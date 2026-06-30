@@ -80,3 +80,6 @@ def atualizar_financeiro(request):
             print(f"Erro no ativo {ticker}: {e}")
 
     return "Sucesso! Base atualizada."
+
+if __name__ == "__main__":
+    atualizar_financeiro(None)
