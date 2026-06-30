@@ -2,8 +2,8 @@ name: Robô Financeiro
 
 on:
   schedule:
-    - cron: '0 6 * * *' 
-  workflow_dispatch: 
+    - cron: '0 6 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -24,7 +24,6 @@ jobs:
         shell: python
         run: |
           import os
-          # Escreve o segredo diretamente para o arquivo
           with open('credenciais.json', 'w') as f:
               f.write(os.environ['GOOGLE_CREDS'])
         env:
