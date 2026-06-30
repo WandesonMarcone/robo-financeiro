@@ -1,0 +1,27 @@
+name: Robô Financeiro
+
+on:
+  schedule:
+    - cron: '0 6 * * *' # Roda todo dia às 06:00 UTC (ajuste conforme necessário)
+  workflow_dispatch: # Permite que você clique num botão para rodar manualmente quando quiser
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v3
+
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Criar arquivo de credenciais
+        run: echo "${{ secrets.GOOGLE_CREDENTIALS }}" > credenciais.json
+
+      - name: Rodar o Robô
+        run: python main.py
