@@ -2,8 +2,8 @@ name: Robô Financeiro
 
 on:
   schedule:
-    - cron: '0 6 * * *' # Roda todo dia às 06:00 UTC (ajuste conforme necessário)
-  workflow_dispatch: # Permite que você clique num botão para rodar manualmente quando quiser
+    - cron: '0 6 * * *' 
+  workflow_dispatch: 
 
 jobs:
   build:
@@ -21,7 +21,14 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Criar arquivo de credenciais
-        run: echo "${{ secrets.GOOGLE_CREDENTIALS_B64 }}" | base64 --decode > credenciais.json
+        shell: python
+        run: |
+          import os
+          # Escreve o segredo diretamente para o arquivo
+          with open('credenciais.json', 'w') as f:
+              f.write(os.environ['GOOGLE_CREDS'])
+        env:
+          GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDENTIALS }}
 
       - name: Rodar o Robô
         run: python main.py
