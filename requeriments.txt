@@ -1,0 +1,5 @@
+gspread
+pandas
+yfinance
+beautifulsoup4
+requests
