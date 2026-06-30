@@ -21,7 +21,10 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Criar arquivo de credenciais
-        run: echo "${{ secrets.GOOGLE_CREDENTIALS }}" > credenciais.json
+        run: |
+        cat <<EOF> credenciais.json
+        ${{ secrets.GOOGLE_CREDENTIALS }}
+        EOF
 
       - name: Rodar o Robô
         run: python main.py
