@@ -22,8 +22,8 @@ def atualizar_financeiro(request):
         print("Processo interrompido pela validação C3.")
         return "Pausado"
 
-    # --- ESPECIFICAÇÃO 2: 10 FIXAS + 5 OPORTUNIDADES ---
-    ativos_core = ["ITUB4", "BBAS3", "EGIE3", "TAEE11", "VALE3", "WEGE3", "SUZB3", "RADL3", "B3SA3", "VIVO3"]
+    # --- ESPECIFICAÇÃO 2: 05 FIXAS + 5 OPORTUNIDADES ---
+    ativos_core = ["ITUB4", "BBAS3", "EGIE3", "VALE3", "ITSA4"]
     try:
         url_ops = "https://www.fundamentus.com.br/resultado.php"
         df_ops = pd.read_html(requests.get(url_ops, headers={'User-Agent': 'Mozilla/5.0'}).text, decimal=',', thousands='.')[0]
