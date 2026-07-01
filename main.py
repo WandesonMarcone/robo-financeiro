@@ -8,12 +8,15 @@ import json
 from datetime import datetime
 
 # --- FUNÇÕES AUXILIARES ---
-def fmt_moeda_sheet(valor):
-    """Retorna o valor como string formatada para o padrão BR (vírgula decimal)"""
+def converter_para_float(valor):
+    """Garante que o valor seja um número float para o Sheets."""
     try:
-        if valor is None or valor == 0: return "0,00"
-        return f"{float(valor):.2f}".replace('.', ',')
-    except: return "0,00"
+        # Se for string com vírgula, converte para ponto
+        if isinstance(valor, str):
+            valor = valor.replace(',', '.')
+        return float(valor)
+    except:
+        return 0.0
 
 # --- MAIN ---
 def atualizar_financeiro(request):
@@ -33,17 +36,15 @@ def atualizar_financeiro(request):
     fund_data_dict = {}
     try:
         url_ops = "https://www.fundamentus.com.br/resultado.php"
-        # Lê a tabela e limpa os nomes das colunas
         df = pd.read_html(requests.get(url_ops, headers={'User-Agent': 'Mozilla/5.0'}).text, decimal=',', thousands='.')[0]
         df.columns = df.columns.str.strip()
         df['Papel'] = df['Papel'].str.strip().str.upper()
-        
-        # Converte colunas chave para numérico, forçando erro se não for número
+
+        # Converte colunas chave para numérico
         for col in ['P/L', 'P/VP', 'Valor de mercado', 'Cotação']:
             if col in df.columns:
-                # Remove pontos e converte para float
                 df[col] = pd.to_numeric(df[col].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
-        
+
         fund_data_dict = df.set_index('Papel').to_dict('index')
     except Exception as e: print(f"Erro ao baixar Fundamentus: {e}")
 
@@ -66,33 +67,28 @@ def atualizar_financeiro(request):
             acao = yf.Ticker(f"{ticker}.SA")
             y_preco = acao.info.get('currentPrice', 0)
 
-            # Busca Fundamentus (valores processados acima)
-            p_l, p_vp, v_mkt, f_preco = 0.0, 0.0, 0.0, 0.0
-            
+            # Busca Fundamentus
+            p_l, p_vp, v_mkt = 0.0, 0.0, 0.0
+
             if ticker in fund_data_dict:
                 d = fund_data_dict[ticker]
                 p_l = d.get('P/L', 0)
                 p_vp = d.get('P/VP', 0)
                 v_mkt = d.get('Valor de mercado', 0)
-                f_preco = d.get('Cotação', 0)
-                print(f"DEBUG {ticker}: P/L={p_l}, P/VP={p_vp}, V_MKT={v_mkt}")
-            else:
-                print(f"AVISO: {ticker} não encontrado no Fundamentus.")
-
-            # --- PREPARA LOTE ---
-            # AF=32, E=5, F=6, AE=31, B=2
+            
+            # --- PREPARA LOTE (Passando apenas o número puro) ---
             lote_updates.append({'range': f'AF{linha_busca}', 'values': [[agora_str]]})
-            lote_updates.append({'range': f'E{linha_busca}', 'values': [[fmt_moeda_sheet(p_l)]]})
-            lote_updates.append({'range': f'F{linha_busca}', 'values': [[fmt_moeda_sheet(p_vp)]]})
-            lote_updates.append({'range': f'AE{linha_busca}', 'values': [[fmt_moeda_sheet(v_mkt)]]})
-            lote_updates.append({'range': f'B{linha_busca}', 'values': [[fmt_moeda_sheet(y_preco)]]})
+            lote_updates.append({'range': f'E{linha_busca}', 'values': [[converter_para_float(p_l)]]})
+            lote_updates.append({'range': f'F{linha_busca}', 'values': [[converter_para_float(p_vp)]]})
+            lote_updates.append({'range': f'AE{linha_busca}', 'values': [[converter_para_float(v_mkt)]]})
+            lote_updates.append({'range': f'B{linha_busca}', 'values': [[converter_para_float(y_preco)]]})
 
         except Exception as e: print(f"Erro no processamento de {ticker}: {e}")
 
     if lote_updates:
         aba_base.batch_update(lote_updates)
         print("Atualização concluída com sucesso!")
-    
+
     return "Sucesso."
 
 if __name__ == "__main__":
