@@ -30,7 +30,7 @@ def atualizar_financeiro(request):
         df_ops['P/L'] = pd.to_numeric(df_ops['P/L'], errors='coerce')
         oportunidades = df_ops[(df_ops['P/L'] > 0) & (df_ops['ROE'].str.replace('%','').str.replace(',','.').astype(float) > 10)].sort_values(by='Liq.2meses', ascending=False).head(5)['Papel'].tolist()
     except:
-        oportunidades = ["PRIO3", "RENT3", "HAPV3", "AZUL4", "CVCB3"]
+        oportunidades = ["SAPR4", "RENT3", "HAPV3", "AZUL4", "CVCB3"]
 
     ativos = list(set([a.upper() for a in (ativos_core + oportunidades)]))
 
