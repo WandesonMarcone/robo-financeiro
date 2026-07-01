@@ -7,7 +7,15 @@ import re
 import json
 from datetime import datetime
 
-# Função auxiliar para ordenar as datas da coluna AF
+# --- FUNÇÕES AUXILIARES NO TOPO ---
+def fmt_moeda(valor):
+    if valor is None: return "R$ 0,00"
+    return f"R$ {valor:,.2f}".replace('.', 'X').replace(',', '.').replace('X', ',')
+
+def fmt_pct(valor):
+    if valor is None: return "0,00%"
+    return f"{valor*100:.2f}%" # Multiplica por 100 para transformar 0.1029 em 10.29%
+
 def obter_data_ordenacao(txt):
     try:
         return datetime.strptime(str(txt).strip(), '%d/%m/%Y %H:%M:%S')
@@ -32,29 +40,24 @@ def atualizar_financeiro(request):
     aba_base = planilha.worksheet("Base de Dados")
     aba_metodo = planilha.worksheet("Metodologia Projetiva")
 
-    # --- LEITURA DO COMANDO (C3) ---
     comando = str(aba_metodo.acell('C3').value).strip().upper()
     if not comando or comando == "CONCLUÍDO":
-        return "Aguardando comando na aba Metodologia Projetiva."
+        return "Aguardando comando."
 
-    # 3. Definição da Carteira Base (10 Fixas)
     ativos_core = ["ITUB4", "BBAS3", "PSSA3", "CMIG4", "VALE3", "SANB11", "SBSP3", "BBSE3", "BBDC3", "PETR4"]
+    oportunidades = [] # Inicializa vazio
 
-    # 4. Lógica de Ativos Finais
+    # Lógica de seleção de ativos
     if comando == "PESQUISAR":
-        # Ciclo Completo
         try:
             url_ops = "https://www.fundamentus.com.br/resultado.php"
             df_ops = pd.read_html(requests.get(url_ops, headers={'User-Agent': 'Mozilla/5.0'}).text, decimal=',', thousands='.')[0]
             df_ops['P/L'] = pd.to_numeric(df_ops['P/L'], errors='coerce')
             df_ops['ROE'] = df_ops['ROE'].str.replace('%', '').str.replace('.', '').str.replace(',', '.').astype(float) / 100
             oportunidades = df_ops[(df_ops['P/L'] > 0) & (df_ops['ROE'] > 0.10)].sort_values(by='Liq.2meses', ascending=False).head(5)['Papel'].tolist()
-        except:
-            oportunidades = []
+        except: pass
 
-        # Rotação (Coluna AF - índice 31)
         todas_linhas = aba_base.get_all_values()
-        coluna_a = [linha[0].strip().upper() for linha in todas_linhas if linha]
         outros_ativos_Fila = []
         for idx, linha in enumerate(todas_linhas[1:], start=2):
             if len(linha) > 0 and linha[0]:
@@ -66,21 +69,17 @@ def atualizar_financeiro(request):
         outros_ativos_Fila.sort(key=lambda x: obter_data_ordenacao(x["data"]))
         ativos_rotativos = [item["ticker"] for item in outros_ativos_Fila[:5]]
         ativos_finais = list(set([a.upper() for a in (ativos_core + oportunidades + ativos_rotativos)]))
-        dados_json = {"META_INFO": {"oportunidades_garimpadas": oportunidades}}
     else:
-        # Modo Único (Ticker na C3)
         ativos_finais = [comando]
-        dados_json = {}
 
-    print(f"Ativos da rodada: {ativos_finais}")
-    
+    dados_json = {}
     coluna_a = aba_base.col_values(1)
     agora_str = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
     data_hoje = datetime.now().date()
 
+    # LOOP PRINCIPAL
     for ticker in ativos_finais:
         try:
-            # Encontra ou cria a linha
             if ticker in coluna_a:
                 linha_busca = coluna_a.index(ticker) + 1
             else:
@@ -88,24 +87,14 @@ def atualizar_financeiro(request):
                 aba_base.update_cell(linha_busca, 1, ticker)
                 coluna_a.append(ticker)
 
-            # TRAVA: Checa data na coluna AF (índice 31)
-            valor_af = aba_base.cell(linha_busca, 32).value # Coluna AF = 32
-            if valor_af:
-                try:
-                    data_ultima = datetime.strptime(str(valor_af).split()[0], '%d/%m/%Y').date()
-                    if data_ultima == data_hoje and comando != "PESQUISAR":
-                        print(f"Skipping {ticker}: Já atualizado hoje.")
-                        continue
-                except: pass
+            # Busca Yahoo
+            acao = yf.Ticker(f"{ticker}.SA")
+            info = acao.info
+            y_preco = info.get('currentPrice', 0)
+            y_dy = info.get('dividendYield', 0)
+            if y_dy is None: y_dy = 0
 
-            # 🟢 FONTE 1: YAHOO
-            y_preco = 0.0
-            try:
-                acao = yf.Ticker(f"{ticker}.SA")
-                y_preco = acao.info.get('currentPrice', 0)
-            except: pass
-
-            # 🔵 FONTE 2: FUNDAMENTUS
+            # Busca Fundamentus
             f_preco = 0.0
             try:
                 url = f"https://www.fundamentus.com.br/detalhes.php?papel={ticker.upper()}"
@@ -116,38 +105,27 @@ def atualizar_financeiro(request):
                         break
             except: pass
 
-            # Carimba AF com data de hoje
             aba_base.update_cell(linha_busca, 32, agora_str)
 
-            # Funções de formatação para garantir que chegue limpo no App Script
-def fmt_moeda(valor):
-    return f"R$ {valor:,.2f}".replace('.', 'X').replace(',', '.').replace('X', ',')
+            # Monta o JSON
+            dados_json[ticker] = {
+                "linha": linha_busca,
+                "valor_atual": fmt_moeda(y_preco), 
+                "f1_preco": fmt_moeda(y_preco),
+                "f2_preco": fmt_moeda(f_preco),
+                "media": fmt_moeda((y_preco + f_preco) / 2),
+                "status": "DISCREPÂNCIA" if abs(y_preco - f_preco) > 0.5 else "100% SINCRONIZADO",
+                "dy": fmt_pct(y_dy)
+            }
+        except Exception as e:
+            print(f"Erro {ticker}: {e}")
 
-def fmt_pct(valor):
-    return f"{valor:.2f}%"
-
-# --- Dentro do seu loop, monte o dicionário assim ---
-    # ... código de busca ...
-    
-    # Cálculo formatado
-    y_dy_fmt = fmt_pct(y_dy) # y_dy já deve ser float (ex: 10.29)
-    
-    dados_json[ticker] = {
-        "linha": linha_busca,
-        "valor_atual": fmt_moeda(y_preco), 
-        "f1_preco": fmt_moeda(y_preco),
-        "f2_preco": fmt_moeda(f_preco),
-        "media": fmt_moeda((y_preco + f_preco) / 2),
-        "status": "DISCREPÂNCIA" if abs(y_preco - f_preco) > 0.5 else "100% SINCRONIZADO",
-        "dy": y_dy_fmt # O DY já chega como "10,29%"
+    # EMPACOTAMENTO FINAL (Fora do Loop)
+    pacote_final = {
+        "META": {"oportunidades": oportunidades},
+        "DADOS": dados_json
     }
-
-# --- NO FINAL DO CÓDIGO, EMPAQUETE ASSIM ---
-pacote_final = {
-    "META": {"oportunidades": oportunidades},
-    "DADOS": dados_json
-}
-aba_base.update_acell('AG1', json.dumps(pacote_final))
+    aba_base.update_acell('AG1', json.dumps(pacote_final))
     return "Sucesso."
 
 if __name__ == "__main__":
