@@ -85,6 +85,8 @@ def atualizar_financeiro(request):
             else:
                 linha_busca = len(coluna_a) + 1
                 aba_base.update_cell(linha_busca, 1, ticker)
+                aba_base.update_cell(linha_busca,5, valor_pl)
+                aba_base.update_cell(linha_busca, 19, valor_roe)
                 coluna_a.append(ticker)
 
             # Busca Yahoo
