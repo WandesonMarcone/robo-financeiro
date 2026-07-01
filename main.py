@@ -8,20 +8,12 @@ import json
 from datetime import datetime
 
 # --- FUNÇÕES AUXILIARES ---
-def fmt_moeda(valor):
-    if valor is None: return "R$ 0,00"
-    return f"R$ {valor:,.2f}".replace('.', 'X').replace(',', '.').replace('X', ',')
-
-def fmt_pct(valor):
-    if valor is None: return "0,00%"
-    return f"{valor*100:.2f}%"
-
-def limpar_numero(texto):
-    if not texto or texto == "-" or texto == "0": return 0.0
-    # Remove tudo exceto dígitos, vírgula e ponto. Converte para float padrão
-    texto_limpo = re.sub(r'[^\d.,]', '', str(texto)).replace('.', '').replace(',', '.')
-    try: return float(texto_limpo)
-    except: return 0.0
+def fmt_moeda_sheet(valor):
+    """Retorna o valor como string formatada para o padrão BR (vírgula decimal)"""
+    try:
+        if valor is None or valor == 0: return "0,00"
+        return f"{float(valor):.2f}".replace('.', ',')
+    except: return "0,00"
 
 # --- MAIN ---
 def atualizar_financeiro(request):
@@ -37,26 +29,27 @@ def atualizar_financeiro(request):
     comando = str(aba_metodo.acell('C3').value).strip().upper()
     if not comando or comando == "CONCLUÍDO": return "Aguardando comando."
 
-    # Mapeamento do Fundamentus (Carrega a tabela completa uma única vez)
+    # 1. Carrega dados do Fundamentus
     fund_data_dict = {}
-    ativos_finais = []
-    
-    # 1. Carrega dados do Fundamentus (Mina de ouro para PL, PVP, Valor Mkt)
     try:
         url_ops = "https://www.fundamentus.com.br/resultado.php"
+        # Lê a tabela e limpa os nomes das colunas
         df = pd.read_html(requests.get(url_ops, headers={'User-Agent': 'Mozilla/5.0'}).text, decimal=',', thousands='.')[0]
+        df.columns = df.columns.str.strip()
         df['Papel'] = df['Papel'].str.strip().str.upper()
+        
+        # Converte colunas chave para numérico, forçando erro se não for número
+        for col in ['P/L', 'P/VP', 'Valor de mercado', 'Cotação']:
+            if col in df.columns:
+                # Remove pontos e converte para float
+                df[col] = pd.to_numeric(df[col].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
+        
         fund_data_dict = df.set_index('Papel').to_dict('index')
     except Exception as e: print(f"Erro ao baixar Fundamentus: {e}")
 
     # 2. Define quais ativos pesquisar
-    if comando == "PESQUISAR":
-        # (Sua lógica atual de rotatividade que você já confia)
-        ativos_finais = df['Papel'].head(10).tolist() # Exemplo: apenas os 10 primeiros por liquidez ou seus fixos
-    else:
-        ativos_finais = [comando]
-
-    print(f"Ativos processando: {ativos_finais}")
+    ativos_finais = df['Papel'].head(10).tolist() if comando == "PESQUISAR" else [comando]
+    print(f"Processando ativos: {ativos_finais}")
 
     lote_updates = []
     coluna_a = aba_base.col_values(1)
@@ -64,7 +57,6 @@ def atualizar_financeiro(request):
 
     for ticker in ativos_finais:
         try:
-            # Encontra linha
             linha_busca = coluna_a.index(ticker) + 1 if ticker in coluna_a else len(coluna_a) + 1
             if ticker not in coluna_a:
                 aba_base.update_cell(linha_busca, 1, ticker)
@@ -74,26 +66,32 @@ def atualizar_financeiro(request):
             acao = yf.Ticker(f"{ticker}.SA")
             y_preco = acao.info.get('currentPrice', 0)
 
-            # Busca Fundamentus (PL, PVP, ValMkt)
-            p_l, p_vp, v_mkt = 0.0, 0.0, 0.0
+            # Busca Fundamentus (valores processados acima)
+            p_l, p_vp, v_mkt, f_preco = 0.0, 0.0, 0.0, 0.0
+            
             if ticker in fund_data_dict:
-                p_l = fund_data_dict[ticker].get('P/L', 0)
-                p_vp = fund_data_dict[ticker].get('P/VP', 0)
-                v_mkt = fund_data_dict[ticker].get('Valor de mercado', 0)
+                d = fund_data_dict[ticker]
+                p_l = d.get('P/L', 0)
+                p_vp = d.get('P/VP', 0)
+                v_mkt = d.get('Valor de mercado', 0)
+                f_preco = d.get('Cotação', 0)
+                print(f"DEBUG {ticker}: P/L={p_l}, P/VP={p_vp}, V_MKT={v_mkt}")
+            else:
+                print(f"AVISO: {ticker} não encontrado no Fundamentus.")
 
-            # --- PREPARA LOTE (Ajuste as colunas aqui se necessário) ---
-            # AF=32 (Data), E=5 (PL), F=6 (PVP), AE=31 (ValorMercado)
+            # --- PREPARA LOTE ---
+            # AF=32, E=5, F=6, AE=31, B=2
             lote_updates.append({'range': f'AF{linha_busca}', 'values': [[agora_str]]})
-            lote_updates.append({'range': f'E{linha_busca}', 'values': [[str(p_l).replace('.',',')]]})
-            lote_updates.append({'range': f'F{linha_busca}', 'values': [[str(p_vp).replace('.',',')]]})
-            lote_updates.append({'range': f'AE{linha_busca}', 'values': [[str(v_mkt).replace('.',',')]]})
-            lote_updates.append({'range': f'B{linha_busca}', 'values': [[str(y_preco).replace('.',',')]]}) # Preço
+            lote_updates.append({'range': f'E{linha_busca}', 'values': [[fmt_moeda_sheet(p_l)]]})
+            lote_updates.append({'range': f'F{linha_busca}', 'values': [[fmt_moeda_sheet(p_vp)]]})
+            lote_updates.append({'range': f'AE{linha_busca}', 'values': [[fmt_moeda_sheet(v_mkt)]]})
+            lote_updates.append({'range': f'B{linha_busca}', 'values': [[fmt_moeda_sheet(y_preco)]]})
 
-        except Exception as e: print(f"Erro {ticker}: {e}")
+        except Exception as e: print(f"Erro no processamento de {ticker}: {e}")
 
-    # Envia tudo de uma vez
     if lote_updates:
         aba_base.batch_update(lote_updates)
+        print("Atualização concluída com sucesso!")
     
     return "Sucesso."
 
