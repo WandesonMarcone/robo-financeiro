@@ -22,19 +22,26 @@ def atualizar_financeiro(request):
         print("Processo interrompido pela validação C3.")
         return "Pausado"
 
-  # 2. Definição da Carteira (10 Fixas + 5 Oportunidades)
+    # 3. Definição da Carteira (10 Fixas + 5 Oportunidades)
     ativos_core = ["ITUB4", "BBAS3", "EGIE3", "TAEE11", "VALE3", "WEGE3", "SUZB3", "RADL3", "B3SA3", "VIVO3"]
-    
+
     # Lógica de Oportunidade (Fundamentus)
     try:
         url = "https://www.fundamentus.com.br/resultado.php"
         headers = {'User-Agent': 'Mozilla/5.0'}
         df = pd.read_html(requests.get(url, headers=headers).text, decimal=',', thousands='.')[0]
+        
+        # Correção: Limpando a formatação do texto da tabela do Fundamentus antes de calcular
+        df['P/L'] = pd.to_numeric(df['P/L'], errors='coerce')
+        df['ROE'] = df['ROE'].str.replace('%', '').str.replace('.', '').str.replace(',', '.').astype(float) / 100
+        
         oportunidades = df[(df['P/L'] > 0) & (df['ROE'] > 0.10)].sort_values(by='Liq.2meses', ascending=False).head(5)['Papel'].tolist()
-    except:
+    except Exception as e:
+        print(f"Usando lista de backup. Erro na busca: {e}")
         oportunidades = ["PRIO3", "RENT3", "HAPV3", "AZUL4", "CVCB3"]
 
-    ativos_finais = list(set(ativos_core + oportunidades))
+    # Correção: Forçando tudo para maiúsculo para evitar o bug do ticket
+    ativos_finais = list(set([a.upper() for a in (ativos_core + oportunidades)]))
 
     # Adaptado da sua função original para limpar qualquer métrica e tratar porcentagens
     def limpar_numero_fundamentus(texto, is_pct=False):
@@ -47,12 +54,13 @@ def atualizar_financeiro(request):
             return 0.0
 
     print("Iniciando varredura na nuvem...")
-    
+
     coluna_a = aba_base.col_values(1)
     lote_atualizacao = []
     dados_json = {}
 
-    for ticker in ativos:
+    # Correção: O loop agora percorre 'ativos_finais' e não a variável inexistente 'ativos'
+    for ticker in ativos_finais:
         try:
             # Encontra a linha (adaptado para criar linha nova se a ação de oportunidade não existir)
             if ticker in coluna_a:
@@ -62,7 +70,7 @@ def atualizar_financeiro(request):
                 aba_base.update_cell(linha_busca, 1, ticker)
                 coluna_a.append(ticker)
 
-            # 🟢 FONTE 1: YAHOO (Agora com Dados Raízes)
+            # 🟢 FONTE 1: YAHOO (Dados Raízes)
             y_preco, y_pl, y_dy, y_vpa, y_roe = 0.0, 0.0, 0.0, 0.0, 0.0
             try:
                 acao = yf.Ticker(f"{ticker}.SA")
@@ -74,15 +82,15 @@ def atualizar_financeiro(request):
                 y_roe = (info.get('returnOnEquity', 0) or 0) * 100
             except: pass
 
-            # 🔵 FONTE 2: FUNDAMENTUS (Agora com Dados Raízes)
+            # 🔵 FONTE 2: FUNDAMENTUS (Dados Raízes)
             f_preco, f_pl, f_dy, f_vpa, f_roe = 0.0, 0.0, 0.0, 0.0, 0.0
             try:
-                url = f"https://www.fundamentus.com.br/detalhes.php?papel={ticker}"
+                # Correção: ticker.upper() para garantir que a busca não falhe
+                url = f"https://www.fundamentus.com.br/detalhes.php?papel={ticker.upper()}"
                 headers = {'User-Agent': 'Mozilla/5.0'}
                 resp = requests.get(url, headers=headers, timeout=5)
                 sopa = BeautifulSoup(resp.text, 'html.parser')
 
-                # O seu parser original, encapsulado numa função para buscar várias métricas
                 def extrair_dado_sopa(label):
                     for td in sopa.find_all('td', class_='label'):
                         if label in td.text:
@@ -103,7 +111,7 @@ def atualizar_financeiro(request):
             # Atualiza a planilha: Yahoo (Colunas B até F) | Fundamentus (Colunas H até L)
             lote_atualizacao.append({'range': f'B{linha_busca}:F{linha_busca}', 'values': [[fmt(y_preco), fmt(y_pl), fmt(y_dy), fmt(y_vpa), fmt(y_roe)]]})
             lote_atualizacao.append({'range': f'H{linha_busca}:L{linha_busca}', 'values': [[fmt(f_preco), fmt(f_pl), fmt(f_dy), fmt(f_vpa), fmt(f_roe)]]})
-            
+
             print(f"Coletado {ticker} | Yahoo Preço: {y_preco} | Fundamentus Preço: {f_preco}")
 
             # --- ESPECIFICAÇÃO 3: JSON DO MODAL (AG1) ---
