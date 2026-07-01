@@ -119,19 +119,35 @@ def atualizar_financeiro(request):
             # Carimba AF com data de hoje
             aba_base.update_cell(linha_busca, 32, agora_str)
 
-            # JSON para o Modal
-            dif = abs(y_preco - f_preco)
-            dados_json[ticker] = {
-                "linha": linha_busca,
-                "f1_preco": y_preco,
-                "f2_preco": f_preco,
-                "media": round((y_preco + f_preco) / 2, 2),
-                "status": "DISCREPÂNCIA" if dif > 0.5 else "100% SINCRONIZADO"
-            }
-        except Exception as e:
-            print(f"Erro {ticker}: {e}")
+            # Funções de formatação para garantir que chegue limpo no App Script
+def fmt_moeda(valor):
+    return f"R$ {valor:,.2f}".replace('.', 'X').replace(',', '.').replace('X', ',')
 
-    aba_base.update_acell('AG1', json.dumps(dados_json))
+def fmt_pct(valor):
+    return f"{valor:.2f}%"
+
+# --- Dentro do seu loop, monte o dicionário assim ---
+    # ... código de busca ...
+    
+    # Cálculo formatado
+    y_dy_fmt = fmt_pct(y_dy) # y_dy já deve ser float (ex: 10.29)
+    
+    dados_json[ticker] = {
+        "linha": linha_busca,
+        "valor_atual": fmt_moeda(y_preco), 
+        "f1_preco": fmt_moeda(y_preco),
+        "f2_preco": fmt_moeda(f_preco),
+        "media": fmt_moeda((y_preco + f_preco) / 2),
+        "status": "DISCREPÂNCIA" if abs(y_preco - f_preco) > 0.5 else "100% SINCRONIZADO",
+        "dy": y_dy_fmt # O DY já chega como "10,29%"
+    }
+
+# --- NO FINAL DO CÓDIGO, EMPAQUETE ASSIM ---
+pacote_final = {
+    "META": {"oportunidades": oportunidades},
+    "DADOS": dados_json
+}
+aba_base.update_acell('AG1', json.dumps(pacote_final))
     return "Sucesso."
 
 if __name__ == "__main__":
