@@ -10,7 +10,7 @@ from datetime import datetime
 # --- CONFIGURAÇÕES E API ---
 TOLERANCIA = 0.05
 TELEFONE_WHATSAPP = "553491503895" 
-API_KEY_WHATSAPP = "516767"
+API_KEY_WHATSAPP = "5116767"
 
 def get_horario_brasilia():
     tz = pytz.timezone('America/Sao_Paulo')
