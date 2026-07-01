@@ -20,12 +20,11 @@ def obter_data_ordenacao(txt):
     try: return datetime.strptime(str(txt).strip(), '%d/%m/%Y %H:%M:%S')
     except: return datetime.min
 
-def limpar_numero_fundamentus(texto, is_pct=False):
+def limpar_numero_fundamentus(texto):
     if not texto or texto == "-" or texto == "0": return 0.0
-    texto_limpo = re.sub(r'[^\d,]', '', texto).replace(',', '.')
-    try:
-        val = float(texto_limpo)
-        return val / 100 if is_pct else val
+    # Remove tudo que não seja número, vírgula ou ponto
+    texto_limpo = re.sub(r'[^\d.,]', '', texto).replace('.', '').replace(',', '.')
+    try: return float(texto_limpo)
     except: return 0.0
 
 # --- MAIN ---
@@ -44,22 +43,25 @@ def atualizar_financeiro(request):
 
     ativos_core = ["ITUB4", "BBAS3", "PSSA3", "CMIG4", "VALE3", "SANB11", "SBSP3", "BBSE3", "BBDC3", "PETR4"]
     oportunidades = []
-    fund_data_dict = {} # Dicionário para busca rápida
+    fund_data_dict = {} 
 
     # Lógica de seleção e Mapeamento de Fundamentos
     if comando == "PESQUISAR":
         try:
             url_ops = "https://www.fundamentus.com.br/resultado.php"
             df_ops = pd.read_html(requests.get(url_ops, headers={'User-Agent': 'Mozilla/5.0'}).text, decimal=',', thousands='.')[0]
-            # Converte em dicionário para consulta rápida
+            # Converte 'Papel' para índice para busca rápida
+            df_ops['Papel'] = df_ops['Papel'].str.strip().str.upper()
             fund_data_dict = df_ops.set_index('Papel').to_dict('index')
             
+            # Filtro para Oportunidades
             df_ops['P/L'] = pd.to_numeric(df_ops['P/L'], errors='coerce')
             df_ops['ROE'] = df_ops['ROE'].str.replace('%', '').str.replace('.', '').str.replace(',', '.').astype(float) / 100
             oportunidades = df_ops[(df_ops['P/L'] > 0) & (df_ops['ROE'] > 0.10)].sort_values(by='Liq.2meses', ascending=False).head(5)['Papel'].tolist()
         except: pass
 
         todas_linhas = aba_base.get_all_values()
+        coluna_a = [linha[0].strip().upper() for linha in todas_linhas if linha]
         outros_ativos_Fila = []
         for idx, linha in enumerate(todas_linhas[1:], start=2):
             if len(linha) > 0 and linha[0]:
@@ -75,7 +77,7 @@ def atualizar_financeiro(request):
         ativos_finais = [comando]
 
     dados_json = {}
-    lote_updates = [] # Armazena tudo para enviar de uma vez
+    lote_updates = [] 
     coluna_a = aba_base.col_values(1)
     agora_str = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
     data_hoje = datetime.now().date()
@@ -88,7 +90,7 @@ def atualizar_financeiro(request):
                 aba_base.update_cell(linha_busca, 1, ticker)
                 coluna_a.append(ticker)
 
-            # TRAVA AF
+            # TRAVA AF (Coluna 32)
             valor_af = aba_base.cell(linha_busca, 32).value
             if valor_af:
                 try:
@@ -98,35 +100,33 @@ def atualizar_financeiro(request):
 
             # --- BUSCA YAHOO ---
             acao = yf.Ticker(f"{ticker}.SA")
-            info = acao.info
-            y_preco = info.get('currentPrice', info.get('regularMarketPrice', 0))
-            y_dy = info.get('dividendYield', 0) or 0
+            y_preco = acao.info.get('currentPrice', 0)
+            y_dy = acao.info.get('dividendYield', 0) or 0
 
-            # --- BUSCA FUNDAMENTUS (ou usa o cache do df_ops) ---
-            f_preco = 0.0
-            p_l, p_vp, v_mkt = 0.0, 0.0, 0.0
+            # --- BUSCA FUNDAMENTUS (ou cache) ---
+            f_preco, f_pl, f_pvp, f_vm = 0.0, 0.0, 0.0, 0.0
             
-            # Tenta pegar do cache (Se PESQUISAR) ou busca página individual
             if ticker in fund_data_dict:
                 d = fund_data_dict[ticker]
-                p_l = d.get('P/L', 0)
-                p_vp = d.get('P/VP', 0)
-                v_mkt = d.get('Valor de mercado', 0)
+                f_pl = d.get('P/L', 0)
+                f_pvp = d.get('P/VP', 0)
+                f_vm = d.get('Valor de mercado', 0)
                 f_preco = d.get('Cotação', 0)
             else:
-                # Fallback: Scraper individual se não estiver na lista geral
                 try:
                     url = f"https://www.fundamentus.com.br/detalhes.php?papel={ticker.upper()}"
                     sopa = BeautifulSoup(requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5).text, 'html.parser')
-                    f_preco = limpar_numero_fundamentus(sopa.find('td', text='Cotação').find_next_sibling('td').text.strip())
+                    f_preco = limpar_numero_fundamentus(sopa.find(text='Cotação').find_next_sibling('td').text.strip())
+                    f_pl = limpar_numero_fundamentus(sopa.find(text='P/L').find_next_sibling('td').text.strip())
+                    f_pvp = limpar_numero_fundamentus(sopa.find(text='P/VP').find_next_sibling('td').text.strip())
                 except: pass
 
-            # --- PREPARA ATUALIZAÇÃO EM LOTE ---
-            # Coluna AF (Data) = 32, E (P/L) = 5, F (P/VP) = 6, AE (ValMercado) = 31
-            lote_updates.append({'range': f'AF{linha_busca}', 'values': [[agora_str]]}) # Nota: Ajuste se AF for 32
-            lote_updates.append({'range': f'E{linha_busca}', 'values': [[str(p_l).replace('.',',')]]})
-            lote_updates.append({'range': f'F{linha_busca}', 'values': [[str(p_vp).replace('.',',')]]})
-            lote_updates.append({'range': f'AE{linha_busca}', 'values': [[str(v_mkt).replace('.',',')]]})
+            # --- LOTE DE ATUALIZAÇÃO ---
+            # AF=32 (Data), E=5 (PL), F=6 (PVP), AE=31 (ValorMercado)
+            lote_updates.append({'range': f'AF{linha_busca}', 'values': [[agora_str]]})
+            lote_updates.append({'range': f'E{linha_busca}', 'values': [[str(f_pl).replace('.',',')]]})
+            lote_updates.append({'range': f'F{linha_busca}', 'values': [[str(f_pvp).replace('.',',')]]})
+            lote_updates.append({'range': f'AE{linha_busca}', 'values': [[str(f_vm).replace('.',',')]]})
 
             dados_json[ticker] = {
                 "linha": linha_busca,
@@ -139,7 +139,6 @@ def atualizar_financeiro(request):
             }
         except Exception as e: print(f"Erro {ticker}: {e}")
 
-    # Envio ÚNICO para o Google Sheets (muito mais rápido)
     aba_base.batch_update(lote_updates)
     aba_base.update_acell('AG1', json.dumps({"META": {"oportunidades": oportunidades}, "DADOS": dados_json}))
     return "Sucesso."
