@@ -38,7 +38,7 @@ def atualizar_financeiro(request):
         return "Aguardando comando na aba Metodologia Projetiva."
 
     # 3. Definição da Carteira Base (10 Fixas)
-    ativos_core = ["ITUB4", "BBAS3", "EGIE3", "TAEE11", "VALE3", "WEGE3", "SUZB3", "RADL3", "B3SA3", "VIVO3"]
+    ativos_core = ["ITUB4", "BBAS3", "PSSA3", "CMIG4", "VALE3", "SANB11", "SBSP3", "BBSE3", "BBDC3", "PETR4"]
 
     # 4. Lógica de Ativos Finais
     if comando == "PESQUISAR":
