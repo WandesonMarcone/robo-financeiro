@@ -123,7 +123,7 @@ def atualizar_financeiro(request):
 
             # --- PREPARA ATUALIZAÇÃO EM LOTE ---
             # Coluna AF (Data) = 32, E (P/L) = 5, F (P/VP) = 6, AE (ValMercado) = 31
-            lote_updates.append({'range': f'AH{linha_busca}', 'values': [[agora_str]]}) # Nota: Ajuste se AF for 32
+            lote_updates.append({'range': f'AF{linha_busca}', 'values': [[agora_str]]}) # Nota: Ajuste se AF for 32
             lote_updates.append({'range': f'E{linha_busca}', 'values': [[str(p_l).replace('.',',')]]})
             lote_updates.append({'range': f'F{linha_busca}', 'values': [[str(p_vp).replace('.',',')]]})
             lote_updates.append({'range': f'AE{linha_busca}', 'values': [[str(v_mkt).replace('.',',')]]})
