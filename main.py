@@ -9,7 +9,7 @@ import json
 def atualizar_financeiro(request):
     # 1. Configurações
     JSON_KEY = 'credenciais.json' 
-    SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1U8h3Hw2yBOmCbvBskP9zHyVVJf_3OkXtAopcFSebLvs/edit' 
+    SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1U8h3Hw2yBOmCbvBskP9zHyVVJf_3OkXtAopcFSebLvs/edit?usp=drivesdk' 
 
     # 2. Autenticação (Serviço)
     gc = gspread.service_account(filename=JSON_KEY)
