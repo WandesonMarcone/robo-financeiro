@@ -29,6 +29,7 @@ def limpar_numero_fundamentus(texto):
 
 # --- MAIN ---
 def atualizar_financeiro(request):
+    print("Iniciando execução do script...")
     JSON_KEY = 'credenciais.json' 
     SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1U8h3Hw2yBOmCbvBskP9zHyVVJf_3OkXtAopcFSebLvs/edit?usp=drivesdk' 
 
@@ -38,7 +39,9 @@ def atualizar_financeiro(request):
     aba_metodo = planilha.worksheet("Metodologia Projetiva")
 
     comando = str(aba_metodo.acell('C3').value).strip().upper()
+    print(f"Comando lido em C3:{comando}")
     if not comando or comando == "CONCLUÍDO":
+        print("Script encerrado: comando vazio ou concluído")
         return "Aguardando comando."
 
     ativos_core = ["ITUB4", "BBAS3", "PSSA3", "CMIG4", "VALE3", "SANB11", "SBSP3", "BBSE3", "BBDC3", "PETR4"]
