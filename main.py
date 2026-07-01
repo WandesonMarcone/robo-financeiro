@@ -2,16 +2,12 @@ import gspread
 import pandas as pd
 import yfinance as yf
 import requests
-from bs4 import BeautifulSoup
-import re
 import json
 from datetime import datetime
 
-# --- FUNÇÕES AUXILIARES ---
+# --- FUNÇÃO AUXILIAR ---
 def converter_para_float(valor):
-    """Garante que o valor seja um número float para o Sheets."""
     try:
-        # Se for string com vírgula, converte para ponto
         if isinstance(valor, str):
             valor = valor.replace(',', '.')
         return float(valor)
@@ -36,15 +32,10 @@ def atualizar_financeiro(request):
     fund_data_dict = {}
     try:
         url_ops = "https://www.fundamentus.com.br/resultado.php"
+        # O Pandas já faz a conversão perfeita da matemática brasileira (decimal=',' e thousands='.')
         df = pd.read_html(requests.get(url_ops, headers={'User-Agent': 'Mozilla/5.0'}).text, decimal=',', thousands='.')[0]
         df.columns = df.columns.str.strip()
         df['Papel'] = df['Papel'].str.strip().str.upper()
-
-        # Converte colunas chave para numérico
-        for col in ['P/L', 'P/VP', 'Valor de mercado', 'Cotação']:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
-
         fund_data_dict = df.set_index('Papel').to_dict('index')
     except Exception as e: print(f"Erro ao baixar Fundamentus: {e}")
 
@@ -63,28 +54,37 @@ def atualizar_financeiro(request):
                 aba_base.update_cell(linha_busca, 1, ticker)
                 coluna_a.append(ticker)
 
-            # Busca Yahoo (Preço)
+            # --- BUSCA YAHOO (Preço, DY e Valor de Mercado) ---
             acao = yf.Ticker(f"{ticker}.SA")
-            y_preco = acao.info.get('currentPrice', 0)
+            info = acao.info
+            y_preco = info.get('currentPrice', info.get('regularMarketPrice', 0))
+            y_dy = info.get('dividendYield', 0)
+            if y_dy is None: y_dy = 0
+            
+            # Pegamos o Valor de Mercado do Yahoo pois é mais rápido e confiável
+            v_mkt = info.get('marketCap', 0) 
 
-            # Busca Fundamentus
-            p_l, p_vp, v_mkt = 0.0, 0.0, 0.0
-
+            # --- BUSCA FUNDAMENTUS (PL e PVP) ---
+            p_l, p_vp = 0.0, 0.0
             if ticker in fund_data_dict:
                 d = fund_data_dict[ticker]
                 p_l = d.get('P/L', 0)
                 p_vp = d.get('P/VP', 0)
-                v_mkt = d.get('Valor de mercado', 0)
             
-            # --- PREPARA LOTE (Passando apenas o número puro) ---
+            print(f"DEBUG {ticker}: P/L={p_l}, P/VP={p_vp}, V_MKT={v_mkt}, DY={y_dy}")
+
+            # --- PREPARA LOTE PARA O GOOGLE SHEETS ---
+            # AF=32(Data), B=2(Preço), C=3(DY), E=5(PL), F=6(PVP), AE=31(ValorMercado)
             lote_updates.append({'range': f'AF{linha_busca}', 'values': [[agora_str]]})
+            lote_updates.append({'range': f'B{linha_busca}', 'values': [[converter_para_float(y_preco)]]})
+            lote_updates.append({'range': f'C{linha_busca}', 'values': [[converter_para_float(y_dy)]]})
             lote_updates.append({'range': f'E{linha_busca}', 'values': [[converter_para_float(p_l)]]})
             lote_updates.append({'range': f'F{linha_busca}', 'values': [[converter_para_float(p_vp)]]})
             lote_updates.append({'range': f'AE{linha_busca}', 'values': [[converter_para_float(v_mkt)]]})
-            lote_updates.append({'range': f'B{linha_busca}', 'values': [[converter_para_float(y_preco)]]})
 
         except Exception as e: print(f"Erro no processamento de {ticker}: {e}")
 
+    # Envia tudo de uma única vez para a planilha
     if lote_updates:
         aba_base.batch_update(lote_updates)
         print("Atualização concluída com sucesso!")
