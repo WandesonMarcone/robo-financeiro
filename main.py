@@ -22,7 +22,6 @@ def obter_data_ordenacao(txt):
 
 def limpar_numero_fundamentus(texto):
     if not texto or texto == "-" or texto == "0": return 0.0
-    # Remove tudo que não seja número, vírgula ou ponto
     texto_limpo = re.sub(r'[^\d.,]', '', texto).replace('.', '').replace(',', '.')
     try: return float(texto_limpo)
     except: return 0.0
@@ -39,7 +38,7 @@ def atualizar_financeiro(request):
     aba_metodo = planilha.worksheet("Metodologia Projetiva")
 
     comando = str(aba_metodo.acell('C3').value).strip().upper()
-    print(f"Comando lido em C3:{comando}")
+    print(f"Comando lido em C3: {comando}")
     if not comando or comando == "CONCLUÍDO":
         print("Script encerrado: comando vazio ou concluído")
         return "Aguardando comando."
@@ -48,16 +47,13 @@ def atualizar_financeiro(request):
     oportunidades = []
     fund_data_dict = {} 
 
-    # Lógica de seleção e Mapeamento de Fundamentos
     if comando == "PESQUISAR":
         try:
             url_ops = "https://www.fundamentus.com.br/resultado.php"
             df_ops = pd.read_html(requests.get(url_ops, headers={'User-Agent': 'Mozilla/5.0'}).text, decimal=',', thousands='.')[0]
-            # Converte 'Papel' para índice para busca rápida
             df_ops['Papel'] = df_ops['Papel'].str.strip().str.upper()
             fund_data_dict = df_ops.set_index('Papel').to_dict('index')
             
-            # Filtro para Oportunidades
             df_ops['P/L'] = pd.to_numeric(df_ops['P/L'], errors='coerce')
             df_ops['ROE'] = df_ops['ROE'].str.replace('%', '').str.replace('.', '').str.replace(',', '.').astype(float) / 100
             oportunidades = df_ops[(df_ops['P/L'] > 0) & (df_ops['ROE'] > 0.10)].sort_values(by='Liq.2meses', ascending=False).head(5)['Papel'].tolist()
@@ -79,7 +75,13 @@ def atualizar_financeiro(request):
     else:
         ativos_finais = [comando]
 
-    dados_json = {}
+    print(f"Ativos para processar: {ativos_finais}")
+    if not ativos_finais:
+        print("ERRO: Nenhum ativo foi carregado.")
+        return "Nenhum ativo encontrado"
+
+    # --- INICIALIZAÇÃO CORRETA ---
+    dados_json = {} 
     lote_updates = [] 
     coluna_a = aba_base.col_values(1)
     agora_str = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
@@ -103,12 +105,12 @@ def atualizar_financeiro(request):
 
             # --- BUSCA YAHOO ---
             acao = yf.Ticker(f"{ticker}.SA")
-            y_preco = acao.info.get('currentPrice', 0)
-            y_dy = acao.info.get('dividendYield', 0) or 0
+            info = acao.info
+            y_preco = info.get('currentPrice', info.get('regularMarketPrice', 0))
+            y_dy = info.get('dividendYield', 0) or 0
 
-            # --- BUSCA FUNDAMENTUS (ou cache) ---
+            # --- BUSCA FUNDAMENTUS ---
             f_preco, f_pl, f_pvp, f_vm = 0.0, 0.0, 0.0, 0.0
-            
             if ticker in fund_data_dict:
                 d = fund_data_dict[ticker]
                 f_pl = d.get('P/L', 0)
@@ -124,13 +126,13 @@ def atualizar_financeiro(request):
                     f_pvp = limpar_numero_fundamentus(sopa.find(text='P/VP').find_next_sibling('td').text.strip())
                 except: pass
 
-            # --- LOTE DE ATUALIZAÇÃO ---
-            # AF=32 (Data), E=5 (PL), F=6 (PVP), AE=31 (ValorMercado)
+            # --- PREPARA LOTE ---
             lote_updates.append({'range': f'AF{linha_busca}', 'values': [[agora_str]]})
             lote_updates.append({'range': f'E{linha_busca}', 'values': [[str(f_pl).replace('.',',')]]})
             lote_updates.append({'range': f'F{linha_busca}', 'values': [[str(f_pvp).replace('.',',')]]})
             lote_updates.append({'range': f'AE{linha_busca}', 'values': [[str(f_vm).replace('.',',')]]})
 
+            # Adiciona ao dicionário AGORA CORRETAMENTE
             dados_json[ticker] = {
                 "linha": linha_busca,
                 "valor_atual": fmt_moeda(y_preco), 
