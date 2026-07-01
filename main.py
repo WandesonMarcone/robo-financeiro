@@ -129,8 +129,8 @@ def atualizar_financeiro(request):
             lote_atualizacao.append({'range': f'B{linha_busca}:F{linha_busca}', 'values': [[fmt(y_preco), fmt(y_pl), fmt(y_dy), fmt(y_vpa), fmt(y_roe)]]})
             lote_atualizacao.append({'range': f'H{linha_busca}:L{linha_busca}', 'values': [[fmt(f_preco), fmt(f_pl), fmt(f_dy), fmt(f_vpa), fmt(f_roe)]]})
             
-            # Carimba a data e hora da atualização na coluna AH (coluna 34)
-            lote_atualizacao.append({'range': f'AH{linha_busca}', 'values': [[agora_str]]})
+            # Carimba a data e hora da atualização na coluna AF (coluna 32)
+            lote_atualizacao.append({'range': f'AF{linha_busca}', 'values': [[agora_str]]})
 
             print(f"Coletado {ticker} | Yahoo Preço: {y_preco} | Fundamentus Preço: {f_preco}")
 
