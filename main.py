@@ -22,17 +22,19 @@ def atualizar_financeiro(request):
         print("Processo interrompido pela validação C3.")
         return "Pausado"
 
-    # --- ESPECIFICAÇÃO 2: 05 FIXAS + 5 OPORTUNIDADES ---
-    ativos_core = ["ITUB4", "BBAS3", "EGIE3", "VALE3", "ITSA4"]
+  # 2. Definição da Carteira (10 Fixas + 5 Oportunidades)
+    ativos_core = ["ITUB4", "BBAS3", "EGIE3", "TAEE11", "VALE3", "WEGE3", "SUZB3", "RADL3", "B3SA3", "VIVO3"]
+    
+    # Lógica de Oportunidade (Fundamentus)
     try:
-        url_ops = "https://www.fundamentus.com.br/resultado.php"
-        df_ops = pd.read_html(requests.get(url_ops, headers={'User-Agent': 'Mozilla/5.0'}).text, decimal=',', thousands='.')[0]
-        df_ops['P/L'] = pd.to_numeric(df_ops['P/L'], errors='coerce')
-        oportunidades = df_ops[(df_ops['P/L'] > 0) & (df_ops['ROE'].str.replace('%','').str.replace(',','.').astype(float) > 10)].sort_values(by='Liq.2meses', ascending=False).head(5)['Papel'].tolist()
+        url = "https://www.fundamentus.com.br/resultado.php"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        df = pd.read_html(requests.get(url, headers=headers).text, decimal=',', thousands='.')[0]
+        oportunidades = df[(df['P/L'] > 0) & (df['ROE'] > 0.10)].sort_values(by='Liq.2meses', ascending=False).head(5)['Papel'].tolist()
     except:
-        oportunidades = ["SAPR4", "RENT3", "HAPV3", "AZUL4", "CVCB3"]
+        oportunidades = ["PRIO3", "RENT3", "HAPV3", "AZUL4", "CVCB3"]
 
-    ativos = list(set([a.upper() for a in (ativos_core + oportunidades)]))
+    ativos_finais = list(set(ativos_core + oportunidades))
 
     # Adaptado da sua função original para limpar qualquer métrica e tratar porcentagens
     def limpar_numero_fundamentus(texto, is_pct=False):
