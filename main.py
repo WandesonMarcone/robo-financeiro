@@ -38,7 +38,7 @@ def enviar_alerta_whatsapp(ticker, msg):
 
 # --- FUNÇÃO PRINCIPAL ---
 def atualizar_financeiro(request):
-    print("Iniciando execução oficial (Versão Cirúrgica)...")
+    print("Iniciando execução oficial (Versão Cirúrgica V2)...")
 
     JSON_KEY = 'credenciais.json' 
     SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1U8h3Hw2yBOmCbvBskP9zHyVVJf_3OkXtAopcFSebLvs/edit?usp=drivesdk' 
@@ -56,18 +56,21 @@ def atualizar_financeiro(request):
     fund_data_dict = {}
     ativos_finais = []
 
-    # Lê todas as linhas de uma vez para não gastar API do Google
+    # Otimização: Lê a planilha uma vez só (Economiza tempo e limites do Google)
     todas_linhas = aba_base.get_all_values()
     coluna_a = [linha[0].strip().upper() if len(linha) > 0 else "" for linha in todas_linhas]
 
     # 1. RASPAGEM E SELEÇÃO DE ATIVOS
     try:
         url_ops = "https://www.fundamentus.com.br/resultado.php"
-        df = pd.read_html(requests.get(url_ops, headers={'User-Agent': 'Mozilla/5.0'}).text, decimal=',', thousands='.')[0]
+        # Disfarce (User-Agent) atualizado para não ser bloqueado
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+        response = requests.get(url_ops, headers=headers, timeout=10)
+        
+        df = pd.read_html(response.text, decimal=',', thousands='.')[0]
         df.columns = df.columns.str.strip()
         df['Papel'] = df['Papel'].str.strip().str.upper()
 
-        # Limpeza cirúrgica: Só arranca % de quem é string
         if 'Div.Yield' in df.columns:
             df['Div.Yield'] = df['Div.Yield'].astype(str).str.replace('%', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
             df['Div.Yield'] = pd.to_numeric(df['Div.Yield'], errors='coerce') / 100
@@ -75,7 +78,6 @@ def atualizar_financeiro(request):
             df['ROE'] = df['ROE'].astype(str).str.replace('%', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
             df['ROE'] = pd.to_numeric(df['ROE'], errors='coerce') / 100
         
-        # P/L e P/VP já são floats nativos, não fazemos manipulação de string neles
         if 'P/L' in df.columns: df['P/L'] = pd.to_numeric(df['P/L'], errors='coerce')
         if 'P/VP' in df.columns: df['P/VP'] = pd.to_numeric(df['P/VP'], errors='coerce')
             
@@ -96,7 +98,10 @@ def atualizar_financeiro(request):
             ativos_finais = list(set(ativos_core + oportunidades + ativos_rotativos))
         else:
             ativos_finais = [comando]
-    except Exception as e: print(f"Erro na raspagem: {e}")
+    except Exception as e: 
+        print(f"Erro na raspagem do Fundamentus: {e}")
+        # Mesmo com erro, se for busca manual, o Yahoo assume
+        if comando != "PESQUISAR": ativos_finais = [comando]
 
     # 2. MOTOR DE ATUALIZAÇÃO E AUDITORIA
     lote_updates = []
@@ -110,8 +115,9 @@ def atualizar_financeiro(request):
             if ticker not in coluna_a:
                 aba_base.update_cell(linha_busca, 1, ticker)
                 coluna_a.append(ticker)
+                todas_linhas.append([ticker])
 
-            # Capta os dados que JÁ ESTÃO na planilha para mostrar no painel
+            # Pega os dados atuais DA PLANILHA
             if linha_busca <= len(todas_linhas):
                 linha_atual = todas_linhas[linha_busca - 1]
                 while len(linha_atual) < 6: linha_atual.append("")
@@ -122,9 +128,9 @@ def atualizar_financeiro(request):
             else:
                 atual_preco, atual_dy, atual_pl, atual_pvp = 0.0, 0.0, 0.0, 0.0
 
-            # Trava Anti-Spam
+            # --- CORREÇÃO DA TRAVA ANTI-SPAM ---
             valor_af = linha_atual[31] if linha_busca <= len(todas_linhas) and len(linha_atual) > 31 else ""
-            if valor_af and comando != "PESQUISAR":
+            if valor_af and comando == "PESQUISAR":
                 try:
                     if datetime.strptime(str(valor_af).split()[0], '%d/%m/%Y').date() == data_hoje: continue
                 except: pass
@@ -157,12 +163,13 @@ def atualizar_financeiro(request):
             status_msg = "🟢 Sincronizado" if is_seguro else f"🔴 Discrepância: {', '.join(lista_disc)}"
 
             # Notificações e Automação
+            # A trava nova: Se os dados da planilha estiverem zerados, FORÇA a revisão manual.
             if not is_seguro or (atual_preco == 0 and atual_pl == 0):
-                # Se for discrepante ou for uma ação vazia (zerada), manda pro painel e pro WhatsApp
-                aba_disc.append_row([agora_str, ticker, status_msg, f"Y:{y_pl}|F:{f_pl}"])
-                enviar_alerta_whatsapp(ticker, f"🔴 ATENÇÃO: Revisão Necessária. Ativo: {ticker}.")
+                motivo = "Ativo Novo/Zerado" if (atual_preco == 0 and atual_pl == 0) else status_msg
+                aba_disc.append_row([agora_str, ticker, motivo, f"Y:{y_pl}|F:{f_pl}"])
+                enviar_alerta_whatsapp(ticker, f"🔴 ATENÇÃO: Revisão Necessária. Ativo: {ticker}. Motivo: {motivo}")
             else:
-                # Se for 100% igual e tiver dados, injeta sozinho
+                # 100% Sincronizado: Atualiza tudo de forma limpa
                 lote_updates.append({'range': f'AF{linha_busca}', 'values': [[agora_str]]})
                 lote_updates.append({'range': f'B{linha_busca}', 'values': [[float(y_preco)]]})
                 lote_updates.append({'range': f'C{linha_busca}', 'values': [[float(f_dy)]]})
@@ -171,7 +178,7 @@ def atualizar_financeiro(request):
                 lote_updates.append({'range': f'AE{linha_busca}', 'values': [[y_vmkt]]})
                 lote_updates.append({'range': f'AH{linha_busca}', 'values': [[f"[{agora_str}] {status_msg}"]]})
 
-            # Monta JSON do Dashboard para TUDO, assim você decide métrica por métrica
+            # Monta JSON para alimentar a interface Cirúrgica
             dados_json_global[ticker] = {
                 "linha": linha_busca,
                 "status": status_msg,
@@ -183,7 +190,8 @@ def atualizar_financeiro(request):
         except Exception as e: print(f"Erro em {ticker}: {e}")
 
     if lote_updates: aba_base.batch_update(lote_updates)
-    aba_base.update_acell('AG1', json.dumps({"DADOS": dados_json_global}))
+    if dados_json_global:
+        aba_base.update_acell('AG1', json.dumps({"DADOS": dados_json_global}))
     return "Sucesso."
 
 if __name__ == "__main__":
