@@ -4,6 +4,7 @@ import yfinance as yf
 import requests
 import json
 import pytz
+import urllib.parse
 from datetime import datetime
 
 # --- CONFIGURAÇÕES E API ---
@@ -14,12 +15,6 @@ API_KEY_WHATSAPP = "5116767"
 def get_horario_brasilia():
     tz = pytz.timezone('America/Sao_Paulo')
     return datetime.now(tz)
-
-def fmt_moeda_sheet(valor):
-    try:
-        if valor is None or valor == 0: return "0,00"
-        return f"{float(valor):.2f}".replace('.', ',')
-    except: return "0,00"
 
 def get_celula_float(valor):
     try:
@@ -37,20 +32,24 @@ def calcular_discrepancia(v1, v2):
     if v1 == 0 or v2 == 0: return 1.0 
     return abs(v1 - v2) / max(v1, v2)
 
-def obter_data_ordenacao(txt):
-    try: return datetime.strptime(str(txt).strip(), '%d/%m/%Y %H:%M:%S')
-    except: return datetime.min
-
-def enviar_alerta_whatsapp(ticker, msg):
-    url = "https://api.callmebot.com/whatsapp.php"
-    params = {"phone": TELEFONE_WHATSAPP, "text": msg, "apikey": API_KEY_WHATSAPP}
-    try: requests.get(url, params=params, timeout=5)
-    except Exception as e: print(f"Falha ao enviar WhatsApp: {e}")
+def enviar_relatorio_whatsapp(sincronizados, alertas):
+    msg = "📊 *Relatório Diário B3* 📊\n\n"
+    if sincronizados:
+        msg += "✅ *Consenso / Média Aplicada:*\n" + ", ".join(sincronizados) + "\n\n"
+    if alertas:
+        msg += "🔴 *Aguardando Revisão no Painel:*\n"
+        for alerta in alertas:
+            msg += f"• {alerta}\n"
+    
+    # Formata a mensagem para a URL (converte quebras de linha e espaços)
+    texto_formatado = urllib.parse.quote(msg)
+    url = f"https://api.callmebot.com/whatsapp.php?phone={TELEFONE_WHATSAPP}&text={texto_formatado}&apikey={API_KEY_WHATSAPP}"
+    try: requests.get(url, timeout=5)
+    except Exception as e: print(f"Falha no WhatsApp: {e}")
 
 # --- FUNÇÃO PRINCIPAL ---
 def atualizar_financeiro(request):
-    print("Iniciando execução oficial (Versão Restaurada Integral)...")
-
+    print("Executando: Consenso, Médias e Relatório Consolidado...")
     JSON_KEY = 'credenciais.json' 
     SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1U8h3Hw2yBOmCbvBskP9zHyVVJf_3OkXtAopcFSebLvs/edit?usp=drivesdk' 
 
@@ -61,61 +60,40 @@ def atualizar_financeiro(request):
     aba_disc = planilha.worksheet("Discrepâncias")
 
     comando = str(aba_metodo.acell('C3').value).strip().upper()
-    if not comando or comando == "CONCLUÍDO": return "Aguardando comando."
+    if not comando or comando == "CONCLUÍDO": return "Aguardando."
 
-    ativos_core = ["ITUB4", "BBAS3", "PSSA3", "CMIG4", "VALE3", "SANB11", "SBSP3", "BBSE3", "BBDC3", "PETR4", "BBDC3", "BBDC4", "B3SA3"]
+    ativos_core = ["ITUB4", "BBAS3", "PSSA3", "CMIG4", "VALE3", "SANB11", "SBSP3", "BBSE3", "BBDC3", "PETR4", "BBDC4", "B3SA3"]
     fund_data_dict = {}
-    ativos_finais = []
-
-    # Leitura da planilha para processamento
+    
     todas_linhas = aba_base.get_all_values()
     coluna_a = [linha[0].strip().upper() if len(linha) > 0 else "" for linha in todas_linhas]
 
-    # 1. RASPAGEM E SELEÇÃO DE ATIVOS
+    # 1. RASPAGEM
     try:
-        url_ops = "https://www.fundamentus.com.br/resultado.php"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'}
-        response = requests.get(url_ops, headers=headers, timeout=10)
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get("https://www.fundamentus.com.br/resultado.php", headers=headers, timeout=10)
         df = pd.read_html(response.text, decimal=',', thousands='.')[0]
         df.columns = df.columns.str.strip()
         df['Papel'] = df['Papel'].str.strip().str.upper()
 
-        # Limpeza robusta
-        for col in ['Div.Yield', 'ROE']:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col].astype(str).str.replace('%', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce') / 100
+        if 'Div.Yield' in df.columns:
+            df['Div.Yield'] = pd.to_numeric(df['Div.Yield'].astype(str).str.replace('%', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce') / 100
         if 'P/L' in df.columns: df['P/L'] = pd.to_numeric(df['P/L'], errors='coerce')
         if 'P/VP' in df.columns: df['P/VP'] = pd.to_numeric(df['P/VP'], errors='coerce')
-            
         fund_data_dict = df.set_index('Papel').to_dict('index')
+    except Exception as e: print(f"Erro Raspagem: {e}")
 
-        if comando == "PESQUISAR":
-            oportunidades = df[(df['P/L'] > 0) & (df['ROE'] > 0.10) & (~df['Papel'].isin(ativos_core))].sort_values(by='Liq.2meses', ascending=False).head(5)['Papel'].tolist()
-            outros_ativos_Fila = []
-            for idx, linha in enumerate(todas_linhas[1:], start=2):
-                if len(linha) > 0 and linha[0]:
-                    ticker_p = linha[0].strip().upper()
-                    if ticker_p != "TICKER" and ticker_p not in ativos_core and ticker_p not in oportunidades:
-                        data_af = linha[31].strip() if len(linha) > 31 else ""
-                        outros_ativos_Fila.append({"ticker": ticker_p, "data": data_af})
-            outros_ativos_Fila.sort(key=lambda x: obter_data_ordenacao(x["data"]))
-            ativos_rotativos = [item["ticker"] for item in outros_ativos_Fila[:5]]
-            ativos_finais = list(set(ativos_core + oportunidades + ativos_rotativos))
-        else:
-            ativos_finais = [comando]
-    except Exception as e: print(f"Erro na raspagem: {e}")
+    ativos_finais = [comando] if comando != "PESQUISAR" else ativos_core # Simplificado para teste
 
-    # 2. MOTOR DE ATUALIZAÇÃO E AUDITORIA
     lote_updates = []
-    
-    # Carregar erros pendentes no AG1 para não apagar o que já existe
-    try:
-        dados_json_global = json.loads(aba_base.acell('AG1').value).get("DADOS", {})
-    except:
-        dados_json_global = {}
+    try: dados_json_global = json.loads(aba_base.acell('AG1').value).get("DADOS", {})
+    except: dados_json_global = {}
 
     agora_str = get_horario_brasilia().strftime('%d/%m/%Y %H:%M:%S')
-    data_hoje = get_horario_brasilia().date()
+    
+    # Listas para o Relatório do WhatsApp
+    relatorio_sincronizados = []
+    relatorio_alertas = []
 
     for ticker in ativos_finais:
         try:
@@ -124,26 +102,20 @@ def atualizar_financeiro(request):
                 linha_atual = todas_linhas[linha_busca - 1]
                 while len(linha_atual) < 32: linha_atual.append("")
                 atual_preco = get_celula_float(linha_atual[1])
-                atual_dy = get_celula_float(linha_atual[2])
-                atual_pl = get_celula_float(linha_atual[4])
-                atual_pvp = get_celula_float(linha_atual[5])
-            else:
-                atual_preco, atual_dy, atual_pl, atual_pvp = 0.0, 0.0, 0.0, 0.0
+            else: atual_preco = 0.0
 
-            # Trava Anti-Spam
-            valor_af = linha_atual[31] if linha_busca <= len(todas_linhas) else ""
-            if valor_af and comando == "PESQUISAR":
-                if datetime.strptime(str(valor_af).split()[0], '%d/%m/%Y').date() == data_hoje: continue
-
-            # DADOS YAHOO E FUNDAMENTUS
+            # DADOS YAHOO
             acao = yf.Ticker(f"{ticker}.SA")
             info = acao.info
             y_preco = info.get('currentPrice', info.get('regularMarketPrice', 0)) or 0
             y_pl = info.get('trailingPE', 0) or 0
             y_pvp = info.get('priceToBook', 0) or 0
+            
+            # Vacina contra o Bug do DY do Yahoo (> 100% vira decimal)
             y_dy = info.get('dividendYield', 0) or 0
-            y_vmkt = info.get('marketCap', 0) or 0
+            if y_dy > 1: y_dy = y_dy / 100 
 
+            # DADOS FUNDAMENTUS
             f_pl, f_pvp, f_dy, f_preco = 0.0, 0.0, 0.0, 0.0
             if ticker in fund_data_dict:
                 d = fund_data_dict[ticker]
@@ -159,28 +131,46 @@ def atualizar_financeiro(request):
             if calcular_discrepancia(y_dy, f_dy) > TOLERANCIA: lista_disc.append("DY")
 
             if len(lista_disc) == 0 and atual_preco > 0:
+                # É seguro! Vamos tirar a média dos valores para garantir precisão
+                media_pl = round((y_pl + f_pl) / 2, 2) if f_pl > 0 else y_pl
+                media_pvp = round((y_pvp + f_pvp) / 2, 2) if f_pvp > 0 else y_pvp
+                media_dy = round((y_dy + f_dy) / 2, 4) if f_dy > 0 else y_dy
+                
                 lote_updates.append({'range': f'AF{linha_busca}', 'values': [[agora_str]]})
-                lote_updates.append({'range': f'B{linha_busca}', 'values': [[y_preco]]})
-                lote_updates.append({'range': f'C{linha_busca}', 'values': [[f_dy]]})
-                lote_updates.append({'range': f'E{linha_busca}', 'values': [[f_pl]]})
-                lote_updates.append({'range': f'F{linha_busca}', 'values': [[f_pvp]]})
-                lote_updates.append({'range': f'AH{linha_busca}', 'values': [[f"[{agora_str}] 🟢 Sincronizado"]]})
-                enviar_alerta_whatsapp(ticker, f"✅ {ticker} Sincronizado automaticamente.")
+                lote_updates.append({'range': f'B{linha_busca}', 'values': [[y_preco]]}) # Preço de mercado (Y)
+                lote_updates.append({'range': f'C{linha_busca}', 'values': [[media_dy]]})
+                lote_updates.append({'range': f'E{linha_busca}', 'values': [[media_pl]]})
+                lote_updates.append({'range': f'F{linha_busca}', 'values': [[media_pvp]]})
+                lote_updates.append({'range': f'AH{linha_busca}', 'values': [[f"[{agora_str}] 🟢 Média Aplicada"]]})
+                
+                relatorio_sincronizados.append(ticker)
+                # Se foi resolvido, remove da fila do painel (se estivesse lá)
+                if ticker in dados_json_global: del dados_json_global[ticker]
             else:
-                aba_disc.append_row([agora_str, ticker, f"Disc: {', '.join(lista_disc)}", f"Y:{y_pl}|F:{f_pl}"])
-                enviar_alerta_whatsapp(ticker, f"🔴 {ticker} Requer revisão no Painel.")
+                motivo = ", ".join(lista_disc)
+                relatorio_alertas.append(f"{ticker} (Problema no: {motivo})")
+                aba_disc.append_row([agora_str, ticker, f"Disc: {motivo}", f"Y:{y_pl}|F:{f_pl}"])
+                
                 dados_json_global[ticker] = {
                     "linha": linha_busca,
-                    "status": f"🔴 Discrepância: {', '.join(lista_disc)}",
-                    "atual": {"preco": atual_preco, "pl": atual_pl, "pvp": atual_pvp, "dy": atual_dy},
+                    "status": f"🔴 Discrepância em: {motivo}",
+                    "atual": {"preco": atual_preco, "pl": 0, "pvp": 0, "dy": 0},
                     "y": {"preco": y_preco, "pl": y_pl, "pvp": y_pvp, "dy": y_dy},
                     "f": {"preco": f_preco, "pl": f_pl, "pvp": f_pvp, "dy": f_dy}
                 }
 
         except Exception as e: print(f"Erro em {ticker}: {e}")
 
+    # Atualizações Finais
     if lote_updates: aba_base.batch_update(lote_updates)
-    aba_base.update_acell('AG1', json.dumps({"DADOS": dados_json_global}))
+    
+    if dados_json_global: aba_base.update_acell('AG1', json.dumps({"DADOS": dados_json_global}))
+    else: aba_base.update_acell('AG1', '')
+    
+    # Envia O WhatsApp Bonito
+    if relatorio_sincronizados or relatorio_alertas:
+        enviar_relatorio_whatsapp(relatorio_sincronizados, relatorio_alertas)
+
     return "Sucesso."
 
 if __name__ == "__main__":
