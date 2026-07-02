@@ -130,7 +130,7 @@ def atualizar_financeiro(request):
             if calcular_discrepancia(y_pvp, f_pvp) > TOLERANCIA: lista_disc.append("P/VP")
             if calcular_discrepancia(y_dy, f_dy) > TOLERANCIA: lista_disc.append("DY")
 
-            if len(lista_disc) == 0 and atual_preco > 0:
+            if len(lista_disc) == 0:
                 # É seguro! Vamos tirar a média dos valores para garantir precisão
                 media_pl = round((y_pl + f_pl) / 2, 2) if f_pl > 0 else y_pl
                 media_pvp = round((y_pvp + f_pvp) / 2, 2) if f_pvp > 0 else y_pvp
