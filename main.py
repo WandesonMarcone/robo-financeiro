@@ -4,6 +4,7 @@ import yfinance as yf
 import requests
 import io
 import random
+import pytz
 from datetime import datetime
 
 # --- CONFIGURAÇÕES ---
@@ -12,69 +13,96 @@ JSON_KEY = 'credenciais.json'
 SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1U8h3Hw2yBOmCbvBskP9zHyVVJf_3OkXtAopcFSebLvs/edit?usp=drivesdk' 
 
 def formatar(val):
-    try: return float(val) if val is not None and not pd.isna(val) else 0.0
+    """Garante que qualquer valor retorne float, limpando sujeiras."""
+    try: 
+        if isinstance(val, str):
+            val = val.replace('%', '').replace('.', '').replace(',', '.')
+        return float(val) if val is not None and not pd.isna(val) else 0.0
     except: return 0.0
 
-def atualizar_financeiro(request=None):
+def atualizar_financeiro():
+    # Conexão
     gc = gspread.service_account(filename=JSON_KEY)
     planilha = gc.open_by_url(SPREADSHEET_URL)
     aba_base = planilha.worksheet("Base de Dados")
     aba_metodo = planilha.worksheet("Metodologia Projetiva")
     
-    # 1. BUSCA DADOS FUNDAMENTUS E DEFINIÇÃO DE FILA
+    # Horário de São Paulo
+    sp_tz = pytz.timezone('America/Sao_Paulo')
+    agora_sp = datetime.now(sp_tz).strftime('%d/%m %H:%M')
+    
+    # 1. BUSCA DADOS FUNDAMENTUS
     try:
         url = "https://www.fundamentus.com.br/resultado.php"
         df = pd.read_html(io.StringIO(requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).text), decimal=',', thousands='.')[0]
         df['Papel'] = df['Papel'].str.strip().str.upper()
         df = df.set_index('Papel')
-    except: df = pd.DataFrame()
+    except Exception as e:
+        print(f"Erro ao buscar Fundamentus: {e}")
+        return
 
-    # Identificar Oportunidades (P/L < 12 e P/VP < 1.5)
-    opps = df[(df['P/L'].astype(float) < 12) & (df['P/VP'].astype(float) < 1.5)].index.tolist()[:5]
-    
-    # Identificar C3
+    # 2. DEFINIÇÃO DA FILA (4-em-1)
     ticker_c3 = str(aba_metodo.acell('C3').value).strip().upper()
-    
-    # Identificar Aleatórias (3)
-    todas = aba_base.col_values(1)[1:] # Coluna A
+    opps = df[(df['P/L'].astype(float) < 12) & (df['P/VP'].astype(float) < 1.5)].index.tolist()[:5]
+    todas = aba_base.col_values(1)[1:]
     aleatorias = random.sample(todas, min(len(todas), 3))
     
-    # Fila final única (sem repetir)
     fila = list(set(FIXAS + [ticker_c3] + opps + aleatorias))
-    fila = [t for t in fila if t in todas] # Garante que está na planilha
+    fila = [t for t in fila if t in df.index and t in todas]
 
-    # 2. PROCESSAMENTO
+    # 3. PROCESSAMENTO
     batch_updates = []
     
     for ticker in fila:
         linha_idx = todas.index(ticker) + 2
         try:
-            # Dados Yahoo
+            # Preço via Yahoo
             yf_data = yf.Ticker(f"{ticker}.SA").info
             preco = formatar(yf_data.get('currentPrice') or yf_data.get('regularMarketPrice'))
             
             # Dados Fundamentus
-            f = df.loc[ticker] if ticker in df.index else {}
+            f = df.loc[ticker]
             
-            # Mapeamento Completo (B a AF)
+            # Mapeamento B a AF (Colunas mapeadas)
             row = [
-                preco, formatar(f.get('Div.Yield', 0)), 0, formatar(f.get('P/L', 0)), 
-                formatar(f.get('P/VP', 0)), formatar(f.get('P/Ativo', 0)), formatar(f.get('Mrg Bruta', 0)),
-                formatar(f.get('Mrg Ebit', 0)), formatar(f.get('Mrg. Líq.', 0)), formatar(f.get('P/EBIT', 0)),
-                formatar(f.get('EV/EBIT', 0)), 0, formatar(f.get('Dív.Líq/ Patrim.', 0)), formatar(f.get('PSR', 0)),
-                formatar(f.get('P/Cap.Giro', 0)), formatar(f.get('P/Ativ Circ.Liq', 0)), formatar(f.get('Liq. Corr.', 0)),
-                formatar(f.get('ROE', 0)), 0, formatar(f.get('ROIC', 0)), 0, 0, 0, 
-                formatar(f.get('Cresc. Rec.5a', 0)), 0, formatar(f.get('Liq.2meses', 0)),
-                formatar(f.get('VPA', 0)), formatar(f.get('LPA', 0)), 0, formatar(f.get('Valor de Mercado', 0)),
-                f"{datetime.now().strftime('%d/%m %H:%M')} OK"
+                preco,                                    # B: Preço
+                formatar(f.get('Div.Yield', 0)),          # C: DY
+                0,                                        # D: Nº Ações (Indisp)
+                formatar(f.get('P/L', 0)),                # E: P/L
+                formatar(f.get('P/VP', 0)),               # F: P/VP
+                formatar(f.get('P/Ativo', 0)),            # G: P/Ativo
+                formatar(f.get('Mrg Bruta', 0)),          # H: Marg. Bruta
+                formatar(f.get('Mrg Ebit', 0)),           # I: Marg. EBIT
+                formatar(f.get('Mrg. Líq.', 0)),          # J: Marg. Líq.
+                formatar(f.get('P/EBIT', 0)),             # K: P/EBIT
+                formatar(f.get('EV/EBIT', 0)),            # L: EV/EBIT
+                formatar(f.get('Dív.Líq/ Patrim.', 0)),   # M: Div.Liq/Ebit (Mapeado de Dív/Patrim)
+                formatar(f.get('Dív.Líq/ Patrim.', 0)),   # N: Div.Liq/Patri
+                formatar(f.get('PSR', 0)),                # O: PSR
+                formatar(f.get('P/Cap.Giro', 0)),         # P: P/Cap.Giro
+                formatar(f.get('P/Ativ Circ.Liq', 0)),    # Q: P.At.Circ.Liq
+                formatar(f.get('Liq. Corr.', 0)),         # R: Liq. Corr
+                formatar(f.get('ROE', 0)),                # S: ROE
+                0,                                        # T: ROA (Indisp)
+                formatar(f.get('ROIC', 0)),               # U: ROIC
+                0, 0, 0,                                  # V, W, X (Indisp)
+                formatar(f.get('Cresc. Rec.5a', 0)),      # Y: CAGR Rec
+                0,                                        # Z: CAGR Lucros (Indisp)
+                formatar(f.get('Liq.2meses', 0)),         # AA: Liq. Media
+                formatar(f.get('VPA', 0)),                # AB: VPA
+                formatar(f.get('LPA', 0)),                # AC: LPA
+                0,                                        # AD: PEG (Indisp)
+                0,                                        # AE: Valor Mercado (Indisp)
+                f"{agora_sp} OK"                          # AF: Atualização
             ]
             batch_updates.append({'range': f'B{linha_idx}:AF{linha_idx}', 'values': [row]})
-        except Exception as e: print(f"Erro {ticker}: {e}")
+        except Exception as e:
+            print(f"Erro ao processar {ticker}: {e}")
 
-    # 3. ESCRITA EM LOTE
+    # 4. ESCRITA EM LOTE
     if batch_updates:
         aba_base.batch_update(batch_updates)
-        print(f"Atualizado lote de {len(fila)} ativos.")
+        print(f"Sucesso: Atualizadas {len(fila)} ações.")
 
 if __name__ == "__main__":
     atualizar_financeiro()
