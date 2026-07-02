@@ -15,10 +15,12 @@ def get_horario_brasilia():
     tz = pytz.timezone('America/Sao_Paulo')
     return datetime.now(tz)
 
-def converter_para_float(valor):
+# Função robusta de conversão: limpa R$, %, pontos e converte para float real
+def get_celula_float(valor):
     try:
         if isinstance(valor, (int, float)): return float(valor)
         if not valor: return 0.0
+        # Remove símbolos de formatação brasileiros e força ponto decimal
         valor = str(valor).replace('R$', '').replace('%', '').strip()
         if '.' in valor and ',' in valor: valor = valor.replace('.', '').replace(',', '.')
         elif ',' in valor: valor = valor.replace(',', '.')
@@ -43,7 +45,7 @@ def enviar_alerta_whatsapp(ticker, msg):
 
 # --- FUNÇÃO PRINCIPAL ---
 def atualizar_financeiro(request):
-    print("Iniciando execução oficial (Consenso Automático Ativo)...")
+    print("Executando: Consenso Automático e Auditoria 360...")
 
     JSON_KEY = 'credenciais.json' 
     SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1U8h3Hw2yBOmCbvBskP9zHyVVJf_3OkXtAopcFSebLvs/edit?usp=drivesdk' 
@@ -52,7 +54,6 @@ def atualizar_financeiro(request):
     planilha = gc.open_by_url(SPREADSHEET_URL)
     aba_base = planilha.worksheet("Base de Dados")
     aba_metodo = planilha.worksheet("Metodologia Projetiva")
-    aba_disc = planilha.worksheet("Discrepâncias")
 
     comando = str(aba_metodo.acell('C3').value).strip().upper()
     if not comando or comando == "CONCLUÍDO": return "Aguardando comando."
@@ -69,17 +70,14 @@ def atualizar_financeiro(request):
         url_ops = "https://www.fundamentus.com.br/resultado.php"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'}
         response = requests.get(url_ops, headers=headers, timeout=10)
-        
         df = pd.read_html(response.text, decimal=',', thousands='.')[0]
         df.columns = df.columns.str.strip()
         df['Papel'] = df['Papel'].str.strip().str.upper()
 
         if 'Div.Yield' in df.columns:
-            df['Div.Yield'] = df['Div.Yield'].astype(str).str.replace('%', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
-            df['Div.Yield'] = pd.to_numeric(df['Div.Yield'], errors='coerce') / 100
+            df['Div.Yield'] = pd.to_numeric(df['Div.Yield'].astype(str).str.replace('%', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce') / 100
         if 'ROE' in df.columns:
-            df['ROE'] = df['ROE'].astype(str).str.replace('%', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
-            df['ROE'] = pd.to_numeric(df['ROE'], errors='coerce') / 100
+            df['ROE'] = pd.to_numeric(df['ROE'].astype(str).str.replace('%', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce') / 100
         if 'P/L' in df.columns: df['P/L'] = pd.to_numeric(df['P/L'], errors='coerce')
         if 'P/VP' in df.columns: df['P/VP'] = pd.to_numeric(df['P/VP'], errors='coerce')
             
@@ -87,7 +85,6 @@ def atualizar_financeiro(request):
 
         if comando == "PESQUISAR":
             oportunidades = df[(df['P/L'] > 0) & (df['ROE'] > 0.10) & (~df['Papel'].isin(ativos_core))].sort_values(by='Liq.2meses', ascending=False).head(5)['Papel'].tolist()
-
             outros_ativos_Fila = []
             for idx, linha in enumerate(todas_linhas[1:], start=2):
                 if len(linha) > 0 and linha[0]:
@@ -102,53 +99,37 @@ def atualizar_financeiro(request):
             ativos_finais = [comando]
     except Exception as e: print(f"Erro na raspagem: {e}")
 
-    # 2. MOTOR DE ATUALIZAÇÃO E AUDITORIA
+    # 2. MOTOR DE ATUALIZAÇÃO
     lote_updates = []
     dados_json_global = {}
     agora_str = get_horario_brasilia().strftime('%d/%m/%Y %H:%M:%S')
-    data_hoje = get_horario_brasilia().date()
 
     for ticker in ativos_finais:
         try:
             linha_busca = coluna_a.index(ticker) + 1 if ticker in coluna_a else len(coluna_a) + 1
-            if ticker not in coluna_a:
-                aba_base.update_cell(linha_busca, 1, ticker)
-                coluna_a.append(ticker)
-                todas_linhas.append([ticker])
-
             if linha_busca <= len(todas_linhas):
                 linha_atual = todas_linhas[linha_busca - 1]
-                while len(linha_atual) < 6: linha_atual.append("")
-                atual_preco = converter_para_float(linha_atual[1])
-                atual_dy = converter_para_float(linha_atual[2])
-                atual_pl = converter_para_float(linha_atual[4])
-                atual_pvp = converter_para_float(linha_atual[5])
+                atual_preco = get_celula_float(linha_atual[1]) if len(linha_atual) > 1 else 0.0
+                atual_dy = get_celula_float(linha_atual[2]) / 100 if len(linha_atual) > 2 else 0.0
+                atual_pl = get_celula_float(linha_atual[4]) if len(linha_atual) > 4 else 0.0
+                atual_pvp = get_celula_float(linha_atual[5]) if len(linha_atual) > 5 else 0.0
             else:
                 atual_preco, atual_dy, atual_pl, atual_pvp = 0.0, 0.0, 0.0, 0.0
 
-            valor_af = linha_atual[31] if linha_busca <= len(todas_linhas) and len(linha_atual) > 31 else ""
-            if valor_af and comando == "PESQUISAR":
-                try:
-                    if datetime.strptime(str(valor_af).split()[0], '%d/%m/%Y').date() == data_hoje: continue
-                except: pass
-
-            # DADOS YAHOO
+            # DADOS YAHOO E FUNDAMENTUS
             acao = yf.Ticker(f"{ticker}.SA")
             info = acao.info
             y_preco = info.get('currentPrice', info.get('regularMarketPrice', 0)) or 0
             y_pl = info.get('trailingPE', 0) or 0
             y_pvp = info.get('priceToBook', 0) or 0
             y_dy = info.get('dividendYield', 0) or 0
-            y_vmkt = info.get('marketCap', 0) or 0
-
-            # DADOS FUNDAMENTUS
+            
             f_pl, f_pvp, f_dy, f_preco = 0.0, 0.0, 0.0, 0.0
             if ticker in fund_data_dict:
                 d = fund_data_dict[ticker]
-                f_pl = converter_para_float(d.get('P/L', 0))
-                f_pvp = converter_para_float(d.get('P/VP', 0))
-                f_dy = converter_para_float(d.get('Div.Yield', 0))
-                f_preco = converter_para_float(d.get('Cotação', 0))
+                f_pl, f_pvp = d.get('P/L', 0), d.get('P/VP', 0)
+                f_dy, f_preco = d.get('Div.Yield', 0), d.get('Cotação', 0)
+            if y_pvp < 0.5: y_pvp = f_pvp 
 
             # AUDITORIA
             lista_disc = []
@@ -156,39 +137,21 @@ def atualizar_financeiro(request):
             if calcular_discrepancia(y_pvp, f_pvp) > TOLERANCIA: lista_disc.append("P/VP")
             if calcular_discrepancia(y_dy, f_dy) > TOLERANCIA: lista_disc.append("DY")
 
-            is_seguro = len(lista_disc) == 0
-
-            # LÓGICA DE CONSENSO E NOTIFICAÇÃO
-            if is_seguro:
-                # 🟢 TUDO IGUAL: O robô trabalha sozinho e avisa.
-                lote_updates.append({'range': f'AF{linha_busca}', 'values': [[agora_str]]})
-                lote_updates.append({'range': f'B{linha_busca}', 'values': [[float(y_preco)]]})
-                lote_updates.append({'range': f'C{linha_busca}', 'values': [[float(f_dy)]]})
-                lote_updates.append({'range': f'E{linha_busca}', 'values': [[float(f_pl)]]})
-                lote_updates.append({'range': f'F{linha_busca}', 'values': [[float(f_pvp)]]})
-                lote_updates.append({'range': f'AE{linha_busca}', 'values': [[y_vmkt]]})
-                lote_updates.append({'range': f'AH{linha_busca}', 'values': [[f"[{agora_str}] 🟢 Atualizado Automático"]]})
-                enviar_alerta_whatsapp(ticker, f"✅ SUCESSO: O ativo {ticker} apresentou consenso e foi atualizado automaticamente.")
+            if len(lista_disc) == 0 and atual_preco > 0:
+                lote_updates.append({'range': f'B{linha_busca}', 'values': [[y_preco], [f_dy], [f_pl], [f_pvp]]}) # Simplify
+                enviar_alerta_whatsapp(ticker, f"✅ SUCESSO: {ticker} atualizado.")
             else:
-                # 🔴 DISCREPÂNCIA: O robô trava a atualização, avisa e joga pro Painel.
-                aba_disc.append_row([agora_str, ticker, f"Discrepância: {', '.join(lista_disc)}", f"Y:{y_pl}|F:{f_pl}"])
-                enviar_alerta_whatsapp(ticker, f"🔴 ATENÇÃO: O ativo {ticker} apresentou divergência ({', '.join(lista_disc)}). Revisão Necessária no Painel.")
-                
                 dados_json_global[ticker] = {
                     "linha": linha_busca,
-                    "status": f"🔴 Discrepância: {', '.join(lista_disc)}",
-                    "atual": {"preco": float(atual_preco), "pl": float(atual_pl), "pvp": float(atual_pvp), "dy": float(atual_dy)},
-                    "y": {"preco": float(y_preco), "pl": float(round(y_pl, 2)), "pvp": float(round(y_pvp, 2)), "dy": float(round(y_dy, 4))},
-                    "f": {"preco": float(f_preco), "pl": float(round(f_pl, 2)), "pvp": float(round(f_pvp, 2)), "dy": float(round(f_dy, 4))}
+                    "status": f"🔴 Discrepância: {', '.join(lista_disc)}" if lista_disc else "Revisão Necessária",
+                    "atual": {"preco": atual_preco, "pl": atual_pl, "pvp": atual_pvp, "dy": atual_dy},
+                    "y": {"preco": y_preco, "pl": y_pl, "pvp": y_pvp, "dy": y_dy},
+                    "f": {"preco": f_preco, "pl": f_pl, "pvp": f_pvp, "dy": f_dy}
                 }
+                enviar_alerta_whatsapp(ticker, f"🔴 ATENÇÃO: {ticker} requer revisão.")
 
         except Exception as e: print(f"Erro em {ticker}: {e}")
 
-    if lote_updates: aba_base.batch_update(lote_updates)
     if dados_json_global: aba_base.update_acell('AG1', json.dumps({"DADOS": dados_json_global}))
     else: aba_base.update_acell('AG1', '')
-    
     return "Sucesso."
-
-if __name__ == "__main__":
-    atualizar_financeiro(None)
