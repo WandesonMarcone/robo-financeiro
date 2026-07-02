@@ -7,7 +7,7 @@ import pytz
 import urllib.parse
 from datetime import datetime
 
-# --- CONFIGURAÇÕES E API ---
+# --- CONFIGURAÇÕES ---
 TOLERANCIA = 0.05
 TELEFONE_WHATSAPP = "553491503895" 
 API_KEY_WHATSAPP = "5116767"
@@ -35,13 +35,11 @@ def calcular_discrepancia(v1, v2):
 def enviar_relatorio_whatsapp(sincronizados, alertas):
     msg = "📊 *Relatório Diário B3* 📊\n\n"
     if sincronizados:
-        msg += "✅ *Consenso / Média Aplicada:*\n" + ", ".join(sincronizados) + "\n\n"
+        msg += "✅ *Automático (Média Aplicada):*\n" + ", ".join(sincronizados) + "\n\n"
     if alertas:
-        msg += "🔴 *Aguardando Revisão no Painel:*\n"
-        for alerta in alertas:
-            msg += f"• {alerta}\n"
+        msg += "🔴 *Revisão no Painel:*\n"
+        for alerta in alertas: msg += f"• {alerta}\n"
     
-    # Formata a mensagem para a URL (converte quebras de linha e espaços)
     texto_formatado = urllib.parse.quote(msg)
     url = f"https://api.callmebot.com/whatsapp.php?phone={TELEFONE_WHATSAPP}&text={texto_formatado}&apikey={API_KEY_WHATSAPP}"
     try: requests.get(url, timeout=5)
@@ -49,7 +47,7 @@ def enviar_relatorio_whatsapp(sincronizados, alertas):
 
 # --- FUNÇÃO PRINCIPAL ---
 def atualizar_financeiro(request):
-    print("Executando: Consenso, Médias e Relatório Consolidado...")
+    print("Executando: Consenso Parcial e Proteção de Botão...")
     JSON_KEY = 'credenciais.json' 
     SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1U8h3Hw2yBOmCbvBskP9zHyVVJf_3OkXtAopcFSebLvs/edit?usp=drivesdk' 
 
@@ -64,11 +62,10 @@ def atualizar_financeiro(request):
 
     ativos_core = ["ITUB4", "BBAS3", "PSSA3", "CMIG4", "VALE3", "SANB11", "SBSP3", "BBSE3", "BBDC3", "PETR4", "BBDC4", "B3SA3"]
     fund_data_dict = {}
-    
     todas_linhas = aba_base.get_all_values()
     coluna_a = [linha[0].strip().upper() if len(linha) > 0 else "" for linha in todas_linhas]
 
-    # 1. RASPAGEM
+    # RASPAGEM FUNDAMENTUS
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get("https://www.fundamentus.com.br/resultado.php", headers=headers, timeout=10)
@@ -83,91 +80,81 @@ def atualizar_financeiro(request):
         fund_data_dict = df.set_index('Papel').to_dict('index')
     except Exception as e: print(f"Erro Raspagem: {e}")
 
-    ativos_finais = [comando] if comando != "PESQUISAR" else ativos_core # Simplificado para teste
+    ativos_finais = [comando] if comando != "PESQUISAR" else ativos_core
 
     lote_updates = []
     try: dados_json_global = json.loads(aba_base.acell('AG1').value).get("DADOS", {})
     except: dados_json_global = {}
 
     agora_str = get_horario_brasilia().strftime('%d/%m/%Y %H:%M:%S')
-    
-    # Listas para o Relatório do WhatsApp
-    relatorio_sincronizados = []
-    relatorio_alertas = []
+    relatorio_sincronizados, relatorio_alertas = [], []
 
     for ticker in ativos_finais:
         try:
             linha_busca = coluna_a.index(ticker) + 1 if ticker in coluna_a else len(coluna_a) + 1
-            if linha_busca <= len(todas_linhas):
-                linha_atual = todas_linhas[linha_busca - 1]
-                while len(linha_atual) < 32: linha_atual.append("")
-                atual_preco = get_celula_float(linha_atual[1])
-            else: atual_preco = 0.0
 
-            # DADOS YAHOO
+            # YAHOO
             acao = yf.Ticker(f"{ticker}.SA")
             info = acao.info
             y_preco = info.get('currentPrice', info.get('regularMarketPrice', 0)) or 0
             y_pl = info.get('trailingPE', 0) or 0
             y_pvp = info.get('priceToBook', 0) or 0
-            
-            # Vacina contra o Bug do DY do Yahoo (> 100% vira decimal)
             y_dy = info.get('dividendYield', 0) or 0
             if y_dy > 1: y_dy = y_dy / 100 
 
-            # DADOS FUNDAMENTUS
+            # FUNDAMENTUS
             f_pl, f_pvp, f_dy, f_preco = 0.0, 0.0, 0.0, 0.0
             if ticker in fund_data_dict:
                 d = fund_data_dict[ticker]
-                f_pl, f_pvp = d.get('P/L', 0), d.get('P/VP', 0)
-                f_dy, f_preco = d.get('Div.Yield', 0), d.get('Cotação', 0)
-            
+                f_pl, f_pvp, f_dy = d.get('P/L', 0), d.get('P/VP', 0), d.get('Div.Yield', 0)
             if y_pvp < 0.5: y_pvp = f_pvp 
 
-            # AUDITORIA
+            # VERIFICAÇÃO INDIVIDUAL DE CADA MÉTRICA
+            disc_pl = calcular_discrepancia(y_pl, f_pl) > TOLERANCIA
+            disc_pvp = calcular_discrepancia(y_pvp, f_pvp) > TOLERANCIA
+            disc_dy = calcular_discrepancia(y_dy, f_dy) > TOLERANCIA
+
             lista_disc = []
-            if calcular_discrepancia(y_pl, f_pl) > TOLERANCIA: lista_disc.append("P/L")
-            if calcular_discrepancia(y_pvp, f_pvp) > TOLERANCIA: lista_disc.append("P/VP")
-            if calcular_discrepancia(y_dy, f_dy) > TOLERANCIA: lista_disc.append("DY")
+            if disc_pl: lista_disc.append("P/L")
+            if disc_pvp: lista_disc.append("P/VP")
+            if disc_dy: lista_disc.append("DY")
+
+            # CALCULA AS MÉDIAS
+            media_preco = float(y_preco) # Preço sempre ganha o Yahoo ao vivo
+            media_pl = float(round((y_pl + f_pl) / 2, 2) if f_pl > 0 else y_pl)
+            media_pvp = float(round((y_pvp + f_pvp) / 2, 2) if f_pvp > 0 else y_pvp)
+            media_dy = float(round((y_dy + f_dy) / 2, 4) if f_dy > 0 else y_dy)
 
             if len(lista_disc) == 0:
-                # É seguro! Vamos tirar a média dos valores para garantir precisão
-                media_pl = round((y_pl + f_pl) / 2, 2) if f_pl > 0 else y_pl
-                media_pvp = round((y_pvp + f_pvp) / 2, 2) if f_pvp > 0 else y_pvp
-                media_dy = round((y_dy + f_dy) / 2, 4) if f_dy > 0 else y_dy
-                
-                lote_updates.append({'range': f'AF{linha_busca}', 'values': [[agora_str]]})
-                lote_updates.append({'range': f'B{linha_busca}', 'values': [[y_preco]]}) # Preço de mercado (Y)
+                # 100% Sincronizado - Vai tudo automático
+                lote_updates.append({'range': f'B{linha_busca}', 'values': [[media_preco]]})
                 lote_updates.append({'range': f'C{linha_busca}', 'values': [[media_dy]]})
                 lote_updates.append({'range': f'E{linha_busca}', 'values': [[media_pl]]})
                 lote_updates.append({'range': f'F{linha_busca}', 'values': [[media_pvp]]})
                 lote_updates.append({'range': f'AH{linha_busca}', 'values': [[f"[{agora_str}] 🟢 Média Aplicada"]]})
-                
                 relatorio_sincronizados.append(ticker)
-                # Se foi resolvido, remove da fila do painel (se estivesse lá)
                 if ticker in dados_json_global: del dados_json_global[ticker]
             else:
+                # Vai pro painel, mas o painel saberá o que tá bom e o que tá ruim
                 motivo = ", ".join(lista_disc)
-                relatorio_alertas.append(f"{ticker} (Problema no: {motivo})")
+                relatorio_alertas.append(f"{ticker} ({motivo})")
                 aba_disc.append_row([agora_str, ticker, f"Disc: {motivo}", f"Y:{y_pl}|F:{f_pl}"])
                 
                 dados_json_global[ticker] = {
                     "linha": linha_busca,
                     "status": f"🔴 Discrepância em: {motivo}",
-                    "atual": {"preco": atual_preco, "pl": 0, "pvp": 0, "dy": 0},
+                    "flags": {"pl": disc_pl, "pvp": disc_pvp, "dy": disc_dy},
+                    "medias": {"preco": media_preco, "pl": media_pl, "pvp": media_pvp, "dy": media_dy},
                     "y": {"preco": y_preco, "pl": y_pl, "pvp": y_pvp, "dy": y_dy},
-                    "f": {"preco": f_preco, "pl": f_pl, "pvp": f_pvp, "dy": f_dy}
+                    "f": {"preco": y_preco, "pl": f_pl, "pvp": f_pvp, "dy": f_dy}
                 }
 
         except Exception as e: print(f"Erro em {ticker}: {e}")
 
-    # Atualizações Finais
     if lote_updates: aba_base.batch_update(lote_updates)
-    
     if dados_json_global: aba_base.update_acell('AG1', json.dumps({"DADOS": dados_json_global}))
     else: aba_base.update_acell('AG1', '')
     
-    # Envia O WhatsApp Bonito
     if relatorio_sincronizados or relatorio_alertas:
         enviar_relatorio_whatsapp(relatorio_sincronizados, relatorio_alertas)
 
