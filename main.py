@@ -1,39 +1,42 @@
 import gspread
+import yfinance as yf
+from datetime import datetime
 
 # --- CONFIGURAÇÕES ---
-JSON_KEY = 'credenciais.json' 
-SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1U8h3Hw2yBOmCbvBskP9zHyVVJf_3OkXtAopcFSebLvs/edit?usp=drivesdk' 
+# Lista limpa e performática
+ATIVOS = ["PETR4", "VALE3", "ITUB4", "BBDC4", "BBAS3", "B3SA3", "WEGE3", "ABEV3", 
+          "SUZB3", "JBSS3", "GGBR4", "BBSE3", "CSAN3", "RADL3", "ELET3", "PRIO3", 
+          "CMIG4", "VIVT3", "CPLE6", "MGLU3"]
 
-def faxina_planilha():
-    gc = gspread.service_account(filename=JSON_KEY)
-    planilha = gc.open_by_url(SPREADSHEET_URL)
-    aba = planilha.worksheet("Base de Dados")
+def atualizar_carteira_elite():
+    gc = gspread.service_account(filename='credenciais.json')
+    aba = gc.open_by_url('https://docs.google.com/spreadsheets/d/1U8h3Hw2yBOmCbvBskP9zHyVVJf_3OkXtAopcFSebLvs/edit?usp=drivesdk').worksheet("Base de Dados")
     
-    # Pega todos os dados
-    linhas = aba.get_all_values()
-    # cabeçalho = linhas[0] # Linha 1
+    # Prepara o lote de escrita
+    batch_updates = []
+    linha_atual = 2 # Começa na linha 2 (após cabeçalho)
     
-    zumbis = []
-    
-    # Itera a partir da linha 2
-    for i, linha in enumerate(linhas[1:], start=2):
-        ticker = linha[0].strip().upper()
-        preco = linha[1].strip()     # Coluna B
-        liq = linha[26].strip()      # Coluna AA (Indice 26)
-        
-        # Critério de Zumbi: Preço vazio/zero OU Liquidez zero
-        if preco == "" or preco == "0" or liq == "" or liq == "0":
-            zumbis.append((i, ticker))
+    for ticker in ATIVOS:
+        try:
+            dados = yf.Ticker(f"{ticker}.SA").info
+            preco = dados.get('currentPrice') or dados.get('regularMarketPrice') or 0
+            pl = dados.get('trailingPE') or 0
+            pvp = dados.get('priceToBook') or 0
             
-    print(f"--- RELATÓRIO DE FAXINA ---")
-    print(f"Total de ações analisadas: {len(linhas)-1}")
-    print(f"Total de ações 'Zumbis' encontradas: {len(zumbis)}")
-    print("Primeiros 10 zumbis encontrados (Linha, Ticker):")
-    for z in zumbis[:10]:
-        print(f"Linha {z[0]}: {z[1]}")
-        
-    return zumbis
+            # Adiciona ao batch (Colunas B, E, F e AF)
+            batch_updates.append({'range': f'B{linha_atual}', 'values': [[preco]]})
+            batch_updates.append({'range': f'E{linha_atual}', 'values': [[pl]]})
+            batch_updates.append({'range': f'F{linha_atual}', 'values': [[pvp]]})
+            batch_updates.append({'range': f'AF{linha_atual}', 'values': [[f"{datetime.now().strftime('%H:%M')} OK"]]})
+            
+            linha_atual += 1
+        except Exception as e:
+            print(f"Erro em {ticker}: {e}")
+            
+    # Executa tudo de uma vez só
+    if batch_updates:
+        aba.batch_update(batch_updates)
+        print(f"Sucesso! {len(ATIVOS)} ações atualizadas com alta performance.")
 
-# Rode isso para ver quem está poluindo seu sistema
 if __name__ == "__main__":
-    lista_zumbis = faxina_planilha()
+    atualizar_carteira_elite()
