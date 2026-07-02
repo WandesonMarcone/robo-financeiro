@@ -154,7 +154,14 @@ def atualizar_financeiro(request):
                 aba_disc.append_row([agora_str, ticker, status_msg, f"Y:{y_pl}|F:{f_pl}"])
                 enviar_alerta_whatsapp(ticker, f"🔴 ATENÇÃO: {status_msg}. Ativo: {ticker}.")
             
-            dados_json_global[ticker] = {"linha": linha_busca, "valor_atual": y_preco, "status": status_msg}
+            dados_json_global[ticker] = {
+                "linha": linha_busca,
+                "status": status_msg,
+                "precos": {"y": ftm_moeda_sheet(y_preco), "f": fmt_moeda_sheet(f_preco)},
+                "pl": {"y": round(info.get('trailingPE', 0), 2) "f": f_pl},
+                "pvp": {"y": round(info.get('priceToBook', 0), 2) "f": f_pvp},
+                "dy": {"y": round(info.get('dividendYield', 0)*100, 2) "f": f_round(f_dy*100, 2)},
+            }
 
         except Exception as e: print(f"Erro em {ticker}: {e}")
 
