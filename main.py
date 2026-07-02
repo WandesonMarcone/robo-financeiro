@@ -126,37 +126,39 @@ def atualizar_financeiro():
             pvp_fmt = formatar(f.get('P/VP', 0))
             
             # MAPEAMENTO COMPLETO (A até AF - ATENÇÃO: Adicionado Ticker na Coluna A)
+            # 3.3 - MAPEAMENTO COMPLETO (B até AF)
             row = [
-                ticker,                                   # A: Ticker (Gravado automaticamente)
                 preco,                                    # B: Preço (YF)
-                dy_fmt,                                   # C: DY
+                formatar(f.get('Div.Yield', 0)),          # C: DY
                 n_acoes,                                  # D: Nº Ações (YF)
-                pl_fmt,                                   # E: P/L
-                pvp_fmt,                                  # F: P/VP
+                formatar(f.get('P/L', 0)),                # E: P/L
+                formatar(f.get('P/VP', 0)),               # F: P/VP
                 formatar(f.get('P/Ativo', 0)),            # G: P/Ativo
                 formatar(f.get('Mrg Bruta', 0)),          # H: Marg. Bruta
                 formatar(f.get('Mrg Ebit', 0)),           # I: Marg. EBIT
                 formatar(f.get('Mrg. Líq.', 0)),          # J: Marg. Líq.
                 formatar(f.get('P/EBIT', 0)),             # K: P/EBIT
                 formatar(f.get('EV/EBIT', 0)),            # L: EV/EBIT
-                formatar(f.get('Dív.Líq/ Patrim.', 0)),   # M: Div.Liq/Ebit 
-                formatar(f.get('Dív.Líq/ Patrim.', 0)),   # N: Div.Liq/Patri
+                formatar(f.get('Dív.Líq/ Patrim.', 0)),   # M: Dív. Liq / EBIT (Mapeado via Patrimônio)
+                formatar(f.get('Dív.Líq/ Patrim.', 0)),   # N: Dív. Liq / Patri
                 formatar(f.get('PSR', 0)),                # O: PSR
                 formatar(f.get('P/Cap.Giro', 0)),         # P: P/Cap.Giro
-                formatar(f.get('P/Ativ Circ.Liq', 0)),    # Q: P.At.Circ.Liq
+                formatar(f.get('P/Ativ Circ.Liq', 0)),    # Q: P. At. Circ. Liq
                 formatar(f.get('Liq. Corr.', 0)),         # R: Liq. Corr
-                roe_fmt,                                  # S: ROE
+                formatar(f.get('ROE', 0)),                # S: ROE
                 roa,                                      # T: ROA (YF)
                 formatar(f.get('ROIC', 0)),               # U: ROIC
-                0, 0, 0,                                  # V, W, X 
-                formatar(f.get('Cresc. Rec.5a', 0)),      # Y: CAGR Rec
-                0,                                        # Z: CAGR Lucros 
-                formatar(f.get('Liq.2meses', 0)),         # AA: Liq. Media
+                0,                                        # V: Patrimônio / Ativos
+                0,                                        # W: Passivos / Ativos
+                0,                                        # X: Giro Ativos
+                formatar(f.get('Cresc. Rec.5a', 0)),      # Y: CAGR Receitas 5 anos
+                0,                                        # Z: CAGR Lucros 5 anos
+                formatar(f.get('Liq.2meses', 0)),         # AA: Liquidez Média Diária
                 vpa,                                      # AB: VPA (YF)
                 lpa,                                      # AC: LPA (YF)
                 peg_ratio,                                # AD: PEG Ratio (YF)
-                valor_mercado,                            # AE: Valor Mercado (YF)
-                f"{agora_sp} OK"                          # AF: Atualização
+                valor_mercado,                            # AE: Valor de Mercado (YF)
+                f"{agora_sp} OK"                          # AF: Última Atualização
             ]
             
             # ATENÇÃO: Range agora é A:AF
