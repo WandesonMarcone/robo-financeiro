@@ -17,7 +17,11 @@ def get_horario_brasilia():
 
 def converter_para_float(valor):
     try:
-        if isinstance(valor, str): valor = valor.replace(',', '.')
+        if isinstance(valor, (int, float)): return float(valor)
+        if not valor: return 0.0
+        valor = str(valor).replace('R$', '').replace('%', '').strip()
+        if '.' in valor and ',' in valor: valor = valor.replace('.', '').replace(',', '.')
+        elif ',' in valor: valor = valor.replace(',', '.')
         return float(valor)
     except: return 0.0
 
@@ -32,13 +36,14 @@ def obter_data_ordenacao(txt):
     except: return datetime.min
 
 def enviar_alerta_whatsapp(ticker, msg):
-    url = f"https://api.callmebot.com/whatsapp.php?phone={TELEFONE_WHATSAPP}&text={msg}&apikey={API_KEY_WHATSAPP}"
-    try: requests.get(url, timeout=5)
-    except: print(f"Falha ao enviar WhatsApp para {ticker}")
+    url = "https://api.callmebot.com/whatsapp.php"
+    params = {"phone": TELEFONE_WHATSAPP, "text": msg, "apikey": API_KEY_WHATSAPP}
+    try: requests.get(url, params=params, timeout=5)
+    except Exception as e: print(f"Falha ao enviar WhatsApp: {e}")
 
 # --- FUNÇÃO PRINCIPAL ---
 def atualizar_financeiro(request):
-    print("Iniciando execução oficial (Versão Cirúrgica V2)...")
+    print("Iniciando execução oficial (Consenso Automático Ativo)...")
 
     JSON_KEY = 'credenciais.json' 
     SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1U8h3Hw2yBOmCbvBskP9zHyVVJf_3OkXtAopcFSebLvs/edit?usp=drivesdk' 
@@ -56,15 +61,13 @@ def atualizar_financeiro(request):
     fund_data_dict = {}
     ativos_finais = []
 
-    # Otimização: Lê a planilha uma vez só (Economiza tempo e limites do Google)
     todas_linhas = aba_base.get_all_values()
     coluna_a = [linha[0].strip().upper() if len(linha) > 0 else "" for linha in todas_linhas]
 
     # 1. RASPAGEM E SELEÇÃO DE ATIVOS
     try:
         url_ops = "https://www.fundamentus.com.br/resultado.php"
-        # Disfarce (User-Agent) atualizado para não ser bloqueado
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'}
         response = requests.get(url_ops, headers=headers, timeout=10)
         
         df = pd.read_html(response.text, decimal=',', thousands='.')[0]
@@ -77,7 +80,6 @@ def atualizar_financeiro(request):
         if 'ROE' in df.columns:
             df['ROE'] = df['ROE'].astype(str).str.replace('%', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
             df['ROE'] = pd.to_numeric(df['ROE'], errors='coerce') / 100
-        
         if 'P/L' in df.columns: df['P/L'] = pd.to_numeric(df['P/L'], errors='coerce')
         if 'P/VP' in df.columns: df['P/VP'] = pd.to_numeric(df['P/VP'], errors='coerce')
             
@@ -98,10 +100,7 @@ def atualizar_financeiro(request):
             ativos_finais = list(set(ativos_core + oportunidades + ativos_rotativos))
         else:
             ativos_finais = [comando]
-    except Exception as e: 
-        print(f"Erro na raspagem do Fundamentus: {e}")
-        # Mesmo com erro, se for busca manual, o Yahoo assume
-        if comando != "PESQUISAR": ativos_finais = [comando]
+    except Exception as e: print(f"Erro na raspagem: {e}")
 
     # 2. MOTOR DE ATUALIZAÇÃO E AUDITORIA
     lote_updates = []
@@ -117,25 +116,23 @@ def atualizar_financeiro(request):
                 coluna_a.append(ticker)
                 todas_linhas.append([ticker])
 
-            # Pega os dados atuais DA PLANILHA
             if linha_busca <= len(todas_linhas):
                 linha_atual = todas_linhas[linha_busca - 1]
                 while len(linha_atual) < 6: linha_atual.append("")
                 atual_preco = converter_para_float(linha_atual[1])
-                atual_dy = converter_para_float(str(linha_atual[2]).replace('%','')) / 100 if '%' in str(linha_atual[2]) else converter_para_float(linha_atual[2])
+                atual_dy = converter_para_float(linha_atual[2])
                 atual_pl = converter_para_float(linha_atual[4])
                 atual_pvp = converter_para_float(linha_atual[5])
             else:
                 atual_preco, atual_dy, atual_pl, atual_pvp = 0.0, 0.0, 0.0, 0.0
 
-            # --- CORREÇÃO DA TRAVA ANTI-SPAM ---
             valor_af = linha_atual[31] if linha_busca <= len(todas_linhas) and len(linha_atual) > 31 else ""
             if valor_af and comando == "PESQUISAR":
                 try:
                     if datetime.strptime(str(valor_af).split()[0], '%d/%m/%Y').date() == data_hoje: continue
                 except: pass
 
-            # BUSCA DADOS YAHOO
+            # DADOS YAHOO
             acao = yf.Ticker(f"{ticker}.SA")
             info = acao.info
             y_preco = info.get('currentPrice', info.get('regularMarketPrice', 0)) or 0
@@ -144,7 +141,7 @@ def atualizar_financeiro(request):
             y_dy = info.get('dividendYield', 0) or 0
             y_vmkt = info.get('marketCap', 0) or 0
 
-            # BUSCA DADOS FUNDAMENTUS
+            # DADOS FUNDAMENTUS
             f_pl, f_pvp, f_dy, f_preco = 0.0, 0.0, 0.0, 0.0
             if ticker in fund_data_dict:
                 d = fund_data_dict[ticker]
@@ -160,38 +157,37 @@ def atualizar_financeiro(request):
             if calcular_discrepancia(y_dy, f_dy) > TOLERANCIA: lista_disc.append("DY")
 
             is_seguro = len(lista_disc) == 0
-            status_msg = "🟢 Sincronizado" if is_seguro else f"🔴 Discrepância: {', '.join(lista_disc)}"
 
-            # Notificações e Automação
-            # A trava nova: Se os dados da planilha estiverem zerados, FORÇA a revisão manual.
-            if not is_seguro or (atual_preco == 0 and atual_pl == 0):
-                motivo = "Ativo Novo/Zerado" if (atual_preco == 0 and atual_pl == 0) else status_msg
-                aba_disc.append_row([agora_str, ticker, motivo, f"Y:{y_pl}|F:{f_pl}"])
-                enviar_alerta_whatsapp(ticker, f"🔴 ATENÇÃO: Revisão Necessária. Ativo: {ticker}. Motivo: {motivo}")
-            else:
-                # 100% Sincronizado: Atualiza tudo de forma limpa
+            # LÓGICA DE CONSENSO E NOTIFICAÇÃO
+            if is_seguro:
+                # 🟢 TUDO IGUAL: O robô trabalha sozinho e avisa.
                 lote_updates.append({'range': f'AF{linha_busca}', 'values': [[agora_str]]})
                 lote_updates.append({'range': f'B{linha_busca}', 'values': [[float(y_preco)]]})
                 lote_updates.append({'range': f'C{linha_busca}', 'values': [[float(f_dy)]]})
                 lote_updates.append({'range': f'E{linha_busca}', 'values': [[float(f_pl)]]})
                 lote_updates.append({'range': f'F{linha_busca}', 'values': [[float(f_pvp)]]})
                 lote_updates.append({'range': f'AE{linha_busca}', 'values': [[y_vmkt]]})
-                lote_updates.append({'range': f'AH{linha_busca}', 'values': [[f"[{agora_str}] {status_msg}"]]})
-
-            # Monta JSON para alimentar a interface Cirúrgica
-            dados_json_global[ticker] = {
-                "linha": linha_busca,
-                "status": status_msg,
-                "atual": {"preco": float(atual_preco), "pl": float(atual_pl), "pvp": float(atual_pvp), "dy": float(atual_dy)},
-                "y": {"preco": float(y_preco), "pl": float(round(y_pl, 2)), "pvp": float(round(y_pvp, 2)), "dy": float(round(y_dy, 4))},
-                "f": {"preco": float(f_preco), "pl": float(round(f_pl, 2)), "pvp": float(round(f_pvp, 2)), "dy": float(round(f_dy, 4))}
-            }
+                lote_updates.append({'range': f'AH{linha_busca}', 'values': [[f"[{agora_str}] 🟢 Atualizado Automático"]]})
+                enviar_alerta_whatsapp(ticker, f"✅ SUCESSO: O ativo {ticker} apresentou consenso e foi atualizado automaticamente.")
+            else:
+                # 🔴 DISCREPÂNCIA: O robô trava a atualização, avisa e joga pro Painel.
+                aba_disc.append_row([agora_str, ticker, f"Discrepância: {', '.join(lista_disc)}", f"Y:{y_pl}|F:{f_pl}"])
+                enviar_alerta_whatsapp(ticker, f"🔴 ATENÇÃO: O ativo {ticker} apresentou divergência ({', '.join(lista_disc)}). Revisão Necessária no Painel.")
+                
+                dados_json_global[ticker] = {
+                    "linha": linha_busca,
+                    "status": f"🔴 Discrepância: {', '.join(lista_disc)}",
+                    "atual": {"preco": float(atual_preco), "pl": float(atual_pl), "pvp": float(atual_pvp), "dy": float(atual_dy)},
+                    "y": {"preco": float(y_preco), "pl": float(round(y_pl, 2)), "pvp": float(round(y_pvp, 2)), "dy": float(round(y_dy, 4))},
+                    "f": {"preco": float(f_preco), "pl": float(round(f_pl, 2)), "pvp": float(round(f_pvp, 2)), "dy": float(round(f_dy, 4))}
+                }
 
         except Exception as e: print(f"Erro em {ticker}: {e}")
 
     if lote_updates: aba_base.batch_update(lote_updates)
-    if dados_json_global:
-        aba_base.update_acell('AG1', json.dumps({"DADOS": dados_json_global}))
+    if dados_json_global: aba_base.update_acell('AG1', json.dumps({"DADOS": dados_json_global}))
+    else: aba_base.update_acell('AG1', '')
+    
     return "Sucesso."
 
 if __name__ == "__main__":
