@@ -2,8 +2,9 @@ name: Robô Financeiro
 
 on:
   schedule:
-    - cron: '0 6 * * *'
-  workflow_dispatch:
+    - cron: '0 7, 11, 15, 19 * * *' # Roda às 07:00, 11:00, 15:00 e 19:00
+  workflow_dispatch: # Permite rodar manualmente a qualquer hora
+
 
 jobs:
   build:
