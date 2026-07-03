@@ -127,7 +127,12 @@ def atualizar_financeiro():
     print("[2/5] Baixando dados globais do Fundamentus...")
     try:
         url = "https://www.fundamentus.com.br/resultado.php"
-        df = pd.read_html(io.StringIO(requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).text), decimal=',', thousands='.')[0]
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+        }
+        response = requests.get(url, headers=headers)
+        df = pd.read_html(io.StringIO(response.text), decimal=',', thousands='.')[0]
+
         df['Papel'] = df['Papel'].str.strip().str.upper()
         df = df.set_index('Papel')
     except Exception as e:
