@@ -6,16 +6,23 @@ import io
 import random
 import pytz
 import urllib.parse
+import telebot # Necessário instalar: pip install pyTelegramBotAPI
 from datetime import datetime
 
-# --- CONFIGURAÇÕES ---
+# --- CONFIGURAÇÕES DO SISTEMA ---
 FIXAS = ["PETR4", "VALE3", "ITUB4", "BBDC4"] 
 JSON_KEY = 'credenciais.json' 
 SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1U8h3Hw2yBOmCbvBskP9zHyVVJf_3OkXtAopcFSebLvs/edit?usp=drivesdk' 
 
-# --- WHATSAPP CONFIG ---
-TELEFONE_WHATSAPP = "553491503895" 
-API_KEY_WHATSAPP = "5116767"
+# --- CONFIGURAÇÕES DE NOTIFICAÇÃO (APIs OFICIAIS) ---
+# 1. Telegram
+TELEGRAM_BOT_TOKEN = "SEU_TOKEN_DO_TELEGRAM_AQUI"
+TELEGRAM_CHAT_ID = "SEU_CHAT_ID_AQUI"
+
+# 2. WhatsApp Cloud API (Meta Oficial)
+WA_PHONE_NUMBER_ID = "SEU_PHONE_NUMBER_ID_AQUI"
+WA_ACCESS_TOKEN = "SEU_TOKEN_DE_ACESSO_DA_META_AQUI"
+WA_RECIPIENT_PHONE = "553491503895" # Número de destino com DDI (55)
 
 def formatar(val):
     try: 
@@ -27,14 +34,51 @@ def formatar(val):
         return float(val) if val is not None and not pd.isna(val) else 0.0
     except: return 0.0
 
-def enviar_whatsapp(msg):
+# --- MÓDULO DE NOTIFICAÇÕES (REDUNDÂNCIA DUPLA) ---
+def enviar_telegram(msg):
     try:
-        url = f"https://api.callmebot.com/whatsapp.php?phone={TELEFONE_WHATSAPP}&text={urllib.parse.quote(msg)}&apikey={API_KEY_WHATSAPP}"
-        res = requests.get(url, timeout=10)
-        if res.status_code == 200:
-            print("📲 Notificação enviada com sucesso no WhatsApp!")
+        if TELEGRAM_BOT_TOKEN == "SEU_TOKEN_DO_TELEGRAM_AQUI": return
+        bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+        bot.send_message(TELEGRAM_CHAT_ID, msg, parse_mode='Markdown')
+        print("📲 [Telegram] Notificação entregue com sucesso!")
     except Exception as e:
-        print(f"⚠️ Falha de conexão com CallMeBot: {e}")
+        print(f"⚠️ [Telegram] Erro de conexão: {e}")
+
+def enviar_whatsapp_oficial(msg):
+    try:
+        if WA_ACCESS_TOKEN == "SEU_TOKEN_DE_ACESSO_DA_META_AQUI": return
+        
+        url = f"https://graph.facebook.com/v18.0/{WA_PHONE_NUMBER_ID}/messages"
+        headers = {
+            "Authorization": f"Bearer {WA_ACCESS_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        
+        # Formatando para a estrutura JSON exigida pela Meta (Texto Simples)
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": WA_RECIPIENT_PHONE,
+            "type": "text",
+            "text": {
+                "preview_url": False,
+                "body": msg
+            }
+        }
+        
+        res = requests.post(url, headers=headers, json=payload, timeout=10)
+        
+        if res.status_code in [200, 201]:
+            print("📲 [WhatsApp Meta] Notificação entregue com sucesso em tempo real!")
+        else:
+            print(f"⚠️ [WhatsApp Meta] Erro retornado pela API: {res.text}")
+    except Exception as e:
+        print(f"⚠️ [WhatsApp Meta] Falha de conexão: {e}")
+
+def disparar_alertas(msg):
+    """Garante a entrega em ambas as plataformas simultaneamente."""
+    enviar_telegram(msg)
+    enviar_whatsapp_oficial(msg)
 
 # --- TRAVA DE 2 HORAS ---
 def precisa_atualizar(ticker, mapa_atualizacao, agora_dt, sp_tz):
@@ -279,10 +323,10 @@ def atualizar_financeiro():
             print(f"   ❌ [ERRO] Falha ao processar {ticker}: {e}")
 
     # 4. ESCRITA EM LOTE E NOTIFICAÇÃO
-    print("\n[5/5] Salvando na Planilha...")
+    print("\n[5/5] Salvando na Planilha e Disparando Notificações...")
     if batch_updates:
         aba_base.batch_update(batch_updates)
-        print(f"💾 Sucesso: {len(batch_updates)} ações atualizadas.")
+        print(f"💾 Sucesso: {len(batch_updates)} ações atualizadas na planilha.")
 
         msg_wpp = "🤖 *Relatório Mestre* 🤖\n\n"
         
@@ -301,7 +345,8 @@ def atualizar_financeiro():
         
         if relatorio_novatas: msg_wpp += "🌟 *NOVA PREVIDENCIÁRIA ADICIONADA:*\n" + "\n".join(relatorio_novatas)
 
-        enviar_whatsapp(msg_wpp)
+        # Usando a nova função para disparar Telegram e Meta WA
+        disparar_alertas(msg_wpp)
     else:
         print("✅ Nenhuma atualização necessária. (Todas as ações selecionadas foram atualizadas a menos de 2 horas).")
 
