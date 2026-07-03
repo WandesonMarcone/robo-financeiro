@@ -81,7 +81,7 @@ def atualizar_financeiro():
     gc = gspread.service_account(filename=JSON_KEY)
     planilha = gc.open_by_url(SPREADSHEET_URL)
     aba_base = planilha.worksheet("BD_Acoes")
-    aba_metodo = planilha.worksheet("Metodologia Projetiva")
+    aba_metodo = planilha.worksheet("Metodos_Acoes")
 
     # Horário de São Paulo
     sp_tz = pytz.timezone('America/Sao_Paulo')
