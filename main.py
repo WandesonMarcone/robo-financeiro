@@ -36,14 +36,14 @@ def enviar_whatsapp(msg):
     except Exception as e:
         print(f"⚠️ Falha de conexão com CallMeBot: {e}")
 
-# --- NOVA FUNÇÃO: TRAVA DE 2 HORAS ---
+# --- TRAVA DE 2 HORAS ---
 def precisa_atualizar(ticker, mapa_atualizacao, agora_dt, sp_tz):
     if ticker not in mapa_atualizacao:
         return True # Se é ação nova, atualiza
 
     val = str(mapa_atualizacao[ticker]).strip()
     if 'OK' not in val:
-        return True # Se a célula AF estiver vazia ou com erro, atualiza
+        return True # Se a célula AG estiver vazia ou com erro, atualiza
 
     val = val.replace('OK', '').strip() # Limpa para ficar só "03/07 08:34"
     try:
@@ -95,7 +95,7 @@ def atualizar_financeiro():
 
     print("\n[3/5] Organizando a Fila (Aplicando Trava de Tempo)...")
 
-    # Lê a planilha inteira de uma vez (Mais rápido e mapeia a Coluna A e AF juntas)
+    # Lê a planilha inteira de uma vez (Mais rápido e mapeia a Coluna A e AG juntas)
     dados_planilha = aba_base.get_all_values()
     todas_originais = []
     mapa_atualizacao = {}
@@ -104,8 +104,8 @@ def atualizar_financeiro():
         if row and row[0].strip() and not row[0].replace(',', '').replace('.', '').isnumeric():
             t = row[0].strip().upper()
             todas_originais.append(t)
-            # A Coluna AF é a 32ª (índice 31)
-            mapa_atualizacao[t] = row[31] if len(row) > 31 else ""
+            # A Coluna AG agora é a 33ª (índice 32)
+            mapa_atualizacao[t] = row[32] if len(row) > 32 else ""
 
     todas = list(todas_originais) # Cópia para trabalhar
 
@@ -131,10 +131,9 @@ def atualizar_financeiro():
         elif precisa_atualizar(ticker_c3, mapa_atualizacao, agora_dt, sp_tz) and ticker_c3 not in cat_fixas:
             cat_metodologia = [ticker_c3]
 
-    # --- 2.3 Oportunidades Reais --- PL MAIOR QUE 0 E MENOR QUE 12 / P/VP MENOR QUE 1,5
-    opps_brutas = df_filtros[(df_filtros['P/L'] > 0) & (df_filtros['P/L'] < 12) & (df_filtros['P/VP'] < 1.5)].index.tolist()
+    # --- 2.3 Oportunidades Reais --- PL > 0 E < 12 / P/VP < 1.5 / ROE >= 8.0 (Filtro Antilixo)
+    opps_brutas = df_filtros[(df_filtros['P/L'] > 0) & (df_filtros['P/L'] < 12) & (df_filtros['P/VP'] < 1.5) & (df_filtros['ROE'] >= 8.0)].index.tolist()
     # Pega apenas as que precisam de atualização e não estão nas categorias acima
-    # TRAVA TOTAL: Se as 5 melhores já tiverem atualizadas, a trava pula elas e busca as próximas 5!
     cat_opps = [o for o in opps_brutas if o in todas_originais and o not in cat_fixas and o not in cat_metodologia and precisa_atualizar(o, mapa_atualizacao, agora_dt, sp_tz)][:5]
 
     # --- 2.4 Modo Caçador ---
@@ -148,17 +147,15 @@ def atualizar_financeiro():
     cat_novatas = [c for c in candidatas_prev if c not in todas][:2] 
     todas.extend(cat_novatas) 
 
-    # --- 2.5 Aleatórias (AGORA INTELIGENTES: Prioriza quem não atualiza há muito tempo) ---
+    # --- 2.5 Aleatórias (Prioriza quem não atualiza há muito tempo) ---
     usadas = set(cat_fixas + cat_metodologia + cat_opps + cat_novatas)
     precisam_urgente = [t for t in todas_originais if t not in usadas and precisa_atualizar(t, mapa_atualizacao, agora_dt, sp_tz)]
 
-    # Se tiver muita ação esquecida, sorteia entre elas. Se não, preenche com as outras.
     if len(precisam_urgente) >= 3:
         cat_aleatorias = random.sample(precisam_urgente, 3)
     else:
         cat_aleatorias = precisam_urgente
-        # --- TRAVA TOTAL APLICADA AQUI MANTENDO A ESTRUTURA ---
-        # As linhas abaixo foram comentadas (desativadas) para garantir que ações já atualizadas NUNCA sejam puxadas pro "resto"
+        # As linhas abaixo ficam desativadas para garantir a Trava Total.
         # resto = [t for t in todas_originais if t not in usadas and t not in cat_aleatorias]
         # vagas = 3 - len(cat_aleatorias)
         # cat_aleatorias += random.sample(resto, min(vagas, len(resto)))
@@ -178,6 +175,7 @@ def atualizar_financeiro():
     batch_updates = []
     relatorio_opps = []
     relatorio_novatas = []
+    relatorio_fixas_opps = [] # LISTA VIP
 
     for ticker in fila:
         linha_idx = todas.index(ticker) + 2
@@ -190,47 +188,59 @@ def atualizar_financeiro():
             valor_mercado = formatar(yf_info.get('marketCap'))   
             vpa = formatar(yf_info.get('bookValue'))             
             lpa = formatar(yf_info.get('trailingEps'))           
+            
+            # Buscando e traduzindo o Setor no Yahoo Finance
+            setor_eng = yf_info.get('sector', 'N/D')
+            traducao_setores = {
+                'Energy': 'Energia', 'Financial Services': 'Financeiro', 'Basic Materials': 'Materiais Básicos', 
+                'Utilities': 'Utilidade Pública', 'Industrials': 'Indústria', 'Consumer Defensive': 'Consumo Defensivo', 
+                'Consumer Cyclical': 'Consumo Cíclico', 'Healthcare': 'Saúde', 'Technology': 'Tecnologia', 
+                'Communication Services': 'Comunicações', 'Real Estate': 'Imobiliário'
+            }
+            setor = traducao_setores.get(setor_eng, setor_eng)
 
             f = df.loc[ticker] if ticker in df.index else {}
 
+            # NOVO MAPEAMENTO COM SETOR NA COLUNA B (Tudo pulou uma casa para a direita)
             row_base = [
-                preco,                                    # B: Preço (YF)
-                formatar(f.get('Div.Yield', 0)),          # C: DY
-                n_acoes,                                  # D: Nº Ações (YF)
-                formatar(f.get('P/L', 0)),                # E: P/L
-                formatar(f.get('P/VP', 0)),               # F: P/VP
-                formatar(f.get('P/Ativo', 0)),            # G: P/Ativo
-                formatar(f.get('Mrg Bruta', 0)),          # H: Marg. Bruta
-                formatar(f.get('Mrg Ebit', 0)),           # I: Marg. EBIT
-                formatar(f.get('Mrg. Líq.', 0)),          # J: Marg. Líq.
-                formatar(f.get('P/EBIT', 0)),             # K: P/EBIT
-                formatar(f.get('EV/EBIT', 0)),            # L: EV/EBIT
-                formatar(f.get('Dív.Líq/ Patrim.', 0)),   # M: Div.Liq/Ebit
-                formatar(f.get('Dív.Líq/ Patrim.', 0)),   # N: Div.Liq/Patri
-                formatar(f.get('PSR', 0)),                # O: PSR
-                formatar(f.get('P/Cap.Giro', 0)),         # P: P/Cap.Giro
-                formatar(f.get('P/Ativ Circ.Liq', 0)),    # Q: P.At.Circ.Liq
-                formatar(f.get('Liq. Corr.', 0)),         # R: Liq. Corr
-                formatar(f.get('ROE', 0)),                # S: ROE
-                roa,                                      # T: ROA (YF)
-                formatar(f.get('ROIC', 0)),               # U: ROIC
-                0, 0, 0,                                  # V, W, X 
-                formatar(f.get('Cresc. Rec.5a', 0)),      # Y: CAGR Rec
-                0,                                        # Z: CAGR Lucros
-                formatar(f.get('Liq.2meses', 0)),         # AA: Liq. Media
-                vpa,                                      # AB: VPA (YF)
-                lpa,                                      # AC: LPA (YF)
-                peg_ratio,                                # AD: PEG Ratio (YF)
-                valor_mercado,                            # AE: Valor Mercado (YF)
-                f"{agora_sp} OK"                          # AF: Atualização
+                setor,                                    # B: Setor (NEW)
+                preco,                                    # C: Preço (YF)
+                formatar(f.get('Div.Yield', 0)),          # D: DY
+                n_acoes,                                  # E: Nº Ações (YF)
+                formatar(f.get('P/L', 0)),                # F: P/L
+                formatar(f.get('P/VP', 0)),               # G: P/VP
+                formatar(f.get('P/Ativo', 0)),            # H: P/Ativo
+                formatar(f.get('Mrg Bruta', 0)),          # I: Marg. Bruta
+                formatar(f.get('Mrg Ebit', 0)),           # J: Marg. EBIT
+                formatar(f.get('Mrg. Líq.', 0)),          # K: Marg. Líq.
+                formatar(f.get('P/EBIT', 0)),             # L: P/EBIT
+                formatar(f.get('EV/EBIT', 0)),            # M: EV/EBIT
+                formatar(f.get('Dív.Líq/ Patrim.', 0)),   # N: Div.Liq/Ebit
+                formatar(f.get('Dív.Líq/ Patrim.', 0)),   # O: Div.Liq/Patri
+                formatar(f.get('PSR', 0)),                # P: PSR
+                formatar(f.get('P/Cap.Giro', 0)),         # Q: P/Cap.Giro
+                formatar(f.get('P/Ativ Circ.Liq', 0)),    # R: P.At.Circ.Liq
+                formatar(f.get('Liq. Corr.', 0)),         # S: Liq. Corr
+                formatar(f.get('ROE', 0)),                # T: ROE
+                roa,                                      # U: ROA (YF)
+                formatar(f.get('ROIC', 0)),               # V: ROIC
+                0, 0, 0,                                  # W, X, Y
+                formatar(f.get('Cresc. Rec.5a', 0)),      # Z: CAGR Rec
+                0,                                        # AA: CAGR Lucros
+                formatar(f.get('Liq.2meses', 0)),         # AB: Liq. Media
+                vpa,                                      # AC: VPA (YF)
+                lpa,                                      # AD: LPA (YF)
+                peg_ratio,                                # AE: PEG Ratio (YF)
+                valor_mercado,                            # AF: Valor Mercado (YF)
+                f"{agora_sp} OK"                          # AG: Atualização
             ]
 
             if ticker in cat_novatas or (ticker == ticker_c3 and c3_nova):
                 row_final = [ticker] + row_base
-                range_update = f'A{linha_idx}:AF{linha_idx}'
+                range_update = f'A{linha_idx}:AG{linha_idx}' # Agora vai até AG
             else:
                 row_final = row_base
-                range_update = f'B{linha_idx}:AF{linha_idx}'
+                range_update = f'B{linha_idx}:AG{linha_idx}' # Agora vai até AG
 
             batch_updates.append({'range': range_update, 'values': [row_final]})
 
@@ -245,17 +255,25 @@ def atualizar_financeiro():
             log_print = f"{cat_atual} / Oportunidade" if tag_extra else cat_atual
             print(f"   ✅ [OK] {ticker} ({log_print}) | Concluída com sucesso.")
 
-            # Formatação WhatsApp Inteligente (Agrupa tudo que for Oportunidade)
+            # Formatação WhatsApp Inteligente
             if ticker in opps_brutas:
                 roe_wpp = formatar(f.get('ROE', 0)) * 100
                 pl_wpp = formatar(f.get('P/L', 0))
                 pvp_wpp = formatar(f.get('P/VP', 0))
-                relatorio_opps.append(f"• *{ticker}*{tag_extra}: R$ {preco} (P/L: {pl_wpp} | P/VP: {pvp_wpp} | ROE: {roe_wpp:.1f}%)")
+                
+                detalhe_msg = f"R$ {preco} | 🏢 {setor} (P/L: {pl_wpp} | P/VP: {pvp_wpp} | ROE: {roe_wpp:.1f}%)"
+                
+                # LISTA VIP: Se for Ação Fixa em Oportunidade, ganha destaque especial
+                if ticker in FIXAS:
+                    relatorio_fixas_opps.append(f"• *{ticker}* está barata!\n   Motivo: P/L ({pl_wpp}) abaixo de 12, P/VP ({pvp_wpp}) abaixo de 1.5 e ROE ({roe_wpp:.1f}%) Saudável.\n   🏢 Setor: {setor}")
+                
+                # Todas as oportunidades (incluindo Fixas) continuam aparecendo na lista geral
+                relatorio_opps.append(f"• *{ticker}*{tag_extra}: {detalhe_msg}")
 
             if ticker in cat_novatas:
                 dy_wpp = formatar(f.get('Div.Yield', 0)) * 100
                 roe_wpp = formatar(f.get('ROE', 0)) * 100
-                relatorio_novatas.append(f"• *{ticker}*: R$ {preco} (DY: {dy_wpp:.1f}% | ROE: {roe_wpp:.1f}%)")
+                relatorio_novatas.append(f"• *{ticker}*: R$ {preco} | 🏢 {setor} (DY: {dy_wpp:.1f}% | ROE: {roe_wpp:.1f}%)")
 
         except Exception as e:
             print(f"   ❌ [ERRO] Falha ao processar {ticker}: {e}")
@@ -267,12 +285,20 @@ def atualizar_financeiro():
         print(f"💾 Sucesso: {len(batch_updates)} ações atualizadas.")
 
         msg_wpp = "🤖 *Relatório Mestre* 🤖\n\n"
+        
+        if relatorio_fixas_opps:
+            msg_wpp += "🚨 *ALERTA VIP: AÇÕES FIXAS EM OPORTUNIDADE* 🚨\n" + "\n".join(relatorio_fixas_opps) + "\n\n"
+            
         if cat_fixas: msg_wpp += f"📌 *Fixas Processadas:*\n{', '.join(cat_fixas)}\n\n"
+        
         if cat_metodologia: 
             status_c3 = "(Adicionada na Planilha!)" if c3_nova else ""
             msg_wpp += f"🔍 *Metodologia (C3):*\n{', '.join(cat_metodologia)} {status_c3}\n\n"
+            
         if cat_aleatorias: msg_wpp += f"🎲 *Varredura de Desatualizadas:*\n{', '.join(cat_aleatorias)}\n\n"
+        
         if relatorio_opps: msg_wpp += "🎯 *Ações em Oportunidade:*\n" + "\n".join(relatorio_opps) + "\n\n"
+        
         if relatorio_novatas: msg_wpp += "🌟 *NOVA PREVIDENCIÁRIA ADICIONADA:*\n" + "\n".join(relatorio_novatas)
 
         enviar_whatsapp(msg_wpp)
