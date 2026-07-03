@@ -134,6 +134,7 @@ def atualizar_financeiro():
     # --- 2.3 Oportunidades Reais --- PL MAIOR QUE 0 E MENOR QUE 12 / P/VP MENOR QUE 1,5
     opps_brutas = df_filtros[(df_filtros['P/L'] > 0) & (df_filtros['P/L'] < 12) & (df_filtros['P/VP'] < 1.5)].index.tolist()
     # Pega apenas as que precisam de atualização e não estão nas categorias acima
+    # TRAVA TOTAL: Se as 5 melhores já tiverem atualizadas, a trava pula elas e busca as próximas 5!
     cat_opps = [o for o in opps_brutas if o in todas_originais and o not in cat_fixas and o not in cat_metodologia and precisa_atualizar(o, mapa_atualizacao, agora_dt, sp_tz)][:5]
 
     # --- 2.4 Modo Caçador ---
@@ -156,9 +157,11 @@ def atualizar_financeiro():
         cat_aleatorias = random.sample(precisam_urgente, 3)
     else:
         cat_aleatorias = precisam_urgente
-        resto = [t for t in todas_originais if t not in usadas and t not in cat_aleatorias]
-        vagas = 3 - len(cat_aleatorias)
-        cat_aleatorias += random.sample(resto, min(vagas, len(resto)))
+        # --- TRAVA TOTAL APLICADA AQUI MANTENDO A ESTRUTURA ---
+        # As linhas abaixo foram comentadas (desativadas) para garantir que ações já atualizadas NUNCA sejam puxadas pro "resto"
+        # resto = [t for t in todas_originais if t not in usadas and t not in cat_aleatorias]
+        # vagas = 3 - len(cat_aleatorias)
+        # cat_aleatorias += random.sample(resto, min(vagas, len(resto)))
 
     fila = cat_fixas + cat_metodologia + cat_opps + cat_aleatorias + cat_novatas
 
@@ -268,7 +271,7 @@ def atualizar_financeiro():
         if cat_metodologia: 
             status_c3 = "(Adicionada na Planilha!)" if c3_nova else ""
             msg_wpp += f"🔍 *Metodologia (C3):*\n{', '.join(cat_metodologia)} {status_c3}\n\n"
-        if cat_aleatorias: msg_wpp += f"🎲 *Ações Desatualizadas:*\n{', '.join(cat_aleatorias)}\n\n"
+        if cat_aleatorias: msg_wpp += f"🎲 *Varredura de Desatualizadas:*\n{', '.join(cat_aleatorias)}\n\n"
         if relatorio_opps: msg_wpp += "🎯 *Ações em Oportunidade:*\n" + "\n".join(relatorio_opps) + "\n\n"
         if relatorio_novatas: msg_wpp += "🌟 *NOVA PREVIDENCIÁRIA ADICIONADA:*\n" + "\n".join(relatorio_novatas)
 
