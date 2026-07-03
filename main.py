@@ -213,11 +213,16 @@ def atualizar_financeiro():
         # Monta a mensagem final do WhatsApp
         msg_wpp = "🤖 *Relatório Mestre* 🤖\n\n"
         if cat_fixas: msg_wpp += f"📌 *Fixas:*\n{', '.join(cat_fixas)}\n\n"
+        
         if cat_metodologia: 
             status_c3 = "(Adicionada na Planilha!)" if c3_nova else ""
+            
             msg_wpp += f"🔍 *Metodologia (C3):*\n{', '.join(cat_metodologia)} {status_c3}\n\n"
+            
         if cat_aleatorias: msg_wpp += f"🎲 *Aleatórias:*\n{', '.join(cat_aleatorias)}\n\n"
+        
         if relatorio_opps: msg_wpp += "🎯 *Oportunidades Atualizadas:*\n" + "\n".join(relatorio_opps) + "\n\n"
+        
         if relatorio_novatas: msg_wpp += "🌟 *NOVA PREVIDENCIÁRIA ADICIONADA:*\n" + "\n".join(relatorio_novatas)
         
         enviar_whatsapp(msg_wpp)
