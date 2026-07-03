@@ -14,15 +14,10 @@ FIXAS = ["PETR4", "VALE3", "ITUB4", "BBDC4"]
 JSON_KEY = 'credenciais.json' 
 SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1U8h3Hw2yBOmCbvBskP9zHyVVJf_3OkXtAopcFSebLvs/edit?usp=drivesdk' 
 
-# --- CONFIGURAÇÕES DE NOTIFICAÇÃO (APIs OFICIAIS) ---
+# --- CONFIGURAÇÕES DE NOTIFICAÇÃO (API OFICIAL) ---
 # 1. Telegram
 TELEGRAM_BOT_TOKEN = "7777811765:AAEk3XQibBBYSFKRfQLzOWs_KpGOcPFR274"
 TELEGRAM_CHAT_ID = "8867098987"
-
-# 2. WhatsApp Cloud API (Meta Oficial)
-WA_PHONE_NUMBER_ID = "2840857522932241"
-WA_ACCESS_TOKEN = "EAASZBAZC5XnZAMBR5BMAniHn0Dxkokwrnug6gxCuCZBgeEBOzrXQoeVaoZCh5yAQoEIZAfqQjmbOCwc4H5TsGpWCqiZCn0ScVM9xXt4h2ZBGg6iTX3s3gZBStrn5HNvnBwZA4muiTJ72B2XZAalZBcpHJ6uRmruPz3g6gG3UzvC3yE2eDCmjW7rZA5J1hxaw7Q6oriB1CxRYvEJJA55xxtK39uvpnsKdJCv6sqSIj"
-WA_RECIPIENT_PHONE = "5534991503895" # Número de destino com DDI (55)
 
 def formatar(val):
     try: 
@@ -34,7 +29,7 @@ def formatar(val):
         return float(val) if val is not None and not pd.isna(val) else 0.0
     except: return 0.0
 
-# --- MÓDULO DE NOTIFICAÇÕES (REDUNDÂNCIA DUPLA) ---
+# --- MÓDULO DE NOTIFICAÇÕES (TELEGRAM) ---
 def enviar_telegram(msg):
     try:
         bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
@@ -43,39 +38,9 @@ def enviar_telegram(msg):
     except Exception as e:
         print(f"⚠️ [Telegram] Erro de conexão: {e}")
 
-def enviar_whatsapp_oficial(msg):
-    try:
-        url = f"https://graph.facebook.com/v18.0/{WA_PHONE_NUMBER_ID}/messages"
-        headers = {
-            "Authorization": f"Bearer {WA_ACCESS_TOKEN}",
-            "Content-Type": "application/json"
-        }
-
-        # Formatando para a estrutura JSON exigida pela Meta (Texto Simples)
-        payload = {
-            "messaging_product": "whatsapp",
-            "recipient_type": "individual",
-            "to": WA_RECIPIENT_PHONE,
-            "type": "text",
-            "text": {
-                "preview_url": False,
-                "body": msg
-            }
-        }
-
-        res = requests.post(url, headers=headers, json=payload, timeout=10)
-
-        if res.status_code in [200, 201]:
-            print("📲 [WhatsApp Meta] Notificação entregue com sucesso em tempo real!")
-        else:
-            print(f"⚠️ [WhatsApp Meta] Erro retornado pela API: {res.text}")
-    except Exception as e:
-        print(f"⚠️ [WhatsApp Meta] Falha de conexão: {e}")
-
 def disparar_alertas(msg):
-    """Garante a entrega em ambas as plataformas simultaneamente."""
+    """Garante a entrega da notificação via Telegram."""
     enviar_telegram(msg)
-    enviar_whatsapp_oficial(msg)
 
 # --- TRAVA DE 2 HORAS ---
 def precisa_atualizar(ticker, mapa_atualizacao, agora_dt, sp_tz):
@@ -234,7 +199,7 @@ def atualizar_financeiro():
             valor_mercado = formatar(yf_info.get('marketCap'))   
             vpa = formatar(yf_info.get('bookValue'))             
             lpa = formatar(yf_info.get('trailingEps'))           
-            
+
             # Buscando e traduzindo o Setor no Yahoo Finance
             setor_eng = yf_info.get('sector', 'N/D')
             traducao_setores = {
@@ -290,7 +255,7 @@ def atualizar_financeiro():
 
             batch_updates.append({'range': range_update, 'values': [row_final]})
 
-            # --- ETIQUETAS VISUAIS DE LOG E WHATSAPP ---
+            # --- ETIQUETAS VISUAIS DE LOG E TELEGRAM ---
             cat_atual = "Fixa" if ticker in cat_fixas else "Novata" if ticker in cat_novatas else "Metodologia" if ticker in cat_metodologia else "Oportunidade" if ticker in cat_opps else "Aleatória"
 
             tag_extra = ""
@@ -301,18 +266,18 @@ def atualizar_financeiro():
             log_print = f"{cat_atual} / Oportunidade" if tag_extra else cat_atual
             print(f"   ✅ [OK] {ticker} ({log_print}) | Concluída com sucesso.")
 
-            # Formatação WhatsApp Inteligente
+            # Formatação Telegram Inteligente
             if ticker in opps_brutas:
                 roe_wpp = formatar(f.get('ROE', 0)) * 100
                 pl_wpp = formatar(f.get('P/L', 0))
                 pvp_wpp = formatar(f.get('P/VP', 0))
-                
+
                 detalhe_msg = f"R$ {preco} | 🏢 {setor} (P/L: {pl_wpp} | P/VP: {pvp_wpp} | ROE: {roe_wpp:.1f}%)"
-                
+
                 # LISTA VIP: Se for Ação Fixa em Oportunidade, ganha destaque especial
                 if ticker in FIXAS:
                     relatorio_fixas_opps.append(f"• *{ticker}* está barata!\n   Motivo: P/L ({pl_wpp}) abaixo de 12, P/VP ({pvp_wpp}) abaixo de 1.5 e ROE ({roe_wpp:.1f}%) Saudável.\n   🏢 Setor: {setor}")
-                
+
                 # Todas as oportunidades (incluindo Fixas) continuam aparecendo na lista geral
                 relatorio_opps.append(f"• *{ticker}*{tag_extra}: {detalhe_msg}")
 
@@ -330,25 +295,25 @@ def atualizar_financeiro():
         aba_base.batch_update(batch_updates)
         print(f"💾 Sucesso: {len(batch_updates)} ações atualizadas na planilha.")
 
-        msg_wpp = "🤖 *Relatório Mestre* 🤖\n\n"
-        
+        msg_telegram = "🤖 *Relatório Mestre* 🤖\n\n"
+
         if relatorio_fixas_opps:
-            msg_wpp += "🚨 *ALERTA VIP: AÇÕES FIXAS EM OPORTUNIDADE* 🚨\n" + "\n".join(relatorio_fixas_opps) + "\n\n"
-            
-        if cat_fixas: msg_wpp += f"📌 *Fixas Processadas:*\n{', '.join(cat_fixas)}\n\n"
-        
+            msg_telegram += "🚨 *ALERTA VIP: AÇÕES FIXAS EM OPORTUNIDADE* 🚨\n" + "\n".join(relatorio_fixas_opps) + "\n\n"
+
+        if cat_fixas: msg_telegram += f"📌 *Fixas Processadas:*\n{', '.join(cat_fixas)}\n\n"
+
         if cat_metodologia: 
             status_c3 = "(Adicionada na Planilha!)" if c3_nova else ""
-            msg_wpp += f"🔍 *Metodologia (C3):*\n{', '.join(cat_metodologia)} {status_c3}\n\n"
-            
-        if cat_aleatorias: msg_wpp += f"🎲 *Varredura de Desatualizadas:*\n{', '.join(cat_aleatorias)}\n\n"
-        
-        if relatorio_opps: msg_wpp += "🎯 *Ações em Oportunidade:*\n" + "\n".join(relatorio_opps) + "\n\n"
-        
-        if relatorio_novatas: msg_wpp += "🌟 *NOVA PREVIDENCIÁRIA ADICIONADA:*\n" + "\n".join(relatorio_novatas)
+            msg_telegram += f"🔍 *Metodologia (C3):*\n{', '.join(cat_metodologia)} {status_c3}\n\n"
 
-        # Usando a nova função para disparar Telegram e Meta WA
-        disparar_alertas(msg_wpp)
+        if cat_aleatorias: msg_telegram += f"🎲 *Varredura de Desatualizadas:*\n{', '.join(cat_aleatorias)}\n\n"
+
+        if relatorio_opps: msg_telegram += "🎯 *Ações em Oportunidade:*\n" + "\n".join(relatorio_opps) + "\n\n"
+
+        if relatorio_novatas: msg_telegram += "🌟 *NOVA PREVIDENCIÁRIA ADICIONADA:*\n" + "\n".join(relatorio_novatas)
+
+        # Usando a função para disparar via Telegram
+        disparar_alertas(msg_telegram)
     else:
         print("✅ Nenhuma atualização necessária. (Todas as ações selecionadas foram atualizadas a menos de 2 horas).")
 
