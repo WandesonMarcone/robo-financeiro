@@ -36,8 +36,39 @@ def enviar_whatsapp(msg):
     except Exception as e:
         print(f"⚠️ Falha de conexão com CallMeBot: {e}")
 
+# --- NOVA FUNÇÃO: TRAVA DE 2 HORAS ---
+def precisa_atualizar(ticker, mapa_atualizacao, agora_dt, sp_tz):
+    if ticker not in mapa_atualizacao:
+        return True # Se é ação nova, atualiza
+        
+    val = str(mapa_atualizacao[ticker]).strip()
+    if 'OK' not in val:
+        return True # Se a célula AF estiver vazia ou com erro, atualiza
+        
+    val = val.replace('OK', '').strip() # Limpa para ficar só "03/07 08:34"
+    try:
+        dia, resto = val.split('/')
+        mes, horario = resto.split(' ')
+        hora, minuto = horario.split(':')
+        
+        # Reconstrói a data lida da planilha
+        dt_af = datetime(agora_dt.year, int(mes), int(dia), int(hora), int(minuto))
+        dt_af = sp_tz.localize(dt_af)
+        
+        # Correção de virada de ano
+        if dt_af > agora_dt: 
+            dt_af = dt_af.replace(year=agora_dt.year - 1)
+            
+        # Calcula a diferença em segundos (7200 segundos = 2 horas)
+        if (agora_dt - dt_af).total_seconds() < 7200:
+            return False # Trava Ativada! Atualizada há menos de 2h
+    except:
+        pass # Se der erro ao ler a data, atualiza por segurança
+        
+    return True
+
 def atualizar_financeiro():
-    print("🚀 INICIANDO AUDITORIA E MODO CAÇADOR 🚀")
+    print("🚀 INICIANDO AUDITORIA COM TRAVA DE 2 HORAS E MODO CAÇADOR 🚀")
     
     # Conexão
     print("[1/5] Conectando ao Google Sheets...")
@@ -48,7 +79,8 @@ def atualizar_financeiro():
     
     # Horário de São Paulo
     sp_tz = pytz.timezone('America/Sao_Paulo')
-    agora_sp = datetime.now(sp_tz).strftime('%d/%m %H:%M')
+    agora_dt = datetime.now(sp_tz)
+    agora_sp = agora_dt.strftime('%d/%m %H:%M')
     
     # 1. BUSCA DADOS FUNDAMENTUS
     print("[2/5] Baixando dados globais do Fundamentus...")
@@ -61,36 +93,48 @@ def atualizar_financeiro():
         print(f"❌ Erro crítico ao buscar Fundamentus: {e}")
         return
 
-    print("\n[3/5] Organizando a Fila de Prioridades e Caçando Novatas...")
+    print("\n[3/5] Organizando a Fila (Aplicando Trava de Tempo)...")
     
-    # IGNORA ERROS NA PLANILHA (Trava anti-números na Coluna A)
-    coluna_a_bruta = aba_base.col_values(1)[1:]
-    todas = [t.strip().upper() for t in coluna_a_bruta if t.strip() and not t.replace(',', '').replace('.', '').isnumeric()]
-    todas_originais = set(todas) # Guarda quem já existia para não sortear espaço vazio
+    # Lê a planilha inteira de uma vez (Mais rápido e mapeia a Coluna A e AF juntas)
+    dados_planilha = aba_base.get_all_values()
+    todas_originais = []
+    mapa_atualizacao = {}
     
-    # Prepara cópia do DF com os números limpos
+    for row in dados_planilha[1:]: # Pula cabeçalho
+        if row and row[0].strip() and not row[0].replace(',', '').replace('.', '').isnumeric():
+            t = row[0].strip().upper()
+            todas_originais.append(t)
+            # A Coluna AF é a 32ª (índice 31)
+            mapa_atualizacao[t] = row[31] if len(row) > 31 else ""
+            
+    todas = list(todas_originais) # Cópia para trabalhar
+    
     df_filtros = df.copy()
     for col in ['P/L', 'P/VP', 'Div.Yield', 'ROE', 'Liq.2meses']:
         df_filtros[col] = df_filtros[col].apply(formatar)
     
-    # --- 2.1 Fixas ---
-    cat_fixas = [f for f in FIXAS if f in todas]
+    # --- 2.1 Fixas (Só entram se a Trava de 2h permitir) ---
+    cat_fixas = [f for f in FIXAS if f in todas and precisa_atualizar(f, mapa_atualizacao, agora_dt, sp_tz)]
+    fixas_travadas = [f for f in FIXAS if f in todas and f not in cat_fixas]
+    if fixas_travadas: print(f"🔒 TRAVA ATIVADA: Ignorando {fixas_travadas} (Atualizadas há menos de 2h)")
     
-    # --- 2.2 Metodologia (C3) com Inteligência de Adição ---
+    # --- 2.2 Metodologia (C3) ---
     ticker_c3 = str(aba_metodo.acell('C3').value).strip().upper()
     cat_metodologia = []
     c3_nova = False
     
     if ticker_c3 and ticker_c3 in df.index:
-        if ticker_c3 not in cat_fixas:
-            cat_metodologia = [ticker_c3]
         if ticker_c3 not in todas:
             c3_nova = True
-            todas.append(ticker_c3) # Adiciona na lista para ganhar uma nova linha no final
-    
-    # --- 2.3 Oportunidades ---
+            todas.append(ticker_c3)
+            cat_metodologia = [ticker_c3]
+        elif precisa_atualizar(ticker_c3, mapa_atualizacao, agora_dt, sp_tz) and ticker_c3 not in cat_fixas:
+            cat_metodologia = [ticker_c3]
+            
+    # --- 2.3 Oportunidades Reais ---
     opps_brutas = df_filtros[(df_filtros['P/L'] > 0.1) & (df_filtros['P/L'] < 12) & (df_filtros['P/VP'] < 1.5)].index.tolist()
-    cat_opps = [o for o in opps_brutas if o in todas_originais and o not in cat_fixas and o != ticker_c3][:5]
+    # Pega apenas as que precisam de atualização e não estão nas categorias acima
+    cat_opps = [o for o in opps_brutas if o in todas_originais and o not in cat_fixas and o not in cat_metodologia and precisa_atualizar(o, mapa_atualizacao, agora_dt, sp_tz)][:5]
     
     # --- 2.4 Modo Caçador ---
     candidatas_prev = df_filtros[
@@ -101,23 +145,30 @@ def atualizar_financeiro():
         (df_filtros['Liq.2meses'] >= 2000000) 
     ].index.tolist()
     cat_novatas = [c for c in candidatas_prev if c not in todas][:2] 
-    todas.extend(cat_novatas) # Adiciona na memória para ganhar linha
+    todas.extend(cat_novatas) 
     
-    # --- 2.5 Aleatórias ---
+    # --- 2.5 Aleatórias (AGORA INTELIGENTES: Prioriza quem não atualiza há muito tempo) ---
     usadas = set(cat_fixas + cat_metodologia + cat_opps + cat_novatas)
-    disponiveis = [t for t in todas_originais if t not in usadas]
-    cat_aleatorias = random.sample(disponiveis, min(len(disponiveis), 3))
+    precisam_urgente = [t for t in todas_originais if t not in usadas and precisa_atualizar(t, mapa_atualizacao, agora_dt, sp_tz)]
     
-    # Junta todas
+    # Se tiver muita ação esquecida, sorteia entre elas. Se não, preenche com as outras.
+    if len(precisam_urgente) >= 3:
+        cat_aleatorias = random.sample(precisam_urgente, 3)
+    else:
+        cat_aleatorias = precisam_urgente
+        resto = [t for t in todas_originais if t not in usadas and t not in cat_aleatorias]
+        vagas = 3 - len(cat_aleatorias)
+        cat_aleatorias += random.sample(resto, min(vagas, len(resto)))
+    
     fila = cat_fixas + cat_metodologia + cat_opps + cat_aleatorias + cat_novatas
     
     # Log Limpo do GitHub
-    print(f"-> Ações Fixas: {cat_fixas}")
-    if cat_metodologia: print(f"-> Metodologia (C3): {cat_metodologia} {'(Nova na planilha!)' if c3_nova else ''}")
+    print(f"-> Ações Fixas na Fila: {cat_fixas}")
+    if cat_metodologia: print(f"-> Metodologia (C3): {cat_metodologia} {'(Nova!)' if c3_nova else ''}")
     if cat_opps: print(f"-> Oportunidades garimpadas: {cat_opps}")
     if cat_novatas: print(f"-> 🌟 ALERTA CAÇADOR (Novas): {cat_novatas}")
-    print(f"-> Sorteio aleatório de manutenção: {cat_aleatorias}")
-    print(f"-> TOTAL NA FILA: {len(fila)} ações.\n")
+    print(f"-> Varredura de Desatualizadas: {cat_aleatorias}")
+    print(f"-> TOTAL PARA ATUALIZAR: {len(fila)} ações.\n")
 
     # 3. PROCESSAMENTO E CAPTURA YAHOO FINANCE
     print("[4/5] Processando cruzamento de dados linha a linha...")
@@ -128,7 +179,6 @@ def atualizar_financeiro():
     for ticker in fila:
         linha_idx = todas.index(ticker) + 2
         try:
-            # Captura Yahoo
             yf_info = yf.Ticker(f"{ticker}.SA").info
             preco = formatar(yf_info.get('currentPrice') or yf_info.get('regularMarketPrice'))
             n_acoes = formatar(yf_info.get('sharesOutstanding')) 
@@ -138,10 +188,8 @@ def atualizar_financeiro():
             vpa = formatar(yf_info.get('bookValue'))             
             lpa = formatar(yf_info.get('trailingEps'))           
             
-            # Captura Fundamentus
             f = df.loc[ticker] if ticker in df.index else {}
             
-            # DADOS BASE RESTAURADOS (COLUNA B até AF)
             row_base = [
                 preco,                                    # B: Preço (YF)
                 formatar(f.get('Div.Yield', 0)),          # C: DY
@@ -154,7 +202,7 @@ def atualizar_financeiro():
                 formatar(f.get('Mrg. Líq.', 0)),          # J: Marg. Líq.
                 formatar(f.get('P/EBIT', 0)),             # K: P/EBIT
                 formatar(f.get('EV/EBIT', 0)),            # L: EV/EBIT
-                formatar(f.get('Dív.Líq/ Patrim.', 0)),   # M: Div.Liq/Ebit (Aprox)
+                formatar(f.get('Dív.Líq/ Patrim.', 0)),   # M: Div.Liq/Ebit
                 formatar(f.get('Dív.Líq/ Patrim.', 0)),   # N: Div.Liq/Patri
                 formatar(f.get('PSR', 0)),                # O: PSR
                 formatar(f.get('P/Cap.Giro', 0)),         # P: P/Cap.Giro
@@ -174,28 +222,33 @@ def atualizar_financeiro():
                 f"{agora_sp} OK"                          # AF: Atualização
             ]
             
-            # --- TRAVA DE SEGURANÇA E AUTO-ADIÇÃO ---
             if ticker in cat_novatas or (ticker == ticker_c3 and c3_nova):
-                # É ação Nova (Caçador ou C3): Escreve da Coluna A até AF
                 row_final = [ticker] + row_base
                 range_update = f'A{linha_idx}:AF{linha_idx}'
             else:
-                # Já existe na planilha: Escreve da Coluna B até AF
                 row_final = row_base
                 range_update = f'B{linha_idx}:AF{linha_idx}'
                 
             batch_updates.append({'range': range_update, 'values': [row_final]})
             
-            # Log Individual
+            # --- ETIQUETAS VISUAIS DE LOG E WHATSAPP ---
             cat_atual = "Fixa" if ticker in cat_fixas else "Novata" if ticker in cat_novatas else "Metodologia" if ticker in cat_metodologia else "Oportunidade" if ticker in cat_opps else "Aleatória"
-            print(f"   ✅ [OK] {ticker} ({cat_atual}) | Concluída com sucesso.")
             
-            # WhatsApp Formatação
-            if ticker in cat_opps:
+            tag_extra = ""
+            if ticker in opps_brutas:
+                if ticker in FIXAS: tag_extra = " (Ação Fixa)"
+                elif ticker == ticker_c3: tag_extra = " (C3)"
+            
+            log_print = f"{cat_atual} / Oportunidade" if tag_extra else cat_atual
+            print(f"   ✅ [OK] {ticker} ({log_print}) | Concluída com sucesso.")
+            
+            # Formatação WhatsApp Inteligente (Agrupa tudo que for Oportunidade)
+            if ticker in opps_brutas:
                 roe_wpp = formatar(f.get('ROE', 0)) * 100
                 pl_wpp = formatar(f.get('P/L', 0))
                 pvp_wpp = formatar(f.get('P/VP', 0))
-                relatorio_opps.append(f"• *{ticker}*: R$ {preco} (P/L: {pl_wpp} | P/VP: {pvp_wpp} | ROE: {roe_wpp:.1f}%)")
+                relatorio_opps.append(f"• *{ticker}*{tag_extra}: R$ {preco} (P/L: {pl_wpp} | P/VP: {pvp_wpp} | ROE: {roe_wpp:.1f}%)")
+            
             if ticker in cat_novatas:
                 dy_wpp = formatar(f.get('Div.Yield', 0)) * 100
                 roe_wpp = formatar(f.get('ROE', 0)) * 100
@@ -210,26 +263,18 @@ def atualizar_financeiro():
         aba_base.batch_update(batch_updates)
         print(f"💾 Sucesso: {len(batch_updates)} ações atualizadas.")
         
-        # Monta a mensagem final do WhatsApp
         msg_wpp = "🤖 *Relatório Mestre* 🤖\n\n"
-        if cat_fixas: msg_wpp += f"📌 *Fixas:*\n{', '.join(cat_fixas)}\n\n"
-        
+        if cat_fixas: msg_wpp += f"📌 *Fixas Processadas:*\n{', '.join(cat_fixas)}\n\n"
         if cat_metodologia: 
             status_c3 = "(Adicionada na Planilha!)" if c3_nova else ""
-            
             msg_wpp += f"🔍 *Metodologia (C3):*\n{', '.join(cat_metodologia)} {status_c3}\n\n"
-            
-        if cat_aleatorias: msg_wpp += f"🎲 *Aleatórias:*\n{', '.join(cat_aleatorias)}\n\n"
-        
-        if relatorio_opps: msg_wpp += "🎯 *Oportunidades Atualizadas:*\n" + "\n".join(relatorio_opps) + "\n\n"
-        
+        if cat_aleatorias: msg_wpp += f"🎲 *Varredura de Desatualizadas:*\n{', '.join(cat_aleatorias)}\n\n"
+        if relatorio_opps: msg_wpp += "🎯 *Ações em Oportunidade:*\n" + "\n".join(relatorio_opps) + "\n\n"
         if relatorio_novatas: msg_wpp += "🌟 *NOVA PREVIDENCIÁRIA ADICIONADA:*\n" + "\n".join(relatorio_novatas)
         
         enviar_whatsapp(msg_wpp)
     else:
-        print("⚠️ Sem dados para atualizar.")
-
-    print("\n🏁 --- PROCESSO FINALIZADO --- 🏁")
+        print("✅ Nenhuma atualização necessária. (Todas as ações selecionadas foram atualizadas a menos de 2 horas).")
 
 if __name__ == "__main__":
     atualizar_financeiro()
