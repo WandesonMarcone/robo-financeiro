@@ -37,7 +37,6 @@ def formatar(val):
 # --- MÓDULO DE NOTIFICAÇÕES (REDUNDÂNCIA DUPLA) ---
 def enviar_telegram(msg):
     try:
-        if TELEGRAM_BOT_TOKEN == "7777811765:AAEk3XQibBBYSFKRfQLzOWs_KpGOcPFR274": return
         bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
         bot.send_message(TELEGRAM_CHAT_ID, msg, parse_mode='Markdown')
         print("📲 [Telegram] Notificação entregue com sucesso!")
@@ -46,14 +45,12 @@ def enviar_telegram(msg):
 
 def enviar_whatsapp_oficial(msg):
     try:
-        if WA_ACCESS_TOKEN == "EAASZBAZC5XnZAMBR5BMAniHn0Dxkokwrnug6gxCuCZBgeEBOzrXQoeVaoZCh5yAQoEIZAfqQjmbOCwc4H5TsGpWCqiZCn0ScVM9xXt4h2ZBGg6iTX3s3gZBStrn5HNvnBwZA4muiTJ72B2XZAalZBcpHJ6uRmruPz3g6gG3UzvC3yE2eDCmjW7rZA5J1hxaw7Q6oriB1CxRYvEJJA55xxtK39uvpnsKdJCv6sqSIj": return
-        
         url = f"https://graph.facebook.com/v18.0/{WA_PHONE_NUMBER_ID}/messages"
         headers = {
             "Authorization": f"Bearer {WA_ACCESS_TOKEN}",
             "Content-Type": "application/json"
         }
-        
+
         # Formatando para a estrutura JSON exigida pela Meta (Texto Simples)
         payload = {
             "messaging_product": "whatsapp",
@@ -65,9 +62,9 @@ def enviar_whatsapp_oficial(msg):
                 "body": msg
             }
         }
-        
+
         res = requests.post(url, headers=headers, json=payload, timeout=10)
-        
+
         if res.status_code in [200, 201]:
             print("📲 [WhatsApp Meta] Notificação entregue com sucesso em tempo real!")
         else:
