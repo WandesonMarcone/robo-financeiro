@@ -2,9 +2,9 @@ name: Robô Financeiro
 
 on:
   schedule:
-    - cron: '0 7, 11, 15, 19 * * *' # Roda às 07:00, 11:00, 15:00 e 19:00
-  workflow_dispatch: # Permite rodar manualmente a qualquer hora
-
+    # Convertido para UTC para rodar exatamente às 07:00, 11:00, 15:00 e 19:00 no Horário de Brasília
+    - cron: '0 10,14,18,22 * * *'
+  workflow_dispatch: # Permite rodar manualmente a qualquer hora do dia pelo painel Actions
 
 jobs:
   build:
