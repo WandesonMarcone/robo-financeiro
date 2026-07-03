@@ -80,7 +80,7 @@ def atualizar_financeiro():
     print("[1/5] Conectando ao Google Sheets...")
     gc = gspread.service_account(filename=JSON_KEY)
     planilha = gc.open_by_url(SPREADSHEET_URL)
-    aba_base = planilha.worksheet("Base de Dados")
+    aba_base = planilha.worksheet("BD_Acoes")
     aba_metodo = planilha.worksheet("Metodologia Projetiva")
 
     # Horário de São Paulo
