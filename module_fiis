@@ -1,0 +1,106 @@
+import pandas as pd
+import yfinance as yf
+import requests
+import io
+from datetime import datetime
+import pytz
+
+def formatar_fii(val):
+    try:
+        if isinstance(val, str):
+            is_percent = '%' in val
+            val = val.replace('%', '').replace('.', '').replace(',', '.')
+            numero = float(val)
+            return numero / 100 if is_percent else numero
+        return float(val) if pd.notna(val) else 0.0
+    except:
+        return 0.0
+
+def classificar_tipo(setor):
+    s = str(setor).upper()
+    if any(x in s for x in ["TÍTULO", "PAPEL", "RECEBÍVEL"]): return "Papel"
+    if any(x in s for x in ["FUNDO DE FUNDOS", "MISTO"]): return "FOF / Misto"
+    return "Tijolo"
+
+def atualizar_fiis(aba_fiis):
+    print("🏢 [LOG FIIs] Iniciando motor de FIIs...")
+
+    # 1. Busca a base de todos os FIIs do mercado
+    try:
+        url = "https://www.fundamentus.com.br/fii_resultado.php"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers, timeout=10)
+        df = pd.read_html(io.StringIO(response.text), decimal=',', thousands='.')[0]
+        df['Papel'] = df['Papel'].str.strip().str.upper()
+        df = df.set_index('Papel')
+    except Exception as e:
+        print(f"❌ [ERRO FIIs] Falha no scraping base: {e}")
+        return ""
+
+    # 2. Lê apenas os FIIs que você digitou na sua planilha
+    dados_planilha = aba_fiis.get_all_values()
+    if len(dados_planilha) <= 1:
+        print("⚠️ [AVISO] Nenhum Ticker encontrado na aba BD_FIIs.")
+        return ""
+
+    tickers_planilha = [row[0].strip().upper() for row in dados_planilha[1:] if row and row[0].strip()]
+
+    sp_tz = pytz.timezone('America/Sao_Paulo')
+    data_atual = datetime.now(sp_tz).strftime("%d/%m %H:%M OK")
+    batch_updates = []
+    relatorio_telegram = []
+
+    for ticker in tickers_planilha:
+        linha_idx = tickers_planilha.index(ticker) + 2 # +2 por causa do cabeçalho
+        try:
+            # Preço em tempo real
+            yf_info = yf.Ticker(f"{ticker}.SA").info
+            preco = formatar_fii(yf_info.get('currentPrice') or yf_info.get('regularMarketPrice') or 0)
+
+            # Dados Fundamentalistas
+            f = df.loc[ticker] if ticker in df.index else {}
+
+            setor = f.get('Segmento', 'N/D')
+            tipo = classificar_tipo(setor)
+            pvp = formatar_fii(f.get('P/VP', 0))
+            dy = formatar_fii(f.get('Dividend Yield', 0))
+            vacancia = formatar_fii(f.get('Vacância Média', 0))
+
+            # Conector para a Etapa 3 (Relatórios Gerenciais)
+            walt = "Pendente (Etapa 3)"
+            alavancagem = "Pendente (Etapa 3)"
+
+            row_update = [
+                preco,
+                tipo,
+                setor,
+                pvp,
+                dy,
+                vacancia,
+                walt,
+                alavancagem,
+                data_atual
+            ]
+
+            # Atualiza da Coluna B até a J
+            batch_updates.append({'range': f'B{linha_idx}:J{linha_idx}', 'values': [row_update]})
+
+            # Lógica do Modo Caçador de FIIs (Abaixo do VPA e pagando bons dividendos)
+            if pvp > 0 and pvp < 0.95 and dy >= 0.09:
+                relatorio_telegram.append(f"• *{ticker}* ({tipo}): R$ {preco} | P/VP: {pvp} | DY: {dy*100:.1f}%")
+
+            print(f"   ✅ [OK] FII {ticker} processado.")
+
+        except Exception as e:
+            print(f"   ❌ [ERRO] Falha ao processar {ticker}: {e}")
+
+    # 3. Gravação em Lote (Performance)
+    if batch_updates:
+        aba_fiis.batch_update(batch_updates, value_input_option='USER_ENTERED')
+        print(f"💾 [FIIs] {len(batch_updates)} fundos atualizados na planilha.")
+
+    if relatorio_telegram:
+        msg = "🏢 *OPORTUNIDADES EM FIIs (Desconto)* 🏢\n" + "\n".join(relatorio_telegram) + "\n\n"
+        return msg
+
+    return ""
