@@ -113,24 +113,21 @@ def index():
 
 @app.route(f'/{TELEGRAM_BOT_TOKEN}', methods=['POST'])
 def webhook():
-    # Recebe a mensagem do Telegram e repassa para o nosso código processar
+    # Recebe a mensagem do Telegram e repassa para o nosso código
     update = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
     bot.process_new_updates([update])
     return "OK", 200
 
-if __name__ == "__main__":
-    # O Render fornece automaticamente esta variável com o link do seu servidor
-    render_url = os.environ.get('RENDER_EXTERNAL_URL')
-    
-    if render_url:
-        # Se estiver no Render, configura o Webhook
-        bot.remove_webhook()
-        bot.set_webhook(url=f"{render_url}/{TELEGRAM_BOT_TOKEN}")
-        # Pega a porta que o Render exige abrir
-        porta = int(os.environ.get('PORT', 5000))
-        app.run(host='0.0.0.0', port=porta)
-    else:
-        # Se você rodar no seu computador local, usa o Polling normal
-        bot.remove_webhook()
-        print("🤖 Bot rodando no modo local (Polling)...")
-        bot.polling(none_stop=True)
+# ==========================================
+# CONFIGURAÇÃO AUTOMÁTICA PARA NUVEM (GUNICORN)
+# ==========================================
+render_url = os.environ.get('RENDER_EXTERNAL_URL')
+if render_url:
+    # Se estiver no Render, configura o Webhook silenciosamente
+    bot.remove_webhook()
+    bot.set_webhook(url=f"{render_url}/{TELEGRAM_BOT_TOKEN}")
+else:
+    # Se rodar no computador local para testes
+    bot.remove_webhook()
+    print("🤖 Bot rodando no modo local...")
+    # bot.polling(none_stop=True) # Descomente esta linha se for testar no PC
