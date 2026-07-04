@@ -77,12 +77,17 @@ def precisa_atualizar(ticker, mapa_atualizacao, agora_dt, sp_tz):
 def atualizar_financeiro():
     print("🚀 INICIANDO AUDITORIA COM TRAVA DE 2 HORAS E MODO CAÇADOR 🚀")
 
-    # Conexão
+     # Conexão
     print("[1/5] Conectando ao Google Sheets...")
     gc = gspread.service_account(filename=JSON_KEY)
     planilha = gc.open_by_url(SPREADSHEET_URL) 
-    aba_macro = planilha.worksheet("BD_Macro") #Macro
-    module_macro.atualizar_macro(aba_macro) # Macro
+    
+    # --- MÓDULO MACRO ---
+    aba_macro = planilha.worksheet("BD_Macro")
+    import module_macro
+    module_macro.atualizar_macro(aba_macro) 
+    # --------------------
+    
     aba_base = planilha.worksheet("BD_Acoes")
     aba_metodo = planilha.worksheet("Metodos_Acoes")
 
