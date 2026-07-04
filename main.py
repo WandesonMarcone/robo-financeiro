@@ -98,6 +98,12 @@ def atualizar_financeiro():
     aba_base = planilha.worksheet("BD_Acoes")
     aba_metodo = planilha.worksheet("Metodos_Acoes")
 
+    # --- MÓDULO FIIs ---
+    aba_fiis = planilha.worksheet("BD_FIIs")
+    import module_fiis
+    msg_fiis = module_fiis.atualizar_fiis(aba_fiis)
+    # -------------------
+
     # 1. BUSCA DADOS FUNDAMENTUS
     print("[2/5] Baixando dados globais do Fundamentus...")
     try:
