@@ -5,6 +5,7 @@ requests
 pytz
 pyTelegramBotAPI
 gspread
+Flask
 google-generativeai
 PyPDF2
 lxml
