@@ -3,28 +3,25 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import gspread
 import os
 import json
+from flask import Flask, request
 
 # --- CONFIGURAÇÕES ---
 TELEGRAM_BOT_TOKEN = "7777811765:AAEk3XQibBBYSFKRfQLzOWs_KpGOcPFR274"
 SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1U8h3Hw2yBOmCbvBskP9zHyVVJf_3OkXtAopcFSebLvs/edit?usp=drivesdk'
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+app = Flask(__name__)
 
 def conectar_planilha():
-    """Conecta ao Sheets lendo os Secrets da Nuvem ou arquivo local."""
     google_creds = os.environ.get('GOOGLE_CREDS')
-    
     if google_creds:
-        # Modo Nuvem (Quando estiver no Render ou GitHub)
         creds_dict = json.loads(google_creds)
         gc = gspread.service_account_from_dict(creds_dict)
     else:
-        # Modo Computador Local (Caso você teste no seu PC)
         gc = gspread.service_account(filename='credenciais.json')
-        
     return gc.open_by_url(SPREADSHEET_URL)
 
-# --- 1. MENU PRINCIPAL ---
+# --- MENU PRINCIPAL ---
 @bot.message_handler(commands=['start', 'menu'])
 def enviar_menu(message):
     markup = InlineKeyboardMarkup()
@@ -32,10 +29,9 @@ def enviar_menu(message):
     markup.row(InlineKeyboardButton("🏢 FIIs", callback_data="menu_fiis"),
                InlineKeyboardButton("📈 Ações", callback_data="menu_acoes"))
     markup.row(InlineKeyboardButton("🌍 Macroeconomia", callback_data="menu_macro"))
-    
     bot.send_message(message.chat.id, "🤖 *Terminal Financeiro* 🤖\nSelecione um módulo para consultar:", reply_markup=markup, parse_mode="Markdown")
 
-# --- 2. NAVEGAÇÃO DE FIIs ---
+# --- NAVEGAÇÃO DE FIIs ---
 @bot.callback_query_handler(func=lambda call: call.data == "menu_fiis")
 def submenu_fiis(call):
     markup = InlineKeyboardMarkup()
@@ -43,16 +39,13 @@ def submenu_fiis(call):
                InlineKeyboardButton("📄 Papel", callback_data="fii_tipo_Papel"))
     markup.row(InlineKeyboardButton("🧩 Híbrido / FOF", callback_data="fii_tipo_Híbrido"))
     markup.row(InlineKeyboardButton("🔙 Voltar", callback_data="voltar_menu"))
-    
-    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, 
-                          text="🏢 *Selecione a categoria de FIIs:*", reply_markup=markup, parse_mode="Markdown")
+    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text="🏢 *Selecione a categoria de FIIs:*", reply_markup=markup, parse_mode="Markdown")
 
-# --- 3. LISTAR ATIVOS DA CATEGORIA ---
+# --- LISTAR ATIVOS ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("fii_tipo_"))
 def listar_fiis(call):
     tipo_escolhido = call.data.split("_")[2]
     bot.answer_callback_query(call.id, f"Buscando fundos de {tipo_escolhido}...")
-    
     try:
         planilha = conectar_planilha()
         aba_fiis = planilha.worksheet("BD_FIIs")
@@ -61,7 +54,6 @@ def listar_fiis(call):
         markup = InlineKeyboardMarkup()
         encontrou = False
         
-        # Filtra a planilha procurando FIIs que batem com o tipo escolhido
         for row in dados[1:]:
             if len(row) > 2 and tipo_escolhido in str(row[1]):
                 ticker = row[0].strip()
@@ -69,25 +61,21 @@ def listar_fiis(call):
                 encontrou = True
                 
         markup.row(InlineKeyboardButton("🔙 Voltar", callback_data="menu_fiis"))
-        
         texto = f"FIIs da categoria *{tipo_escolhido}* na sua carteira:" if encontrou else f"Nenhum FII de *{tipo_escolhido}* encontrado na planilha."
-        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, 
-                              text=texto, reply_markup=markup, parse_mode="Markdown")
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=texto, reply_markup=markup, parse_mode="Markdown")
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Erro ao ler planilha: {e}")
 
-# --- 4. EXIBIR DADOS DO ATIVO ---
+# --- EXIBIR DADOS DO ATIVO ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("detalhe_"))
 def detalhe_ativo(call):
     ticker = call.data.split("_")[1]
     bot.answer_callback_query(call.id, f"Carregando {ticker}...")
-    
     try:
         planilha = conectar_planilha()
         aba_fiis = planilha.worksheet("BD_FIIs")
         dados = aba_fiis.get_all_values()
         
-        # Procura a linha exata do Ticker
         linha_ativo = next((row for row in dados if row[0] == ticker), None)
         
         if linha_ativo:
@@ -98,32 +86,51 @@ def detalhe_ativo(call):
             dy = str(float(linha_ativo[6]) * 100) + "%" if linha_ativo[6].replace('.', '').isnumeric() else linha_ativo[6]
             vacancia = str(float(linha_ativo[7]) * 100) + "%" if linha_ativo[7].replace('.', '').isnumeric() else linha_ativo[7]
             
-            texto = f"📌 *{ticker}* ({tipo} - {setor})\n\n"
-            texto += f"💵 *Preço:* R$ {preco}\n"
-            texto += f"⚖️ *P/VP:* {pvp}\n"
-            texto += f"💰 *DY (12m):* {dy}\n"
-            texto += f"🏢 *Vacância:* {vacancia}\n\n"
-            texto += "_As análises de Fatos Relevantes e Valuation estarão disponíveis nas próximas etapas._"
+            texto = f"📌 *{ticker}* ({tipo} - {setor})\n\n💵 *Preço:* R$ {preco}\n⚖️ *P/VP:* {pvp}\n💰 *DY (12m):* {dy}\n🏢 *Vacância:* {vacancia}\n\n_As análises de Fatos Relevantes e Valuation estarão disponíveis nas próximas etapas._"
             
-            # Botões de Ação Futuros (Ainda sem função, apenas visuais)
             markup = InlineKeyboardMarkup()
-            markup.row(InlineKeyboardButton("📰 Fatos Relevantes", callback_data=f"fatos_{ticker}"),
-                       InlineKeyboardButton("🧮 Valuation", callback_data=f"val_{ticker}"))
+            markup.row(InlineKeyboardButton("📰 Fatos Relevantes", callback_data=f"fatos_{ticker}"), InlineKeyboardButton("🧮 Valuation", callback_data=f"val_{ticker}"))
             markup.row(InlineKeyboardButton("🔙 Voltar", callback_data="menu_fiis"))
             
-            bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, 
-                                  text=texto, reply_markup=markup, parse_mode="Markdown")
+            bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=texto, reply_markup=markup, parse_mode="Markdown")
         else:
             bot.send_message(call.message.chat.id, f"Dados de {ticker} não encontrados.")
-            
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Erro: {e}")
 
-# --- BOTÕES DE VOLTAR ---
 @bot.callback_query_handler(func=lambda call: call.data == "voltar_menu")
 def voltar_menu_principal(call):
     enviar_menu(call.message)
 
-# Mantém o bot acordado escutando o Telegram
-print("🤖 Bot interativo iniciado! Aguardando comandos no Telegram...")
-bot.polling()
+
+# ==========================================
+# MOTOR DO SERVIDOR WEB (FLASK) PARA O RENDER
+# ==========================================
+
+@app.route('/', methods=['GET'])
+def index():
+    return "🚀 Servidor do Bot Financeiro está Online!", 200
+
+@app.route(f'/{TELEGRAM_BOT_TOKEN}', methods=['POST'])
+def webhook():
+    # Recebe a mensagem do Telegram e repassa para o nosso código processar
+    update = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
+    bot.process_new_updates([update])
+    return "OK", 200
+
+if __name__ == "__main__":
+    # O Render fornece automaticamente esta variável com o link do seu servidor
+    render_url = os.environ.get('RENDER_EXTERNAL_URL')
+    
+    if render_url:
+        # Se estiver no Render, configura o Webhook
+        bot.remove_webhook()
+        bot.set_webhook(url=f"{render_url}/{TELEGRAM_BOT_TOKEN}")
+        # Pega a porta que o Render exige abrir
+        porta = int(os.environ.get('PORT', 5000))
+        app.run(host='0.0.0.0', port=porta)
+    else:
+        # Se você rodar no seu computador local, usa o Polling normal
+        bot.remove_webhook()
+        print("🤖 Bot rodando no modo local (Polling)...")
+        bot.polling(none_stop=True)
