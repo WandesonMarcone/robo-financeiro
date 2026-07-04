@@ -94,7 +94,7 @@ def atualizar_financeiro():
 
     msg_macro = ""
     # O robô vai verificar que horas são. Adicionado o 0 (meia-noite) para você testar agora.
-    if hora_atual in [0, 11, 19]:
+    if hora_atual in [1, 11, 19]:
         msg_macro = module_macro.atualizar_macro(aba_macro)
     else:
         print(f"⏸️ [MACRO] Fora do horário de pregão ({hora_atual}h). Macro não será atualizado agora.")
