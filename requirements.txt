@@ -4,4 +4,6 @@ yfinance
 requests
 pytz
 pyTelegramBotAPI
+google-generativeai
+PyPDF2
 lxml
