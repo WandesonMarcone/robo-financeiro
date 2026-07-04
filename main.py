@@ -86,18 +86,13 @@ def atualizar_financeiro():
     sp_tz = pytz.timezone('America/Sao_Paulo')
     agora_dt = datetime.now(sp_tz)
     agora_sp = agora_dt.strftime('%d/%m %H:%M')
-    hora_atual = agora_dt.hour
 
-    # --- MÓDULO MACRO (Abertura 11h e Fechamento 19h) ---
+    # --- MÓDULO MACRO (TESTE - SEM TRAVA DE HORÁRIO) ---
     aba_macro = planilha.worksheet("BD_Macro")
     import module_macro
 
-    msg_macro = ""
-    # O robô vai verificar que horas são. Adicionado o 0 (meia-noite) para você testar agora.
-    if hora_atual in [1, 11, 19]:
-        msg_macro = module_macro.atualizar_macro(aba_macro)
-    else:
-        print(f"⏸️ [MACRO] Fora do horário de pregão ({hora_atual}h). Macro não será atualizado agora.")
+    # O robô vai atualizar o Macro SEMPRE que rodar para podermos validar o sistema
+    msg_macro = module_macro.atualizar_macro(aba_macro)
     # ----------------------------------------------------
 
     aba_base = planilha.worksheet("BD_Acoes")
@@ -157,7 +152,7 @@ def atualizar_financeiro():
         elif precisa_atualizar(ticker_c3, mapa_atualizacao, agora_dt, sp_tz) and ticker_c3 not in cat_fixas:
             cat_metodologia = [ticker_c3]
 
-    # --- 2.3 Oportunidades Reais --- PL > 0 E < 12 / P/VP < 1.5 / ROE >= 6.0 (Filtro Antilixo)
+    # --- 2.3 Oportunidades Reais --- PL > 0 E < 12 / P/VP < 1.5 / ROE >= 8.0 (Filtro Antilixo)
     opps_brutas = df_filtros[(df_filtros['P/L'] > 0) & (df_filtros['P/L'] < 12) & (df_filtros['P/VP'] < 1.5) & (df_filtros['ROE'] >= 8.0)].index.tolist()
     # Pega apenas as que precisam de atualização e não estão nas categorias acima
     cat_opps = [o for o in opps_brutas if o in todas_originais and o not in cat_fixas and o not in cat_metodologia and precisa_atualizar(o, mapa_atualizacao, agora_dt, sp_tz)][:5]
