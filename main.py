@@ -157,7 +157,7 @@ def atualizar_financeiro():
         elif precisa_atualizar(ticker_c3, mapa_atualizacao, agora_dt, sp_tz) and ticker_c3 not in cat_fixas:
             cat_metodologia = [ticker_c3]
 
-    # --- 2.3 Oportunidades Reais --- PL > 0 E < 12 / P/VP < 1.5 / ROE >= 8.0 (Filtro Antilixo)
+    # --- 2.3 Oportunidades Reais --- PL > 0 E < 12 / P/VP < 1.5 / ROE >= 6.0 (Filtro Antilixo)
     opps_brutas = df_filtros[(df_filtros['P/L'] > 0) & (df_filtros['P/L'] < 12) & (df_filtros['P/VP'] < 1.5) & (df_filtros['ROE'] >= 8.0)].index.tolist()
     # Pega apenas as que precisam de atualização e não estão nas categorias acima
     cat_opps = [o for o in opps_brutas if o in todas_originais and o not in cat_fixas and o not in cat_metodologia and precisa_atualizar(o, mapa_atualizacao, agora_dt, sp_tz)][:5]
