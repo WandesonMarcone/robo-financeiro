@@ -77,24 +77,31 @@ def precisa_atualizar(ticker, mapa_atualizacao, agora_dt, sp_tz):
 def atualizar_financeiro():
     print("🚀 INICIANDO AUDITORIA COM TRAVA DE 2 HORAS E MODO CAÇADOR 🚀")
 
-     # Conexão
+    # Conexão
     print("[1/5] Conectando ao Google Sheets...")
     gc = gspread.service_account(filename=JSON_KEY)
     planilha = gc.open_by_url(SPREADSHEET_URL) 
-    
-    # --- MÓDULO MACRO ---
-    aba_macro = planilha.worksheet("BD_Macro")
-    import module_macro
-    module_macro.atualizar_macro(aba_macro) 
-    # --------------------
-    
-    aba_base = planilha.worksheet("BD_Acoes")
-    aba_metodo = planilha.worksheet("Metodos_Acoes")
 
     # Horário de São Paulo
     sp_tz = pytz.timezone('America/Sao_Paulo')
     agora_dt = datetime.now(sp_tz)
     agora_sp = agora_dt.strftime('%d/%m %H:%M')
+    hora_atual = agora_dt.hour
+
+    # --- MÓDULO MACRO (Abertura 11h e Fechamento 19h) ---
+    aba_macro = planilha.worksheet("BD_Macro")
+    import module_macro
+
+    msg_macro = ""
+    # O robô vai verificar que horas são. Adicionado o 0 (meia-noite) para você testar agora.
+    if hora_atual in [0, 11, 19]:
+        msg_macro = module_macro.atualizar_macro(aba_macro)
+    else:
+        print(f"⏸️ [MACRO] Fora do horário de pregão ({hora_atual}h). Macro não será atualizado agora.")
+    # ----------------------------------------------------
+
+    aba_base = planilha.worksheet("BD_Acoes")
+    aba_metodo = planilha.worksheet("Metodos_Acoes")
 
     # 1. BUSCA DADOS FUNDAMENTUS
     print("[2/5] Baixando dados globais do Fundamentus...")
@@ -174,10 +181,6 @@ def atualizar_financeiro():
         cat_aleatorias = random.sample(precisam_urgente, 3)
     else:
         cat_aleatorias = precisam_urgente
-        # As linhas abaixo ficam desativadas para garantir a Trava Total.
-        # resto = [t for t in todas_originais if t not in usadas and t not in cat_aleatorias]
-        # vagas = 3 - len(cat_aleatorias)
-        # cat_aleatorias += random.sample(resto, min(vagas, len(resto)))
 
     fila = cat_fixas + cat_metodologia + cat_opps + cat_aleatorias + cat_novatas
 
@@ -220,7 +223,6 @@ def atualizar_financeiro():
 
             f = df.loc[ticker] if ticker in df.index else {}
 
-            # NOVO MAPEAMENTO COM SETOR NA COLUNA B (Tudo pulou uma casa para a direita)
             row_base = [
                 setor,                                    # B: Setor (NEW)
                 preco,                                    # C: Preço (YF)
@@ -256,14 +258,13 @@ def atualizar_financeiro():
 
             if ticker in cat_novatas or (ticker == ticker_c3 and c3_nova):
                 row_final = [ticker] + row_base
-                range_update = f'A{linha_idx}:AG{linha_idx}' # Agora vai até AG
+                range_update = f'A{linha_idx}:AG{linha_idx}' 
             else:
                 row_final = row_base
-                range_update = f'B{linha_idx}:AG{linha_idx}' # Agora vai até AG
+                range_update = f'B{linha_idx}:AG{linha_idx}' 
 
             batch_updates.append({'range': range_update, 'values': [row_final]})
 
-            # --- ETIQUETAS VISUAIS DE LOG E TELEGRAM ---
             cat_atual = "Fixa" if ticker in cat_fixas else "Novata" if ticker in cat_novatas else "Metodologia" if ticker in cat_metodologia else "Oportunidade" if ticker in cat_opps else "Aleatória"
 
             tag_extra = ""
@@ -274,7 +275,6 @@ def atualizar_financeiro():
             log_print = f"{cat_atual} / Oportunidade" if tag_extra else cat_atual
             print(f"   ✅ [OK] {ticker} ({log_print}) | Concluída com sucesso.")
 
-            # Formatação Telegram Inteligente
             if ticker in opps_brutas:
                 roe_wpp = formatar(f.get('ROE', 0)) * 100
                 pl_wpp = formatar(f.get('P/L', 0))
@@ -282,11 +282,9 @@ def atualizar_financeiro():
 
                 detalhe_msg = f"R$ {preco} | 🏢 {setor} (P/L: {pl_wpp} | P/VP: {pvp_wpp} | ROE: {roe_wpp:.1f}%)"
 
-                # LISTA VIP: Se for Ação Fixa em Oportunidade, ganha destaque especial
                 if ticker in FIXAS:
                     relatorio_fixas_opps.append(f"• *{ticker}* está barata!\n   Motivo: P/L ({pl_wpp}) abaixo de 12, P/VP ({pvp_wpp}) abaixo de 1.5 e ROE ({roe_wpp:.1f}%) Saudável.\n   🏢 Setor: {setor}")
 
-                # Todas as oportunidades (incluindo Fixas) continuam aparecendo na lista geral
                 relatorio_opps.append(f"• *{ticker}*{tag_extra}: {detalhe_msg}")
 
             if ticker in cat_novatas:
@@ -299,11 +297,17 @@ def atualizar_financeiro():
 
     # 4. ESCRITA EM LOTE E NOTIFICAÇÃO
     print("\n[5/5] Salvando na Planilha e Disparando Notificações...")
+    
+    # Prepara a mensagem final
+    msg_telegram = ""
+    if msg_macro:
+        msg_telegram += msg_macro # Adiciona o macro no topo, se houver
+
     if batch_updates:
         aba_base.batch_update(batch_updates)
         print(f"💾 Sucesso: {len(batch_updates)} ações atualizadas na planilha.")
 
-        msg_telegram = "🤖 *Relatório Mestre* 🤖\n\n"
+        msg_telegram += "🤖 *Relatório de Ações* 🤖\n\n"
 
         if relatorio_fixas_opps:
             msg_telegram += "🚨 *ALERTA VIP: AÇÕES FIXAS EM OPORTUNIDADE* 🚨\n" + "\n".join(relatorio_fixas_opps) + "\n\n"
@@ -320,10 +324,11 @@ def atualizar_financeiro():
 
         if relatorio_novatas: msg_telegram += "🌟 *NOVA PREVIDENCIÁRIA ADICIONADA:*\n" + "\n".join(relatorio_novatas)
 
-        # Usando a função para disparar via Telegram
+    # Dispara o alerta se o Macro rodou OU se alguma ação atualizou
+    if msg_telegram != "":
         disparar_alertas(msg_telegram)
     else:
-        print("✅ Nenhuma atualização necessária. (Todas as ações selecionadas foram atualizadas a menos de 2 horas).")
+        print("✅ Nenhuma atualização de Ações ou Macro necessária neste horário.")
 
 if __name__ == "__main__":
     atualizar_financeiro()
