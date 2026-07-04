@@ -304,6 +304,9 @@ def atualizar_financeiro():
     if msg_macro:
         msg_telegram += msg_macro # Adiciona o macro no topo, se houver
 
+    if msg_fiis:
+        msg_telegram += msg_fiis 
+
     if batch_updates:
         aba_base.batch_update(batch_updates)
         print(f"💾 Sucesso: {len(batch_updates)} ações atualizadas na planilha.")
