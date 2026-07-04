@@ -97,7 +97,7 @@ def atualizar_fiis(aba_fiis):
     df_cacador = df[
         (df['P/VP'] >= 0.40) & (df['P/VP'] <= 1.00) & 
         (df['Dividend Yield'] >= 0.09) & 
-        (df['Liquidez'] >= 500000)
+        (df['Liquidez'] >= 5000000)
     ]
     oportunidades_gerais = df_cacador.index.tolist()
     novatos_garimpados = [fii for fii in oportunidades_gerais if fii not in tickers_planilha and fii not in cat_fixas][:3]
