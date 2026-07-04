@@ -22,13 +22,15 @@ def formatar_fii(val):
 
 def classificar_tipo(setor):
     s = str(setor).upper()
-    if any(x in s for x in ["TÍTULO", "PAPEL", "RECEBÍVEL"]): return "Papel"
-    if any(x in s for x in ["FUNDO DE FUNDOS", "FOF", "MISTO"]): return "FOF / Misto"
+    # Correção do mapeamento de nomes do Fundamentus
+    if any(x in s for x in ["TÍTULO", "PAPEL", "RECEBÍVEL", "VAL. MOB"]): return "Papel"
+    if any(x in s for x in ["FUNDO DE FUNDOS", "FOF", "MISTO", "HÍBRIDO"]): return "FOF / Misto"
+    if "N/D" in s or "OUTROS" in s: return "Híbrido/Outros"
     return "Tijolo"
 
 def precisa_atualizar_fii(ticker, mapa_atualizacao, agora_dt, sp_tz):
     if ticker not in mapa_atualizacao:
-        return True # Se não existe na planilha, atualiza
+        return True 
 
     val = str(mapa_atualizacao[ticker]).strip()
     if 'OK' not in val:
@@ -47,20 +49,19 @@ def precisa_atualizar_fii(ticker, mapa_atualizacao, agora_dt, sp_tz):
             dt_af = dt_af.replace(year=agora_dt.year - 1)
 
         if (agora_dt - dt_af).total_seconds() < 7200:
-            return False # Trava de 2h ativada
+            return False 
     except:
         pass 
 
     return True
 
 def atualizar_fiis(aba_fiis):
-    print("🏢 [LOG FIIs] Iniciando motor de FIIs...")
+    print("🏢 [LOG FIIs] Iniciando motor de FIIs (Filtro Antilixo Ativado)...")
 
     sp_tz = pytz.timezone('America/Sao_Paulo')
     agora_dt = datetime.now(sp_tz)
     data_atual = agora_dt.strftime("%d/%m %H:%M OK")
 
-    # 1. Busca TODOS os FIIs do mercado
     try:
         url = "https://www.fundamentus.com.br/fii_resultado.php"
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -76,7 +77,6 @@ def atualizar_fiis(aba_fiis):
         print(f"❌ [ERRO FIIs] Falha no scraping base: {e}")
         return ""
 
-    # 2. Mapeia a sua planilha
     dados_planilha = aba_fiis.get_all_values()
     tickers_planilha = []
     mapa_atualizacao = {}
@@ -85,24 +85,20 @@ def atualizar_fiis(aba_fiis):
         if row and row[0].strip():
             t = row[0].strip().upper()
             tickers_planilha.append(t)
-            # Coluna P é o índice 15
             mapa_atualizacao[t] = row[15] if len(row) > 15 else ""
 
-    # 3. ORGANIZANDO A FILA
-    
-    # A) FIIs Fixos (Passando pela trava de 2h)
     cat_fixas = [f for f in FIXAS_FIIS if precisa_atualizar_fii(f, mapa_atualizacao, agora_dt, sp_tz)]
     
-    # B) O Garimpo (Max 3)
+    # 🎯 NOVO FILTRO DE GARIMPO INSTITUCIONAL
     df_cacador = df[
-        (df['P/VP'] >= 0.40) & (df['P/VP'] <= 1.00) & 
-        (df['Dividend Yield'] >= 0.09) & 
-        (df['Liquidez'] >= 5000000)
+        (df['P/VP'] >= 0.85) & (df['P/VP'] <= 0.99) & 
+        (df['Dividend Yield'] >= 0.08) & (df['Dividend Yield'] <= 0.14) &
+        (df['Liquidez'] >= 1000000) &
+        (df['Vacância Média'] <= 0.15)
     ]
     oportunidades_gerais = df_cacador.index.tolist()
     novatos_garimpados = [fii for fii in oportunidades_gerais if fii not in tickers_planilha and fii not in cat_fixas][:3]
     
-    # C) Aleatórias Desatualizadas (Max 2)
     usadas = set(cat_fixas + novatos_garimpados)
     precisam_urgente = [t for t in tickers_planilha if t not in usadas and precisa_atualizar_fii(t, mapa_atualizacao, agora_dt, sp_tz)]
     
@@ -173,7 +169,7 @@ def atualizar_fiis(aba_fiis):
         print(f"💾 [FIIs] {len(batch_updates)} FIIs atualizados na planilha.")
 
     if relatorio_telegram:
-        msg = "🏢 *OPORTUNIDADES EM FIIs (Modo Caçador)* 🏢\n" + "\n".join(relatorio_telegram) + "\n\n"
+        msg = "🏢 *FIIs CAÇADOR (Ativos Premium com Desconto)* 🏢\n" + "\n".join(relatorio_telegram) + "\n\n"
         return msg
 
     return ""
