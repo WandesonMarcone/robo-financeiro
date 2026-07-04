@@ -4,5 +4,4 @@ yfinance
 requests
 pytz
 pyTelegramBotAPI
-git+https://github.com/WandesonMarcone/mercadosfinanceirobr.git
 lxml
