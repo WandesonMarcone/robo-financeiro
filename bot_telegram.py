@@ -1,16 +1,27 @@
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import gspread
+import os
+import json
 
 # --- CONFIGURAÇÕES ---
 TELEGRAM_BOT_TOKEN = "7777811765:AAEk3XQibBBYSFKRfQLzOWs_KpGOcPFR274"
-JSON_KEY = 'credenciais.json'
 SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1U8h3Hw2yBOmCbvBskP9zHyVVJf_3OkXtAopcFSebLvs/edit?usp=drivesdk'
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
 def conectar_planilha():
-    gc = gspread.service_account(filename=JSON_KEY)
+    """Conecta ao Sheets lendo os Secrets da Nuvem ou arquivo local."""
+    google_creds = os.environ.get('GOOGLE_CREDS')
+    
+    if google_creds:
+        # Modo Nuvem (Quando estiver no Render ou GitHub)
+        creds_dict = json.loads(google_creds)
+        gc = gspread.service_account_from_dict(creds_dict)
+    else:
+        # Modo Computador Local (Caso você teste no seu PC)
+        gc = gspread.service_account(filename='credenciais.json')
+        
     return gc.open_by_url(SPREADSHEET_URL)
 
 # --- 1. MENU PRINCIPAL ---
