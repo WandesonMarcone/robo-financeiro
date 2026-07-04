@@ -6,6 +6,7 @@ pytz
 pyTelegramBotAPI
 gspread
 Flask
+gunicorn
 google-generativeai
 PyPDF2
 lxml
