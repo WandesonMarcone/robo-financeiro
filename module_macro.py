@@ -1,25 +1,35 @@
 import requests
+import yfinance as yf
 from datetime import datetime
 import pytz
 
 def obter_selic():
+    # Série 432: Meta Selic
     url = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.432/dados/ultimos/1?formato=json"
     res = requests.get(url, timeout=10)
     return float(res.json()[0]['valor'])
 
 def obter_ipca_12m():
+    # Série 13522: IPCA 12 meses
     url = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.13522/dados/ultimos/1?formato=json"
     res = requests.get(url, timeout=10)
     return float(res.json()[0]['valor'])
 
 def obter_dolar():
-    # URL corrigida com /json/ incluído
-    url = "https://economia.awesomeapi.com.br/json/last/USD-BRL"
-    res = requests.get(url, timeout=10)
-    return float(res.json()['USDBRL']['bid'])
+    """Tenta o Yahoo Finance (Tempo Real). Se falhar, usa o Banco Central (PTAX)."""
+    try:
+        ticker = yf.Ticker("BRL=X")
+        df = ticker.history(period="1d")
+        return float(df['Close'].iloc[-1])
+    except Exception as e:
+        print(f"⚠️ [AVISO] Yahoo Finance falhou para o Dólar. A tentar o Banco Central... Erro: {e}")
+        # Plano B: Banco Central do Brasil (Série 10813 - Dólar Venda)
+        url = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.10813/dados/ultimos/1?formato=json"
+        res = requests.get(url, timeout=10)
+        return float(res.json()[0]['valor'])
 
 def atualizar_macro(aba_macro):
-    print("🔍 [LOG MACRO] Buscando dados econômicos...")
+    print("🔍 [LOG MACRO] Buscando dados económicos...")
     try:
         selic = obter_selic()
         ipca = obter_ipca_12m()
@@ -35,7 +45,7 @@ def atualizar_macro(aba_macro):
         print("✅ [LOG MACRO] Salvo na linha 2 da aba BD_Macro!")
 
         # Monta a mensagem para o Telegram
-        msg = "🌍 *Panorama Econômico*\n"
+        msg = "🌍 *Panorama Económico*\n"
         msg += f"💵 Dólar: R$ {dolar:.2f}\n"
         msg += f"🏛️ Selic: {selic}%\n"
         msg += f"🛒 IPCA (12m): {ipca}%\n\n"
