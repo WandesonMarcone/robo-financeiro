@@ -113,10 +113,20 @@ def index():
 
 @app.route(f'/{TELEGRAM_BOT_TOKEN}', methods=['POST'])
 def webhook():
-    # Recebe a mensagem do Telegram e repassa para o nosso código
-    update = telebot.types.Update.de_json(request.stream.read().decode('utf-8'))
-    bot.process_new_updates([update])
-    return "OK", 200
+    try:
+        # get_data() é blindado contra o esvaziamento do Gunicorn
+        json_string = request.get_data().decode('utf-8')
+        
+        # Rastreador: Vai imprimir a mensagem crua nos logs do Render
+        print(f"📩 SINAL RECEBIDO DO TELEGRAM: {json_string}") 
+        
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        
+        return "OK", 200
+    except Exception as e:
+        print(f"❌ ERRO INTERNO NO WEBHOOK: {e}")
+        return "Erro", 500
 
 # ==========================================
 # CONFIGURAÇÃO AUTOMÁTICA PARA NUVEM (GUNICORN)
