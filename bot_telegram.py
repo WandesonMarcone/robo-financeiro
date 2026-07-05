@@ -4,6 +4,7 @@ import gspread
 import os
 import json
 import traceback
+import math
 import yfinance as yf
 from datetime import datetime
 from flask import Flask, request
