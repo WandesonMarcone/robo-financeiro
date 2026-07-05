@@ -134,90 +134,118 @@ def submenu_acoes(call):
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Erro ao ler planilha de Ações: {e}")
 
-# --- 6. VISUALIZAR DETALHE DA AÇÃO (Cálculo em Tempo Real de 5 anos via yfinance) ---
+# --- 6. VISUALIZAR DETALHE DA AÇÃO ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("acao_"))
 def detalhe_acao(call):
     ticker = call.data.split("_")[1]
-    bot.answer_callback_query(call.id, f"Analisando histórico de {ticker}...")
+    bot.answer_callback_query(call.id, f"A preparar motor de cálculo para {ticker}...")
     try:
-        # Busca dados ao vivo da B3 via yfinance
-        asset = yf.Ticker(f"{ticker}.SA")
-        info = asset.info
-        
-        preco_atual = info.get('currentPrice') or info.get('regularMarketPrice') or 0
-        lpa = info.get('trailingEps') or 1.0 # Evita divisão por zero
-        
-        # Coleta de dividendos dos últimos 5 anos
-        historico_divs = asset.dividends
-        ano_atual = datetime.now().year
-        divs_ultimos_5_anos = 0
-        
-        if not historico_divs.empty:
-            divs_filtrados = historico_divs[historico_divs.index.year >= (ano_atual - 5)]
-            divs_ultimos_5_anos = divs_filtrados.sum() / 5 if not divs_filtrados.empty else 0
-
-        payout_sugerido = (divs_ultimos_5_anos / lpa) * 100 if lpa > 0 else 50.0
-        if payout_sugerido > 100 or payout_sugerido < 0: payout_sugerido = 50.0 # Trava de segurança para distorções
-
         texto = f"📌 *ANÁLISE ESTRUTURAL: {ticker}*\n\n"
-        texto += f"💵 *Preço de Balcão:* R$ {preco_atual:.2f}\n"
-        texto += f"📈 *Lucro Por Ação (LPA Atual):* R$ {lpa:.2f}\n"
-        texto += f"📊 *Média de Dividendos (Últimos 5 anos):* R$ {divs_ultimos_5_anos:.2f}/ano\n"
-        texto += f"🎯 *Payout Histórico Sugerido:* {payout_sugerido:.1f}%\n\n"
-        texto += "_O motor matemático calculou estes dados diretamente do balcão da B3 para evitar atrasos._"
+        texto += "⏳ _Os motores de Valuation Triplo e IA estão prontos nos botões abaixo._"
 
         markup = InlineKeyboardMarkup()
         markup.row(InlineKeyboardButton("📰 Resumo IA (Fatos)", callback_data=f"ia_{ticker}"))
-        markup.row(InlineKeyboardButton("🧮 Valuation de Bazin", callback_data=f"val_{ticker}_{payout_sugerido:.1f}"))
+        # Chamamos o valuation sem parâmetros iniciais para ele calcular o histórico sozinho
+        markup.row(InlineKeyboardButton("🧮 Calcular Valuation Triplo", callback_data=f"val_{ticker}"))
         markup.row(InlineKeyboardButton("🔙 Voltar", callback_data="menu_acoes"))
 
         bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=texto, reply_markup=markup, parse_mode="Markdown")
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ Erro ao processar dados de {ticker}: {e}")
+        bot.send_message(call.message.chat.id, f"❌ Erro: {e}")
 
-# --- 7. MOTOR MATEMÁTICO: VALUATION DE BAZIN INTERATIVO (Muda o Payout nos botões!) ---
+# --- 7. MOTOR MATEMÁTICO: VALUATION TRIPLO (BAZIN, PROJETIVO E FCD) ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("val_"))
-def valuation_bazin(call):
+def valuation_triplo(call):
     partes = call.data.split("_")
     ticker = partes[1]
-    payout_simulado = float(partes[2])
     
-    bot.answer_callback_query(call.id, f"Simulando Payout em {payout_simulado:.1f}%...")
+    # Se existirem parâmetros nos botões de simulação
+    payout_custom = float(partes[2]) if len(partes) > 2 else None
+    yield_exigido = float(partes[3]) if len(partes) > 3 else 0.08
+    
+    bot.answer_callback_query(call.id, f"Lendo DRE e projetando {ticker}...")
     
     try:
         asset = yf.Ticker(f"{ticker}.SA")
-        lpa = asset.info.get('trailingEps') or 1.0
-        preco_atual = asset.info.get('currentPrice') or asset.info.get('regularMarketPrice') or 0
+        info = asset.info
+        preco_atual = info.get('currentPrice') or info.get('regularMarketPrice') or 0
+        lpa_atual = info.get('trailingEps') or 0.01 
         
-        # Regra de Três Projetiva: Novo dividendo com base no Payout escolhido
-        dividendo_projetado = lpa * (payout_simulado / 100)
+        # A) DADOS HISTÓRICOS BAZIN
+        historico_divs = asset.dividends
+        ano_atual = datetime.now().year
+        divs_5_anos = historico_divs[historico_divs.index.year >= (ano_atual - 5)]
+        dpa_medio_5a = divs_5_anos.sum() / 5 if not divs_5_anos.empty else 0
         
-        # Fórmula de Bazin: Preço Justo = Dividendo / Taxa Mínima de Expectativa (6%)
-        preco_justo_bazin = dividendo_projetado / 0.06
-        margem_seguranca = ((preco_justo_bazin - preco_atual) / preco_justo_bazin) * 100 if preco_justo_bazin > 0 else 0
+        # Limita o Payout Histórico Base para ser seguro (entre 10% e 100%)
+        payout_historico = (dpa_medio_5a / lpa_atual) if lpa_atual > 0 else 0.5
+        payout_historico = max(0.1, min(payout_historico, 1.0))
+        
+        # B) ACESSA A DRE (LUCRO LÍQUIDO DOS ÚLTIMOS 3-4 ANOS) PARA CALCULAR CRESCIMENTO
+        try:
+            lucros = asset.income_stmt.loc['Net Income']
+            lucros_lista = lucros.dropna().values[::-1] # Do mais antigo para o mais novo
+            # Calcula o CAGR (Taxa de Crescimento Anual Composta)
+            if len(lucros_lista) >= 2 and lucros_lista[0] > 0:
+                cagr_lucro = (lucros_lista[-1] / lucros_lista[0]) ** (1 / (len(lucros_lista) - 1)) - 1
+            else:
+                cagr_lucro = 0.05
+        except:
+            cagr_lucro = 0.05
+            
+        cagr_lucro = max(0, min(cagr_lucro, 0.15)) # Limita o crescimento projetado a 15% (Conservador)
+        
+        # C) AS PROJEÇÕES PARA O PRÓXIMO ANO
+        lpa_projetado = lpa_atual * (1 + cagr_lucro)
+        payout_usado = payout_custom / 100 if payout_custom else payout_historico
+        dividendo_projetado = lpa_projetado * payout_usado
 
-        texto = f"🧮 *VALUATION PROJETIVO (MÉTODO BAZIN): {ticker}*\n\n"
-        texto += f"📊 *Payout Simulado:* {payout_simulado:.1f}%\n"
-        texto += f"💸 *Dividendo Projetado:* R$ {dividendo_projetado:.2f}\n"
-        texto += f"🏛️ *Taxa de Desconto Estipulada:* 6.0% (Padrão Bazin)\n\n"
-        texto += f"💎 *PREÇO JUSTO CALCULADO:* R$ {preco_justo_bazin:.2f}\n"
-        texto += f"💵 *Preço Atual de Mercado:* R$ {preco_atual:.2f}\n"
+        # D) OS CÁLCULOS DOS 3 MÉTODOS
+        teto_bazin = dpa_medio_5a / 0.06
+        teto_projetivo = dividendo_projetado / yield_exigido
         
-        if margem_seguranca > 0:
-            texto += f"🟢 *Margem de Segurança:* +{margem_seguranca:.1f}% (Ativo com Desconto)"
-        else:
-            texto += f"🔴 *Margem de Segurança:* {margem_seguranca:.1f}% (Ativo acima do preço justo)"
+        taxa_desconto_fcd = 0.12 # WACC Conservador do Brasil (12%)
+        teto_fcd = lpa_projetado / (taxa_desconto_fcd - cagr_lucro) if taxa_desconto_fcd > cagr_lucro else 0
 
-        # Botões de simulação instantânea! Refazem a conta sem recarregar o bot
+        # E) MONTAGEM DA INTERFACE
+        texto = f"🧮 *VALUATION TRIPLO: {ticker}*\n"
+        texto += f"💵 Preço Atual: R$ {preco_atual:.2f}\n\n"
+        
+        texto += f"📊 *Projeção (Próx. 12m):*\n"
+        texto += f"• Crescimento Histórico (DRE): {cagr_lucro*100:.1f}%\n"
+        texto += f"• LPA Projetado: R$ {lpa_projetado:.2f}\n"
+        texto += f"• Payout Utilizado: {payout_usado*100:.1f}%\n"
+        texto += f"• Dividendo Projetado: R$ {dividendo_projetado:.2f}\n\n"
+
+        margem_bazin = ((teto_bazin/preco_atual)-1)*100 if preco_atual > 0 else 0
+        texto += f"🏛️ *1. TETO BAZIN (Histórico)*\n"
+        texto += f"R$ {teto_bazin:.2f} ({margem_bazin:+.1f}%)\n\n"
+
+        margem_proj = ((teto_projetivo/preco_atual)-1)*100 if preco_atual > 0 else 0
+        texto += f"🚀 *2. TETO PROJETIVO (Vídeo)*\n"
+        texto += f"_Exigindo {yield_exigido*100:.1f}% de DY_\n"
+        texto += f"R$ {teto_projetivo:.2f} ({margem_proj:+.1f}%)\n\n"
+
+        margem_fcd = ((teto_fcd/preco_atual)-1)*100 if preco_atual > 0 else 0
+        texto += f"💸 *3. TETO FCD (Lucro Total)*\n"
+        texto += f"R$ {teto_fcd:.2f} ({margem_fcd:+.1f}%)\n"
+
+        # F) OS BOTÕES MÁGICOS DE SIMULAÇÃO
         markup = InlineKeyboardMarkup()
-        markup.row(InlineKeyboardButton("📊 Simular 40%", callback_data=f"val_{ticker}_40.0"),
-                   InlineKeyboardButton("📊 Simular 60%", callback_data=f"val_{ticker}_60.0"))
-        markup.row(InlineKeyboardButton("📊 Simular 80%", callback_data=f"val_{ticker}_80.0"))
+        p_val = payout_usado * 100
+        markup.row(
+            InlineKeyboardButton("📊 Payout 40%", callback_data=f"val_{ticker}_40_{yield_exigido}"),
+            InlineKeyboardButton("📊 Payout 60%", callback_data=f"val_{ticker}_60_{yield_exigido}")
+        )
+        markup.row(
+            InlineKeyboardButton("🎯 Exigir 6% DY", callback_data=f"val_{ticker}_{p_val:.1f}_0.06"),
+            InlineKeyboardButton("🎯 Exigir 8% DY", callback_data=f"val_{ticker}_{p_val:.1f}_0.08")
+        )
         markup.row(InlineKeyboardButton("🔙 Voltar para a Ação", callback_data=f"acao_{ticker}"))
 
         bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=texto, reply_markup=markup, parse_mode="Markdown")
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ Erro no cálculo de Valuation: {e}")
+        bot.send_message(call.message.chat.id, f"❌ Erro no cálculo: {e}")
 
 # --- 8. CHAMA O CÉREBRO DA IA (Fatos Relevantes) ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("ia_"))
