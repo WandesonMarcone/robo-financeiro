@@ -1,4 +1,3 @@
-gspread
 pandas
 yfinance
 requests
