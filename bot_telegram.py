@@ -111,6 +111,74 @@ def detalhe_ativo(call):
 def voltar_menu_principal(call):
     enviar_menu(call.message)
 
+# --- NAVEGAÇÃO DE AÇÕES ---
+@bot.callback_query_handler(func=lambda call: call.data == "menu_acoes")
+def submenu_acoes(call):
+    bot.answer_callback_query(call.id, "Carregando Ações...")
+    try:
+        planilha = conectar_planilha()
+        aba_acoes = planilha.worksheet("BD_Acoes")
+        dados = aba_acoes.get_all_values()
+        
+        markup = InlineKeyboardMarkup()
+        encontrou = False
+        
+        # Pula o cabeçalho e cria um botão para cada ação da planilha
+        for row in dados[1:]:
+            if row and row[0].strip():
+                ticker = row[0].strip()
+                markup.row(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"acao_{ticker}"))
+                encontrou = True
+                
+        markup.row(InlineKeyboardButton("🔙 Voltar", callback_data="voltar_menu"))
+        
+        texto = "📈 *Ações na sua Carteira:*" if encontrou else "Nenhuma ação encontrada na planilha."
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=texto, reply_markup=markup, parse_mode="Markdown")
+    except Exception as e:
+        bot.send_message(call.message.chat.id, f"❌ Erro ao ler planilha de Ações: {e}")
+
+# --- DETALHE DA AÇÃO (Com placeholder para Valuation/Payout de 5 anos) ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith("acao_"))
+def detalhe_acao(call):
+    ticker = call.data.split("_")[1]
+    bot.answer_callback_query(call.id, f"Analisando {ticker}...")
+    
+    # Aqui, futuramente, entrará o yfinance para calcular o Payout e Lucro de 5 anos ao vivo
+    texto = f"📌 *{ticker}*\n\n"
+    texto += "⏳ _Calculando histórico de 5 anos e Payout dinâmico... (Módulo em construção)_\n"
+    
+    markup = InlineKeyboardMarkup()
+    markup.row(InlineKeyboardButton("📰 Resumo IA (Fatos)", callback_data=f"ia_{ticker}"))
+    markup.row(InlineKeyboardButton("🧮 Valuation Projetivo", callback_data=f"val_{ticker}"))
+    markup.row(InlineKeyboardButton("🔙 Voltar", callback_data="menu_acoes"))
+    
+    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=texto, reply_markup=markup, parse_mode="Markdown")
+
+# --- O CÉREBRO DA IA EM AÇÃO (Fatos Relevantes) ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith("fatos_") or call.data.startswith("ia_"))
+def chamar_ia(call):
+    ticker = call.data.split("_")[1]
+    # O bot avisa que está "Digitando..." para você saber que a IA está pensando
+    bot.answer_callback_query(call.id, f"IA lendo dados de {ticker}... Isso leva uns 3 segundos.")
+    
+    # Chama o nosso novo módulo
+    analise = module_ia.analisar_fatos_com_ia(ticker)
+    
+    markup = InlineKeyboardMarkup()
+    markup.row(InlineKeyboardButton("🔙 Voltar", callback_data="voltar_menu"))
+    
+    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=f"🧠 *Análise Gemini - {ticker}*\n\n{analise}", reply_markup=markup, parse_mode="Markdown")
+
+# --- MENU MINHA CARTEIRA ---
+@bot.callback_query_handler(func=lambda call: call.data == "menu_carteira")
+def submenu_carteira(call):
+    bot.answer_callback_query(call.id, "Buscando consolidação...")
+    
+    markup = InlineKeyboardMarkup()
+    markup.row(InlineKeyboardButton("🔙 Voltar", callback_data="voltar_menu"))
+    
+    texto = "💼 *Minha Carteira*\n\n_Módulo de consolidação em construção. Requer a aba 'BD_Carteira' com histórico de aportes para cálculo de rentabilidade real._"
+    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=texto, reply_markup=markup, parse_mode="Markdown")
 
 # ==========================================
 # MOTOR DO SERVIDOR WEB (FLASK) 
