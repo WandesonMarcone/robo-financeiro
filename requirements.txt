@@ -8,5 +8,6 @@ gspread
 Flask
 gunicorn
 google-generativeai
+google-api-python-client
 PyPDF2
 lxml
