@@ -1,75 +1,37 @@
 import requests
-import yfinance as yf
-from datetime import datetime
-import pytz
 
-def obter_selic():
-    url = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.432/dados/ultimos/1?formato=json"
-    res = requests.get(url, timeout=10)
-    return float(res.json()[0]['valor'])
-
-def obter_ipca_12m():
-    url = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.13522/dados/ultimos/1?formato=json"
-    res = requests.get(url, timeout=10)
-    return float(res.json()[0]['valor'])
-
-def obter_dolar():
+def obter_dados_macro():
     try:
-        ticker = yf.Ticker("BRL=X")
-        df = ticker.history(period="1d")
-        return float(df['Close'].iloc[-1])
-    except:
-        url = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.10813/dados/ultimos/1?formato=json"
-        res = requests.get(url, timeout=10)
-        return float(res.json()[0]['valor'])
+        # 1. Busca a Taxa Selic (Meta) no Banco Central (Série 432)
+        url_selic = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.432/dados/ultimos/1?formato=json"
+        resp_selic = requests.get(url_selic, timeout=5).json()
+        selic = float(resp_selic[0]['valor'])
+        data_selic = resp_selic[0]['data']
 
-def atualizar_macro(aba_macro):
-    print("🔍 [LOG MACRO] Buscando dados econômicos...")
-    try:
-        selic = obter_selic()
-        ipca = obter_ipca_12m()
-        dolar = obter_dolar()
+        # 2. Busca o IPCA Acumulado 12m no Banco Central (Série 13522)
+        url_ipca = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.13522/dados/ultimos/1?formato=json"
+        resp_ipca = requests.get(url_ipca, timeout=5).json()
+        ipca = float(resp_ipca[0]['valor'])
 
-        sp_tz = pytz.timezone('America/Sao_Paulo')
-        data_hora_atual = datetime.now(sp_tz).strftime("%d/%m/%Y %H:%M")
+        # 3. Busca o Dólar Comercial em Tempo Real (AwesomeAPI)
+        url_dolar = "https://economia.awesomeapi.com.br/last/USD-BRL"
+        resp_dolar = requests.get(url_dolar, timeout=5).json()
+        dolar = float(resp_dolar['USDBRL']['bid'])
+        variacao_dolar = float(resp_dolar['USDBRL']['pctChange'])
 
-        selic_planilha = selic / 100 
-        ipca_planilha = ipca / 100
-        dolar_planilha = float(round(dolar, 4))
+        # 4. Cálculo do Juro Real Atual (Selic - IPCA)
+        juro_real = selic - ipca
 
-        # --- LÓGICA DE ANTISPAM ---
-        enviar_mensagem = True
-        try:
-            # Tenta ler a última linha gravada (Linha 2)
-            ultima_linha = aba_macro.row_values(2)
-            ultimo_selic = float(ultima_linha[1].replace(',', '.').replace('%', ''))
-            ultimo_ipca = float(ultima_linha[2].replace(',', '.').replace('%', ''))
-            ultimo_dolar = float(ultima_linha[3].replace(',', '.'))
-
-            # Verifica se houve mudança real
-            mudou_taxas = (selic_planilha != ultimo_selic) or (ipca_planilha != ultimo_ipca)
-            mudou_dolar = abs(dolar_planilha - ultimo_dolar) >= 0.05 # Mudança de 5 centavos
-
-            if not mudou_taxas and not mudou_dolar:
-                enviar_mensagem = False
-                print("⏸️ [LOG MACRO] Sem mudanças relevantes. Salvando em silêncio.")
-        except:
-            pass # Se der erro ao ler (ex: planilha vazia), manda a mensagem.
-
-        # Salva na planilha convertendo o dólar para formato BR
-        linha_salvar = [data_hora_atual, selic_planilha, ipca_planilha, str(dolar_planilha).replace('.', ',')]
-        aba_macro.insert_row(linha_salvar, 2, value_input_option='USER_ENTERED')
+        texto = "🌍 *PANORAMA MACROECONÔMICO BRASIL*\n\n"
+        texto += f"🏛️ *Taxa Selic:* {selic:.2f}% a.a. _(Ref: {data_selic})_\n"
+        texto += f"🛒 *IPCA (12m):* {ipca:.2f}%\n"
+        texto += f"⚖️ *Juro Real (Aprox):* {juro_real:.2f}%\n\n"
         
-        # Só retorna o texto se houver mudança
-        if enviar_mensagem:
-            msg = "🌍 *Atualização Econômica*\n"
-            msg += f"💵 Dólar: R$ {dolar:.2f}\n"
-            msg += f"🏛️ Selic: {selic}%\n"
-            msg += f"🛒 IPCA: {ipca}%\n\n"
-            return msg
-        else:
-            return ""
+        sinal_dolar = "+" if variacao_dolar > 0 else ""
+        texto += f"💵 *Dólar Comercial:* R$ {dolar:.2f} ({sinal_dolar}{variacao_dolar}%)\n\n"
+        
+        texto += "_Dados extraídos via API do Banco Central do Brasil._"
+        return texto
 
     except Exception as e:
-        print(f"❌ [ERRO MACRO]: {e}")
-        return ""
+        return f"❌ Erro ao buscar dados macroeconômicos: {e}"
