@@ -3,13 +3,15 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import gspread
 import os
 import json
+import traceback
 from flask import Flask, request
 
 # --- CONFIGURAÇÕES ---
 TELEGRAM_BOT_TOKEN = "7777811765:AAEk3XQibBBYSFKRfQLzOWs_KpGOcPFR274"
 SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1U8h3Hw2yBOmCbvBskP9zHyVVJf_3OkXtAopcFSebLvs/edit?usp=drivesdk'
 
-bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+# ⚠️ O SEGREDO ESTÁ AQUI: threaded=False obriga o bot a mostrar os erros na tela!
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, threaded=False)
 app = Flask(__name__)
 
 def conectar_planilha():
@@ -24,12 +26,19 @@ def conectar_planilha():
 # --- MENU PRINCIPAL ---
 @bot.message_handler(commands=['start', 'menu'])
 def enviar_menu(message):
-    markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("💼 Minha Carteira", callback_data="menu_carteira"))
-    markup.row(InlineKeyboardButton("🏢 FIIs", callback_data="menu_fiis"),
-               InlineKeyboardButton("📈 Ações", callback_data="menu_acoes"))
-    markup.row(InlineKeyboardButton("🌍 Macroeconomia", callback_data="menu_macro"))
-    bot.send_message(message.chat.id, "🤖 *Terminal Financeiro* 🤖\nSelecione um módulo para consultar:", reply_markup=markup, parse_mode="Markdown")
+    print("▶️ Função enviar_menu ACIONADA pelo código!") # Rastreador
+    try:
+        markup = InlineKeyboardMarkup()
+        markup.row(InlineKeyboardButton("💼 Minha Carteira", callback_data="menu_carteira"))
+        markup.row(InlineKeyboardButton("🏢 FIIs", callback_data="menu_fiis"),
+                   InlineKeyboardButton("📈 Ações", callback_data="menu_acoes"))
+        markup.row(InlineKeyboardButton("🌍 Macroeconomia", callback_data="menu_macro"))
+        
+        bot.send_message(message.chat.id, "🤖 *Terminal Financeiro* 🤖\nSelecione um módulo para consultar:", reply_markup=markup, parse_mode="Markdown")
+        print("✅ Menu enviado para o Telegram com sucesso!")
+    except Exception as e:
+        print(f"❌ ERRO AO ENVIAR MENU: {e}")
+        traceback.print_exc()
 
 # --- NAVEGAÇÃO DE FIIs ---
 @bot.callback_query_handler(func=lambda call: call.data == "menu_fiis")
@@ -104,40 +113,21 @@ def voltar_menu_principal(call):
 
 
 # ==========================================
-# MOTOR DO SERVIDOR WEB (FLASK) PARA O RENDER
+# MOTOR DO SERVIDOR WEB (FLASK) 
 # ==========================================
-
-@app.route('/', methods=['GET'])
-def index():
-    return "🚀 Servidor do Bot Financeiro está Online!", 200
-
 @app.route(f'/{TELEGRAM_BOT_TOKEN}', methods=['POST'])
 def webhook():
     try:
-        # get_data() é blindado contra o esvaziamento do Gunicorn
         json_string = request.get_data().decode('utf-8')
-        
-        # Rastreador: Vai imprimir a mensagem crua nos logs do Render
-        print(f"📩 SINAL RECEBIDO DO TELEGRAM: {json_string}") 
+        print(f"📩 SINAL RECEBIDO: {json_string}") 
         
         update = telebot.types.Update.de_json(json_string)
+        
+        # O threaded=False fará o erro explodir aqui caso exista
         bot.process_new_updates([update])
         
         return "OK", 200
     except Exception as e:
-        print(f"❌ ERRO INTERNO NO WEBHOOK: {e}")
+        print(f"❌ ERRO FATAL NO WEBHOOK: {e}")
+        traceback.print_exc()
         return "Erro", 500
-
-# ==========================================
-# CONFIGURAÇÃO AUTOMÁTICA PARA NUVEM (GUNICORN)
-# ==========================================
-render_url = os.environ.get('RENDER_EXTERNAL_URL')
-if render_url:
-    # Se estiver no Render, configura o Webhook silenciosamente
-    bot.remove_webhook()
-    bot.set_webhook(url=f"{render_url}/{TELEGRAM_BOT_TOKEN}")
-else:
-    # Se rodar no computador local para testes
-    bot.remove_webhook()
-    print("🤖 Bot rodando no modo local...")
-    # bot.polling(none_stop=True) # Descomente esta linha se for testar no PC
