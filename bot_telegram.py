@@ -134,36 +134,116 @@ def submenu_acoes(call):
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Erro ao ler planilha de Ações: {e}")
 
-# --- 6. VISUALIZAR DETALHE DA AÇÃO ---
+import math # Adicione isto lá no topo do ficheiro, junto com os outros imports!
+
+# --- 6. VISUALIZAR DETALHE DA AÇÃO (RAIO-X COMPLETO) ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("acao_"))
 def detalhe_acao(call):
     ticker = call.data.split("_")[1]
-    bot.answer_callback_query(call.id, f"A preparar motor de cálculo para {ticker}...")
+    bot.answer_callback_query(call.id, f"A extrair Raio-X financeiro de {ticker}...")
     try:
-        texto = f"📌 *ANÁLISE ESTRUTURAL: {ticker}*\n\n"
-        texto += "⏳ _Os motores de Valuation Triplo e IA estão prontos nos botões abaixo._"
+        asset = yf.Ticker(f"{ticker}.SA")
+        info = asset.info
+        
+        # Extração de Dados Fundamentalistas
+        preco_atual = info.get('currentPrice') or info.get('regularMarketPrice') or 0
+        setor = info.get('sector', 'Não Informado')
+        pl = info.get('trailingPE', 0)
+        pvp = info.get('priceToBook', 0)
+        lpa = info.get('trailingEps', 0)
+        vpa = info.get('bookValue', 0)
+        dy = (info.get('dividendYield', 0) * 100) if info.get('dividendYield') else 0
+        
+        # Cálculo de Payout Histórico (Conservador)
+        historico_divs = asset.dividends
+        ano_atual = datetime.now().year
+        divs_5_anos = historico_divs[historico_divs.index.year >= (ano_atual - 5)]
+        dpa_medio_5a = divs_5_anos.sum() / 5 if not divs_5_anos.empty else 0
+        payout = (dpa_medio_5a / lpa * 100) if lpa > 0 else 0
+
+        # Montagem do Dashboard
+        texto = f"📌 *RAIO-X ESTRUTURAL: {ticker}*\n"
+        texto += f"🏭 *Setor:* {setor}\n\n"
+        
+        texto += f"💵 *Preço Atual:* R$ {preco_atual:.2f}\n"
+        texto += f"💰 *Dividend Yield:* {dy:.2f}%\n"
+        texto += f"📊 *Payout Histórico Médio:* {payout:.1f}%\n\n"
+        
+        texto += f"📈 *Múltiplos de Valuation:*\n"
+        texto += f"• *P/L (Preço/Lucro):* {pl:.2f}\n"
+        texto += f"• *P/VP (Preço/Valor Patrimonial):* {pvp:.2f}\n"
+        texto += f"• *LPA (Lucro por Ação):* R$ {lpa:.2f}\n"
+        texto += f"• *VPA (Valor Patrimonial):* R$ {vpa:.2f}\n"
 
         markup = InlineKeyboardMarkup()
-        markup.row(InlineKeyboardButton("📰 Resumo IA (Fatos)", callback_data=f"ia_{ticker}"))
-        # Chamamos o valuation sem parâmetros iniciais para ele calcular o histórico sozinho
-        markup.row(InlineKeyboardButton("🧮 Calcular Valuation Triplo", callback_data=f"val_{ticker}"))
-        markup.row(InlineKeyboardButton("🔙 Voltar", callback_data="menu_acoes"))
+        markup.row(InlineKeyboardButton("🧠 Avaliação IA", callback_data=f"ia_{ticker}"))
+        markup.row(InlineKeyboardButton("🎯 Preços Teto (Graham/Bazin)", callback_data=f"teto_{ticker}"))
+        markup.row(InlineKeyboardButton("🚀 Preço Projetivo (Vídeo)", callback_data=f"proj_{ticker}"))
+        markup.row(InlineKeyboardButton("🔙 Voltar para Ações", callback_data="menu_acoes"))
 
         bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=texto, reply_markup=markup, parse_mode="Markdown")
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ Erro: {e}")
+        bot.send_message(call.message.chat.id, f"❌ Erro ao processar dados de {ticker}: {e}")
 
-# --- 7. MOTOR MATEMÁTICO: VALUATION TRIPLO (BAZIN, PROJETIVO E FCD) ---
-@bot.callback_query_handler(func=lambda call: call.data.startswith("val_"))
-def valuation_triplo(call):
+# --- 7. MÓDULO: PREÇOS TETO (GRAHAM E BAZIN) ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith("teto_"))
+def precos_teto(call):
+    ticker = call.data.split("_")[1]
+    bot.answer_callback_query(call.id, f"A calcular Graham e Bazin para {ticker}...")
+    
+    try:
+        asset = yf.Ticker(f"{ticker}.SA")
+        info = asset.info
+        preco_atual = info.get('currentPrice') or info.get('regularMarketPrice') or 0
+        lpa = info.get('trailingEps', 0)
+        vpa = info.get('bookValue', 0)
+        
+        # BAZIN
+        historico_divs = asset.dividends
+        ano_atual = datetime.now().year
+        divs_5_anos = historico_divs[historico_divs.index.year >= (ano_atual - 5)]
+        dpa_medio_5a = divs_5_anos.sum() / 5 if not divs_5_anos.empty else 0
+        teto_bazin = dpa_medio_5a / 0.06
+        margem_bazin = ((teto_bazin/preco_atual)-1)*100 if preco_atual > 0 else 0
+        
+        # GRAHAM (Exige Lucro e Patrimônio Positivos)
+        if lpa > 0 and vpa > 0:
+            teto_graham = math.sqrt(22.5 * lpa * vpa)
+            margem_graham = ((teto_graham/preco_atual)-1)*100 if preco_atual > 0 else 0
+            texto_graham = f"R$ {teto_graham:.2f} ({margem_graham:+.1f}%)"
+        else:
+            texto_graham = "N/A (LPA ou VPA negativos)"
+
+        texto = f"🎯 *PREÇOS TETO (HISTÓRICOS): {ticker}*\n"
+        texto += f"💵 Preço Atual: R$ {preco_atual:.2f}\n\n"
+        
+        texto += f"🏛️ *1. FÓRMULA DE GRAHAM*\n"
+        texto += f"_Baseado no Lucro e Patrimônio_\n"
+        texto += f"Teto: {texto_graham}\n\n"
+        
+        texto += f"💰 *2. MÉTODO DE BAZIN*\n"
+        texto += f"_Baseado na média de dividendos (6%)_\n"
+        texto += f"Teto: R$ {teto_bazin:.2f} ({margem_bazin:+.1f}%)\n"
+
+        markup = InlineKeyboardMarkup()
+        markup.row(InlineKeyboardButton("🚀 Ir para Preço Projetivo", callback_data=f"proj_{ticker}"))
+        markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=f"acao_{ticker}"))
+
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=texto, reply_markup=markup, parse_mode="Markdown")
+    except Exception as e:
+        bot.send_message(call.message.chat.id, f"❌ Erro no cálculo: {e}")
+
+# --- 8. MÓDULO: PREÇO PROJETIVO (DO VÍDEO) ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith("proj_"))
+def valuation_projetivo(call):
+    # Formato: proj_TICKER_PAYOUT_YIELD
     partes = call.data.split("_")
     ticker = partes[1]
     
-    # Se existirem parâmetros nos botões de simulação
-    payout_custom = float(partes[2]) if len(partes) > 2 else None
-    yield_exigido = float(partes[3]) if len(partes) > 3 else 0.08
+    payout_custom = float(partes[2]) if len(partes) > 2 else 50.0 # Payout base 50%
+    yield_exigido = float(partes[3]) if len(partes) > 3 else 0.08 # Yield base 8%
     
-    bot.answer_callback_query(call.id, f"Lendo DRE e projetando {ticker}...")
+    bot.answer_callback_query(call.id, f"Projetando DRE de {ticker}...")
     
     try:
         asset = yf.Ticker(f"{ticker}.SA")
@@ -171,81 +251,46 @@ def valuation_triplo(call):
         preco_atual = info.get('currentPrice') or info.get('regularMarketPrice') or 0
         lpa_atual = info.get('trailingEps') or 0.01 
         
-        # A) DADOS HISTÓRICOS BAZIN
-        historico_divs = asset.dividends
-        ano_atual = datetime.now().year
-        divs_5_anos = historico_divs[historico_divs.index.year >= (ano_atual - 5)]
-        dpa_medio_5a = divs_5_anos.sum() / 5 if not divs_5_anos.empty else 0
-        
-        # Limita o Payout Histórico Base para ser seguro (entre 10% e 100%)
-        payout_historico = (dpa_medio_5a / lpa_atual) if lpa_atual > 0 else 0.5
-        payout_historico = max(0.1, min(payout_historico, 1.0))
-        
-        # B) ACESSA A DRE (LUCRO LÍQUIDO DOS ÚLTIMOS 3-4 ANOS) PARA CALCULAR CRESCIMENTO
-        try:
-            lucros = asset.income_stmt.loc['Net Income']
-            lucros_lista = lucros.dropna().values[::-1] # Do mais antigo para o mais novo
-            # Calcula o CAGR (Taxa de Crescimento Anual Composta)
-            if len(lucros_lista) >= 2 and lucros_lista[0] > 0:
-                cagr_lucro = (lucros_lista[-1] / lucros_lista[0]) ** (1 / (len(lucros_lista) - 1)) - 1
-            else:
-                cagr_lucro = 0.05
-        except:
-            cagr_lucro = 0.05
-            
-        cagr_lucro = max(0, min(cagr_lucro, 0.15)) # Limita o crescimento projetado a 15% (Conservador)
-        
-        # C) AS PROJEÇÕES PARA O PRÓXIMO ANO
+        # Simulação de crescimento conservador (DRE Projetada)
+        cagr_lucro = 0.05 
         lpa_projetado = lpa_atual * (1 + cagr_lucro)
-        payout_usado = payout_custom / 100 if payout_custom else payout_historico
-        dividendo_projetado = lpa_projetado * payout_usado
-
-        # D) OS CÁLCULOS DOS 3 MÉTODOS
-        teto_bazin = dpa_medio_5a / 0.06
-        teto_projetivo = dividendo_projetado / yield_exigido
         
-        taxa_desconto_fcd = 0.12 # WACC Conservador do Brasil (12%)
-        teto_fcd = lpa_projetado / (taxa_desconto_fcd - cagr_lucro) if taxa_desconto_fcd > cagr_lucro else 0
+        dividendo_projetado = lpa_projetado * (payout_custom / 100)
+        teto_projetivo = dividendo_projetado / yield_exigido
+        margem_proj = ((teto_projetivo/preco_atual)-1)*100 if preco_atual > 0 else 0
 
-        # E) MONTAGEM DA INTERFACE
-        texto = f"🧮 *VALUATION TRIPLO: {ticker}*\n"
+        texto = f"🚀 *PREÇO TETO PROJETIVO: {ticker}*\n"
         texto += f"💵 Preço Atual: R$ {preco_atual:.2f}\n\n"
         
-        texto += f"📊 *Projeção (Próx. 12m):*\n"
-        texto += f"• Crescimento Histórico (DRE): {cagr_lucro*100:.1f}%\n"
+        texto += f"📊 *Premissas do Próximo Ano:*\n"
         texto += f"• LPA Projetado: R$ {lpa_projetado:.2f}\n"
-        texto += f"• Payout Utilizado: {payout_usado*100:.1f}%\n"
+        texto += f"• Payout Simulado: {payout_custom:.1f}%\n"
         texto += f"• Dividendo Projetado: R$ {dividendo_projetado:.2f}\n\n"
 
-        margem_bazin = ((teto_bazin/preco_atual)-1)*100 if preco_atual > 0 else 0
-        texto += f"🏛️ *1. TETO BAZIN (Histórico)*\n"
-        texto += f"R$ {teto_bazin:.2f} ({margem_bazin:+.1f}%)\n\n"
+        texto += f"🎯 *RESULTADO (Exigindo {yield_exigido*100:.1f}% de DY)*\n"
+        texto += f"💎 *Preço Teto:* R$ {teto_projetivo:.2f}\n"
+        
+        if margem_proj > 0:
+            texto += f"🟢 *Margem:* +{margem_proj:.1f}% (Oportunidade)"
+        else:
+            texto += f"🔴 *Margem:* {margem_proj:.1f}% (Caro)"
 
-        margem_proj = ((teto_projetivo/preco_atual)-1)*100 if preco_atual > 0 else 0
-        texto += f"🚀 *2. TETO PROJETIVO (Vídeo)*\n"
-        texto += f"_Exigindo {yield_exigido*100:.1f}% de DY_\n"
-        texto += f"R$ {teto_projetivo:.2f} ({margem_proj:+.1f}%)\n\n"
-
-        margem_fcd = ((teto_fcd/preco_atual)-1)*100 if preco_atual > 0 else 0
-        texto += f"💸 *3. TETO FCD (Lucro Total)*\n"
-        texto += f"R$ {teto_fcd:.2f} ({margem_fcd:+.1f}%)\n"
-
-        # F) OS BOTÕES MÁGICOS DE SIMULAÇÃO
+        # Botões Interativos do Vídeo
         markup = InlineKeyboardMarkup()
-        p_val = payout_usado * 100
         markup.row(
-            InlineKeyboardButton("📊 Payout 40%", callback_data=f"val_{ticker}_40_{yield_exigido}"),
-            InlineKeyboardButton("📊 Payout 60%", callback_data=f"val_{ticker}_60_{yield_exigido}")
+            InlineKeyboardButton("📊 Payout 40%", callback_data=f"proj_{ticker}_40_{yield_exigido}"),
+            InlineKeyboardButton("📊 Payout 60%", callback_data=f"proj_{ticker}_60_{yield_exigido}")
         )
         markup.row(
-            InlineKeyboardButton("🎯 Exigir 6% DY", callback_data=f"val_{ticker}_{p_val:.1f}_0.06"),
-            InlineKeyboardButton("🎯 Exigir 8% DY", callback_data=f"val_{ticker}_{p_val:.1f}_0.08")
+            InlineKeyboardButton("🎯 Exigir 6% DY", callback_data=f"proj_{ticker}_{payout_custom}_0.06"),
+            InlineKeyboardButton("🎯 Exigir 8% DY", callback_data=f"proj_{ticker}_{payout_custom}_0.08")
         )
-        markup.row(InlineKeyboardButton("🔙 Voltar para a Ação", callback_data=f"acao_{ticker}"))
+        markup.row(InlineKeyboardButton("💾 Salvar na Planilha", callback_data=f"salvar_{ticker}_{teto_projetivo:.2f}"))
+        markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=f"acao_{ticker}"))
 
         bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=texto, reply_markup=markup, parse_mode="Markdown")
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ Erro no cálculo: {e}")
+        bot.send_message(call.message.chat.id, f"❌ Erro no cálculo projetivo: {e}")
 
 # --- 8. CHAMA O CÉREBRO DA IA (Fatos Relevantes) ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("ia_"))
