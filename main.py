@@ -6,9 +6,10 @@ import io
 import random
 import pytz
 import urllib.parse
-import module_macro
-import telebot # Necessário instalar: pip install pyTelegramBotAPI
+import telebot 
 from datetime import datetime
+import os
+import json
 
 # --- CONFIGURAÇÕES DO SISTEMA ---
 FIXAS = ["PETR4", "VALE3", "ITUB4", "BBDC4"] 
@@ -16,7 +17,6 @@ JSON_KEY = 'credenciais.json'
 SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1U8h3Hw2yBOmCbvBskP9zHyVVJf_3OkXtAopcFSebLvs/edit?usp=drivesdk' 
 
 # --- CONFIGURAÇÕES DE NOTIFICAÇÃO (API OFICIAL) ---
-# 1. Telegram
 TELEGRAM_BOT_TOKEN = "7777811765:AAEk3XQibBBYSFKRfQLzOWs_KpGOcPFR274"
 TELEGRAM_CHAT_ID = "8867098987"
 
@@ -31,17 +31,15 @@ def formatar(val):
     except: return 0.0
 
 # --- MÓDULO DE NOTIFICAÇÕES (TELEGRAM) ---
-def enviar_telegram(msg):
+def disparar_alertas(msg):
+    """Garante a entrega da notificação via Telegram."""
+    if msg.strip() == "": return
     try:
         bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
         bot.send_message(TELEGRAM_CHAT_ID, msg, parse_mode='Markdown')
-        print("📲 [Telegram] Notificação entregue com sucesso!")
+        print("📲 [Telegram] Notificação de ALERTA entregue com sucesso!")
     except Exception as e:
         print(f"⚠️ [Telegram] Erro de conexão: {e}")
-
-def disparar_alertas(msg):
-    """Garante a entrega da notificação via Telegram."""
-    enviar_telegram(msg)
 
 # --- TRAVA DE 2 HORAS ---
 def precisa_atualizar(ticker, mapa_atualizacao, agora_dt, sp_tz):
@@ -52,54 +50,49 @@ def precisa_atualizar(ticker, mapa_atualizacao, agora_dt, sp_tz):
     if 'OK' not in val:
         return True # Se a célula AG estiver vazia ou com erro, atualiza
 
-    val = val.replace('OK', '').strip() # Limpa para ficar só "03/07 08:34"
+    val = val.replace('OK', '').strip() 
     try:
         dia, resto = val.split('/')
         mes, horario = resto.split(' ')
         hora, minuto = horario.split(':')
 
-        # Reconstrói a data lida da planilha
         dt_af = datetime(agora_dt.year, int(mes), int(dia), int(hora), int(minuto))
         dt_af = sp_tz.localize(dt_af)
-
-        # Correção de virada de ano
         if dt_af > agora_dt: 
             dt_af = dt_af.replace(year=agora_dt.year - 1)
 
-        # Calcula a diferença em segundos (7200 segundos = 2 horas)
         if (agora_dt - dt_af).total_seconds() < 7200:
-            return False # Trava Ativada! Atualizada há menos de 2h
+            return False 
     except:
-        pass # Se der erro ao ler a data, atualiza por segurança
-
+        pass 
     return True
 
+def conectar_gspread():
+    google_creds = os.environ.get('GOOGLE_CREDS')
+    if google_creds:
+        creds_dict = json.loads(google_creds)
+        gc = gspread.service_account_from_dict(creds_dict)
+    else:
+        gc = gspread.service_account(filename=JSON_KEY)
+    return gc
+
 def atualizar_financeiro():
-    print("🚀 INICIANDO AUDITORIA COM TRAVA DE 2 HORAS E MODO CAÇADOR 🚀")
+    print("🚀 INICIANDO AUDITORIA COM TRAVA DE 2 HORAS E MODO CAÇADOR SILENCIOSO 🚀")
 
     # Conexão
     print("[1/5] Conectando ao Google Sheets...")
-    gc = gspread.service_account(filename=JSON_KEY)
+    gc = conectar_gspread()
     planilha = gc.open_by_url(SPREADSHEET_URL) 
 
-    # Horário de São Paulo
     sp_tz = pytz.timezone('America/Sao_Paulo')
     agora_dt = datetime.now(sp_tz)
     agora_sp = agora_dt.strftime('%d/%m %H:%M')
 
-    # --- MÓDULO MACRO (TESTE - SEM TRAVA DE HORÁRIO) ---
-    aba_macro = planilha.worksheet("BD_Macro")
-    import module_macro
-
-    # O robô vai atualizar o Macro SEMPRE que rodar para podermos validar o sistema
-    msg_macro = module_macro.atualizar_macro(aba_macro)
-    # ----------------------------------------------------
-
     aba_base = planilha.worksheet("BD_Acoes")
     aba_metodo = planilha.worksheet("Metodos_Acoes")
+    aba_fiis = planilha.worksheet("BD_FIIs")
 
     # --- MÓDULO FIIs ---
-    aba_fiis = planilha.worksheet("BD_FIIs")
     import module_fiis
     msg_fiis = module_fiis.atualizar_fiis(aba_fiis)
     # -------------------
@@ -108,12 +101,9 @@ def atualizar_financeiro():
     print("[2/5] Baixando dados globais do Fundamentus...")
     try:
         url = "https://www.fundamentus.com.br/resultado.php"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
-        }
+        headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers)
         df = pd.read_html(io.StringIO(response.text), decimal=',', thousands='.')[0]
-
         df['Papel'] = df['Papel'].str.strip().str.upper()
         df = df.set_index('Papel')
     except Exception as e:
@@ -121,35 +111,26 @@ def atualizar_financeiro():
         return
 
     print("\n[3/5] Organizando a Fila (Aplicando Trava de Tempo)...")
-
-    # Lê a planilha inteira de uma vez (Mais rápido e mapeia a Coluna A e AG juntas)
     dados_planilha = aba_base.get_all_values()
     todas_originais = []
     mapa_atualizacao = {}
 
-    for row in dados_planilha[1:]: # Pula cabeçalho
+    for row in dados_planilha[1:]:
         if row and row[0].strip() and not row[0].replace(',', '').replace('.', '').isnumeric():
             t = row[0].strip().upper()
             todas_originais.append(t)
-            # A Coluna AG agora é a 33ª (índice 32)
             mapa_atualizacao[t] = row[32] if len(row) > 32 else ""
 
-    todas = list(todas_originais) # Cópia para trabalhar
-
+    todas = list(todas_originais)
     df_filtros = df.copy()
     for col in ['P/L', 'P/VP', 'Div.Yield', 'ROE', 'Liq.2meses']:
         df_filtros[col] = df_filtros[col].apply(formatar)
 
-    # --- 2.1 Fixas (Só entram se a Trava de 2h permitir) ---
     cat_fixas = [f for f in FIXAS if f in todas and precisa_atualizar(f, mapa_atualizacao, agora_dt, sp_tz)]
-    fixas_travadas = [f for f in FIXAS if f in todas and f not in cat_fixas]
-    if fixas_travadas: print(f"🔒 TRAVA ATIVADA: Ignorando {fixas_travadas} (Atualizadas há menos de 2h)")
-
-    # --- 2.2 Metodologia (C3) ---
+    
     ticker_c3 = str(aba_metodo.acell('C3').value).strip().upper()
     cat_metodologia = []
     c3_nova = False
-
     if ticker_c3 and ticker_c3 in df.index:
         if ticker_c3 not in todas:
             c3_nova = True
@@ -158,47 +139,38 @@ def atualizar_financeiro():
         elif precisa_atualizar(ticker_c3, mapa_atualizacao, agora_dt, sp_tz) and ticker_c3 not in cat_fixas:
             cat_metodologia = [ticker_c3]
 
-    # --- 2.3 Oportunidades Reais --- PL > 0 E < 12 / P/VP < 1.5 / ROE >= 8.0 (Filtro Antilixo)
+    # Oportunidades Reais 
     opps_brutas = df_filtros[(df_filtros['P/L'] > 0) & (df_filtros['P/L'] < 12) & (df_filtros['P/VP'] < 1.5) & (df_filtros['ROE'] >= 8.0)].index.tolist()
-    # Pega apenas as que precisam de atualização e não estão nas categorias acima
     cat_opps = [o for o in opps_brutas if o in todas_originais and o not in cat_fixas and o not in cat_metodologia and precisa_atualizar(o, mapa_atualizacao, agora_dt, sp_tz)][:5]
 
-    # --- 2.4 Modo Caçador ---
+    # Modo Caçador 
     candidatas_prev = df_filtros[
         (df_filtros['P/L'] >= 2) & (df_filtros['P/L'] <= 15) &
         (df_filtros['P/VP'] >= 0.2) & (df_filtros['P/VP'] <= 1.5) &
-        (df_filtros['Div.Yield'] >= 6.0) & 
-        (df_filtros['ROE'] >= 10.0) &      
+        (df_filtros['Div.Yield'] >= 6.0) & (df_filtros['ROE'] >= 10.0) &      
         (df_filtros['Liq.2meses'] >= 2000000) 
     ].index.tolist()
     cat_novatas = [c for c in candidatas_prev if c not in todas][:2] 
     todas.extend(cat_novatas) 
 
-    # --- 2.5 Aleatórias (Prioriza quem não atualiza há muito tempo) ---
+    # Aleatórias
     usadas = set(cat_fixas + cat_metodologia + cat_opps + cat_novatas)
     precisam_urgente = [t for t in todas_originais if t not in usadas and precisa_atualizar(t, mapa_atualizacao, agora_dt, sp_tz)]
-
-    if len(precisam_urgente) >= 3:
-        cat_aleatorias = random.sample(precisam_urgente, 3)
-    else:
-        cat_aleatorias = precisam_urgente
+    cat_aleatorias = random.sample(precisam_urgente, 3) if len(precisam_urgente) >= 3 else precisam_urgente
 
     fila = cat_fixas + cat_metodologia + cat_opps + cat_aleatorias + cat_novatas
 
-    # Log Limpo do GitHub
     print(f"-> Ações Fixas na Fila: {cat_fixas}")
-    if cat_metodologia: print(f"-> Metodologia (C3): {cat_metodologia} {'(Nova!)' if c3_nova else ''}")
-    if cat_opps: print(f"-> Oportunidades garimpadas: {cat_opps}")
-    if cat_novatas: print(f"-> 🌟 ALERTA CAÇADOR (Novas): {cat_novatas}")
-    print(f"-> Varredura de Desatualizadas: {cat_aleatorias}")
     print(f"-> TOTAL PARA ATUALIZAR: {len(fila)} ações.\n")
 
-    # 3. PROCESSAMENTO E CAPTURA YAHOO FINANCE
+    # 3. PROCESSAMENTO YAHOO FINANCE
     print("[4/5] Processando cruzamento de dados linha a linha...")
     batch_updates = []
-    relatorio_opps = []
-    relatorio_novatas = []
-    relatorio_fixas_opps = [] # LISTA VIP
+    
+    # ⚠️ O SEGREDO DO "SILÊNCIO": Só notificamos o que for VIP ou OPORTUNIDADE
+    relatorio_opps_telegram = []
+    relatorio_fixas_telegram = [] 
+    relatorio_novatas_telegram = []
 
     for ticker in fila:
         linha_idx = todas.index(ticker) + 2
@@ -212,50 +184,13 @@ def atualizar_financeiro():
             vpa = formatar(yf_info.get('bookValue'))             
             lpa = formatar(yf_info.get('trailingEps'))           
 
-            # Buscando e traduzindo o Setor no Yahoo Finance
             setor_eng = yf_info.get('sector', 'N/D')
-            traducao_setores = {
-                'Energy': 'Energia', 'Financial Services': 'Financeiro', 'Basic Materials': 'Materiais Básicos', 
-                'Utilities': 'Utilidade Pública', 'Industrials': 'Indústria', 'Consumer Defensive': 'Consumo Defensivo', 
-                'Consumer Cyclical': 'Consumo Cíclico', 'Healthcare': 'Saúde', 'Technology': 'Tecnologia', 
-                'Communication Services': 'Comunicações', 'Real Estate': 'Imobiliário'
-            }
+            traducao_setores = {'Energy': 'Energia', 'Financial Services': 'Financeiro', 'Basic Materials': 'Materiais Básicos', 'Utilities': 'Utilidade Pública', 'Industrials': 'Indústria', 'Consumer Defensive': 'Consumo Defensivo', 'Consumer Cyclical': 'Consumo Cíclico', 'Healthcare': 'Saúde', 'Technology': 'Tecnologia', 'Communication Services': 'Comunicações', 'Real Estate': 'Imobiliário'}
             setor = traducao_setores.get(setor_eng, setor_eng)
 
             f = df.loc[ticker] if ticker in df.index else {}
 
-            row_base = [
-                setor,                                    # B: Setor (NEW)
-                preco,                                    # C: Preço (YF)
-                formatar(f.get('Div.Yield', 0)),          # D: DY
-                n_acoes,                                  # E: Nº Ações (YF)
-                formatar(f.get('P/L', 0)),                # F: P/L
-                formatar(f.get('P/VP', 0)),               # G: P/VP
-                formatar(f.get('P/Ativo', 0)),            # H: P/Ativo
-                formatar(f.get('Mrg Bruta', 0)),          # I: Marg. Bruta
-                formatar(f.get('Mrg Ebit', 0)),           # J: Marg. EBIT
-                formatar(f.get('Mrg. Líq.', 0)),          # K: Marg. Líq.
-                formatar(f.get('P/EBIT', 0)),             # L: P/EBIT
-                formatar(f.get('EV/EBIT', 0)),            # M: EV/EBIT
-                formatar(f.get('Dív.Líq/ Patrim.', 0)),   # N: Div.Liq/Ebit
-                formatar(f.get('Dív.Líq/ Patrim.', 0)),   # O: Div.Liq/Patri
-                formatar(f.get('PSR', 0)),                # P: PSR
-                formatar(f.get('P/Cap.Giro', 0)),         # Q: P/Cap.Giro
-                formatar(f.get('P/Ativ Circ.Liq', 0)),    # R: P.At.Circ.Liq
-                formatar(f.get('Liq. Corr.', 0)),         # S: Liq. Corr
-                formatar(f.get('ROE', 0)),                # T: ROE
-                roa,                                      # U: ROA (YF)
-                formatar(f.get('ROIC', 0)),               # V: ROIC
-                0, 0, 0,                                  # W, X, Y
-                formatar(f.get('Cresc. Rec.5a', 0)),      # Z: CAGR Rec
-                0,                                        # AA: CAGR Lucros
-                formatar(f.get('Liq.2meses', 0)),         # AB: Liq. Media
-                vpa,                                      # AC: VPA (YF)
-                lpa,                                      # AD: LPA (YF)
-                peg_ratio,                                # AE: PEG Ratio (YF)
-                valor_mercado,                            # AF: Valor Mercado (YF)
-                f"{agora_sp} OK"                          # AG: Atualização
-            ]
+            row_base = [setor, preco, formatar(f.get('Div.Yield', 0)), n_acoes, formatar(f.get('P/L', 0)), formatar(f.get('P/VP', 0)), formatar(f.get('P/Ativo', 0)), formatar(f.get('Mrg Bruta', 0)), formatar(f.get('Mrg Ebit', 0)), formatar(f.get('Mrg. Líq.', 0)), formatar(f.get('P/EBIT', 0)), formatar(f.get('EV/EBIT', 0)), formatar(f.get('Dív.Líq/ Patrim.', 0)), formatar(f.get('Dív.Líq/ Patrim.', 0)), formatar(f.get('PSR', 0)), formatar(f.get('P/Cap.Giro', 0)), formatar(f.get('P/Ativ Circ.Liq', 0)), formatar(f.get('Liq. Corr.', 0)), formatar(f.get('ROE', 0)), roa, formatar(f.get('ROIC', 0)), 0, 0, 0, formatar(f.get('Cresc. Rec.5a', 0)), 0, formatar(f.get('Liq.2meses', 0)), vpa, lpa, peg_ratio, valor_mercado, f"{agora_sp} OK"]
 
             if ticker in cat_novatas or (ticker == ticker_c3 and c3_nova):
                 row_final = [ticker] + row_base
@@ -266,73 +201,58 @@ def atualizar_financeiro():
 
             batch_updates.append({'range': range_update, 'values': [row_final]})
 
-            cat_atual = "Fixa" if ticker in cat_fixas else "Novata" if ticker in cat_novatas else "Metodologia" if ticker in cat_metodologia else "Oportunidade" if ticker in cat_opps else "Aleatória"
+            print(f"   ✅ [OK] {ticker} | Dados atualizados.")
 
-            tag_extra = ""
-            if ticker in opps_brutas:
-                if ticker in FIXAS: tag_extra = " (Ação Fixa)"
-                elif ticker == ticker_c3: tag_extra = " (C3)"
-
-            log_print = f"{cat_atual} / Oportunidade" if tag_extra else cat_atual
-            print(f"   ✅ [OK] {ticker} ({log_print}) | Concluída com sucesso.")
-
+            # SELEÇÃO PARA NOTIFICAR O TELEGRAM (A REGRA DE OURO)
             if ticker in opps_brutas:
                 roe_wpp = formatar(f.get('ROE', 0)) * 100
                 pl_wpp = formatar(f.get('P/L', 0))
                 pvp_wpp = formatar(f.get('P/VP', 0))
 
-                detalhe_msg = f"R$ {preco} | 🏢 {setor} (P/L: {pl_wpp} | P/VP: {pvp_wpp} | ROE: {roe_wpp:.1f}%)"
+                detalhe_msg = f"R$ {preco} | (P/L: {pl_wpp} | P/VP: {pvp_wpp})"
 
+                # Se a Oportunidade for de uma das suas Fixas, alerta máximo
                 if ticker in FIXAS:
-                    relatorio_fixas_opps.append(f"• *{ticker}* está barata!\n   Motivo: P/L ({pl_wpp}) abaixo de 12, P/VP ({pvp_wpp}) abaixo de 1.5 e ROE ({roe_wpp:.1f}%) Saudável.\n   🏢 Setor: {setor}")
-
-                relatorio_opps.append(f"• *{ticker}*{tag_extra}: {detalhe_msg}")
+                    relatorio_fixas_telegram.append(f"🟢 *Sinal Verde em {ticker}*\n   Preço: R$ {preco} | P/VP caiu para {pvp_wpp}\n   ROE Saudável de {roe_wpp:.1f}%")
+                else:
+                    relatorio_opps_telegram.append(f"• *{ticker}*: {detalhe_msg}")
 
             if ticker in cat_novatas:
                 dy_wpp = formatar(f.get('Div.Yield', 0)) * 100
-                roe_wpp = formatar(f.get('ROE', 0)) * 100
-                relatorio_novatas.append(f"• *{ticker}*: R$ {preco} | 🏢 {setor} (DY: {dy_wpp:.1f}% | ROE: {roe_wpp:.1f}%)")
+                relatorio_novatas_telegram.append(f"• *{ticker}*: R$ {preco} | 🏭 {setor} (DY: {dy_wpp:.1f}%)")
 
         except Exception as e:
             print(f"   ❌ [ERRO] Falha ao processar {ticker}: {e}")
 
-    # 4. ESCRITA EM LOTE E NOTIFICAÇÃO
-    print("\n[5/5] Salvando na Planilha e Disparando Notificações...")
-    
-    # Prepara a mensagem final
+    # 4. ESCRITA EM LOTE E NOTIFICAÇÃO SILENCIOSA
+    print("\n[5/5] Salvando na Planilha e Disparando Notificações (Modo Oportunidade)...")
     msg_telegram = ""
-    if msg_macro:
-        msg_telegram += msg_macro # Adiciona o macro no topo, se houver
-
-    if msg_fiis:
+    
+    if msg_fiis: # Se o FII mudou muito e gritou, a gente repassa
         msg_telegram += msg_fiis 
 
     if batch_updates:
         aba_base.batch_update(batch_updates)
         print(f"💾 Sucesso: {len(batch_updates)} ações atualizadas na planilha.")
 
-        msg_telegram += "🤖 *Relatório de Ações* 🤖\n\n"
+        # Só cria título se houver relatórios úteis
+        if relatorio_fixas_telegram or relatorio_opps_telegram or relatorio_novatas_telegram:
+            msg_telegram += "🤖 *Caçador de Ações* 🤖\n\n"
 
-        if relatorio_fixas_opps:
-            msg_telegram += "🚨 *ALERTA VIP: AÇÕES FIXAS EM OPORTUNIDADE* 🚨\n" + "\n".join(relatorio_fixas_opps) + "\n\n"
+        if relatorio_fixas_telegram:
+            msg_telegram += "🚨 *ALERTA VIP: SUAS AÇÕES FIXAS ESTÃO BARATAS* 🚨\n" + "\n".join(relatorio_fixas_telegram) + "\n\n"
 
-        if cat_fixas: msg_telegram += f"📌 *Fixas Processadas:*\n{', '.join(cat_fixas)}\n\n"
+        if relatorio_opps_telegram: 
+            msg_telegram += "🎯 *Oportunidades do Mercado (P/VP < 1.5):*\n" + "\n".join(relatorio_opps_telegram) + "\n\n"
 
-        if cat_metodologia: 
-            status_c3 = "(Adicionada na Planilha!)" if c3_nova else ""
-            msg_telegram += f"🔍 *Metodologia (C3):*\n{', '.join(cat_metodologia)} {status_c3}\n\n"
+        if relatorio_novatas_telegram: 
+            msg_telegram += "🌟 *NOVAS EMPRESAS CAÇADAS:*\n" + "\n".join(relatorio_novatas_telegram)
 
-        if cat_aleatorias: msg_telegram += f"🎲 *Varredura de Desatualizadas:*\n{', '.join(cat_aleatorias)}\n\n"
-
-        if relatorio_opps: msg_telegram += "🎯 *Ações em Oportunidade:*\n" + "\n".join(relatorio_opps) + "\n\n"
-
-        if relatorio_novatas: msg_telegram += "🌟 *NOVA PREVIDENCIÁRIA ADICIONADA:*\n" + "\n".join(relatorio_novatas)
-
-    # Dispara o alerta se o Macro rodou OU se alguma ação atualizou
-    if msg_telegram != "":
+    # Dispara o alerta SÓ se o Caçador encontrou coisas relevantes
+    if msg_telegram.strip():
         disparar_alertas(msg_telegram)
     else:
-        print("✅ Nenhuma atualização de Ações ou Macro necessária neste horário.")
+        print("✅ Planilha atualizada. (Sem Notificação: O mercado está em repouso e não há barganhas ativas).")
 
 if __name__ == "__main__":
     atualizar_financeiro()
