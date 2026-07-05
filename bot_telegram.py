@@ -271,6 +271,20 @@ def submenu_carteira(call):
 def voltar_menu_principal(call):
     enviar_menu(call.message)
 
+# --- 10. MÓDULO MACROECONOMIA ---
+@bot.callback_query_handler(func=lambda call: call.data == "menu_macro")
+def submenu_macro(call):
+    bot.answer_callback_query(call.id, "A consultar o Banco Central do Brasil...")
+    
+    dados_macro = module_macro.obter_dados_macro()
+    
+    markup = InlineKeyboardMarkup()
+    markup.row(InlineKeyboardButton("🔄 Atualizar", callback_data="menu_macro"))
+    markup.row(InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="voltar_menu"))
+    
+    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, 
+                          text=dados_macro, reply_markup=markup, parse_mode="Markdown")
+
 # ==========================================
 # MOTOR DO SERVIDOR WEB (FLASK) 
 # ==========================================
