@@ -10,7 +10,7 @@ def analisar_fatos_com_ia(ticker):
     try:
         genai.configure(api_key=chave_api)
         # Usamos o modelo flash por ser extremamente rápido para respostas no Telegram
-        model = genai.GenerativeModel('gemini-1.5-flash') 
+        model = genai.GenerativeModel('gemini-pro')
         
         prompt = f"""
         Você é um analista financeiro sênior de um Family Office.
