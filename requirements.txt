@@ -10,3 +10,5 @@ google-generativeai
 google-api-python-client
 PyPDF2
 lxml
+xlrd
+python-dateutil
