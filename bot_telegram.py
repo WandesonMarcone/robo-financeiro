@@ -1,7 +1,6 @@
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import gspread
-import module_cvm_bridge
 import os
 import json
 import traceback
@@ -11,7 +10,9 @@ from datetime import datetime
 from flask import Flask, request
 
 # --- IMPORTAÇÃO DOS SEUS CÉREBROS ---
-import module_ia  # 💡 Corrigido: Agora a IA não vai dar erro de NameError
+import module_ia 
+import module_macro
+import module_cvm_bridge
 
 # --- CONFIGURAÇÕES ---
 TELEGRAM_BOT_TOKEN = "7777811765:AAEk3XQibBBYSFKRfQLzOWs_KpGOcPFR274"
@@ -95,15 +96,17 @@ def detalhe_ativo(call):
             setor = linha_ativo[2]
             preco = linha_ativo[3]
             pvp = linha_ativo[5]
-            
-            # Formatação defensiva caso a planilha ainda não tenha sido atualizada pelo main.py
+
             dy = f"{float(linha_ativo[6])*100:.2f}%" if (len(linha_ativo) > 6 and linha_ativo[6].replace('.', '').isnumeric()) else "Aguardando atualização..."
             vacancia = f"{float(linha_ativo[7])*100:.2f}%" if (len(linha_ativo) > 7 and linha_ativo[7].replace('.', '').isnumeric()) else "0.00%"
 
             texto = f"📌 *{ticker}* ({tipo} - {setor})\n\n💵 *Preço Atual:* R$ {preco}\n⚖️ *P/VP:* {pvp}\n💰 *DY (12m):* {dy}\n🏢 *Vacância Média:* {vacancia}\n\n_Dados extraídos diretamente da infraestrutura do seu Banco de Dados._"
 
             markup = InlineKeyboardMarkup()
-            markup.row(InlineKeyboardButton("📰 Resumo IA (Fatos)", callback_data=f"ia_{ticker}"))
+            # Botões Institucionais CVM/FundosNet para FIIs
+            markup.row(InlineKeyboardButton("📑 Relatório Gerencial", callback_data=f"doc_gerencial_{ticker}"))
+            markup.row(InlineKeyboardButton("🚨 Fatos Relevantes", callback_data=f"doc_fato_{ticker}_fii"))
+            markup.row(InlineKeyboardButton("🧠 Resumo IA (Geral)", callback_data=f"ia_{ticker}"))
             markup.row(InlineKeyboardButton("🔙 Voltar", callback_data="menu_fiis"))
 
             bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=texto, reply_markup=markup, parse_mode="Markdown")
@@ -136,8 +139,6 @@ def submenu_acoes(call):
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Erro ao ler planilha de Ações: {e}")
 
-import math # Adicione isto lá no topo do ficheiro, junto com os outros imports!
-
 # --- 6. VISUALIZAR DETALHE DA AÇÃO (RAIO-X COMPLETO) ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("acao_"))
 def detalhe_acao(call):
@@ -146,8 +147,7 @@ def detalhe_acao(call):
     try:
         asset = yf.Ticker(f"{ticker}.SA")
         info = asset.info
-        
-        # Extração de Dados Fundamentalistas
+
         preco_atual = info.get('currentPrice') or info.get('regularMarketPrice') or 0
         setor = info.get('sector', 'Não Informado')
         pl = info.get('trailingPE', 0)
@@ -155,22 +155,20 @@ def detalhe_acao(call):
         lpa = info.get('trailingEps', 0)
         vpa = info.get('bookValue', 0)
         dy = (info.get('dividendYield', 0) * 100) if info.get('dividendYield') else 0
-        
-        # Cálculo de Payout Histórico (Conservador)
+
         historico_divs = asset.dividends
         ano_atual = datetime.now().year
         divs_5_anos = historico_divs[historico_divs.index.year >= (ano_atual - 5)]
         dpa_medio_5a = divs_5_anos.sum() / 5 if not divs_5_anos.empty else 0
         payout = (dpa_medio_5a / lpa * 100) if lpa > 0 else 0
 
-        # Montagem do Dashboard
         texto = f"📌 *RAIO-X ESTRUTURAL: {ticker}*\n"
         texto += f"🏭 *Setor:* {setor}\n\n"
-        
+
         texto += f"💵 *Preço Atual:* R$ {preco_atual:.2f}\n"
         texto += f"💰 *Dividend Yield:* {dy:.2f}%\n"
         texto += f"📊 *Payout Histórico Médio:* {payout:.1f}%\n\n"
-        
+
         texto += f"📈 *Múltiplos de Valuation:*\n"
         texto += f"• *P/L (Preço/Lucro):* {pl:.2f}\n"
         texto += f"• *P/VP (Preço/Valor Patrimonial):* {pvp:.2f}\n"
@@ -178,9 +176,12 @@ def detalhe_acao(call):
         texto += f"• *VPA (Valor Patrimonial):* R$ {vpa:.2f}\n"
 
         markup = InlineKeyboardMarkup()
-        markup.row(InlineKeyboardButton("🧠 Avaliação IA", callback_data=f"ia_{ticker}"))
+        # Botões Institucionais CVM/B3 para Ações
+        markup.row(InlineKeyboardButton("📊 Resultados 1º Tri / Lucros", callback_data=f"doc_trimestre_{ticker}"))
+        markup.row(InlineKeyboardButton("🚨 Fatos Relevantes", callback_data=f"doc_fato_{ticker}_acao"))
         markup.row(InlineKeyboardButton("🎯 Preços Teto (Graham/Bazin)", callback_data=f"teto_{ticker}"))
         markup.row(InlineKeyboardButton("🚀 Preço Projetivo (Vídeo)", callback_data=f"proj_{ticker}"))
+        markup.row(InlineKeyboardButton("🧠 Avaliação IA (Geral)", callback_data=f"ia_{ticker}"))
         markup.row(InlineKeyboardButton("🔙 Voltar para Ações", callback_data="menu_acoes"))
 
         bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=texto, reply_markup=markup, parse_mode="Markdown")
@@ -192,23 +193,21 @@ def detalhe_acao(call):
 def precos_teto(call):
     ticker = call.data.split("_")[1]
     bot.answer_callback_query(call.id, f"A calcular Graham e Bazin para {ticker}...")
-    
+
     try:
         asset = yf.Ticker(f"{ticker}.SA")
         info = asset.info
         preco_atual = info.get('currentPrice') or info.get('regularMarketPrice') or 0
         lpa = info.get('trailingEps', 0)
         vpa = info.get('bookValue', 0)
-        
-        # BAZIN
+
         historico_divs = asset.dividends
         ano_atual = datetime.now().year
         divs_5_anos = historico_divs[historico_divs.index.year >= (ano_atual - 5)]
         dpa_medio_5a = divs_5_anos.sum() / 5 if not divs_5_anos.empty else 0
         teto_bazin = dpa_medio_5a / 0.06
         margem_bazin = ((teto_bazin/preco_atual)-1)*100 if preco_atual > 0 else 0
-        
-        # GRAHAM (Exige Lucro e Patrimônio Positivos)
+
         if lpa > 0 and vpa > 0:
             teto_graham = math.sqrt(22.5 * lpa * vpa)
             margem_graham = ((teto_graham/preco_atual)-1)*100 if preco_atual > 0 else 0
@@ -218,11 +217,11 @@ def precos_teto(call):
 
         texto = f"🎯 *PREÇOS TETO (HISTÓRICOS): {ticker}*\n"
         texto += f"💵 Preço Atual: R$ {preco_atual:.2f}\n\n"
-        
+
         texto += f"🏛️ *1. FÓRMULA DE GRAHAM*\n"
         texto += f"_Baseado no Lucro e Patrimônio_\n"
         texto += f"Teto: {texto_graham}\n\n"
-        
+
         texto += f"💰 *2. MÉTODO DE BAZIN*\n"
         texto += f"_Baseado na média de dividendos (6%)_\n"
         texto += f"Teto: R$ {teto_bazin:.2f} ({margem_bazin:+.1f}%)\n"
@@ -238,32 +237,30 @@ def precos_teto(call):
 # --- 8. MÓDULO: PREÇO PROJETIVO (DO VÍDEO) ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("proj_"))
 def valuation_projetivo(call):
-    # Formato: proj_TICKER_PAYOUT_YIELD
     partes = call.data.split("_")
     ticker = partes[1]
-    
-    payout_custom = float(partes[2]) if len(partes) > 2 else 50.0 # Payout base 50%
-    yield_exigido = float(partes[3]) if len(partes) > 3 else 0.08 # Yield base 8%
-    
+
+    payout_custom = float(partes[2]) if len(partes) > 2 else 50.0 
+    yield_exigido = float(partes[3]) if len(partes) > 3 else 0.08 
+
     bot.answer_callback_query(call.id, f"Projetando DRE de {ticker}...")
-    
+
     try:
         asset = yf.Ticker(f"{ticker}.SA")
         info = asset.info
         preco_atual = info.get('currentPrice') or info.get('regularMarketPrice') or 0
         lpa_atual = info.get('trailingEps') or 0.01 
-        
-        # Simulação de crescimento conservador (DRE Projetada)
+
         cagr_lucro = 0.05 
         lpa_projetado = lpa_atual * (1 + cagr_lucro)
-        
+
         dividendo_projetado = lpa_projetado * (payout_custom / 100)
         teto_projetivo = dividendo_projetado / yield_exigido
         margem_proj = ((teto_projetivo/preco_atual)-1)*100 if preco_atual > 0 else 0
 
         texto = f"🚀 *PREÇO TETO PROJETIVO: {ticker}*\n"
         texto += f"💵 Preço Atual: R$ {preco_atual:.2f}\n\n"
-        
+
         texto += f"📊 *Premissas do Próximo Ano:*\n"
         texto += f"• LPA Projetado: R$ {lpa_projetado:.2f}\n"
         texto += f"• Payout Simulado: {payout_custom:.1f}%\n"
@@ -271,13 +268,12 @@ def valuation_projetivo(call):
 
         texto += f"🎯 *RESULTADO (Exigindo {yield_exigido*100:.1f}% de DY)*\n"
         texto += f"💎 *Preço Teto:* R$ {teto_projetivo:.2f}\n"
-        
+
         if margem_proj > 0:
             texto += f"🟢 *Margem:* +{margem_proj:.1f}% (Oportunidade)"
         else:
             texto += f"🔴 *Margem:* {margem_proj:.1f}% (Caro)"
 
-        # Botões Interativos do Vídeo
         markup = InlineKeyboardMarkup()
         markup.row(
             InlineKeyboardButton("📊 Payout 40%", callback_data=f"proj_{ticker}_40_{yield_exigido}"),
@@ -294,19 +290,19 @@ def valuation_projetivo(call):
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Erro no cálculo projetivo: {e}")
 
-# --- 8. CHAMA O CÉREBRO DA IA (Fatos Relevantes) ---
+# --- 9. AVALIAÇÃO IA GENÉRICA ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("ia_"))
 def chamar_ia(call):
     ticker = call.data.split("_")[1]
     bot.answer_callback_query(call.id, f"O Gemini está analisando {ticker}...")
-    
+
     analise = module_ia.analisar_fatos_com_ia(ticker)
-    
+
     markup = InlineKeyboardMarkup()
     markup.row(InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="voltar_menu"))
     bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=f"🧠 *Análise Gemini - {ticker}*\n\n{analise}", reply_markup=markup, parse_mode="Markdown")
 
-# --- 9. MENU MINHA CARTEIRA ---
+# --- 10. MÓDULO MINHA CARTEIRA ---
 @bot.callback_query_handler(func=lambda call: call.data == "menu_carteira")
 def submenu_carteira(call):
     markup = InlineKeyboardMarkup()
@@ -318,19 +314,71 @@ def submenu_carteira(call):
 def voltar_menu_principal(call):
     enviar_menu(call.message)
 
-# --- 10. MÓDULO MACROECONOMIA ---
+# --- 11. MÓDULO MACROECONOMIA ---
 @bot.callback_query_handler(func=lambda call: call.data == "menu_macro")
 def submenu_macro(call):
     bot.answer_callback_query(call.id, "A consultar o Banco Central do Brasil...")
-    
+
     dados_macro = module_macro.obter_dados_macro()
-    
+
     markup = InlineKeyboardMarkup()
+    # Adicionado o botão das Notícias Macro
+    markup.row(InlineKeyboardButton("📰 Últimas Notícias do Mercado", callback_data="noticias_macro"))
     markup.row(InlineKeyboardButton("🔄 Atualizar", callback_data="menu_macro"))
     markup.row(InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="voltar_menu"))
-    
+
     bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, 
                           text=dados_macro, reply_markup=markup, parse_mode="Markdown")
+
+# --- 12. PONTES CVM E FUNDOSNET (NOVOS HANDLERS IA) ---
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("doc_fato_"))
+def relatorio_fato_relevante(call):
+    dados = call.data.split("_")
+    ticker = dados[2]
+    tipo_ativo = dados[3] # 'acao' ou 'fii'
+    
+    bot.answer_callback_query(call.id, f"A ler Fatos Relevantes da CVM para {ticker}...")
+    is_fii = True if tipo_ativo == 'fii' else False
+    
+    resumo = module_cvm_bridge.buscar_fatos_relevantes(ticker, is_fii)
+    
+    markup = InlineKeyboardMarkup()
+    markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=f"acao_{ticker}" if not is_fii else f"detalhe_{ticker}"))
+    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=resumo, reply_markup=markup, parse_mode="Markdown")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("doc_gerencial_"))
+def relatorio_gerencial(call):
+    ticker = call.data.split("_")[2]
+    bot.answer_callback_query(call.id, f"A extrair os últimos 2 meses de relatórios de {ticker}...")
+    
+    resumo = module_cvm_bridge.buscar_relatorios_gerenciais(ticker)
+    
+    markup = InlineKeyboardMarkup()
+    markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=f"detalhe_{ticker}"))
+    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=resumo, reply_markup=markup, parse_mode="Markdown")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("doc_trimestre_"))
+def relatorio_trimestral(call):
+    ticker = call.data.split("_")[2]
+    bot.answer_callback_query(call.id, f"A ler ITR/DFP de {ticker}...")
+    
+    resumo = module_cvm_bridge.buscar_resultados_trimestrais(ticker)
+    
+    markup = InlineKeyboardMarkup()
+    markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=f"acao_{ticker}"))
+    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=resumo, reply_markup=markup, parse_mode="Markdown")
+
+@bot.callback_query_handler(func=lambda call: call.data == "noticias_macro")
+def noticias_macro(call):
+    bot.answer_callback_query(call.id, "A pesquisar jornais e feeds macroeconómicos...")
+    
+    resumo = module_cvm_bridge.buscar_noticias_macro()
+    
+    markup = InlineKeyboardMarkup()
+    markup.row(InlineKeyboardButton("🔙 Voltar ao Macro", callback_data="menu_macro"))
+    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=f"🌍 *Radar Macroeconómico*\n\n{resumo}", reply_markup=markup, parse_mode="Markdown")
+
 
 # ==========================================
 # MOTOR DO SERVIDOR WEB (FLASK) 
