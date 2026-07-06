@@ -1,6 +1,7 @@
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import gspread
+import module_cvm_bridge
 import os
 import json
 import traceback
