@@ -87,15 +87,16 @@ def atualizar_fiis(aba_fiis):
             tickers_planilha.append(t)
             mapa_atualizacao[t] = row[15] if len(row) > 15 else ""
 
-    cat_fixas = [f for f in FIXAS_FIIS if precisa_atualizar_fii(f, mapa_atualizacao, agora_dt, sp_tz)]
+    cat_fixas = FIXAS_FIIS
     
-    # 🎯 NOVO FILTRO DE GARIMPO INSTITUCIONAL
+     # 🎯 NOVO FILTRO DE GARIMPO INSTITUCIONAL (ELITE)
     df_cacador = df[
-        (df['P/VP'] >= 0.85) & (df['P/VP'] <= 0.99) & 
-        (df['Dividend Yield'] >= 0.08) & (df['Dividend Yield'] <= 0.14) &
-        (df['Liquidez'] >= 1000000) &
-        (df['Vacância Média'] <= 0.15)
+        (df['P/VP'] >= 0.90) & (df['P/VP'] <= 1.05) &  # Evita fundos derretendo (<0.90 costuma ter calote oculto)
+        (df['Dividend Yield'] >= 0.09) & # Exige no mínimo 9% de DY real ao ano
+        (df['Liquidez'] >= 1500000) & # Aumenta a régua para 1.5 Milhões (tira fundos ilíquidos)
+        (df['Vacância Média'] <= 0.10) # Tolerância máxima de 10% de imóveis vazios
     ]
+
     oportunidades_gerais = df_cacador.index.tolist()
     novatos_garimpados = [fii for fii in oportunidades_gerais if fii not in tickers_planilha and fii not in cat_fixas][:3]
     
