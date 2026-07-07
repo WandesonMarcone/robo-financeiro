@@ -3,6 +3,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import gspread
 import os
 import json
+import threading
 import traceback
 import math
 import yfinance as yf
