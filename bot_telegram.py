@@ -382,7 +382,7 @@ def noticias_macro(call):
 
 
 # ==========================================
-# MOTOR DO SERVIDOR WEB (FLASK) - ALTA PERFORMANCE
+# MOTOR DO SERVIDOR WEB (COM DIAGNÓSTICO)
 # ==========================================
 @app.route(f'/{TELEGRAM_BOT_TOKEN}', methods=['POST'])
 def webhook():
@@ -390,13 +390,19 @@ def webhook():
         json_string = request.get_data().decode('utf-8')
         update = telebot.types.Update.de_json(json_string)
         
-        # 🔥 O SEGREDO: Abre uma "linha de trabalho" paralela. 
-        # O Telegram recebe a confirmação na hora e não trava, enquanto a IA pensa.
-        thread = threading.Thread(target=bot.process_new_updates, args=([update],))
+        # Função wrapper para capturar erros dentro da thread
+        def process_threaded(upd):
+            try:
+                bot.process_new_updates([upd])
+            except Exception as e:
+                print(f"❌ ERRO CRÍTICO NA THREAD: {e}")
+                traceback.print_exc()
+
+        thread = threading.Thread(target=process_threaded, args=(update,))
         thread.start()
         
         return "OK", 200
     except Exception as e:
-        print(f"❌ ERRO FATAL NO WEBHOOK: {e}")
+        print(f"❌ ERRO FATAL NO WEBHOOK PRINCIPAL: {e}")
         traceback.print_exc()
         return "Erro", 500
