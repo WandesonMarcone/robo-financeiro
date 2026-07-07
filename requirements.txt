@@ -13,3 +13,6 @@ lxml
 xlrd
 python-dateutil
 xmltodict
+openpyxl
+cssselect
+html5lib
