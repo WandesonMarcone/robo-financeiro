@@ -12,3 +12,4 @@ PyPDF2
 lxml
 xlrd
 python-dateutil
+xmltodict
