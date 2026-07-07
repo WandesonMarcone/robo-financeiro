@@ -104,7 +104,6 @@ def detalhe_ativo(call):
             texto = f"📌 *{ticker}* ({tipo} - {setor})\n\n💵 *Preço Atual:* R$ {preco}\n⚖️ *P/VP:* {pvp}\n💰 *DY (12m):* {dy}\n🏢 *Vacância Média:* {vacancia}\n\n_Dados extraídos diretamente da infraestrutura do seu Banco de Dados._"
 
             markup = InlineKeyboardMarkup()
-            # Botões Institucionais CVM/FundosNet para FIIs
             markup.row(InlineKeyboardButton("📑 Relatório Gerencial", callback_data=f"doc_gerencial_{ticker}"))
             markup.row(InlineKeyboardButton("🚨 Fatos Relevantes", callback_data=f"doc_fato_{ticker}_fii"))
             markup.row(InlineKeyboardButton("🧠 Resumo IA (Geral)", callback_data=f"ia_{ticker}"))
@@ -177,7 +176,6 @@ def detalhe_acao(call):
         texto += f"• *VPA (Valor Patrimonial):* R$ {vpa:.2f}\n"
 
         markup = InlineKeyboardMarkup()
-        # Botões Institucionais CVM/B3 para Ações
         markup.row(InlineKeyboardButton("📊 Resultados 1º Tri / Lucros", callback_data=f"doc_trimestre_{ticker}"))
         markup.row(InlineKeyboardButton("🚨 Fatos Relevantes", callback_data=f"doc_fato_{ticker}_acao"))
         markup.row(InlineKeyboardButton("🎯 Preços Teto (Graham/Bazin)", callback_data=f"teto_{ticker}"))
@@ -187,7 +185,8 @@ def detalhe_acao(call):
 
         bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=texto, reply_markup=markup, parse_mode="Markdown")
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ Erro ao processar dados de {ticker}: {e}")
+        if "message is not modified" not in str(e):
+            bot.send_message(call.message.chat.id, f"❌ Erro ao processar dados de {ticker}: {e}")
 
 # --- 7. MÓDULO: PREÇOS TETO (GRAHAM E BAZIN) ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith("teto_"))
@@ -301,14 +300,18 @@ def chamar_ia(call):
 
     markup = InlineKeyboardMarkup()
     markup.row(InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="voltar_menu"))
-    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=f"🧠 *Análise Gemini - {ticker}*\n\n{analise}", reply_markup=markup, parse_mode="Markdown")
+    try:
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=f"🧠 *Análise Gemini - {ticker}*\n\n{analise}", reply_markup=markup, parse_mode="Markdown")
+    except Exception as e:
+        if "message is not modified" not in str(e):
+            print(f"Erro IA: {e}")
 
 # --- 10. MÓDULO MINHA CARTEIRA ---
 @bot.callback_query_handler(func=lambda call: call.data == "menu_carteira")
 def submenu_carteira(call):
     markup = InlineKeyboardMarkup()
     markup.row(InlineKeyboardButton("🔙 Voltar", callback_data="voltar_menu"))
-    texto = "💼 *Minha Carteira*\n\n_Módulo de consolidação em construção. Próximo passo: integrar a aba 'BD_Carteira' para calcular o preço médio e rendimento passivo mensal real._"
+    texto = "💼 *Minha Carteira*\n\n_Módulo de consolidação em construção._"
     bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=texto, reply_markup=markup, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data == "voltar_menu")
@@ -323,80 +326,95 @@ def submenu_macro(call):
     dados_macro = module_macro.obter_dados_macro()
 
     markup = InlineKeyboardMarkup()
-    # Adicionado o botão das Notícias Macro
     markup.row(InlineKeyboardButton("📰 Últimas Notícias do Mercado", callback_data="noticias_macro"))
     markup.row(InlineKeyboardButton("🔄 Atualizar", callback_data="menu_macro"))
     markup.row(InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="voltar_menu"))
 
-    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, 
-                          text=dados_macro, reply_markup=markup, parse_mode="Markdown")
+    try:
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=dados_macro, reply_markup=markup, parse_mode="Markdown")
+    except Exception as e:
+        if "message is not modified" not in str(e):
+            print(e)
 
 # --- 12. PONTES CVM E FUNDOSNET (NOVOS HANDLERS IA) ---
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("doc_fato_"))
 def relatorio_fato_relevante(call):
-    print(f"DEBUG: Entrou no handler Fato Relevante para {call.data}")
     try:
         dados = call.data.split("_")
         ticker = dados[2]
         tipo_ativo = dados[3]  # 'acao' ou 'fii'
 
-        bot.answer_callback_query(call.id, f"A ler Fatos Relevantes da CVM para {ticker}...")
+        bot.answer_callback_query(call.id, f"A ler Fatos Relevantes para {ticker}...")
         is_fii = True if tipo_ativo == 'fii' else False
 
-        print(f"DEBUG: Chamando a ponte para {ticker}")
         resumo = module_cvm_bridge.buscar_fatos_relevantes(ticker, is_fii)
-        print(f"DEBUG: Ponte retornou: {resumo[:50]}...")
 
-        markup = types.InlineKeyboardMarkup()
-        markup.row(types.InlineKeyboardButton("⬅️ Voltar", callback_data=callback_voltar))
+        # CÓDIGO CORRIGIDO (O Erro de Sintaxe estava aqui)
+        markup = InlineKeyboardMarkup()
+        markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=f"acao_{ticker}" if not is_fii else f"detalhe_{ticker}"))
 
-        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=resumo, parse_mode="Markdown")
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=resumo, reply_markup=markup, parse_mode="Markdown")
     except Exception as e:
-        print(f"❌ ERRO CRÍTICO NO HANDLER: {e}")
-        traceback.print_exc()
+        # Se for o erro do Telegram "message is not modified", a gente ignora silenciosamente
+        if "message is not modified" not in str(e):
+            print(f"❌ ERRO CRÍTICO NO HANDLER: {e}")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("doc_gerencial_"))
 def relatorio_gerencial(call):
-    ticker = call.data.split("_")[2]
-    bot.answer_callback_query(call.id, f"A extrair os últimos 2 meses de relatórios de {ticker}...")
-    
-    resumo = module_cvm_bridge.buscar_relatorios_gerenciais(ticker)
-    
-    markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=f"detalhe_{ticker}"))
-    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=resumo, reply_markup=markup, parse_mode="Markdown")
+    try:
+        ticker = call.data.split("_")[2]
+        bot.answer_callback_query(call.id, f"A extrair relatórios de {ticker}...")
+
+        resumo = module_cvm_bridge.buscar_relatorios_gerenciais(ticker)
+
+        markup = InlineKeyboardMarkup()
+        markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=f"detalhe_{ticker}"))
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=resumo, reply_markup=markup, parse_mode="Markdown")
+    except Exception as e:
+        if "message is not modified" not in str(e):
+            print(e)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("doc_trimestre_"))
 def relatorio_trimestral(call):
-    ticker = call.data.split("_")[2]
-    bot.answer_callback_query(call.id, f"A ler ITR/DFP de {ticker}...")
-    
-    resumo = module_cvm_bridge.buscar_resultados_trimestrais(ticker)
-    
-    markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=f"acao_{ticker}"))
-    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=resumo, reply_markup=markup, parse_mode="Markdown")
+    try:
+        ticker = call.data.split("_")[2]
+        bot.answer_callback_query(call.id, f"A ler ITR/DFP de {ticker}...")
+
+        resumo = module_cvm_bridge.buscar_resultados_trimestrais(ticker)
+
+        markup = InlineKeyboardMarkup()
+        markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=f"acao_{ticker}"))
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=resumo, reply_markup=markup, parse_mode="Markdown")
+    except Exception as e:
+        if "message is not modified" not in str(e):
+            print(e)
 
 @bot.callback_query_handler(func=lambda call: call.data == "noticias_macro")
 def noticias_macro(call):
-    bot.answer_callback_query(call.id, "A pesquisar jornais e feeds macroeconómicos...")
-    
-    resumo = module_cvm_bridge.buscar_noticias_macro()
-    
-    markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("🔙 Voltar ao Macro", callback_data="menu_macro"))
-    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=f"🌍 *Radar Macroeconómico*\n\n{resumo}", reply_markup=markup, parse_mode="Markdown")
+    try:
+        bot.answer_callback_query(call.id, "A pesquisar jornais e feeds macroeconómicos...")
 
+        resumo = module_cvm_bridge.buscar_noticias_macro()
+
+        markup = InlineKeyboardMarkup()
+        markup.row(InlineKeyboardButton("🔙 Voltar ao Macro", callback_data="menu_macro"))
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=f"🌍 *Radar Macroeconómico*\n\n{resumo}", reply_markup=markup, parse_mode="Markdown")
+    except Exception as e:
+        if "message is not modified" not in str(e):
+            print(e)
 
 # ==========================================
-# MOTOR DO SERVIDOR WEB (COM DIAGNÓSTICO)
+# MOTOR DO SERVIDOR WEB (COM THREADING E ESCUDO)
 # ==========================================
 @app.route(f'/{TELEGRAM_BOT_TOKEN}', methods=['POST'])
 def webhook():
     json_string = request.get_data().decode('utf-8')
     update = telebot.types.Update.de_json(json_string)
-    
-    # Execução direta, sem threads, para podermos ver o erro no log
-    bot.process_new_updates([update])
-    return "OK", 200
+
+    # Função isolada para rodar em paralelo sem estourar o limite de tempo do Telegram
+    def processo_paralelo():
+        try:
+            bot.process_new_updates([update])
+        except Exception as e:
+            # O "Escudo Anti-Clone"
