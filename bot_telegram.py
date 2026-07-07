@@ -335,18 +335,23 @@ def submenu_macro(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("doc_fato_"))
 def relatorio_fato_relevante(call):
-    dados = call.data.split("_")
-    ticker = dados[2]
-    tipo_ativo = dados[3] # 'acao' ou 'fii'
-    
-    bot.answer_callback_query(call.id, f"A ler Fatos Relevantes da CVM para {ticker}...")
-    is_fii = True if tipo_ativo == 'fii' else False
-    
-    resumo = module_cvm_bridge.buscar_fatos_relevantes(ticker, is_fii)
-    
-    markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=f"acao_{ticker}" if not is_fii else f"detalhe_{ticker}"))
-    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=resumo, reply_markup=markup, parse_mode="Markdown")
+    print(f"DEBUG: Entrou no handler Fato Relevante para {call.data}") # <--- ADICIONE ESTO
+    try:
+        dados = call.data.split("_")
+        ticker = dados[2]
+        tipo_ativo = dados[3]
+        
+        bot.answer_callback_query(call.id, f"A processar {ticker}...")
+        is_fii = True if tipo_ativo == 'fii' else False
+        
+        print(f"DEBUG: Chamando a ponte para {ticker}") # <--- ADICIONE ESTO
+        resumo = module_cvm_bridge.buscar_fatos_relevantes(ticker, is_fii)
+        print(f"DEBUG: Ponte retornou: {resumo[:50]}...") # <--- ADICIONE ESTO
+        
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=resumo, parse_mode="Markdown")
+    except Exception as e:
+        print(f"❌ ERRO CRÍTICO NO HANDLER: {e}") # <--- VAI APARECER NO LOG DO RENDER
+        traceback.print_exc()
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("doc_gerencial_"))
 def relatorio_gerencial(call):
