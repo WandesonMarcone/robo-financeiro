@@ -416,5 +416,5 @@ def webhook():
     def processo_paralelo():
         try:
             bot.process_new_updates([update])
-        except Exception as e:
+            except Exception as e:
             # O "Escudo Anti-Clone"
