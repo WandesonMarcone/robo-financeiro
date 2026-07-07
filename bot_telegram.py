@@ -412,9 +412,14 @@ def webhook():
     json_string = request.get_data().decode('utf-8')
     update = telebot.types.Update.de_json(json_string)
 
-    # Função isolada para rodar em paralelo sem estourar o limite de tempo do Telegram
     def processo_paralelo():
         try:
             bot.process_new_updates([update])
-            except Exception as e:
-            # O "Escudo Anti-Clone"
+        except Exception as e:
+            if "message is not modified" not in str(e):
+                print(f"❌ Erro na Thread: {e}")
+
+    thread = threading.Thread(target=processo_paralelo)
+    thread.start()
+    
+    return "OK", 200
