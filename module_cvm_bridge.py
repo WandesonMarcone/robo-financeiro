@@ -16,6 +16,17 @@ def extrair_resumo_ia(ticker, tipo_documento, texto_bruto):
     """
     return module_ia.analisar_fatos_com_ia(ticker + f" - {tipo_documento}\n\n" + texto_bruto[:10000])
 
+def obter_palavra_chave_fundo(ticker):
+    """Traduz o Ticker (Ex: GARE11) para o nome base oficial na B3 (Ex: GUARDIAN)"""
+    try:
+        nome_longo = yf.Ticker(f"{ticker}.SA").info.get('longName', '').upper()
+        # Removemos termos genéricos para sobrar apenas o nome da Gestora/Fundo
+        termos_inuteis = ["FUNDO", "DE", "INVESTIMENTO", "IMOBILIARIO", "IMOBILIÁRIO", "FII", "FDO", "INV", "IMOB", "S.A.", "SA", "REAL", "ESTATE", "LOGISTICA", "LOGÍSTICA", "RECEBÍVEIS", "RECEBIVEIS"]
+        palavras = [p for p in nome_longo.split() if p not in termos_inuteis and len(p) > 2]
+        return palavras[0] if palavras else ticker[:4].upper()
+    except:
+        return ticker[:4].upper()
+
 def buscar_fatos_relevantes(ticker, is_fii=False):
     if is_fii:
         try:
@@ -23,15 +34,14 @@ def buscar_fatos_relevantes(ticker, is_fii=False):
             inicio_ano = datetime.date(hoje.year, 1, 1)
             fnet = FundosNet()
             
-            # Categoria exata conforme o dicionário da B3
             docs_gerais = list(fnet.busca(categoria="Fato Relevante", inicio=inicio_ano, fim=hoje))
             
-            # Filtro Laser: Procura apenas os documentos do FII solicitado para poupar memória
-            prefixo = ticker[:4].upper()
-            docs_fundo = [d for d in docs_gerais if prefixo in str(getattr(d, 'nome_fundo', '')).upper()]
+            # Filtro Inteligente com o nome traduzido
+            palavra_chave = obter_palavra_chave_fundo(ticker)
+            docs_fundo = [d for d in docs_gerais if palavra_chave in str(getattr(d, 'nome_fundo', '')).upper() or ticker in str(getattr(d, 'nome_fundo', '')).upper()]
             
             if not docs_fundo: 
-                return f"Nenhum Fato Relevante de {ticker} registado neste ano no FundosNet."
+                return f"Nenhum Fato Relevante de {ticker} (Buscando por: {palavra_chave}) registado neste ano."
             
             contexto = f"Fatos Relevantes Oficiais de {ticker}:\n"
             for d in docs_fundo[:2]:
@@ -62,17 +72,18 @@ def buscar_fatos_relevantes(ticker, is_fii=False):
 def buscar_relatorios_gerenciais(ticker):
     try:
         hoje = datetime.date.today()
-        dois_meses_atras = hoje - relativedelta(months=2)
+        # Janela de busca expandida para 3 meses
+        tres_meses_atras = hoje - relativedelta(months=3)
         fnet = FundosNet()
         
-        # 🔥 CORREÇÃO DO ERRO: Alterado para "Relatórios" conforme exigência da B3
-        docs_gerais = list(fnet.busca(categoria="Relatórios", inicio=dois_meses_atras, fim=hoje))
+        docs_gerais = list(fnet.busca(categoria="Relatórios", inicio=tres_meses_atras, fim=hoje))
         
-        prefixo = ticker[:4].upper()
-        docs_fundo = [d for d in docs_gerais if prefixo in str(getattr(d, 'nome_fundo', '')).upper()]
+        # Filtro Inteligente com o nome traduzido
+        palavra_chave = obter_palavra_chave_fundo(ticker)
+        docs_fundo = [d for d in docs_gerais if palavra_chave in str(getattr(d, 'nome_fundo', '')).upper() or ticker in str(getattr(d, 'nome_fundo', '')).upper()]
         
         if not docs_fundo: 
-            return f"Nenhum Relatório de {ticker} publicado nos últimos 2 meses."
+            return f"Nenhum Relatório de {ticker} (Buscando por: {palavra_chave}) publicado nos últimos 3 meses."
             
         contexto = f"Relatórios Recentes de {ticker}:\n"
         for d in docs_fundo[:2]:
