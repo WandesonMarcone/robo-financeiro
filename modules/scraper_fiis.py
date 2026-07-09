@@ -157,7 +157,11 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             if ticker in novatos_garimpados:
                 texto_ativo = f"{emoji} *{ticker}* ({tipo})\n   R$ {preco:.2f}\n   P/VP: {pvp:.2f} | DY: {dy*100:.1f}%{txt_vacancia}"
                 relatorio_opps.append(texto_ativo)
-            
+
+            if ticker in fixas_opps:
+                texto_ativo = f"{emoji} *{ticker}* ({tipo})\n   R$ {preco:.2f}\n   P/VP: {pvp:.2f} | DY: {dy*100:.1f}%{txt_vacancia}"
+                relatorio_fixas_opps.append(texto_ativo))
+
             # Se for Fixo (Sempre mostra a variação)
             elif ticker in cat_fixas:
                 texto_ativo = f"{emoji} *{ticker}* ({tipo})\n   R$ {preco_velho:.2f} ➔ R$ {preco:.2f} {icone_variacao}\n   P/VP: {pvp:.2f} | DY: {dy*100:.1f}%{txt_vacancia}"
