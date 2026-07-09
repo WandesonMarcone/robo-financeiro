@@ -4,8 +4,7 @@ import requests
 import pandas as pd
 import yfinance as yf
 import config
-from modules.utils import formatar, precisa_atualizar
-from modules.utils import get_request_with_retry
+from modules.utils import formatar, precisa_atualizar, get_request_with_retry
 
 def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     print("📈 [1/5] Baixando dados globais do Fundamentus (O Arrastão)...")
@@ -15,7 +14,7 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     try:
         url = "https://www.fundamentus.com.br/resultado.php"
         headers = {'User-Agent': 'Mozilla/5.0'}
-        response = get_request_with_retry(url, headers={'User-Agent': 'Mozilla/5.0'})
+        response = get_request_with_retry(url, headers=headers)
         df = pd.read_html(io.StringIO(response.text), decimal=',', thousands='.')[0]
         df['Papel'] = df['Papel'].str.strip().str.upper()
         df = df.set_index('Papel')
@@ -30,12 +29,15 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     dados_planilha = aba_base.get_all_values()
     todas_originais = []
     mapa_atualizacao = {}
+    precos_antigos = {} # Guarda o preço anterior para o Telegram
 
     for row in dados_planilha[1:]:
         if row and row[0].strip() and not row[0].replace(',', '').replace('.', '').isnumeric():
             t = row[0].strip().upper()
             todas_originais.append(t)
-            # Lê o carimbo de tempo na Coluna AG (índice 32)
+            # O preço antigo está na Coluna C (índice 2)
+            precos_antigos[t] = formatar(row[2]) if len(row) > 2 else 0
+            # O carimbo de tempo está na Coluna AG (índice 32)
             mapa_atualizacao[t] = row[32] if len(row) > 32 else ""
 
     todas = list(todas_originais)
@@ -45,7 +47,7 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     cat_opps = []
     cat_novatas = []
     opps_brutas = []
-    
+
     # 🎯 OPORTUNIDADES: Só roda se o Fundamentus conseguiu baixar a tabela geral
     if not df.empty:
         opps_brutas = df[(df['P/L'] > 0) & (df['P/L'] < 12) & (df['P/VP'] < 1.5) & (df['ROE'] >= 8.0)].index.tolist()
@@ -78,36 +80,38 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
 
     print("[3/5] Processando cruzamento de dados linha a linha...")
     batch_updates = []
+    relatorio_fixas = []
     relatorio_opps = []
     relatorio_novatas = []
-    relatorio_fixas_opps = [] 
+    relatorio_atualizados = []
 
     for ticker in fila:
         linha_idx = todas.index(ticker) + 2
         try:
             # 🌐 CAPTURA DE PRECISÃO: API GLOBO (Yahoo Finance)
             yf_info = yf.Ticker(f"{ticker}.SA").info
-            preco = formatar(yf_info.get('currentPrice') or yf_info.get('regularMarketPrice'))
+            preco_yf = formatar(yf_info.get('currentPrice') or yf_info.get('regularMarketPrice') or 0)
             n_acoes = formatar(yf_info.get('sharesOutstanding')) 
             roa = formatar(yf_info.get('returnOnAssets'))        
             peg_ratio = formatar(yf_info.get('trailingPegRatio') or yf_info.get('pegRatio')) 
             valor_mercado = formatar(yf_info.get('marketCap'))   
             vpa_yf = formatar(yf_info.get('bookValue'))             
             lpa_yf = formatar(yf_info.get('trailingEps'))
-            
-            # Dados secundários do YF para caso o Fundamentus falhe
+
             dy_yf = formatar(yf_info.get('dividendYield', 0)) * 100
             pl_yf = formatar(yf_info.get('trailingPE'))
             pvp_yf = formatar(yf_info.get('priceToBook'))
 
-            # Tradutor de Setores do YF
             setor_eng = yf_info.get('sector', 'N/D')
             traducao_setores = {'Energy': 'Energia', 'Financial Services': 'Financeiro', 'Basic Materials': 'Materiais Básicos', 'Utilities': 'Utilidade Pública', 'Industrials': 'Indústria', 'Consumer Defensive': 'Consumo Defensivo', 'Consumer Cyclical': 'Consumo Cíclico', 'Healthcare': 'Saúde', 'Technology': 'Tecnologia', 'Communication Services': 'Comunicações', 'Real Estate': 'Imobiliário'}
             setor = traducao_setores.get(setor_eng, setor_eng)
 
             # 🇧🇷 CAPTURA DE ARRASTÃO: BASE NACIONAL (Fundamentus)
-            # Se a ação não existir na tabela, a variável 'f' fica vazia e não quebra o código
             f = df.loc[ticker] if (not df.empty and ticker in df.index) else {}
+            preco_fundamentus = formatar(f.get('Cotação', 0))
+            
+            # 🔥 CORREÇÃO DO BUG DO R$ 0
+            preco = preco_yf if preco_yf > 0 else preco_fundamentus
 
             # 🛡️ REDUNDÂNCIA 2: Decisão de Inteligência (Prioriza Fundamentus, Falha para YF/Matemática)
             dy_final = formatar(f.get('Div.Yield', dy_yf))
@@ -152,47 +156,37 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
                 valor_mercado,                            # 30 | Coluna AF: Valor Mercado (YF)
                 f"{agora_sp} OK"                          # 31 | Coluna AG: Carimbo de Atualização
             ]
-            # Total Exato: 32 colunas processadas.
-
-            # Se for uma ação que não estava na planilha, injeta o Ticker na Coluna A (somando 33 colunas)
+            
             if ticker in cat_novatas:
                 row_final = [ticker] + row_base
                 range_update = f'A{linha_idx}:AG{linha_idx}'
-            # Se a ação já existe, preserva o Ticker atualizando apenas da B até a AG (32 colunas)
             else:
                 row_final = row_base
                 range_update = f'B{linha_idx}:AG{linha_idx}'
 
             batch_updates.append({'range': range_update, 'values': [row_final]})
+            print(f"   ✅ [OK] {ticker} Concluída.")
 
-            tag_extra = ""
-            if ticker in opps_brutas:
-                if ticker in config.FIXAS_ACOES: tag_extra = " (Ação Fixa)"
+            # --- CONSTRUÇÃO DO TELEGRAM (Old vs New) ---
+            preco_velho = precos_antigos.get(ticker, preco) 
+            icone_variacao = "📈" if preco > preco_velho else ("📉" if preco < preco_velho else "➖")
+            
+            texto_ativo = f"🏭 *{ticker}* ({setor})\n   R$ {preco_velho:.2f} ➔ R$ {preco:.2f} {icone_variacao}\n   P/L: {pl_final:.1f} | P/VP: {pvp_final:.2f} | ROE: {roe_final*100:.1f}%"
 
-            print(f"   ✅ [OK] {ticker} ({tag_extra or 'Processada'}) | Concluída.")
-
-            # Montagem do Relatório Visual do Telegram
-            if ticker in opps_brutas:
-                detalhe_msg = f"R$ {preco} | 🏢 {setor} (P/L: {pl_final} | P/VP: {pvp_final} | ROE: {roe_final*100:.1f}%)"
-
-                if ticker in config.FIXAS_ACOES:
-                    relatorio_fixas_opps.append(f"• *{ticker}* está barata!\n   Motivo: P/L ({pl_final}) abaixo de 12, P/VP ({pvp_final}) abaixo de 1.5.\n   🏢 Setor: {setor}")
-                relatorio_opps.append(f"• *{ticker}*{tag_extra}: {detalhe_msg}")
-
-            if ticker in cat_novatas:
-                relatorio_novatas.append(f"• *{ticker}*: R$ {preco} | 🏢 {setor} (DY: {dy_final*100:.1f}% | ROE: {roe_final*100:.1f}%)")
+            if ticker in config.FIXAS_ACOES: relatorio_fixas.append(texto_ativo)
+            elif ticker in opps_brutas: relatorio_opps.append(texto_ativo)
+            elif ticker in cat_novatas: relatorio_novatas.append(texto_ativo)
+            else: relatorio_atualizados.append(texto_ativo)
 
         except Exception as e:
             print(f"   ❌ [ERRO] Falha ao processar {ticker}: {e}")
 
     msg_out = ""
     if batch_updates:
-        msg_out = "🤖 *Relatório de Ações* 🤖\n\n"
-        if relatorio_fixas_opps:
-            msg_out += "🚨 *ALERTA VIP: AÇÕES FIXAS EM OPORTUNIDADE* 🚨\n" + "\n".join(relatorio_fixas_opps) + "\n\n"
-        if cat_fixas: msg_out += f"📌 *Fixas Processadas:*\n{', '.join(cat_fixas)}\n\n"
-        if cat_aleatorias: msg_out += f"🎲 *Varredura de Desatualizadas:*\n{', '.join(cat_aleatorias)}\n\n"
-        if relatorio_opps: msg_out += "🎯 *Ações em Oportunidade:*\n" + "\n".join(relatorio_opps) + "\n\n"
-        if relatorio_novatas: msg_out += "🌟 *NOVA PREVIDENCIÁRIA ADICIONADA:*\n" + "\n".join(relatorio_novatas)
+        msg_out = "🤖 *MOVIMENTAÇÃO DE AÇÕES* 🤖\n\n"
+        if relatorio_fixas: msg_out += "📌 *SUA CARTEIRA FIXA:*\n" + "\n\n".join(relatorio_fixas) + "\n\n"
+        if relatorio_opps: msg_out += "🎯 *TOP OPORTUNIDADES (P/L < 12):*\n" + "\n\n".join(relatorio_opps) + "\n\n"
+        if relatorio_novatas: msg_out += "🌟 *NOVAS PREVIDENCIÁRIAS GARIMPADAS:*\n" + "\n\n".join(relatorio_novatas) + "\n\n"
+        if relatorio_atualizados: msg_out += "🔄 *OUTRAS ATUALIZADAS:*\n" + "\n\n".join(relatorio_atualizados) + "\n\n"
 
     return batch_updates, msg_out, aba_base
