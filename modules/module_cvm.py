@@ -48,16 +48,25 @@ def salvar_pdf_no_drive(nome_arquivo, pdf_bytes):
         return None, str(e)
 
 def extrair_texto_pdf(pdf_bytes):
-    """Lê as primeiras 10 páginas de um PDF para enviar o texto à IA."""
+    """Lê as primeiras 5 e as últimas 5 páginas do PDF para capturar começo e fim."""
     try:
         leitor = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
+        num_paginas = len(leitor.pages)
         texto = ""
-        num_paginas = min(len(leitor.pages), 10) 
-        for i in range(num_paginas):
+        
+        # Define quais páginas ler
+        paginas_a_ler = []
+        if num_paginas <= 10:
+            paginas_a_ler = range(num_paginas) # Lê tudo se for curto
+        else:
+            paginas_a_ler = list(range(5)) + list(range(num_paginas - 5, num_paginas))
+            
+        for i in paginas_a_ler:
             texto += leitor.pages[i].extract_text() + "\n"
         return texto
     except Exception as e:
         return f"Erro ao extrair texto do PDF: {str(e)}"
+
 
 def extrair_resumo_ia(ticker, tipo_documento, texto_bruto, link_drive=None):
     """Gera um resumo do documento usando a IA configurada."""
