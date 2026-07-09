@@ -167,16 +167,31 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
             batch_updates.append({'range': range_update, 'values': [row_final]})
             print(f"   ✅ [OK] {ticker} Concluída.")
 
-            # --- CONSTRUÇÃO DO TELEGRAM (Old vs New) ---
+            # --- CONSTRUÇÃO INTELIGENTE DO TELEGRAM (Old vs New) ---
             preco_velho = precos_antigos.get(ticker, preco) 
             icone_variacao = "📈" if preco > preco_velho else ("📉" if preco < preco_velho else "➖")
             
-            texto_ativo = f"🏭 *{ticker}* ({setor})\n   R$ {preco_velho:.2f} ➔ R$ {preco:.2f} {icone_variacao}\n   P/L: {pl_final:.1f} | P/VP: {pvp_final:.2f} | ROE: {roe_final*100:.1f}%"
+            # Se for Garimpo Novo (Oportunidades do Mercado ou Novatas)
+            if ticker in cat_novatas or (ticker in opps_brutas and ticker not in config.FIXAS_ACOES):
+                texto_ativo = f"🏭 *{ticker}* ({setor})\n   R$ {preco:.2f}\n   P/L: {pl_final:.1f} | P/VP: {pvp_final:.2f} | ROE: {roe_final*100:.1f}%"
+                
+                if ticker in cat_novatas: relatorio_novatas.append(texto_ativo)
+                elif ticker in opps_brutas: relatorio_opps.append(texto_ativo)
 
-            if ticker in config.FIXAS_ACOES: relatorio_fixas.append(texto_ativo)
-            elif ticker in opps_brutas: relatorio_opps.append(texto_ativo)
-            elif ticker in cat_novatas: relatorio_novatas.append(texto_ativo)
-            else: relatorio_atualizados.append(texto_ativo)
+            # Se for Fixa (Sempre mostra a variação)
+            elif ticker in config.FIXAS_ACOES:
+                texto_ativo = f"🏭 *{ticker}* ({setor})\n   R$ {preco_velho:.2f} ➔ R$ {preco:.2f} {icone_variacao}\n   P/L: {pl_final:.1f} | P/VP: {pvp_final:.2f} | ROE: {roe_final*100:.1f}%"
+                
+                # ALERTA MÁXIMO: Fixa em Ponto de Bala
+                if ticker in opps_brutas:
+                    relatorio_fixas_opps.append(f"🚨 *{ticker} ESTÁ BARATA!* 🚨\n   Motivo: P/L abaixo de 12 e P/VP abaixo de 1.5.\n   {texto_ativo}")
+                else:
+                    relatorio_fixas.append(texto_ativo)
+            
+            # Varreduras antigas
+            else:
+                texto_ativo = f"🏭 *{ticker}* ({setor})\n   R$ {preco_velho:.2f} ➔ R$ {preco:.2f} {icone_variacao}\n   P/L: {pl_final:.1f} | P/VP: {pvp_final:.2f} | ROE: {roe_final*100:.1f}%"
+                relatorio_atualizados.append(texto_ativo)
 
         except Exception as e:
             print(f"   ❌ [ERRO] Falha ao processar {ticker}: {e}")
@@ -184,6 +199,7 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     msg_out = ""
     if batch_updates:
         msg_out = "🤖 *MOVIMENTAÇÃO DE AÇÕES* 🤖\n\n"
+        if relatorio_fixas_opps: msg_out += "🏆 *ALERTA VIP: AÇÕES FIXAS EM OPORTUNIDADE* 🏆\n" + "\n\n".join(relatorio_fixas_opps) + "\n\n"
         if relatorio_fixas: msg_out += "📌 *SUA CARTEIRA FIXA:*\n" + "\n\n".join(relatorio_fixas) + "\n\n"
         if relatorio_opps: msg_out += "🎯 *TOP OPORTUNIDADES (P/L < 12):*\n" + "\n\n".join(relatorio_opps) + "\n\n"
         if relatorio_novatas: msg_out += "🌟 *NOVAS PREVIDENCIÁRIAS GARIMPADAS:*\n" + "\n\n".join(relatorio_novatas) + "\n\n"
