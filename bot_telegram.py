@@ -60,6 +60,21 @@ def enviar_menu(message):
     except Exception as e:
         traceback.print_exc()
 
+@bot.message_handler(commands=['logs'])
+def mostrar_logs(message):
+    try:
+        planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
+        aba_logs = planilha.worksheet("BD_Logs")
+        ultimas_linhas = aba_logs.get_all_values()[-5:] # Pega as 5 últimas
+        
+        texto_logs = "📜 *Últimos Logs do Robô:*\n\n"
+        for linha in ultimas_linhas:
+            texto_logs += f"🕒 {linha[0]} | {linha[1]}: {linha[2]}\n"
+        
+        bot.reply_to(message, texto_logs, parse_mode="Markdown")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Erro ao ler logs: {e}")
+        
 @bot.callback_query_handler(func=lambda call: call.data == "menu_acoes")
 def submenu_acoes(call):
     bot.answer_callback_query(call.id, "A carregar Carteira de Ações...")
