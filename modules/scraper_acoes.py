@@ -156,8 +156,8 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
 
             try:
                 # Carregamos a aba de logs apenas se ela existir para não travar o loop
-                aba_logs = planilha.worksheet("BD_Logs")
-                aba_logs.append_row([str(datetime.now(sp_tz)), ticker, str(e)])
+                    aba_logs = planilha.worksheet("BD_Logs")
+                    aba_logs.append_row([str(datetime.now(sp_tz)), ticker, str(e)])
             except Exception as log_error:
                 print(f"   ⚠️ Não foi possível gravar o log: {log_error}")
             # --------------------------
