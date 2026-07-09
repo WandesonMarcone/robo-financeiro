@@ -5,6 +5,7 @@ import traceback
 from flask import Flask, request
 import config
 from modules.utils import conectar_gspread
+from modules import module_cvm
 
 # Importa as suas pontes de dados externas
 import module_ia
@@ -44,6 +45,39 @@ def comando_adicionar(message):
         bot.send_message(message.chat.id, f"✅ *{ticker}* adicionado com sucesso na aba `{nome_aba}`!\nEle será processado na próxima auditoria do sistema.", parse_mode="Markdown")
     except Exception as e:
         bot.reply_to(message, f"❌ Erro ao adicionar ativo: {e}")
+
+@bot.message_handler(commands=['cvm'])
+def cvm_command(message):
+    """
+    Comando para buscar relatórios da CVM/B3.
+    Uso: /cvm TICKER
+    """
+    # Divide a mensagem para pegar o ticker: "/cvm GARE11" -> ["/cvm", "GARE11"]
+    args = message.text.split()
+    
+    if len(args) < 2:
+        bot.reply_to(message, "⚠️ *Comando incompleto!*\nUse: `/cvm TICKER` (Exemplo: `/cvm GARE11`)", parse_mode="Markdown")
+        return
+
+    ticker = args[1].upper()
+    bot.reply_to(message, f"🔍 *Consultando bases oficiais (CVM/B3) para {ticker}...*", parse_mode="Markdown")
+    
+    try:
+        # Define se é FII (geralmente termina em 11) para filtrar a busca correta
+        is_fii = ticker.endswith(('11', '13', '14')) 
+        
+        # Chama a função que criamos no módulo CVM
+        resultado = module_cvm.buscar_relatorios_gerenciais(ticker)
+        
+        # Envia o resumo pronto para o Telegram
+        bot.reply_to(message, resultado, parse_mode="Markdown")
+        
+        print(f"   ✅ [LOG BOT] Comando /cvm executado para {ticker}.")
+        
+    except Exception as e:
+        erro_msg = f"❌ Erro ao buscar documento para {ticker}: {e}"
+        bot.reply_to(message, erro_msg)
+        print(f"   ❌ [ERRO BOT] {erro_msg}")
 
 # ==========================================
 # MENUS DE NAVEGAÇÃO
