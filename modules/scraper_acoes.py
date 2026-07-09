@@ -4,6 +4,7 @@ import requests
 import pandas as pd
 import yfinance as yf
 import config
+from modules.utils import get_request_with_retry
 from modules.utils import formatar, precisa_atualizar
 
 def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
@@ -14,7 +15,7 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     try:
         url = "https://www.fundamentus.com.br/resultado.php"
         headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, timeout=10)
+        response = get_request_with_retry(url, headers={'User-Agent': 'Mozilla/5.0'})
         df = pd.read_html(io.StringIO(response.text), decimal=',', thousands='.')[0]
         df['Papel'] = df['Papel'].str.strip().str.upper()
         df = df.set_index('Papel')
