@@ -79,6 +79,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     relatorio_fixas = []
     relatorio_opps = []
     relatorio_atualizados = []
+    relatorio_fixas_opps = []
     proxima_linha_vazia = len(dados_planilha) + 1 
 
     for ticker in fila_total:
