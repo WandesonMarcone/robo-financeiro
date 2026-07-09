@@ -154,6 +154,14 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
             print(f"   ✅ [OK] {ticker} mapeado e processado.")
         except Exception as e: print(f"   ❌ [ERRO] Falha {ticker}: {e}")
 
+            try:
+                # Carregamos a aba de logs apenas se ela existir para não travar o loop
+                aba_logs = planilha.worksheet("BD_Logs")
+                aba_logs.append_row([str(datetime.now(sp_tz)), ticker, str(e)])
+            except Exception as log_error:
+                print(f"   ⚠️ Não foi possível gravar o log: {log_error}")
+            # --------------------------
+
     # --- MONTAGEM MODULAR COM SEPARADOR ---
     msg_blocos = ["🤖 *MOVIMENTAÇÃO DE AÇÕES* 🤖"]
     if relatorio_fixas_opps: msg_blocos.append("🏆 *ALERTA VIP (Fixas em Oportunidade):*\n" + "\n\n".join(relatorio_fixas_opps))
