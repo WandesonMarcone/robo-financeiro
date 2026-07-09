@@ -125,5 +125,30 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
             print(f"   ✅ [OK] {ticker} mapeado e processado.")
         except Exception as e: print(f"   ❌ [ERRO] Falha {ticker}: {e}")
 
-    msg = "🤖 *MOVIMENTAÇÃO AÇÕES* 🤖\n\n" + (f"🏆 *FIXAS:* \n" + "\n\n".join(relatorio_fixas_opps + relatorio_fixas) + "\n\n" if relatorio_fixas or relatorio_fixas_opps else "") + (f"🎯 *OPORTUNIDADES:*\n" + "\n\n".join(relatorio_opps) + "\n\n" if relatorio_opps else "") + (f"🔄 *OUTRAS:*\n" + "\n\n".join(relatorio_atualizados) if relatorio_atualizados else "")
+    # --- MONTAGEM ORGANIZADA E MODULAR ---
+    msg_blocos = ["🤖 *MOVIMENTAÇÃO DE AÇÕES* 🤖"]
+
+    if relatorio_fixas_opps:
+        bloco = "🏆 *ALERTA VIP: AÇÕES FIXAS EM OPORTUNIDADE* 🏆\n" + "\n\n".join(relatorio_fixas_opps)
+        msg_blocos.append(bloco)
+    
+    if relatorio_fixas:
+        bloco = "📌 *SUA CARTEIRA FIXA:*\n" + "\n\n".join(relatorio_fixas)
+        msg_blocos.append(bloco)
+
+    if relatorio_opps:
+        bloco = "🎯 *OPORTUNIDADES DE MERCADO:*\n" + "\n\n".join(relatorio_opps)
+        msg_blocos.append(bloco)
+
+    if relatorio_novatas:
+        bloco = "🌟 *NOVAS GARIMPADAS:*\n" + "\n\n".join(relatorio_novatas)
+        msg_blocos.append(bloco)
+
+    if relatorio_atualizados:
+        bloco = "🔄 *OUTRAS ATUALIZAÇÕES:*\n" + "\n\n".join(relatorio_atualizados)
+        msg_blocos.append(bloco)
+
+    # Une os blocos com uma linha divisória clara
+    msg = "\n\n➖➖➖➖➖➖➖➖➖➖\n\n".join(msg_blocos)
+    
     return batch_updates, msg, aba_base
