@@ -142,24 +142,26 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
                 batch_updates.append({'range': f'B{linha_idx}:Q{linha_idx}', 'values': [row_update_parcial]})
             else:
                 batch_updates.append({'range': f'A{proxima_linha_vazia}:Q{proxima_linha_vazia}', 'values': [row_update_completo]})
-                proxima_linha_vazia += 1
+                proxima_linha_vazia += 1 
     
+
+                
     # --- CONSTRUÇÃO CORRETA E LÓGICA ---
-    p_velho = precos_antigos.get(ticker, preco)
-    ico = "📈" if preco > p_velho else ("📉" if preco < p_velho else "➖")
-    txt = f"{emoji} *{ticker}*\n   R$ {p_velho:.2f} ➔ R$ {preco:.2f} {ico}\n   P/VP: {pvp:.2f} | DY: {dy*100:.1f}%"
+                p_velho = precos_antigos.get(ticker, preco)
+                ico = "📈" if preco > p_velho else ("📉" if preco < p_velho else "➖")
+                txt = f"{emoji} *{ticker}*\n   R$ {p_velho:.2f} ➔ R$ {preco:.2f} {ico}\n   P/VP: {pvp:.2f} | DY: {dy*100:.1f}%"
     
     # Lógica de seleção (Onde o relatorio_fixas_opps é preenchido)
-    if ticker in cat_fixas:
+            if ticker in cat_fixas:
         # Se for Fixo E estiver em Oportunidade (Você define a regra de oportunidade aqui, ex: P/VP < 1)
-        if ticker in novatos: # Ou qualquer regra de oportunidade que você use
-            relatorio_fixas_opps.append(f"🚨 *{ticker} EM OPORTUNIDADE!* 🚨\n{txt}")
-        else:
-            relatorio_fixas.append(txt)
-    elif ticker in novatos:
-        relatorio_opps.append(f"{emoji} *{ticker}* (Oportunidade)\n   R$ {preco:.2f} | P/VP: {pvp:.2f} | DY: {dy*100:.1f}%")
-    else:
-        relatorio_atualizados.append(txt)
+            if ticker in novatos: # Ou qualquer regra de oportunidade que você use
+                   relatorio_fixas_opps.append(f"🚨 *{ticker} EM OPORTUNIDADE!* 🚨\n{txt}")
+            else:
+                   relatorio_fixas.append(txt)
+            elif ticker in novatos:
+                   relatorio_opps.append(f"{emoji} *{ticker}* (Oportunidade)\n   R$ {preco:.2f} | P/VP: {pvp:.2f} | DY: {dy*100:.1f}%")
+            else:
+                  relatorio_atualizados.append(txt)
 
             
             # Se for Garimpo Novo (nunca esteve na planilha)
