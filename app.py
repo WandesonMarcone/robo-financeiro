@@ -3,7 +3,7 @@ import pytz
 import config
 from modules.utils import conectar_gspread, disparar_alertas
 from modules.scraper_acoes import rodar_garimpo_acoes
-import module_fiis # Mantido temporariamente até a Reestruturação da Etapa 3 do link do Fundamentus
+from modules.scraper_fiis import rodar_garimpo_fiis # <--- Importação Corrigida
 
 def executar_auditoria_carteira():
     print("🚀 INICIANDO ARQUITETURA MODULAR DE ALTA PERFORMANCE 🚀")
@@ -18,25 +18,25 @@ def executar_auditoria_carteira():
     
     # --- TURBO DE FIIS ---
     print("\n⚡ Acionando Motor de Fundos Imobiliários...")
-    aba_fiis = planilha.worksheet("BD_FIIs")
-    msg_fiis = module_fiis.atualizar_fiis(aba_fiis)
+    batch_updates_fiis, msg_fiis, aba_fiis = rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz)
     
     # --- TURBO DE AÇÕES ---
-    print("\n⚡ Acionando Motor de Ações Esturutrais...")
-    batch_updates, msg_acoes, aba_base = rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz)
+    print("\n⚡ Acionando Motor de Ações Estruturais...")
+    batch_updates_acoes, msg_acoes, aba_acoes = rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz)
     
     # --- SALVAMENTO EM LOTE E ALERTA CONSOLIDADO ---
     print("\n[5/5] Consolidando gravação de dados e envio de notificações...")
-    if batch_updates:
-        aba_base.batch_update(batch_updates)
-        print(f"💾 Sucesso: {len(batch_updates)} registros de ações gravados.")
+    if batch_updates_fiis:
+        aba_fiis.batch_update(batch_updates_fiis)
+        print(f"💾 Sucesso: {len(batch_updates_fiis)} registros de FIIs gravados.")
         
-    # Agrupa os alertas dos dois motores para não fludar o Telegram
+    if batch_updates_acoes:
+        aba_acoes.batch_update(batch_updates_acoes)
+        print(f"💾 Sucesso: {len(batch_updates_acoes)} registros de ações gravados.")
+        
     msg_consolidada = ""
-    if msg_fiis:
-        msg_consolidada += msg_fiis + "\n"
-    if msg_acoes:
-        msg_consolidada += msg_acoes
+    if msg_fiis: msg_consolidada += msg_fiis
+    if msg_acoes: msg_consolidada += msg_acoes
         
     if msg_consolidada.strip():
         disparar_alertas(msg_consolidada)
@@ -45,3 +45,4 @@ def executar_auditoria_carteira():
 
 if __name__ == "__main__":
     executar_auditoria_carteira()
+        
