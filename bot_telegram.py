@@ -80,6 +80,24 @@ def cvm_command(message):
         bot.reply_to(message, erro_msg)
         print(f"   ❌ [ERRO BOT] {erro_msg}")
 
+@bot.callback_query_handler(func=lambda call: True)
+def callback_handler(call):
+    # O call.data é o "nome" do botão que você definiu lá no teclado
+    if call.data == "submenu_acoes":
+        submenu_acoes(call)
+    elif call.data == "voltar_menu":
+        voltar_menu_principal(call)
+    elif call.data == "detalhe_ativo":
+        detalhe_ativo(call)
+    elif call.data == "fato_relevante":
+        relatorio_fato_relevante(call)
+    elif call.data == "relatorio_gerencial":
+        relatorio_gerencial(call)
+    elif call.data == "relatorio_trimestral":
+        relatorio_trimestral(call)
+    elif call.data == "chamar_ia":
+        chamar_ia_geral(call)
+
 # ==========================================
 # MENUS DE NAVEGAÇÃO
 # ==========================================
