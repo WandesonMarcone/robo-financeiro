@@ -9,11 +9,16 @@ from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from googleapiclient.http import MediaIoBaseUpload
 from mercados.fundosnet import FundosNet
-# Certifique-se de que module_ia.py existe na pasta modules (ou ajuste a importação se estiver na raiz)
+
+# Importamos o arquivo de configuração para pegar o ID da pasta
+import config 
+
+# Como o module_ia está na mesma pasta (modules/), 
+# você pode importar direto:
 import modules.module_ia as module_ia
 
-# O ID exato da sua pasta DadosFinanceiros no Google Drive
-DRIVE_FOLDER_ID = "1Q-dkO4oSd6_9zmOeZmPX8nmuVWzdjHOq"
+# O ID agora vem do seu arquivo de configuração central
+DRIVE_FOLDER_ID = config.DRIVE_FOLDER_ID
 
 # --- BLOCO 1: INTEGRAÇÃO COM GOOGLE DRIVE E IA ---
 
