@@ -6,9 +6,12 @@ import yfinance as yf
 from datetime import datetime
 import pytz
 import config
-from modules.utils import formatar, precisa_atualizar
+from modules.utils import formatar, precisa_atualizar, get_request_with_retry
 
 def classificar_fii_e_emoji(setor):
+    """
+    Classifica automaticamente o FII e atribui um Emoji visual para o Telegram.
+    """
     s = str(setor).upper()
     if any(x in s for x in ["TÍTULOS", "PAPEL", "RECEBÍVEL", "VALORES MOBILIÁRIOS"]): 
         return "Papel", "📜"
@@ -25,11 +28,11 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     try:
         url = "https://www.fundamentus.com.br/fii_resultado.php"
         headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, timeout=10)
+        response = get_request_with_retry(url, headers=headers)
         df = pd.read_html(io.StringIO(response.text), decimal=',', thousands='.')[0]
         df['Papel'] = df['Papel'].str.strip().str.upper()
         df = df.set_index('Papel')
-        # Adicionado 'Cotação' para servir de backup caso o Yahoo falhe (Bug do R$ 0)
+        # Garante formatação inclusive do Backup de Cotação
         for col in ['Cotação', 'P/VP', 'Dividend Yield', 'Liquidez', 'Vacância Média', 'Valor de Mercado', 'Qtd de imóveis']:
             if col in df.columns:
                 df[col] = df[col].apply(formatar)
@@ -46,7 +49,8 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
         if row and row[0].strip():
             t = row[0].strip().upper()
             tickers_planilha.append(t)
-            precos_antigos[t] = formatar(row[3]) if len(row) > 3 else 0 # O preço antigo está na coluna D
+            # O preço antigo dos FIIs está na Coluna D (índice 3)
+            precos_antigos[t] = formatar(row[3]) if len(row) > 3 else 0 
             mapa_atualizacao[t] = row[15] if len(row) > 15 else ""
 
     cat_fixas = [f for f in config.FIXAS_FIIS if f in tickers_planilha and precisa_atualizar(f, mapa_atualizacao, agora_dt, sp_tz)]
@@ -59,7 +63,6 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             (df['Liquidez'] >= 1000000) &                  
             (df['Vacância Média'] <= 0.10)                 
         ]
-        # Pega as top 3 oportunidades com maior DY
         oportunidades_gerais = df_cacador.sort_values(by='Dividend Yield', ascending=False).index.tolist()
         novatos_garimpados = [fii for fii in oportunidades_gerais if fii not in tickers_planilha and fii not in cat_fixas][:3]
     
@@ -68,7 +71,9 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     cat_desatualizadas = random.sample(precisam_urgente, 2) if len(precisam_urgente) >= 2 else precisam_urgente
 
     fila_total = cat_fixas + novatos_garimpados + cat_desatualizadas
-    if not fila_total: return [], "", aba_fiis
+    if not fila_total: 
+        print("✅ [FIIs] Nenhuma atualização necessária (Trava de 2h ativa para todos).")
+        return [], "", aba_fiis
 
     batch_updates = []
     relatorio_fixas = []
@@ -89,6 +94,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
 
             setor = f.get('Segmento', 'N/D') if isinstance(f.get('Segmento'), str) else 'N/D'
             
+            # Correção Cirúrgica Anti-Fundamentus
             if ticker == "GARE11": setor, tipo, emoji = "Galpões/Renda Urbana", "Tijolo", "🧱"
             elif ticker == "VISC11": setor, tipo, emoji = "Shoppings", "Tijolo", "🧱"
             elif ticker == "MXRF11": setor, tipo, emoji = "Papel/Múltiplo", "Papel", "📜"
@@ -106,9 +112,27 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             media_div_mensal = (preco * dy) / 12
             lucro_12m = valor_mercado * dy 
 
+            # =========================================================================
+            # 🗺️ MAPEAMENTO COMPLETO DAS 16 COLUNAS DA ABA "BD_FIIs" (COLUNAS A ATÉ P)
+            # =========================================================================
             row_update_completo = [
-                ticker, tipo, setor, preco, numero_cotas, pvp, dy, vacancia, qtd_imoveis, 
-                "Mapeamento em Curso", "Pendente", liquidez, valor_mercado, vpa, lucro_12m, media_div_mensal, f"{agora_sp} OK"
+                ticker,                 # 🟢 Coluna A: Ticker do Ativo
+                tipo,                   # 🟢 Coluna B: Tipo de FII (Classificação interna)
+                setor,                  # 🟢 Coluna C: Segmento do Fundo (Fundamentus)
+                preco,                  # 🔵 Coluna D: Cotação Atual (Yahoo Finance/Fundamentus)
+                numero_cotas,           # 🧮 Coluna E: Quantidade de Cotas (Calculado)
+                pvp,                    # 🟢 Coluna F: P/VP Real (Fundamentus)
+                dy,                     # 🟢 Coluna G: Dividend Yield 12 Meses (Fundamentus)
+                vacancia,               # 🟢 Coluna H: Vacância Média (Fundamentus)
+                qtd_imoveis,            # 🟢 Coluna I: Quantidade Física de Imóveis (Fundamentus)
+                "Mapeamento em Curso",  # ⚪ Coluna J: WALT 
+                "Pendente",             # ⚪ Coluna K: Alavancagem / Dívida 
+                liquidez,               # 🟢 Coluna L: Liquidez Média Diária (Fundamentus)
+                valor_mercado,          # 🟢 Coluna M: Patrimônio Líquido (Fundamentus)
+                vpa,                    # 🧮 Coluna N: Valor Patrimonial da Cota (Calculado)
+                lucro_12m,              # 🧮 Coluna O: Lucro Total Distribuído 12M (Calculado)
+                media_div_mensal,       # 🧮 Coluna P: Projeção de Dividendo Mensal/Cota (Calculado)
+                f"{agora_sp} OK"        # ⏰ Coluna Q: Carimbo de Data/Hora (Trava)
             ]
             row_update_parcial = row_update_completo[1:] 
 
@@ -122,6 +146,8 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             # --- CONSTRUÇÃO DO TELEGRAM (Old vs New & Vacância Condicional) ---
             preco_velho = precos_antigos.get(ticker, preco)
             icone_variacao = "📈" if preco > preco_velho else ("📉" if preco < preco_velho else "➖")
+            
+            # Só mostra a vacância se for fundo de Tijolo (Oculta para fundos de Papel)
             txt_vacancia = f" | 🏚️ Vacância: {vacancia*100:.1f}%" if tipo == "Tijolo" else ""
             
             texto_ativo = f"{emoji} *{ticker}* ({tipo})\n   R$ {preco_velho:.2f} ➔ R$ {preco:.2f} {icone_variacao}\n   P/VP: {pvp:.2f} | DY: {dy*100:.1f}%{txt_vacancia}"
@@ -129,6 +155,8 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             if ticker in cat_fixas: relatorio_fixas.append(texto_ativo)
             elif ticker in novatos_garimpados: relatorio_opps.append(texto_ativo)
             else: relatorio_atualizados.append(texto_ativo)
+
+            print(f"   ✅ [OK] FII {ticker} processado.")
 
         except Exception as e:
             print(f"   ❌ [ERRO] Falha {ticker}: {e}")
