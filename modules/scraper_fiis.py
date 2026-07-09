@@ -143,18 +143,30 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
                 batch_updates.append({'range': f'A{proxima_linha_vazia}:Q{proxima_linha_vazia}', 'values': [row_update_completo]})
                 proxima_linha_vazia += 1
                 
-            # --- CONSTRUÇÃO DO TELEGRAM (Old vs New & Vacância Condicional) ---
+            # --- CONSTRUÇÃO INTELIGENTE DO TELEGRAM ---
             preco_velho = precos_antigos.get(ticker, preco)
             icone_variacao = "📈" if preco > preco_velho else ("📉" if preco < preco_velho else "➖")
-            
-            # Só mostra a vacância se for fundo de Tijolo (Oculta para fundos de Papel)
             txt_vacancia = f" | 🏚️ Vacância: {vacancia*100:.1f}%" if tipo == "Tijolo" else ""
             
-            texto_ativo = f"{emoji} *{ticker}* ({tipo})\n   R$ {preco_velho:.2f} ➔ R$ {preco:.2f} {icone_variacao}\n   P/VP: {pvp:.2f} | DY: {dy*100:.1f}%{txt_vacancia}"
-
-            if ticker in cat_fixas: relatorio_fixas.append(texto_ativo)
-            elif ticker in novatos_garimpados: relatorio_opps.append(texto_ativo)
-            else: relatorio_atualizados.append(texto_ativo)
+            # Se for Garimpo Novo (nunca esteve na planilha)
+            if ticker in novatos_garimpados:
+                texto_ativo = f"{emoji} *{ticker}* ({tipo})\n   R$ {preco:.2f}\n   P/VP: {pvp:.2f} | DY: {dy*100:.1f}%{txt_vacancia}"
+                relatorio_opps.append(texto_ativo)
+            
+            # Se for Fixo (Sempre mostra a variação)
+            elif ticker in cat_fixas:
+                texto_ativo = f"{emoji} *{ticker}* ({tipo})\n   R$ {preco_velho:.2f} ➔ R$ {preco:.2f} {icone_variacao}\n   P/VP: {pvp:.2f} | DY: {dy*100:.1f}%{txt_vacancia}"
+                
+                # ALERTA MÁXIMO: Fixo que entrou em preço de oportunidade
+                if ticker in oportunidades_gerais:
+                    relatorio_fixas_opps.append(f"🚨 *{ticker} ENTROU EM DESCONTO!* 🚨\n   {texto_ativo}")
+                else:
+                    relatorio_fixas.append(texto_ativo)
+                    
+            # Outros Atualizados (Desatualizadas)
+            else:
+                texto_ativo = f"{emoji} *{ticker}* ({tipo})\n   R$ {preco_velho:.2f} ➔ R$ {preco:.2f} {icone_variacao}\n   P/VP: {pvp:.2f} | DY: {dy*100:.1f}%{txt_vacancia}"
+                relatorio_atualizados.append(texto_ativo)
 
             print(f"   ✅ [OK] FII {ticker} processado.")
 
@@ -164,6 +176,8 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     msg_out = ""
     if batch_updates:
         msg_out = "🏢 *MOVIMENTAÇÃO DE FIIs* 🏢\n\n"
+        # O PÓDIO DE PRIORIDADES:
+        if relatorio_fixas_opps: msg_out += "🏆 *ALERTA VIP: SEUS FIIs ESTÃO BARATOS!* 🏆\n" + "\n\n".join(relatorio_fixas_opps) + "\n\n"
         if relatorio_fixas: msg_out += "📌 *SUA CARTEIRA FIXA:*\n" + "\n\n".join(relatorio_fixas) + "\n\n"
         if relatorio_opps: msg_out += "🎯 *TOP OPORTUNIDADES (Desconto + DY):*\n" + "\n\n".join(relatorio_opps) + "\n\n"
         if relatorio_atualizados: msg_out += "🔄 *OUTROS ATUALIZADOS:*\n" + "\n\n".join(relatorio_atualizados) + "\n\n"
