@@ -4,8 +4,8 @@ import requests
 import pandas as pd
 import yfinance as yf
 import config
-from modules.utils import get_request_with_retry
 from modules.utils import formatar, precisa_atualizar
+from modules.utils import get_request_with_retry
 
 def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     print("📈 [1/5] Baixando dados globais do Fundamentus (O Arrastão)...")
