@@ -6,6 +6,14 @@ import yfinance as yf
 import config
 from modules.utils import formatar, precisa_atualizar, get_request_with_retry
 
+traducao_setores = {
+    'Energy': 'Energia', 'Financial Services': 'Financeiro', 'Basic Materials': 'Materiais Básicos', 
+    'Utilities': 'Utilidade Pública', 'Industrials': 'Indústria', 'Consumer Defensive': 'Consumo Defensivo', 
+    'Consumer Cyclical': 'Consumo Cíclico', 'Healthcare': 'Saúde', 'Technology': 'Tecnologia', 
+    'Communication Services': 'Comunicações', 'Real Estate': 'Imobiliário', 'Healthcare': 'Saúde',
+    'Consumer Staples': 'Consumo Defensivo', 'Consumer Discretionary': 'Consumo Cíclico'
+}
+
 def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     print("📈 [1/5] Iniciando auditoria completa de Ações...")
     aba_base = planilha.worksheet("BD_Acoes")
