@@ -101,17 +101,25 @@ def callback_handler(call):
 # ==========================================
 # MENUS DE NAVEGAÇÃO
 # ==========================================
-@bot.message_handler(commands=['start', 'menu'])
+@bot.message_handler(commands=['menu'])
 def enviar_menu(message):
     try:
+        # 1. Pega os logs (função criada acima)
+        texto_logs = obter_texto_logs()
+        
+        # 2. Monta o menu
         markup = InlineKeyboardMarkup()
         markup.row(InlineKeyboardButton("🏢 FIIs (Imobiliários)", callback_data="menu_fiis"),
                    InlineKeyboardButton("📈 Ações (Empresas)", callback_data="menu_acoes"))
         markup.row(InlineKeyboardButton("🌍 Visão Macro & Notícias", callback_data="menu_macro"))
 
-        bot.send_message(message.chat.id, "🤖 *Terminal Institucional* 🤖\nSelecione o módulo de análise:", reply_markup=markup, parse_mode="Markdown")
+        # 3. Envia o texto dos logs + o menu
+        mensagem_final = texto_logs + "🤖 *Terminal Institucional* 🤖\nSelecione o módulo de análise:"
+        
+        bot.send_message(message.chat.id, mensagem_final, reply_markup=markup, parse_mode="Markdown")
     except Exception as e:
         traceback.print_exc()
+        bot.reply_to(message, "❌ Erro ao abrir o menu.")
 
 @bot.message_handler(commands=['logs'])
 def mostrar_logs(message):
