@@ -80,5 +80,26 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             print(f"   ✅ [OK] FII {ticker} processado.")
         except Exception as e: print(f"   ❌ [ERRO] {ticker}: {e}")
 
-    msg = "🏢 *MOVIMENTAÇÃO FIIs*\n\n" + (f"🏆 *FIXAS OPORTUNIDADE:*\n" + "\n\n".join(rel_fixas_opps) + "\n\n" if rel_fixas_opps else "") + (f"📌 *CARTEIRA FIXA:*\n" + "\n\n".join(rel_fixas) + "\n\n" if rel_fixas else "") + (f"🎯 *OPORTUNIDADES:*\n" + "\n\n".join(rel_opps) + "\n\n" if rel_opps else "") + (f"🔄 *ATUALIZADOS:*\n" + "\n\n".join(rel_at) if rel_at else "")
+    # --- MONTAGEM ORGANIZADA E MODULAR ---
+    msg_blocos = ["🏢 *MOVIMENTAÇÃO DE FIIs* 🏢"]
+
+    if rel_fixas_opps:
+        bloco = "🏆 *ALERTA VIP: FIXAS EM OPORTUNIDADE* 🏆\n" + "\n\n".join(rel_fixas_opps)
+        msg_blocos.append(bloco)
+
+    if rel_fixas:
+        bloco = "📌 *CARTEIRA FIXA:*\n" + "\n\n".join(rel_fixas)
+        msg_blocos.append(bloco)
+
+    if rel_opps:
+        bloco = "🎯 *TOP OPORTUNIDADES:*\n" + "\n\n".join(rel_opps)
+        msg_blocos.append(bloco)
+
+    if rel_at:
+        bloco = "🔄 *ATUALIZAÇÕES DE FIIs:*\n" + "\n\n".join(rel_at)
+        msg_blocos.append(bloco)
+
+    # Une os blocos com uma linha divisória clara
+    msg = "\n\n➖➖➖➖➖➖➖➖➖➖\n\n".join(msg_blocos)
+
     return batch_updates, msg, aba_fiis
