@@ -127,6 +127,20 @@ def mostrar_logs(message):
         bot.reply_to(message, texto_logs, parse_mode="Markdown")
     except Exception as e:
         bot.reply_to(message, f"❌ Erro ao ler logs: {e}")
+
+def obter_texto_logs():
+    try:
+        planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
+        aba_logs = planilha.worksheet("BD_Logs")
+        # Pega as 3 últimas linhas para não poluir o chat
+        ultimas = aba_logs.get_all_values()[-3:]
+        
+        texto = "📜 *Status do Robô (Últimos logs):*\n"
+        for l in ultimas:
+            texto += f"🕒 {l[0]} - {l[2]}\n"
+        return texto + "\n"
+    except:
+        return "⚠️ *Erro ao ler logs.* (Aba BD_Logs não encontrada)\n\n"
         
 @bot.callback_query_handler(func=lambda call: call.data == "menu_acoes")
 def submenu_acoes(call):
