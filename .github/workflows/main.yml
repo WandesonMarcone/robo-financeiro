@@ -3,8 +3,7 @@ name: Robô Financeiro
 on:
   schedule:
     - cron: '0 13,15,17,19,21 * * 1-5'
-
-  workflow_dispatch: # Permite rodar manualmente a qualquer hora do dia pelo painel Actions
+  workflow_dispatch: 
 
 jobs:
   build:
@@ -23,14 +22,18 @@ jobs:
 
       - name: Criar arquivo de credenciais
         shell: python
+        env:
+          # O nome da variável aqui (GOOGLE_CREDS) tem de ser igual ao que está no seu script
+          GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDENTIALS }}
         run: |
           import os
           with open('credenciais.json', 'w') as f:
               f.write(os.environ['GOOGLE_CREDS'])
-        env:
-          GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDENTIALS }}
 
       - name: Rodar o Robô
         env:
+          # Injetamos todos os segredos necessários para o app.py e seus módulos
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDENTIALS }}
         run: python app.py
