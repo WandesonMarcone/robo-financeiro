@@ -6,6 +6,24 @@ import pytz
 import telebot
 from datetime import datetime
 import config
+import time
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+def get_request_with_retry(url, headers):
+    """Uma requisição blindada que tenta 3 vezes antes de desistir."""
+    session = requests.Session()
+    retry = Retry(
+        total=3, 
+        backoff_factor=1, # Espera 1s, 2s, 4s entre tentativas
+        status_forcelist=[500, 502, 503, 504]
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
+    return session.get(url, headers=headers, timeout=15)
+
 
 def formatar(val):
     try: 
