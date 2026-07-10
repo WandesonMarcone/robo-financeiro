@@ -304,7 +304,7 @@ def relatorio_fato_relevante(call):
         is_fii = True if tipo_ativo == 'fii' else False
 
         # Chama a nossa ponte CVM que escrevemos no module_cvm_bridge.py
-        resumo = module_cvm_bridge.buscar_fatos_relevantes(ticker, is_fii)
+        resumo = module_cvm.buscar_fatos_relevantes(ticker, is_fii)
 
         markup = InlineKeyboardMarkup()
         markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=f"acao_{ticker}" if not is_fii else f"fii_{ticker}"))
@@ -319,7 +319,7 @@ def relatorio_gerencial(call):
         ticker = call.data.split("_")[2]
         bot.answer_callback_query(call.id, f"A extrair relatórios de {ticker} da B3...")
 
-        resumo = module_cvm_bridge.buscar_relatorios_gerenciais(ticker)
+        resumo = module_cvm.buscar_relatorios_gerenciais(ticker)
 
         markup = InlineKeyboardMarkup()
         markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=f"fii_{ticker}"))
@@ -333,7 +333,7 @@ def relatorio_trimestral(call):
         ticker = call.data.split("_")[2]
         bot.answer_callback_query(call.id, f"A baixar balanço ITR de {ticker}...")
 
-        resumo = module_cvm_bridge.buscar_resultados_trimestrais(ticker)
+        resumo = module_cvm.buscar_resultados_trimestrais(ticker)
 
         markup = InlineKeyboardMarkup()
         markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=f"acao_{ticker}"))
