@@ -5,7 +5,6 @@ import traceback
 from flask import Flask, request
 import config
 from datetime import datetime
-import os
 import time
 import schedule
 import io
@@ -19,6 +18,10 @@ from modules.utils import conectar_gspread
 from modules import module_cvm
 from modules import module_ia
 from modules import module_macro
+
+import os
+print(f"DEBUG: Groq Key encontrada: {'SIM' if os.environ.get('GROQ_API_KEY') else 'NÃO'}")
+
 
 bot = telebot.TeleBot(config.TELEGRAM_BOT_TOKEN, threaded=False)
 app = Flask(__name__)
