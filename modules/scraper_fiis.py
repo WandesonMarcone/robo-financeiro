@@ -51,15 +51,26 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     precos_antigos = {}
 
     # Varredura inicial da planilha para mapear o estado atual
+    # Varredura inicial da planilha para mapear o estado atual
     for row in dados_planilha[1:]: 
         if row and row[0].strip():
             t = row[0].strip().upper()
             tickers_planilha.append(t)
-            # O preço antigo cadastrado está localizado na Coluna D (Índice 3)
-            precos_antigos[t] = formatar(row[3]) if len(row) > 3 else 0 
-            # O carimbo de validação está localizado na Coluna Q (Índice 16, ou 15 dependendo de como você conta, ajustado na base)
+            
+            # --- Lógica de Limpeza de Preço para FIIs (Coluna D / Índice 3) ---
+            try:
+                if len(row) > 3 and str(row[3]).strip():
+                    # Remove R$, remove ponto de milhar, troca vírgula por ponto
+                    raw_val = str(row[3]).replace('R$', '').replace('.', '').replace(',', '.').strip()
+                    precos_antigos[t] = float(raw_val) if raw_val else 0.0
+                else:
+                    precos_antigos[t] = 0.0
+            except:
+                precos_antigos[t] = 0.0
+            
+            # O carimbo de validação (Coluna Q / Índice 16)
             mapa_atualizacao[t] = row[15] if len(row) > 15 else "" 
-
+ 
     # Filtro de ativos fixos definidos nas configurações
     cat_fixas = [f for f in config.FIXAS_FIIS if f in tickers_planilha and precisa_atualizar(f, mapa_atualizacao, agora_dt, sp_tz)]
 
