@@ -42,23 +42,37 @@ MAPA_CVM = {
 
 def obter_palavra_chave_cvm(ticker):
     """
-    Tenta achar o nome CVM pelo mapa. Se não achar, usa uma técnica de fallback 
-    tentando extrair o nome via Yahoo Finance.
+    INVESTIGADOR DE IDENTIDADE:
+    1. Tenta pelo mapa fixo (Rápido).
+    2. Se não achar, busca o nome real no Yahoo Finance e extrai a identidade CVM (Inteligente).
     """
     ticker_upper = ticker.upper()
     
-    # 1. Tentativa pelo nosso dicionário blindado (O mais rápido e exato)
+    # 1. Tenta pelo mapa fixo
     if ticker_upper in MAPA_CVM:
         return MAPA_CVM[ticker_upper]
     
-    # 2. Fallback: Se for um ativo novo que não está no mapa, tenta adivinhar pelo YFinance
+    # 2. Investigação Automática (Se não estiver no mapa)
     try:
-        nome_longo = yf.Ticker(f"{ticker_upper}.SA").info.get('longName', '').upper()
-        # Pega as duas primeiras palavras do nome corporativo (Ex: "ITAU UNIBANCO HOLDING S.A." -> "ITAU UNIBANCO")
-        partes = nome_longo.split()
-        return f"{partes[0]} {partes[1]}" if len(partes) > 1 else partes[0]
-    except:
-        return ticker_upper[:4] # Último recurso: usa as 4 letras iniciais
+        print(f"🔍 Investigando identidade do ativo {ticker_upper}...")
+        yf_ticker = yf.Ticker(f"{ticker_upper}.SA")
+        # O 'longName' costuma trazer o nome legal (ex: 'CSHG RENDA URBANA FUNDO DE INVESTIMENTO IMOBILIARIO')
+        nome_completo = yf_ticker.info.get('longName', '').upper()
+        
+        # Limpeza para pegar a essência do nome (Removemos sufixos comuns de busca)
+        nome_limpo = nome_completo.replace("FUNDO DE INVESTIMENTO IMOBILIARIO", "") \
+                                 .replace("FUNDO DE INVESTIMENTO", "") \
+                                 .replace("S.A.", "").replace("SA", "").strip()
+        
+        # Pegamos as duas primeiras palavras importantes que restaram
+        partes = nome_limpo.split()
+        nome_cvm = f"{partes[0]} {partes[1]}" if len(partes) > 1 else partes[0]
+        
+        print(f"✅ Identidade descoberta: {nome_cvm}")
+        return nome_cvm
+    except Exception as e:
+        print(f"⚠️ Não foi possível investigar. Usando fallback simples: {e}")
+        return ticker_upper[:4]
 
 # --- BLOCO 1: INTEGRAÇÃO COM GOOGLE DRIVE E IA ---
 
