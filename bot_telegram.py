@@ -382,44 +382,43 @@ def callback_geral(call):
 
         elif dados.startswith("ia_"):
             ticker = dados.split("_")[1]
+            bot.answer_callback_query(call.id, f"🧠 IA a analisar {ticker}...")
             
-            # Avisa ao utilizador que está a analisar
-            bot.answer_callback_query(call.id, f"🧠 IA (Llama 3) a analisar {ticker}...")
+            # --- A SUA IDEIA APLICADA AQUI ---
+            # Define se é FII ou Ação
+            tipo_ativo = "Fundo Imobiliário (FII)" if ticker.endswith("11") else "Ação de Empresa"
+            # Puxa o nome real usando a função que já temos no module_cvm
+            nome_oficial = module_cvm.obter_palavra_chave_cvm(ticker)
             
-            # Chama a função do módulo da IA
-            analise = module_ia.analisar_fatos_com_ia(f"Faça um resumo financeiro geral da saúde e dos últimos movimentos do ativo {ticker}")
+            # O Prompt Blindado
+            prompt = f"""
+            Faça um resumo financeiro geral da saúde e dos últimos movimentos do ativo {ticker}. 
+            Para te dar contexto exato: trata-se do {tipo_ativo} chamado '{nome_oficial}'. 
+            Foque exclusivamente neste ativo. Não confunda com outras empresas.
+            """
             
-            # Prepara o botão de voltar
+            analise = module_ia.analisar_fatos_com_ia(prompt)
+            # ---------------------------------
+            
             markup = InlineKeyboardMarkup()
             markup.row(InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="voltar_menu"))
             
-            # BLINDAGEM 1: Evita o erro "Message to delete not found"
             try:
                 bot.delete_message(call.message.chat.id, call.message.message_id)
-            except Exception as e_del:
-                print(f"Aviso ao apagar mensagem (ignorado): {e_del}")
+            except:
+                pass
             
-            # Prepara o texto final
-            texto_final = f"🧠 *Análise Groq/Llama 3 - {ticker}*\n\n{analise}"
+            texto_final = f"🧠 *Análise Groq/Llama 3 - {ticker} ({nome_oficial})*\n\n{analise}"
             
-            # BLINDAGEM 2: Evita o erro "Can't parse entities" do Telegram
             try:
-                # Tenta enviar com formatação Markdown
                 bot.send_message(call.message.chat.id, texto_final, reply_markup=markup, parse_mode="Markdown")
             except Exception as erro_telegram:
-                # Se o Telegram rejeitar a formatação gerada pela IA, envia em texto puro!
                 if "parse entities" in str(erro_telegram).lower():
                     bot.send_message(call.message.chat.id, texto_final, reply_markup=markup)
                 else:
-                    print(f"Erro crítico no envio da mensagem: {erro_telegram}")
                     bot.send_message(call.message.chat.id, f"⚠️ Erro de formatação. Análise Bruta:\n\n{analise}", reply_markup=markup)
             
             return
-
-    # Este é o except final da sua função callback_geral
-    except Exception as e:
-        print(f"Erro no botão {call.data}: {e}")
-        bot.answer_callback_query(call.id, "❌ Erro ao processar o comando.")
 
 # ==========================================
 # MOTOR DO SERVIDOR WEB WEBHOOK
