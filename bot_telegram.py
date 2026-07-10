@@ -30,8 +30,10 @@ def obter_url_logo(ticker):
         "ITUB4": "itau.com.br",
         "HGLG11": "cshg.com.br",
         "VISC11": "vincipartners.com",
-        "KNRI11": "kinea.com.br"
+        "KNRI11": "kinea.com.br",
+        "GARE11": "guardiangestora.com.br"
     }
+
     
     dominio = dominios.get(ticker.upper())
     if dominio:
