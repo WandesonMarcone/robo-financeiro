@@ -221,33 +221,44 @@ def buscar_fatos_relevantes(ticker, is_fii=False):
         return f"❌ Erro na extração de Fatos Relevantes: {e}"
 
 def buscar_relatorios_gerenciais(ticker):
-    """Busca relatórios gerenciais recentes de FIIs via FundosNet, usando a técnica do MAPA_CVM."""
+    """Busca relatórios gerenciais recentes contornando a B3 (Via Fundamentus)."""
     try:
-        nome_cvm = obter_palavra_chave_cvm(ticker)
-        print(f"Buscando relatórios para: {nome_cvm} (Ticker: {ticker})")
-
-        fnet = FundosNet()
-        hoje = datetime.date.today()
-        tres_meses_atras = hoje - relativedelta(months=3)
+        url_fr = f"https://www.fundamentus.com.br/fr.php?papel={ticker}"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        response = requests.get(url_fr, headers=headers, timeout=10)
         
-        docs_gerais = list(fnet.busca(categoria="Relatórios", inicio=tres_meses_atras, fim=hoje))
-
-        # Filtra os documentos buscando pelo nome da CVM que descobrimos
-        docs_fundo = [d for d in docs_gerais if nome_cvm in str(getattr(d, 'nome_fundo', '')).upper() or ticker in str(getattr(d, 'nome_fundo', '')).upper()]
-
-        if not docs_fundo: 
-            return f"Nenhum Relatório de {ticker} publicado nos últimos 3 meses (Buscando por: {nome_cvm})."
-
-        contexto = f"Relatórios Recentes de {ticker}:\n"
-        for d in docs_fundo[:2]:
-            data_str = getattr(d, 'datahora_entrega', None)
-            data_formatada = data_str.strftime('%d/%m/%Y') if hasattr(data_str, 'strftime') else str(data_str)
-            contexto += f"- Data: {data_formatada} | Tipo: {getattr(d, 'tipo', 'N/D')}\n"
-            contexto += f"  Link: {getattr(d, 'url', 'Indisponível')}\n"
-
+        contexto = ""
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            tabela = soup.find('table')
+            
+            if tabela:
+                # Pula o cabeçalho e pega as linhas
+                linhas = tabela.find_all('tr')[1:] 
+                relatorios = []
+                
+                for linha in linhas:
+                    colunas = linha.find_all('td')
+                    if len(colunas) >= 2:
+                        data = colunas[0].text.strip()
+                        assunto = colunas[1].text.strip()
+                        
+                        # Filtra apenas os relatórios gerenciais
+                        if "Gerencial" in assunto or "Relatório" in assunto:
+                            relatorios.append(f"- {data}: {assunto}")
+                            if len(relatorios) >= 3: # Pega apenas os 3 mais recentes
+                                break
+                
+                if relatorios:
+                    contexto = f"Relatórios Gerenciais Recentes de {ticker} (Fonte: Fundamentus):\n" + "\n".join(relatorios)
+        
+        if not contexto:
+            return f"Nenhum Relatório Gerencial recente encontrado para {ticker} no radar."
+            
         return extrair_resumo_ia(ticker, "Relatório Gerencial", contexto)
+        
     except Exception as e:
-        return f"❌ Erro ao extrair relatórios via FundosNet: {e}"
+        return f"❌ Erro na extração de Relatórios: {e}"
 
 def buscar_resultados_trimestrais(ticker):
     """Busca resultados trimestrais (ITR/DFP) de ações via Yahoo Finance."""
