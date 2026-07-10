@@ -3,6 +3,9 @@ setuptools>=65.0.0
 wheel>=0.40.0
 greenlet==3.0.3
 
+# TRAVA DE SEGURANÇA PARA O BRFINANCE (Resolve o erro DEFAULT_CIPHERS)
+urllib3<2.0.0
+
 # Bibliotecas do seu robô e IA
 pandas
 yfinance
