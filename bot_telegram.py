@@ -17,12 +17,43 @@ app = Flask(__name__)
 # ==========================================
 # UTILITÁRIO: LOGOS DAS EMPRESAS
 # ==========================================
+import requests
+
+# ==========================================
+# UTILITÁRIO: LOGOS DAS EMPRESAS (VIA GITHUB)
+# ==========================================
 def obter_url_logo(ticker):
-    """Tenta obter a logo da empresa usando a API do Clearbit baseada no nome oficial."""
-    # Retorna uma imagem genérica padrão caso não encontre
-    url_padrao = "https://cdn-icons-png.flaticon.com/512/2830/2830284.png" 
+    """
+    1º Tenta buscar no GitHub fornecido.
+    2º Resolve tickers antigos (ex: GARE11 -> GALG11).
+    3º Faz fallback para Clearbit ou Imagem Padrão.
+    """
+    ticker_upper = ticker.upper()
+
+    # 1. Tradutor de Tickers Desatualizados (Adicione outros se precisar)
+    mapa_antigos = {
+        "GARE11": "GALG11",
+        "RZTR11": "RZTR11", # Exemplo, se precisar mapear outro
+        # "NOVO": "ANTIGO"
+    }
     
-    # Mapeamento rápido de domínios conhecidos para as logos
+    # Se o ticker estiver no mapa, ele usa o antigo para buscar a foto. Se não, usa o normal.
+    ticker_busca = mapa_antigos.get(ticker_upper, ticker_upper)
+
+    # 2. Tenta buscar no Repositório do GitHub
+    # ATENÇÃO: Verifique se as imagens estão na raiz ou numa pasta. 
+    # Estou a assumir que o formato é .png (se for .jpg, altere abaixo)
+    url_github = f"https://raw.githubusercontent.com/WandesonMarcone/icones-bolsabr/main/ícones/{ticker_busca}.png"
+    
+    try:
+        # Faz um request rápido (HEAD) só para ver se a imagem existe sem fazer download dela
+        resposta = requests.head(url_github, timeout=3)
+        if resposta.status_code == 200:
+            return url_github
+    except Exception as e:
+        print(f"Aviso: Imagem {ticker_busca} não encontrada no GitHub.")
+
+    # 3. Fallback 1: Clearbit (Se não tiver no GitHub, tenta pelo site da gestora)
     dominios = {
         "PETR4": "petrobras.com.br",
         "VALE3": "vale.com",
@@ -33,13 +64,13 @@ def obter_url_logo(ticker):
         "KNRI11": "kinea.com.br",
         "GARE11": "guardiangestora.com.br"
     }
-
     
-    dominio = dominios.get(ticker.upper())
+    dominio = dominios.get(ticker_upper)
     if dominio:
         return f"https://logo.clearbit.com/{dominio}"
     
-    return url_padrao
+    # 4. Fallback 2: Imagem padrão de banco
+    return "https://cdn-icons-png.flaticon.com/512/2830/2830284.png"
 
 # ==========================================
 # COMANDO: ADICIONAR ATIVO (/adicionar)
