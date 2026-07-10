@@ -26,6 +26,7 @@ cssselect
 html5lib
 mercados
 beautifulsoup4
+quantstats
 
 # Playwright (necessário para a sua "invasão" ao StatusInvest)
 playwright==1.42.0
