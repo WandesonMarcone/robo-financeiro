@@ -160,11 +160,13 @@ def buscar_fatos_relevantes(ticker, is_fii=False):
             return f"❌ Erro de conexão com o terminal de ações (Yahoo Finance): {e}"
 
 def buscar_relatorios_gerenciais(ticker):
-    """Busca relatórios gerenciais de FIIs via FundosNet."""
-    try:
-        hoje = datetime.date.today()
-        tres_meses_atras = hoje - relativedelta(months=3)
-        fnet = FundosNet()
+    nome_cvm = obter_palavra_chave_cvm(ticker)
+    print(f"Buscando relatórios para: {nome_cvm} (Ticker: {ticker})")
+    
+    fnet = FundosNet()
+    # E aqui a busca acontece usando o NOME, não o ticker!
+    # docs = list(fnet.busca(fundo=nome_cvm, categoria="Relatórios", ...))
+
 
         docs_gerais = list(fnet.busca(categoria="Relatórios", inicio=tres_meses_atras, fim=hoje))
 
