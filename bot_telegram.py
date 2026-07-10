@@ -410,3 +410,9 @@ def webhook():
     thread.start()
 
     return "OK", 200
+
+# ==========================================
+# INICIAR AGENDADOR PROATIVO
+# ==========================================
+thread_agendador = threading.Thread(target=rodar_agendador, daemon=True)
+thread_agendador.start()
