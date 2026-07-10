@@ -37,49 +37,46 @@ def autenticar_drive_logos():
     except:
         return None
 
+import io
+
 def obter_e_salvar_logo(ticker):
     """
     Orquestrador de Logos: Drive -> GitHub -> Logo.dev -> Google Favicons
+    Blindado contra falhas do Google Drive.
     """
     ticker_upper = ticker.upper()
     nome_arquivo = f"{ticker_upper}_logo.png"
     service = autenticar_drive_logos()
 
-    # ---------------------------------------------------------
-    # 1. TENTA BUSCAR NO GOOGLE DRIVE (Seu Banco de Dados)
-    # ---------------------------------------------------------
+    # 1. TENTA NO DRIVE (CACHE)
     if service:
         try:
-            # Procura se o arquivo já existe na sua pasta
             query = f"name='{nome_arquivo}' and '{config.DRIVE_FOLDER_ID}' in parents and trashed=false"
             resultados = service.files().list(q=query, fields="files(id)").execute()
             arquivos = resultados.get('files', [])
             
             if arquivos:
-                # Se achou no Drive, faz o download dos bytes para enviar ao Telegram
                 file_id = arquivos[0]['id']
                 foto_bytes = service.files().get_media(fileId=file_id).execute()
-                print(f"✅ Logo do {ticker} carregada do Google Drive (Economizou API)!")
-                return foto_bytes
+                # O Telegram exige que os bytes estejam embrulhados no io.BytesIO
+                return io.BytesIO(foto_bytes) 
         except Exception as e:
-            print(f"Erro ao buscar no Drive: {e}")
+            print(f"⚠️ Aviso Drive (Leitura): {e}")
 
-    # ---------------------------------------------------------
-    # 2. SE NÃO TEM NO DRIVE, BUSCA NA INTERNET (Cascata)
-    # ---------------------------------------------------------
+    # 2. SE NÃO TEM NO DRIVE, BUSCA NA INTERNET
     url_encontrada = None
     
-    # A. Tenta o seu GitHub
-    mapa_antigos = {"GARE11": "GALG11"}
+    # A. Tenta o seu GitHub (URL corrigida)
+    mapa_antigos = {"GARE11": "GALG11", "RZTR11": "RZTR11"}
     ticker_busca = mapa_antigos.get(ticker_upper, ticker_upper)
-    url_github = f"https://raw.githubusercontent.com/WandesonMarcone/icones-bolsabr/main/icones/{ticker_busca}.png"
+    url_github = f"https://raw.githubusercontent.com/WandesonMarcone/icones-bolsabr/main/{ticker_busca}.png"
     
     try:
         if requests.head(url_github, timeout=2).status_code == 200:
             url_encontrada = url_github
     except: pass
 
-    # B. Se falhou o GitHub, tenta Logo.dev / Google Favicons
+    # B. Tenta Logo.dev ou Google Favicons
     if not url_encontrada:
         dominios = {
             "PETR4": "petrobras.com.br",
@@ -101,28 +98,29 @@ def obter_e_salvar_logo(ticker):
             else:
                 url_encontrada = f"https://www.google.com/s2/favicons?domain={dominio}&sz=256"
 
-    # ---------------------------------------------------------
-    # 3. SALVA NO DRIVE PARA O FUTURO E RETORNA A IMAGEM
-    # ---------------------------------------------------------
+    # 3. SALVA NO DRIVE E RETORNA
     if url_encontrada:
         try:
-            # Baixa a imagem da internet
             resposta = requests.get(url_encontrada, timeout=5)
             if resposta.status_code == 200:
                 foto_bytes = resposta.content
                 
-                # Salva no Drive silenciosamente
+                # Tenta salvar no Drive, mas protegido por um Try/Except isolado!
+                # Se falhar, a imagem continua a ser enviada para o Telegram.
                 if service:
-                    file_metadata = {'name': nome_arquivo, 'parents': [config.DRIVE_FOLDER_ID]}
-                    media = MediaIoBaseUpload(io.BytesIO(foto_bytes), mimetype='image/png')
-                    service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-                    print(f"💾 Logo do {ticker} baixada da internet e salva no Drive com sucesso!")
+                    try:
+                        file_metadata = {'name': nome_arquivo, 'parents': [config.DRIVE_FOLDER_ID]}
+                        media = MediaIoBaseUpload(io.BytesIO(foto_bytes), mimetype='image/png')
+                        service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+                        print(f"💾 {ticker} salva no Drive com sucesso!")
+                    except Exception as e_drive:
+                        print(f"⚠️ Aviso Drive (Salvamento): {e_drive}")
                 
-                return foto_bytes # Retorna os bytes para o Telegram
+                return io.BytesIO(foto_bytes) # Retorna embrulhado para o Telegram
         except Exception as e:
-            print(f"Erro ao baixar/salvar imagem: {e}")
+            print(f"⚠️ Erro ao baixar imagem da internet: {e}")
 
-    # 4. Fallback Final (Imagem Padrão se TUDO falhar)
+    # 4. FALLBACK PADRÃO
     is_fii = ticker_upper.endswith(('11', '13', '14'))
     if is_fii:
         return "https://cdn-icons-png.flaticon.com/512/3125/3125692.png" 
