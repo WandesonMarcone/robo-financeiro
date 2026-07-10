@@ -379,17 +379,17 @@ def callback_geral(call):
 
         elif dados.startswith("ia_"):
             ticker = dados.split("_")[1]
-            bot.answer_callback_query(call.id, f"Gemini a analisar {ticker}...")
+            # Mude o texto aqui:
+            bot.answer_callback_query(call.id, f"🧠 IA (Llama 3) a analisar {ticker}...")
+            
+            # Aqui ele chama a função que editaremos no module_ia.py
             analise = module_ia.analisar_fatos_com_ia(f"Faça um resumo financeiro geral da saúde e dos últimos movimentos do ativo {ticker}")
+            
             markup = InlineKeyboardMarkup()
             markup.row(InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="voltar_menu"))
             bot.delete_message(call.message.chat.id, call.message.message_id)
-            bot.send_message(call.message.chat.id, f"🧠 *Análise Gemini - {ticker}*\n\n{analise}", reply_markup=markup, parse_mode="Markdown")
+            bot.send_message(call.message.chat.id, f"🧠 *Análise Groq/Llama 3 - {ticker}*\n\n{analise}", reply_markup=markup, parse_mode="Markdown")
             return
-
-    except Exception as e:
-        print(f"Erro no botão {call.data}: {e}")
-        bot.answer_callback_query(call.id, "❌ Erro ao processar o comando.")
 
 # ==========================================
 # MOTOR DO SERVIDOR WEB WEBHOOK
