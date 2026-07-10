@@ -10,7 +10,6 @@ from modules.utils import conectar_gspread
 # Agora todos os módulos estão dentro da pasta 'modules', então usamos 'from modules import ...'
 from modules import module_cvm
 from modules import module_ia
-from modules import module_cvm_bridge
 from modules import module_macro
 
 bot = telebot.TeleBot(config.TELEGRAM_BOT_TOKEN, threaded=False)
