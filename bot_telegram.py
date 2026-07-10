@@ -139,15 +139,18 @@ def obter_texto_logs():
     try:
         planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
         aba_logs = planilha.worksheet("BD_Logs")
-        # Pega as 3 últimas linhas para não poluir o chat
         ultimas = aba_logs.get_all_values()[-3:]
         
         texto = "📜 *Status do Robô (Últimos logs):*\n"
         for l in ultimas:
-            texto += f"🕒 {l[0]} - {l[2]}\n"
+            # Pega o erro e remove caracteres que quebram o Markdown do Telegram
+            erro_limpo = str(l[2]).replace('*', '').replace('_', '').replace('[', '(').replace(']', ')')
+            texto += f"🕒 {l[0][:16]} - {l[1]}: {erro_limpo}\n"
+            
         return texto + "\n"
-    except:
-        return "⚠️ *Erro ao ler logs.* (Aba BD_Logs não encontrada)\n\n"
+    except Exception as e:
+        print(f"Erro no log: {e}")
+        return "⚠️ *Erro ao ler logs da planilha.*\n\n"
         
 @bot.callback_query_handler(func=lambda call: call.data == "menu_acoes")
 def submenu_acoes(call):
