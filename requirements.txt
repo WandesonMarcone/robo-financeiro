@@ -1,3 +1,9 @@
+# Bibliotecas de sistema e versões fixas para evitar erros de compilação
+setuptools>=65.0.0
+wheel>=0.40.0
+greenlet==3.0.3
+
+# Bibliotecas do seu robô
 pandas
 yfinance
 requests
@@ -8,6 +14,8 @@ Flask
 gunicorn
 google-generativeai
 google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
 PyPDF2
 lxml
 xlrd
@@ -16,7 +24,8 @@ xmltodict
 openpyxl
 cssselect
 html5lib
+mercados
+beautifulsoup4
+
+# Playwright (necessário para a sua "invasão" ao StatusInvest)
 playwright==1.42.0
-setuptools>=65.0.0
-wheel>=0.40.0
-greenlet==3.0.3
