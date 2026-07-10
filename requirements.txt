@@ -17,3 +17,6 @@ openpyxl
 cssselect
 html5lib
 playwright==1.42.0
+setuptools>=65.0.0
+wheel>=0.40.0
+greenlet==3.0.3
