@@ -5,6 +5,13 @@ import traceback
 from flask import Flask, request
 import config
 from datetime import datetime
+import os
+import io
+import json
+import requests
+from googleapiclient.discovery import build
+from google.oauth2 import service_account
+from googleapiclient.http import MediaIoBaseUpload
 
 from modules.utils import conectar_gspread
 from modules import module_cvm
@@ -13,14 +20,6 @@ from modules import module_macro
 
 bot = telebot.TeleBot(config.TELEGRAM_BOT_TOKEN, threaded=False)
 app = Flask(__name__)
-
-import os
-import io
-import json
-import requests
-from googleapiclient.discovery import build
-from google.oauth2 import service_account
-from googleapiclient.http import MediaIoBaseUpload
 
 # ==========================================
 # UTILITÁRIO: LOGOS DAS EMPRESAS (CACHE NO DRIVE)
@@ -37,12 +36,10 @@ def autenticar_drive_logos():
     except:
         return None
 
-import io
-
 def obter_e_salvar_logo(ticker):
     """
     Orquestrador de Logos: Drive -> GitHub -> Logo.dev -> Google Favicons
-    Blindado contra falhas do Google Drive.
+    Blindado contra falhas do Google Drive e adaptado para o Telegram.
     """
     ticker_upper = ticker.upper()
     nome_arquivo = f"{ticker_upper}_logo.png"
@@ -54,23 +51,27 @@ def obter_e_salvar_logo(ticker):
             query = f"name='{nome_arquivo}' and '{config.DRIVE_FOLDER_ID}' in parents and trashed=false"
             resultados = service.files().list(q=query, fields="files(id)").execute()
             arquivos = resultados.get('files', [])
-            
+
             if arquivos:
                 file_id = arquivos[0]['id']
                 foto_bytes = service.files().get_media(fileId=file_id).execute()
-                # O Telegram exige que os bytes estejam embrulhados no io.BytesIO
-                return io.BytesIO(foto_bytes) 
+                
+                # Prepara para o Telegram (Exige Nome e Cursor no início)
+                img_stream = io.BytesIO(foto_bytes)
+                img_stream.name = nome_arquivo
+                img_stream.seek(0)
+                return img_stream
         except Exception as e:
             print(f"⚠️ Aviso Drive (Leitura): {e}")
 
     # 2. SE NÃO TEM NO DRIVE, BUSCA NA INTERNET
     url_encontrada = None
-    
-    # A. Tenta o seu GitHub (URL corrigida)
+
+    # A. Tenta o seu GitHub
     mapa_antigos = {"GARE11": "GALG11", "RZTR11": "RZTR11"}
     ticker_busca = mapa_antigos.get(ticker_upper, ticker_upper)
-    url_github = f"https://raw.githubusercontent.com/WandesonMarcone/icones-bolsabr/main/{ticker_busca}.png"
-    
+    url_github = f"https://raw.githubusercontent.com/WandesonMarcone/icones-bolsabr/main/icones/{ticker_busca}.png"
+
     try:
         if requests.head(url_github, timeout=2).status_code == 200:
             url_encontrada = url_github
@@ -90,7 +91,7 @@ def obter_e_salvar_logo(ticker):
             "MXRF11": "xpi.com.br"
         }
         dominio = dominios.get(ticker_upper)
-        
+
         if dominio:
             token_logodev = os.environ.get('LOGO_DEV_TOKEN')
             if token_logodev:
@@ -98,15 +99,14 @@ def obter_e_salvar_logo(ticker):
             else:
                 url_encontrada = f"https://www.google.com/s2/favicons?domain={dominio}&sz=256"
 
-    # 3. SALVA NO DRIVE E RETORNA
+    # 3. SALVA NO DRIVE E RETORNA PARA O TELEGRAM
     if url_encontrada:
         try:
             resposta = requests.get(url_encontrada, timeout=5)
             if resposta.status_code == 200:
                 foto_bytes = resposta.content
-                
-                # Tenta salvar no Drive, mas protegido por um Try/Except isolado!
-                # Se falhar, a imagem continua a ser enviada para o Telegram.
+
+                # Tenta salvar no Drive isoladamente
                 if service:
                     try:
                         file_metadata = {'name': nome_arquivo, 'parents': [config.DRIVE_FOLDER_ID]}
@@ -115,8 +115,12 @@ def obter_e_salvar_logo(ticker):
                         print(f"💾 {ticker} salva no Drive com sucesso!")
                     except Exception as e_drive:
                         print(f"⚠️ Aviso Drive (Salvamento): {e_drive}")
-                
-                return io.BytesIO(foto_bytes) # Retorna embrulhado para o Telegram
+
+                # Prepara para o Telegram
+                img_stream = io.BytesIO(foto_bytes)
+                img_stream.name = nome_arquivo
+                img_stream.seek(0)
+                return img_stream
         except Exception as e:
             print(f"⚠️ Erro ao baixar imagem da internet: {e}")
 
@@ -206,21 +210,21 @@ def mostrar_logs(message):
         planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
         aba_logs = planilha.worksheet("BD_Logs")
         linhas = aba_logs.get_all_values()
-        
+
         # Pega as últimas 10 linhas, ignorando o cabeçalho
         ultimas_linhas = linhas[-10:] if len(linhas) > 10 else linhas[1:] 
 
         # Hoje para filtro básico
         hoje_str = datetime.now().strftime("%d/%m/%Y")
-        
+
         texto_logs = f"📜 *Logs Recentes (Foco em: {hoje_str}):*\n\n"
-        
+
         # O Google Sheets costuma retornar '2026-07-10 14:30:00'
         for linha in ultimas_linhas:
             data_hora = linha[0]
             nivel = linha[1]
             erro_limpo = str(linha[2]).replace('*', '').replace('_', '').replace('[', '(').replace(']', ')')
-            
+
             # Formatação limpa
             texto_logs += f"📅 `{data_hora[:10]}` 🕒 `{data_hora[11:16]}` | {nivel}\n💬 {erro_limpo}\n\n"
 
@@ -231,17 +235,13 @@ def mostrar_logs(message):
 # ==========================================
 # PORTEIRO DOS BOTÕES (Callback Handler Único)
 # ==========================================
-# Removemos os vários decoradores callback_query_handler que estavam a dar conflito
-# e centralizamos tudo num único "porteiro".
-
 @bot.callback_query_handler(func=lambda call: True)
 def callback_geral(call):
     try:
         dados = call.data
-        
+
         # 1. Menus Principais
         if dados == "voltar_menu":
-            # Recria o menu limpo
             markup = InlineKeyboardMarkup()
             markup.row(InlineKeyboardButton("🏢 FIIs (Imobiliários)", callback_data="menu_fiis"),
                        InlineKeyboardButton("📈 Ações (Empresas)", callback_data="menu_acoes"))
@@ -250,7 +250,7 @@ def callback_geral(call):
                                   text="🤖 *Terminal Institucional* 🤖\nSelecione o módulo de análise abaixo:", 
                                   reply_markup=markup, parse_mode="Markdown")
             return
-            
+
         elif dados == "menu_macro":
             bot.answer_callback_query(call.id, "🌍 Coletando dados macroeconômicos oficiais...")
             resultado = module_macro.obter_dados_macro()
@@ -258,7 +258,7 @@ def callback_geral(call):
             markup.row(InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="voltar_menu"))
             bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=resultado, reply_markup=markup, parse_mode="Markdown")
             return
-            
+
         elif dados == "menu_acoes":
             bot.answer_callback_query(call.id, "A carregar Carteira de Ações...")
             aba_acoes = conectar_gspread().open_by_url(config.SPREADSHEET_URL).worksheet("BD_Acoes")
@@ -274,7 +274,7 @@ def callback_geral(call):
             texto = "📈 *Selecione uma Ação para Raio-X e Documentos:*" if encontrou else "Nenhuma ação encontrada."
             bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=texto, reply_markup=markup, parse_mode="Markdown")
             return
-            
+
         elif dados == "menu_fiis":
             bot.answer_callback_query(call.id, "A carregar Carteira de FIIs...")
             aba_fiis = conectar_gspread().open_by_url(config.SPREADSHEET_URL).worksheet("BD_FIIs")
@@ -311,12 +311,10 @@ def callback_geral(call):
                 markup.row(InlineKeyboardButton("🧠 Resumo IA (Geral)", callback_data=f"ia_{ticker}"))
                 markup.row(InlineKeyboardButton("🔙 Voltar para FIIs", callback_data="menu_fiis"))
                 texto = f"📌 *Painel de Controle: {ticker}*\n\nAcesse relatórios gerenciais e comunicados ao mercado."
-            
-            # Exclui a mensagem anterior e envia uma nova COM A LOGO
+
             foto_dado = obter_e_salvar_logo(ticker)
             bot.delete_message(call.message.chat.id, call.message.message_id)
-            
-            # O Telegram aceita tanto URL em texto quanto os bytes do arquivo
+
             bot.send_photo(call.message.chat.id, foto_dado, caption=texto, reply_markup=markup, parse_mode="Markdown")
             return
 
@@ -330,7 +328,6 @@ def callback_geral(call):
             resumo = module_cvm.buscar_fatos_relevantes(ticker, is_fii)
             markup = InlineKeyboardMarkup()
             markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=f"acao_{ticker}" if not is_fii else f"fii_{ticker}"))
-            # Como a mensagem atual é uma foto, precisamos usar edit_message_caption ou enviar nova
             bot.delete_message(call.message.chat.id, call.message.message_id)
             bot.send_message(call.message.chat.id, resumo, reply_markup=markup, parse_mode="Markdown")
             return
