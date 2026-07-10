@@ -35,6 +35,6 @@ jobs:
           # Injetamos todos os segredos necessários para o app.py e seus módulos
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           LOGO_DEV_TOKEN: ${{ secrets.LOGO_DEV_TOKEN }}
         run: python app.py
