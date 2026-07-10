@@ -151,6 +151,34 @@ def obter_texto_logs():
     except Exception as e:
         print(f"Erro no log: {e}")
         return "⚠️ *Erro ao ler logs da planilha.*\n\n"
+
+# --- PORTEIRO DOS BOTÕES (Callback Handler) ---
+@bot.callback_query_handler(func=lambda call: True)
+def callback_handler(call):
+    try:
+        # Quando o utilizador clica em "Visão Macro"
+        if call.data == "menu_macro":
+            bot.answer_callback_query(call.id, "🌍 Coletando dados macroeconômicos oficiais...")
+            
+            # Chama o seu arquivo module_macro.py
+            resultado = module_macro.obter_dados_macro()
+            
+            # Edita a mensagem do menu com os dados
+            bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=resultado, parse_mode="Markdown")
+
+        # Quando clica em FIIs
+        elif call.data == "menu_fiis":
+            bot.answer_callback_query(call.id, "🏢 Módulo FIIs...")
+            bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text="🏢 *Módulo de FIIs Ativado*\n(Em breve conectaremos os relatórios aqui.)", parse_mode="Markdown")
+
+        # Quando clica em Ações
+        elif call.data == "menu_acoes":
+            bot.answer_callback_query(call.id, "📈 Módulo Ações...")
+            bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text="📈 *Módulo de Ações Ativado*\n(Em breve conectaremos os balanços aqui.)", parse_mode="Markdown")
+
+    except Exception as e:
+        bot.send_message(call.message.chat.id, f"❌ Erro ao processar o botão: {e}")
+
         
 @bot.callback_query_handler(func=lambda call: call.data == "menu_acoes")
 def submenu_acoes(call):
