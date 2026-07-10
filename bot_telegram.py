@@ -14,63 +14,119 @@ from modules import module_macro
 bot = telebot.TeleBot(config.TELEGRAM_BOT_TOKEN, threaded=False)
 app = Flask(__name__)
 
-# ==========================================
-# UTILITÁRIO: LOGOS DAS EMPRESAS
-# ==========================================
+import os
+import io
+import json
 import requests
+from googleapiclient.discovery import build
+from google.oauth2 import service_account
+from googleapiclient.http import MediaIoBaseUpload
 
 # ==========================================
-# UTILITÁRIO: LOGOS DAS EMPRESAS (VIA GITHUB)
+# UTILITÁRIO: LOGOS DAS EMPRESAS (CACHE NO DRIVE)
 # ==========================================
-def obter_url_logo(ticker):
+def autenticar_drive_logos():
+    try:
+        google_creds = os.environ.get('GOOGLE_CREDS')
+        if not google_creds: return None
+        creds = service_account.Credentials.from_service_account_info(
+            json.loads(google_creds), 
+            scopes=['https://www.googleapis.com/auth/drive.file', 'https://www.googleapis.com/auth/drive.readonly']
+        )
+        return build('drive', 'v3', credentials=creds)
+    except:
+        return None
+
+def obter_e_salvar_logo(ticker):
     """
-    1º Tenta buscar no GitHub fornecido.
-    2º Resolve tickers antigos (ex: GARE11 -> GALG11).
-    3º Faz fallback para Clearbit ou Imagem Padrão.
+    Orquestrador de Logos: Drive -> GitHub -> Logo.dev -> Google Favicons
     """
     ticker_upper = ticker.upper()
+    nome_arquivo = f"{ticker_upper}_logo.png"
+    service = autenticar_drive_logos()
 
-    # 1. Tradutor de Tickers Desatualizados (Adicione outros se precisar)
-    mapa_antigos = {
-        "GARE11": "GALG11",
-        "RZTR11": "RZTR11", # Exemplo, se precisar mapear outro
-        # "NOVO": "ANTIGO"
-    }
+    # ---------------------------------------------------------
+    # 1. TENTA BUSCAR NO GOOGLE DRIVE (Seu Banco de Dados)
+    # ---------------------------------------------------------
+    if service:
+        try:
+            # Procura se o arquivo já existe na sua pasta
+            query = f"name='{nome_arquivo}' and '{config.DRIVE_FOLDER_ID}' in parents and trashed=false"
+            resultados = service.files().list(q=query, fields="files(id)").execute()
+            arquivos = resultados.get('files', [])
+            
+            if arquivos:
+                # Se achou no Drive, faz o download dos bytes para enviar ao Telegram
+                file_id = arquivos[0]['id']
+                foto_bytes = service.files().get_media(fileId=file_id).execute()
+                print(f"✅ Logo do {ticker} carregada do Google Drive (Economizou API)!")
+                return foto_bytes
+        except Exception as e:
+            print(f"Erro ao buscar no Drive: {e}")
+
+    # ---------------------------------------------------------
+    # 2. SE NÃO TEM NO DRIVE, BUSCA NA INTERNET (Cascata)
+    # ---------------------------------------------------------
+    url_encontrada = None
     
-    # Se o ticker estiver no mapa, ele usa o antigo para buscar a foto. Se não, usa o normal.
+    # A. Tenta o seu GitHub
+    mapa_antigos = {"GARE11": "GALG11"}
     ticker_busca = mapa_antigos.get(ticker_upper, ticker_upper)
-
-    # 2. Tenta buscar no Repositório do GitHub
-    # ATENÇÃO: Verifique se as imagens estão na raiz ou numa pasta. 
-    # Estou a assumir que o formato é .png (se for .jpg, altere abaixo)
-    url_github = f"https://raw.githubusercontent.com/WandesonMarcone/icones-bolsabr/main/ícones/{ticker_busca}.png"
+    url_github = f"https://raw.githubusercontent.com/WandesonMarcone/icones-bolsabr/main/icones/{ticker_busca}.png"
     
     try:
-        # Faz um request rápido (HEAD) só para ver se a imagem existe sem fazer download dela
-        resposta = requests.head(url_github, timeout=3)
-        if resposta.status_code == 200:
-            return url_github
-    except Exception as e:
-        print(f"Aviso: Imagem {ticker_busca} não encontrada no GitHub.")
+        if requests.head(url_github, timeout=2).status_code == 200:
+            url_encontrada = url_github
+    except: pass
 
-    # 3. Fallback 1: Clearbit (Se não tiver no GitHub, tenta pelo site da gestora)
-    dominios = {
-        "PETR4": "petrobras.com.br",
-        "VALE3": "vale.com",
-        "BBAS3": "bb.com.br",
-        "ITUB4": "itau.com.br",
-        "HGLG11": "cshg.com.br",
-        "VISC11": "vincipartners.com",
-        "KNRI11": "kinea.com.br",
-        "GARE11": "guardiangestora.com.br"
-    }
-    
-    dominio = dominios.get(ticker_upper)
-    if dominio:
-        return f"https://logo.clearbit.com/{dominio}"
-    
-    # 4. Fallback 2: Imagem padrão de banco
-    return "https://cdn-icons-png.flaticon.com/512/2830/2830284.png"
+    # B. Se falhou o GitHub, tenta Logo.dev / Google Favicons
+    if not url_encontrada:
+        dominios = {
+            "PETR4": "petrobras.com.br",
+            "VALE3": "vale.com",
+            "BBAS3": "bb.com.br",
+            "ITUB4": "itau.com.br",
+            "HGLG11": "cshg.com.br",
+            "VISC11": "vincipartners.com",
+            "KNRI11": "kinea.com.br",
+            "GARE11": "guardiangestora.com.br",
+            "MXRF11": "xpi.com.br"
+        }
+        dominio = dominios.get(ticker_upper)
+        
+        if dominio:
+            token_logodev = os.environ.get('LOGO_DEV_TOKEN')
+            if token_logodev:
+                url_encontrada = f"https://img.logo.dev/{dominio}?token={token_logodev}"
+            else:
+                url_encontrada = f"https://www.google.com/s2/favicons?domain={dominio}&sz=256"
+
+    # ---------------------------------------------------------
+    # 3. SALVA NO DRIVE PARA O FUTURO E RETORNA A IMAGEM
+    # ---------------------------------------------------------
+    if url_encontrada:
+        try:
+            # Baixa a imagem da internet
+            resposta = requests.get(url_encontrada, timeout=5)
+            if resposta.status_code == 200:
+                foto_bytes = resposta.content
+                
+                # Salva no Drive silenciosamente
+                if service:
+                    file_metadata = {'name': nome_arquivo, 'parents': [config.DRIVE_FOLDER_ID]}
+                    media = MediaIoBaseUpload(io.BytesIO(foto_bytes), mimetype='image/png')
+                    service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+                    print(f"💾 Logo do {ticker} baixada da internet e salva no Drive com sucesso!")
+                
+                return foto_bytes # Retorna os bytes para o Telegram
+        except Exception as e:
+            print(f"Erro ao baixar/salvar imagem: {e}")
+
+    # 4. Fallback Final (Imagem Padrão se TUDO falhar)
+    is_fii = ticker_upper.endswith(('11', '13', '14'))
+    if is_fii:
+        return "https://cdn-icons-png.flaticon.com/512/3125/3125692.png" 
+    return "https://cdn-icons-png.flaticon.com/512/2933/2933116.png"
 
 # ==========================================
 # COMANDO: ADICIONAR ATIVO (/adicionar)
