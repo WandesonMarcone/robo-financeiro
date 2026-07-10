@@ -36,7 +36,7 @@ def tarefa_busca_proativa():
             # Busca o fato relevante
             resultado = module_cvm.buscar_fatos_relevantes(ticker)
             # Envia para você
-            bot.send_message(config.SEU_CHAT_ID, f"🔔 *Notificação Proativa - {ticker}*\n\n{resultado}", parse_mode="Markdown")
+            bot.send_message(config.TELEGRAM_CHAT_ID, f"🔔 *Notificação Proativa - {ticker}*\n\n{resultado}", parse_mode="Markdown")
         except Exception as e:
             print(f"Erro na busca proativa de {ticker}: {e}")
 
