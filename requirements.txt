@@ -1,9 +1,9 @@
-# Bibliotecas de sistema e versões fixas para evitar erros de compilação
+# Bibliotecas de sistema e garantias
 setuptools>=65.0.0
 wheel>=0.40.0
 greenlet==3.0.3
 
-# Bibliotecas do seu robô
+# Bibliotecas do seu robô e IA
 pandas
 yfinance
 requests
@@ -24,9 +24,12 @@ xmltodict
 openpyxl
 cssselect
 html5lib
-mercados
 beautifulsoup4
+
+# Novas Bibliotecas Institucionais (O motor do novo CVM)
 quantstats
+finlogic
+brfinance
 
 # Playwright (necessário para a sua "invasão" ao StatusInvest)
 playwright==1.42.0
