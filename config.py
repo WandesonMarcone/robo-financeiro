@@ -22,6 +22,5 @@ FIXAS_FIIS = ["GARE11", "MXRF11", "VISC11", "HGLG11"] # Pode alterar e colocar o
 MAPA_RI_SITES = {
     "HGLG11": "https://ri.hglg11.com.br/central-de-resultados/",
     "VISC11": "https://ri.visc11.com.br/central-de-resultados/",
-    "PETR4": "https://api.mziq.com/mzfilemanager/v2/d/565d0a68-3f8c-4f51-b0e5-79a632742966/f2628468-b714-436f-870f-1b777a82810a?origin=1",
-    # Basta adicionar uma nova linha aqui quando quiser novos fundos/ações!
+    "GARE11": "https://guardiangestora.com.br/fundo/guardian-logistica/" # <--- Adicionado
 }
