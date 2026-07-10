@@ -97,6 +97,24 @@ def callback_handler(call):
     elif call.data == "chamar_ia":
         chamar_ia_geral(call)
 
+@bot.message_handler(commands=['testepw'])
+def comando_teste_playwright(message):
+    try:
+        args = message.text.split()
+        if len(args) < 2:
+            bot.reply_to(message, "⚠️ Use o formato: /testepw TICKER (Ex: /testepw MXRF11)")
+            return
+            
+        ticker = args[1].upper()
+        bot.reply_to(message, f"🕵️‍♂️ Iniciando invasão via navegador (Playwright) para {ticker}. Isso pode demorar uns 10 segundos...")
+        
+        # Chama a nossa nova função
+        resultado = module_cvm.testar_playwright_statusinvest(ticker)
+        
+        bot.reply_to(message, resultado, parse_mode="Markdown")
+    except Exception as e:
+        bot.reply_to(message, f"Erro: {e}")
+
 # ==========================================
 # MENUS DE NAVEGAÇÃO
 # ==========================================
