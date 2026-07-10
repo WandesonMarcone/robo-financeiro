@@ -28,8 +28,11 @@ def classificar_fii_e_emoji(setor):
     tickers_planilha = []
     mapa_atualizacao = {}
     precos_antigos = {}
-    oportunidades_gerais = [] 
+     # Inicialização das listas de controle
+    oportunidades_gerais = []
     novatos_garimpados = []
+
+    print("🏢 [2/5] Organizando a fila de processamento e verificando travas de tempo...")
 
     # Varredura inicial da planilha para mapear o estado atual
     # Varredura inicial da planilha para mapear o estado atual
