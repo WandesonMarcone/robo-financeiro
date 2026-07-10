@@ -6,7 +6,7 @@ JSON_KEY = 'credenciais.json'
 
 # --- CONFIGURAÇÕES DE NOTIFICAÇÃO (TELEGRAM) ---
 # 🔒 O Token agora é secreto! O código vai puxar diretamente do servidor Render.
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") 
+SEU_CHAT_ID = os.environ.get("TELEGRAM_BOT_TOKEN") 
 # O Chat ID pode ficar público, pois é apenas um endereço de destino e sem o Token ninguém consegue mandar mensagens para lá.
 TELEGRAM_CHAT_ID = "8867098987"
 
