@@ -32,13 +32,24 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
         df = pd.DataFrame() 
 
     dados_planilha = aba_base.get_all_values()
+    dados_planilha = aba_base.get_all_values()
     todas_originais, mapa_atualizacao, precos_antigos = [], {}, {}
+    
     for row in dados_planilha[1:]:
         if row and row[0].strip() and not row[0].replace(',', '').replace('.', '').isnumeric():
             t = row[0].strip().upper()
             todas_originais.append(t)
-            precos_antigos[t] = formatar(row[2]) if len(row) > 2 else 0 # Coluna C
-            mapa_atualizacao[t] = row[32] if len(row) > 32 else "" # Coluna AG
+            
+            # Lógica de limpeza para o preço na Coluna C (índice 2)
+            try:
+                # Remove "R$", tira o ponto de milhar, troca vírgula por ponto
+                raw_val = str(row[2]).replace('R$', '').replace('.', '').replace(',', '.').strip()
+                precos_antigos[t] = float(raw_val) if raw_val else 0.0
+            except:
+                precos_antigos[t] = 0.0
+            
+            # Mapeamento da Coluna AG (índice 32)
+            mapa_atualizacao[t] = row[32] if len(row) > 32 else ""
 
     todas = list(todas_originais)
     cat_fixas = [f for f in config.FIXAS_ACOES if f in todas and precisa_atualizar(f, mapa_atualizacao, agora_dt, sp_tz)]
