@@ -79,6 +79,16 @@ def cvm_command(message):
         bot.reply_to(message, erro_msg)
         print(f"   ❌ [ERRO BOT] {erro_msg}")
 
+@bot.message_handler(commands=['risco'])
+def comando_risco(message):
+    try:
+        ticker = message.text.split()[1].upper()
+        bot.reply_to(message, f"📊 Calculando matriz de risco (QuantStats) para {ticker}...")
+        resultado = module_cvm.analisar_performance_quantstats(ticker)
+        bot.reply_to(message, resultado, parse_mode="Markdown")
+    except:
+        bot.reply_to(message, "Use: /risco TICKER")
+
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
     # O call.data é o "nome" do botão que você definiu lá no teclado
