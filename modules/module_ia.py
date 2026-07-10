@@ -17,7 +17,7 @@ def analisar_fatos_com_ia(resumo_prompt):
         
         # Modelo atualizado (gemini-1.5-pro é mais robusto para textos longos como PDFs)
         # Se preferir o modelo mais rápido e barato, pode trocar por 'gemini-1.5-flash'
-        model = genai.GenerativeModel('gemini-1.5-pro-latest') 
+        model = genai.GenerativeModel('gemini-1.5-flash')
 
         # A execução da IA
         response = model.generate_content(resumo_prompt)
