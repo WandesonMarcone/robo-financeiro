@@ -394,6 +394,10 @@ def callback_geral(call):
             bot.send_message(call.message.chat.id, f"🧠 *Análise Groq/Llama 3 - {ticker}*\n\n{analise}", reply_markup=markup, parse_mode="Markdown")
             return
 
+    except Exception as e:
+        print(f"Erro no botão {call.data}: {e}")
+        bot.answer_callback_query(call.id, "❌ Erro ao processar o comando.")
+
 # ==========================================
 # MOTOR DO SERVIDOR WEB WEBHOOK
 # ==========================================
