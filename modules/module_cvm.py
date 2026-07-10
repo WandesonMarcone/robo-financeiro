@@ -21,10 +21,33 @@ from googleapiclient.http import MediaIoBaseUpload
 import config
 import modules.module_ia as module_ia
 
-# Variáveis globais do config
+# Variáveis globais do config e ambiente
 DRIVE_FOLDER_ID = config.DRIVE_FOLDER_ID
-# Usa getattr para não quebrar caso o dicionário ainda não esteja no config.py
 MAPA_RI = getattr(config, 'MAPA_RI_SITES', {}) 
+# Deteta se o bot está rodando em nuvem para evitar timeouts em sites com firewall agressivo (como Fundamentus)
+IS_CLOUD = os.environ.get('RENDER') or os.environ.get('GITHUB_ACTIONS')
+
+# ==========================================
+# 0. FUNÇÃO DE SEGURANÇA (YFINANCE)
+# ==========================================
+def buscar_ticker_seguro(ticker):
+    """
+    Tenta buscar ticker com e sem .SA para evitar o Erro 404 (Quote not found).
+    Retorna o objeto do Yahoo Finance configurado corretamente.
+    """
+    for sufixo in [".SA", ""]:
+        ticker_completo = f"{ticker}{sufixo}"
+        asset = yf.Ticker(ticker_completo)
+        try:
+            # Puxar o histórico de 1 dia é a forma mais rápida de validar se o ativo existe lá
+            hist = asset.history(period="1d")
+            if not hist.empty:
+                return asset
+        except Exception:
+            continue
+            
+    # Último recurso: retorna o padrão para tentar extrair ao menos notícias
+    return yf.Ticker(f"{ticker}.SA")
 
 # ==========================================
 # 1. MAPEAMENTO DE IDENTIDADE DA CVM
@@ -47,9 +70,10 @@ def obter_palavra_chave_cvm(ticker):
     ticker_upper = ticker.upper()
     if ticker_upper in MAPA_CVM:
         return MAPA_CVM[ticker_upper]
-    
+
     try:
-        nome_completo = yf.Ticker(f"{ticker_upper}.SA").info.get('longName', '').upper()
+        asset = buscar_ticker_seguro(ticker_upper)
+        nome_completo = asset.info.get('longName', '').upper()
         nome_limpo = nome_completo.replace("FUNDO DE INVESTIMENTO IMOBILIARIO", "").replace("FUNDO DE INVESTIMENTO", "").replace("S.A.", "").replace("SA", "").strip()
         partes = nome_limpo.split()
         return f"{partes[0]} {partes[1]}" if len(partes) > 1 else partes[0]
@@ -87,12 +111,11 @@ def extrair_texto_pdf(pdf_bytes):
         for i, pagina in enumerate(leitor.pages):
             texto_pagina = pagina.extract_text()
             if not texto_pagina: continue
-            
+
             texto_lower = texto_pagina.lower()
-            # Pega as 3 primeiras, as 2 últimas ou qualquer uma com os termos-chave
             if i < 3 or i >= len(leitor.pages) - 2 or any(termo in texto_lower for termo in palavras_chave):
                 texto_estrategico += f"\n\n--- [PÁGINA {i+1}] ---\n{texto_pagina}"
-                
+
         return texto_estrategico[:100000]
     except Exception as e:
         return f"Erro ao aplicar Raio-X no PDF: {str(e)}"
@@ -111,10 +134,10 @@ def extrair_resumo_ia(ticker, tipo_documento, texto_bruto, link_drive=None):
     3. 🎯 Veredito do Especialista: Este evento gera uma Oportunidade ou Risco? Justifique.
     """
     resumo = module_ia.analisar_fatos_com_ia(ticker + f" - {tipo_documento}\n\n" + prompt)
-    
+
     if link_drive:
         resumo += f"\n\n📂 **Documento Oficial (Salvo no Drive):** [Acessar Arquivo Completo]({link_drive})"
-        
+
     return resumo
 
 # ==========================================
@@ -124,11 +147,11 @@ def buscar_relatorio_ri(ticker):
     """Camada Ouro: Procura o PDF oficial direto no site de RI (se configurado)."""
     url = MAPA_RI.get(ticker.upper())
     if not url: return None
-    
+
     try:
         response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=15)
         soup = BeautifulSoup(response.text, 'html.parser')
-        
+
         for link in soup.find_all('a', href=True):
             href = link['href']
             if ".pdf" in href.lower() and ("gerencial" in href.lower() or "relatorio" in href.lower()):
@@ -139,7 +162,7 @@ def buscar_relatorio_ri(ticker):
 def buscar_relatorios_gerenciais(ticker):
     """
     Orquestra a busca de relatórios gerenciais:
-    1. Site de RI (Download direto) -> 2. Fundamentus (Scraping)
+    1. Site de RI (Download direto) -> 2. Fundamentus (Scraping Seguro)
     """
     # TENTATIVA 1: Site Direto de RI (Mais seguro, gera PDF)
     pdf_url = buscar_relatorio_ri(ticker)
@@ -152,65 +175,67 @@ def buscar_relatorios_gerenciais(ticker):
         except Exception as e:
             print(f"Erro ao processar PDF do RI para {ticker}: {e}")
 
-    # TENTATIVA 2: Fundamentus (Texto rápido se o RI não estiver mapeado)
-    try:
-        url_fr = f"https://www.fundamentus.com.br/fr.php?papel={ticker}"
-        response = requests.get(url_fr, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
-        contexto = ""
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            tabela = soup.find('table')
-            if tabela:
-                relatorios = []
-                for linha in tabela.find_all('tr')[1:]:
-                    colunas = linha.find_all('td')
-                    if len(colunas) >= 2:
-                        assunto = colunas[1].text.strip()
-                        if "Gerencial" in assunto or "Relatório" in assunto:
-                            relatorios.append(f"- {colunas[0].text.strip()}: {assunto}")
-                            if len(relatorios) >= 3: break
-                
-                if relatorios:
-                    contexto = f"Relatórios Recentes de {ticker} (Fundamentus):\n" + "\n".join(relatorios)
-                    return extrair_resumo_ia(ticker, "Resumo de Lançamento de Relatórios", contexto)
-                    
-        return f"Nenhum Relatório Gerencial encontrado para {ticker} (Bases consultadas: RI e Fundamentus)."
-    except Exception as e:
-        return f"❌ Erro na extração de Relatórios: {e}"
+    # TENTATIVA 2: Fundamentus (Evita se estiver na nuvem por conta do firewall)
+    if not IS_CLOUD:
+        try:
+            url_fr = f"https://www.fundamentus.com.br/fr.php?papel={ticker}"
+            response = requests.get(url_fr, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
+            contexto = ""
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                tabela = soup.find('table')
+                if tabela:
+                    relatorios = []
+                    for linha in tabela.find_all('tr')[1:]:
+                        colunas = linha.find_all('td')
+                        if len(colunas) >= 2:
+                            assunto = colunas[1].text.strip()
+                            if "Gerencial" in assunto or "Relatório" in assunto:
+                                relatorios.append(f"- {colunas[0].text.strip()}: {assunto}")
+                                if len(relatorios) >= 3: break
+
+                    if relatorios:
+                        contexto = f"Relatórios Recentes de {ticker} (Fundamentus):\n" + "\n".join(relatorios)
+                        return extrair_resumo_ia(ticker, "Resumo de Lançamento de Relatórios", contexto)
+        except Exception as e:
+            print(f"Erro Fundamentus Relatórios: {e}")
+
+    return f"Nenhum Relatório Gerencial encontrado para {ticker}. (Lembre-se de adicionar o site de RI deste ativo no config.py)"
 
 def buscar_fatos_relevantes(ticker, is_fii=False):
     """Cascata: 1. Fundamentus -> 2. brFinance (CVM) -> 3. Yahoo"""
     contexto = ""
-    
+
     # TENTATIVA 1: Fundamentus
-    try:
-        url_fr = f"https://www.fundamentus.com.br/fr.php?papel={ticker}"
-        response = requests.get(url_fr, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            tabela = soup.find('table')
-            if tabela:
-                linhas = tabela.find_all('tr')[1:4] 
-                if linhas:
-                    contexto = f"Últimos Fatos Relevantes de {ticker} (Fonte: Fundamentus):\n"
-                    for linha in linhas:
-                        colunas = linha.find_all('td')
-                        if len(colunas) >= 2:
-                            contexto += f"- {colunas[0].text.strip()}: {colunas[1].text.strip()}\n"
-    except: pass
+    if not IS_CLOUD:
+        try:
+            url_fr = f"https://www.fundamentus.com.br/fr.php?papel={ticker}"
+            response = requests.get(url_fr, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                tabela = soup.find('table')
+                if tabela:
+                    linhas = tabela.find_all('tr')[1:4] 
+                    if linhas:
+                        contexto = f"Últimos Fatos Relevantes de {ticker} (Fonte: Fundamentus):\n"
+                        for linha in linhas:
+                            colunas = linha.find_all('td')
+                            if len(colunas) >= 2:
+                                contexto += f"- {colunas[0].text.strip()}: {colunas[1].text.strip()}\n"
+        except: pass
 
     # TENTATIVA 2: brFinance (Integração Oficial CVM para Documentos)
     if not contexto and not is_fii:
         try:
             cvm_api = CVMAsyncBackend()
             print(f"Acionando motor oficial brFinance (CVM) para {ticker}...")
-            # Futura expansão: Aqui extraímos documentos diretamente da base CVM
         except: pass
 
     # TENTATIVA 3: Yahoo Finance (Notícias/Eventos)
     if not contexto:
         try:
-            news = yf.Ticker(f"{ticker}.SA").news
+            asset = buscar_ticker_seguro(ticker)
+            news = asset.news
             if news:
                 contexto = f"Eventos Corporativos (Fonte: Yahoo Finance) de {ticker}:\n"
                 for n in news[:2]:
@@ -226,7 +251,7 @@ def buscar_fatos_relevantes(ticker, is_fii=False):
 def buscar_resultados_trimestrais(ticker):
     """Cascata: FinLogic (Profundo) -> Yahoo Finance (Rápido)"""
     contexto = f"Demonstrativos Financeiros (DRE) de {ticker}:\n\n"
-    
+
     try:
         print("Iniciando motor FinLogic (DRE)...")
         empresa = fl.Company(ticker)
@@ -235,9 +260,13 @@ def buscar_resultados_trimestrais(ticker):
     except Exception as e_fl:
         print(f"⚠️ FinLogic indisponível/sem dados. Trocando para Yahoo Finance...")
         try:
-            dre_yf = yf.Ticker(f"{ticker}.SA").quarterly_income_stmt
+            asset = buscar_ticker_seguro(ticker)
+            if asset is None:
+                return f"❌ Ticker {ticker} não encontrado no Yahoo Finance."
+                
+            dre_yf = asset.quarterly_income_stmt
             if dre_yf.empty:
-                return f"Demonstrativos trimestrais indisponíveis para {ticker} em todas as bases."
+                return f"Demonstrativos trimestrais indisponíveis para {ticker} nas bases abertas."
             contexto += "Fonte: Yahoo Finance (ITR)\n" + dre_yf.iloc[:, :2].to_string()
         except Exception as e_yf:
             return f"❌ Falha crítica ao extrair DRE (FinLogic e Yahoo): {e_yf}"
@@ -250,21 +279,25 @@ def buscar_resultados_trimestrais(ticker):
 def analisar_performance_quantstats(ticker):
     """Motor matemático de risco."""
     try:
-        hist = yf.Ticker(f"{ticker}.SA").history(period="1y")
-        if hist.empty: return f"Sem dados históricos suficientes para {ticker}."
-        
+        asset = buscar_ticker_seguro(ticker)
+        if asset is None:
+            return f"❌ Ticker {ticker} não encontrado nas bases financeiras."
+            
+        hist = asset.history(period="1y")
+        if hist.empty: return f"Sem dados históricos suficientes para calcular risco de {ticker}."
+
         returns = hist['Close'].pct_change().dropna()
         sharpe = qs.stats.sharpe(returns)
         volatilidade = qs.stats.volatility(returns) * 100 
         max_drawdown = qs.stats.max_drawdown(returns) * 100
-        
+
         contexto = f"""
         Métricas de Risco (Últimos 12 meses) de {ticker} (Motor: QuantStats):
         - Índice de Sharpe: {sharpe:.2f}
         - Volatilidade Anualizada: {volatilidade:.2f}%
         - Máximo Drawdown (Pior queda): {max_drawdown:.2f}%
         """
-        
+
         prompt = f"""
         Atue como gestor de risco institucional. Avalie os dados para o ativo {ticker}:
         {contexto}
