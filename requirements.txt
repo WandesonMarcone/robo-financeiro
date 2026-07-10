@@ -16,3 +16,4 @@ xmltodict
 openpyxl
 cssselect
 html5lib
+playwright==1.42.0
