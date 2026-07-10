@@ -1,12 +1,14 @@
 import os
 from groq import Groq
 
-# Inicializa o cliente Groq
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-
 def analisar_fatos_com_ia(prompt):
-    """Analisa fatos e documentos usando o motor Llama 3 do Groq."""
+    # Verificação crítica de segurança
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        return "❌ Erro: Chave GROQ_API_KEY não encontrada no servidor (Verifique as Variáveis de Ambiente do Render)."
+    
     try:
+        client = Groq(api_key=api_key)
         chat_completion = client.chat.completions.create(
             messages=[
                 {"role": "system", "content": "Você é um analista financeiro institucional sênior."},
@@ -17,4 +19,5 @@ def analisar_fatos_com_ia(prompt):
         )
         return chat_completion.choices[0].message.content
     except Exception as e:
-        return f"❌ Erro na análise Groq: {str(e)}"
+        # Isso vai te mostrar o erro exato no chat se algo falhar
+        return f"❌ Erro crítico na IA: {str(e)}"
