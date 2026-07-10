@@ -78,10 +78,12 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     
     # Processamento do rastreamento de oportunidades em memória (Caçador)
     if not df.empty:
+        # Filtragem Blindada (Ajuste dos requisitos)
         df_cacador = df[
-            (df['P/VP'] >= 0.85) & (df['P/VP'] <= 1.05) &  
-            (df['Dividend Yield'] >= 0.08) &               
-            (df['Liquidez'] >= 1000000) &                  
+            (df['P/VP'] >= 0.85) &
+            (df['P/VP'] <= 1.05) &
+            (df['Dividend Yield'] >= 0.08) &
+            (df['Liquidez'] >= 3000000) &  # <--- Aumentado para 3 milhões
             (df['Vacância Média'] <= 0.10)                 
         ]
         oportunidades_gerais = df_cacador.sort_values(by='Dividend Yield', ascending=False).index.tolist()
