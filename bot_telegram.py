@@ -315,9 +315,11 @@ def callback_geral(call):
                 texto = f"📌 *Painel de Controle: {ticker}*\n\nAcesse relatórios gerenciais e comunicados ao mercado."
             
             # Exclui a mensagem anterior e envia uma nova COM A LOGO
-            url_logo = obter_url_logo(ticker)
+            foto_dado = obter_e_salvar_logo(ticker)
             bot.delete_message(call.message.chat.id, call.message.message_id)
-            bot.send_photo(call.message.chat.id, url_logo, caption=texto, reply_markup=markup, parse_mode="Markdown")
+            
+            # O Telegram aceita tanto URL em texto quanto os bytes do arquivo
+            bot.send_photo(call.message.chat.id, foto_dado, caption=texto, reply_markup=markup, parse_mode="Markdown")
             return
 
         # 3. Funções de Documentos e IA
