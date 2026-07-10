@@ -22,33 +22,14 @@ def classificar_fii_e_emoji(setor):
         return "Híbrido", "🧩"
     return "Tijolo", "🧱"
 
-def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
-    print("🏢 [1/5] Iniciando varredura e auditoria completa do mercado de FIIs...")
-    aba_fiis = planilha.worksheet("BD_FIIs")
-
-    # 🛡️ Extração da tabela geral do Fundamentus (O Arrastão)
-    try:
-        url = "https://www.fundamentus.com.br/fii_resultado.php"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = get_request_with_retry(url, headers=headers)
-        df = pd.read_html(io.StringIO(response.text), decimal=',', thousands='.')[0]
-        df['Papel'] = df['Papel'].str.strip().str.upper()
-        df = df.set_index('Papel')
-        
-        # Formatação numérica preventiva para as colunas vitais
-        for col in ['Cotação', 'P/VP', 'Dividend Yield', 'Liquidez', 'Vacância Média', 'Valor de Mercado', 'Qtd de imóveis']:
-            if col in df.columns:
-                df[col] = df[col].apply(formatar)
-        print("   ✅ Base de dados do Fundamentus carregada com sucesso.")
-    except Exception as e:
-        print(f"⚠️ [AVISO] Erro no Fundamentus (Timeout ou Queda): {e}. Operando em modo de contingência (Yahoo Finance).")
-        df = pd.DataFrame() 
-
-    print("\n🏢 [2/5] Organizando a fila de processamento e verificando travas de tempo...")
+    oportunidades_gerais = [] 
+    novatos_garimpados = [] travas de tempo...")
     dados_planilha = aba_fiis.get_all_values()
     tickers_planilha = []
     mapa_atualizacao = {}
     precos_antigos = {}
+    oportunidades_gerais = [] 
+    novatos_garimpados = []
 
     # Varredura inicial da planilha para mapear o estado atual
     # Varredura inicial da planilha para mapear o estado atual
