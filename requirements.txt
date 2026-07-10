@@ -28,6 +28,7 @@ openpyxl
 cssselect
 html5lib
 beautifulsoup4
+groq
 
 # Novas Bibliotecas Institucionais (O motor do novo CVM)
 quantstats
