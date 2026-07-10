@@ -22,25 +22,45 @@ def classificar_fii_e_emoji(setor):
         return "Híbrido", "🧩"
     return "Tijolo", "🧱"
 
-    oportunidades_gerais = [] 
-    novatos_garimpados = [] travas de tempo...")
+def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
+    print("🏢 [1/5] Iniciando varredura e auditoria completa do mercado de FIIs...")
+    aba_fiis = planilha.worksheet("BD_FIIs")
+
+    # 🛡️ Extração da tabela geral do Fundamentus (O Arrastão)
+    try:
+        url = "https://www.fundamentus.com.br/fii_resultado.php"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = get_request_with_retry(url, headers=headers)
+        df = pd.read_html(io.StringIO(response.text), decimal=',', thousands='.')[0]
+        df['Papel'] = df['Papel'].str.strip().str.upper()
+        df = df.set_index('Papel')
+        
+        # Formatação numérica preventiva para as colunas vitais
+        for col in ['Cotação', 'P/VP', 'Dividend Yield', 'Liquidez', 'Vacância Média', 'Valor de Mercado', 'Qtd de imóveis']:
+            if col in df.columns:
+                df[col] = df[col].apply(formatar)
+        print("   ✅ Base de dados do Fundamentus carregada com sucesso.")
+    except Exception as e:
+        print(f"⚠️ [AVISO] Erro no Fundamentus (Timeout ou Queda): {e}. Operando em modo de contingência (Yahoo Finance).")
+        df = pd.DataFrame()
+
+    print("\n🏢 [2/5] Organizando a fila de processamento e verificando travas de tempo...")
+    
+    # Inicialização segura das variáveis de controle para evitar falhas se o Fundamentus cair
+    oportunidades_gerais = []
+    novatos_garimpados = []
+    
     dados_planilha = aba_fiis.get_all_values()
     tickers_planilha = []
     mapa_atualizacao = {}
     precos_antigos = {}
-     # Inicialização das listas de controle
-    oportunidades_gerais = []
-    novatos_garimpados = []
 
-    print("🏢 [2/5] Organizando a fila de processamento e verificando travas de tempo...")
-
-    # Varredura inicial da planilha para mapear o estado atual
     # Varredura inicial da planilha para mapear o estado atual
     for row in dados_planilha[1:]: 
         if row and row[0].strip():
             t = row[0].strip().upper()
             tickers_planilha.append(t)
-            
+
             # --- Lógica de Limpeza de Preço para FIIs (Coluna D / Índice 3) ---
             try:
                 if len(row) > 3 and str(row[3]).strip():
@@ -51,23 +71,21 @@ def classificar_fii_e_emoji(setor):
                     precos_antigos[t] = 0.0
             except:
                 precos_antigos[t] = 0.0
-            
+
             # O carimbo de validação (Coluna Q / Índice 16)
             mapa_atualizacao[t] = row[15] if len(row) > 15 else "" 
- 
+
     # Filtro de ativos fixos definidos nas configurações
     cat_fixas = [f for f in config.FIXAS_FIIS if f in tickers_planilha and precisa_atualizar(f, mapa_atualizacao, agora_dt, sp_tz)]
 
-    novatos_garimpados = []
-    
     # Processamento do rastreamento de oportunidades em memória (Caçador)
     if not df.empty:
-        # Filtragem Blindada (Ajuste dos requisitos)
+        # Filtragem Blindada (Ajuste dos requisitos de segurança para liquidez)
         df_cacador = df[
             (df['P/VP'] >= 0.85) &
             (df['P/VP'] <= 1.05) &
             (df['Dividend Yield'] >= 0.08) &
-            (df['Liquidez'] >= 3000000) &  # <--- Aumentado para 3 milhões
+            (df['Liquidez'] >= 3000000) &  # <--- Aumentado para 3 milhões de liquidez mínima
             (df['Vacância Média'] <= 0.10)                 
         ]
         oportunidades_gerais = df_cacador.sort_values(by='Dividend Yield', ascending=False).index.tolist()
@@ -151,7 +169,7 @@ def classificar_fii_e_emoji(setor):
                 media_div_mensal,       # 15 | Coluna P: Projeção de Dividendo Mensal por Cota
                 f"{agora_sp} OK"        # 16 | Coluna Q: Carimbo de Conclusão da Carga
             ]
-            
+
             # Sub-seleção para atualização (Ignora a coluna A se o fundo já existir)
             row_update_parcial = row_update_completo[1:] 
 
@@ -166,7 +184,7 @@ def classificar_fii_e_emoji(setor):
             # --- CONSTRUÇÃO DOS BLOCOS DO TELEGRAM ---
             preco_velho = precos_antigos.get(ticker, preco)
             icone_variacao = "📈" if preco > preco_velho else ("📉" if preco < preco_velho else "➖")
-            
+
             # Filtro visual: Oculta vacância irrelevante (ex: fundos de papel)
             txt_vacancia = f" | 🏚️ Vacância: {vacancia*100:.1f}%" if tipo == "Tijolo" else ""
 
@@ -175,16 +193,16 @@ def classificar_fii_e_emoji(setor):
                 # Oculta o preço velho para ativos recém chegados
                 texto_ativo = f"{emoji} *{ticker}* ({tipo})\n   R$ {preco:.2f}\n   P/VP: {pvp:.2f} | DY: {dy*100:.1f}%{txt_vacancia}"
                 relatorio_opps.append(texto_ativo)
-            
+
             elif ticker in config.FIXAS_FIIS:
                 texto_ativo = f"{emoji} *{ticker}* ({tipo})\n   R$ {preco_velho:.2f} ➔ R$ {preco:.2f} {icone_variacao}\n   P/VP: {pvp:.2f} | DY: {dy*100:.1f}%{txt_vacancia}"
-                
+
                 # Regra de Alerta Máximo (VIP): Fixo que obedece às regras de barganha do Caçador
                 if ticker in oportunidades_gerais:
                     relatorio_fixas_opps.append(f"🚨 *{ticker} ENTROU EM DESCONTO!* 🚨\n   {texto_ativo}")
                 else:
                     relatorio_fixas.append(texto_ativo)
-            
+
             else:
                 # Atualização de rotina para base desatualizada
                 texto_ativo = f"{emoji} *{ticker}* ({tipo})\n   R$ {preco_velho:.2f} ➔ R$ {preco:.2f} {icone_variacao}\n   P/VP: {pvp:.2f} | DY: {dy*100:.1f}%{txt_vacancia}"
@@ -203,7 +221,7 @@ def classificar_fii_e_emoji(setor):
 
     print("\n🏢 [4/5] Estruturando e limpando mensagens modulares para o Telegram...")
     msg_blocos = ["🏢 *MOVIMENTAÇÃO DE FIIs* 🏢"]
-    
+
     if relatorio_fixas_opps: 
         msg_blocos.append("🏆 *ALERTA VIP (Fixas em Oportunidade):*\n" + "\n\n".join(relatorio_fixas_opps))
     if relatorio_fixas: 
@@ -212,7 +230,7 @@ def classificar_fii_e_emoji(setor):
         msg_blocos.append("🎯 *TOP OPORTUNIDADES (Desconto + DY):*\n" + "\n\n".join(relatorio_opps))
     if relatorio_atualizados: 
         msg_blocos.append("🔄 *OUTRAS ATUALIZAÇÕES:*\n" + "\n\n".join(relatorio_atualizados))
-    
+
     # Junção controlada por divisórias estruturadas para legibilidade Mobile
     msg_out = "\n\n➖➖➖➖➖➖➖➖➖➖\n\n".join(msg_blocos) if batch_updates else ""
 
