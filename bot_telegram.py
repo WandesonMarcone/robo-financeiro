@@ -23,6 +23,29 @@ from modules import module_macro
 bot = telebot.TeleBot(config.TELEGRAM_BOT_TOKEN, threaded=False)
 app = Flask(__name__)
 
+# [COLOQUE AQUI LOGO APÓS A DEFINIÇÃO DO BOT E APP]
+
+def tarefa_busca_proativa():
+    """Esta função rodará a cada 1 hora automaticamente."""
+    print("⏳ Executando busca proativa de documentos na CVM...")
+    # Lista de ativos que quer vigiar
+    ativos_para_vigiar = ["GARE11", "PETR4", "MXRF11", "GGRC11"] 
+    
+    for ticker in ativos_para_vigiar:
+        try:
+            # Busca o fato relevante
+            resultado = module_cvm.buscar_fatos_relevantes(ticker)
+            # Envia para você
+            bot.send_message(config.SEU_CHAT_ID, f"🔔 *Notificação Proativa - {ticker}*\n\n{resultado}", parse_mode="Markdown")
+        except Exception as e:
+            print(f"Erro na busca proativa de {ticker}: {e}")
+
+def rodar_agendador():
+    schedule.every(1).hours.do(tarefa_busca_proativa)
+    while True:
+        schedule.run_pending()
+        time.sleep(60)
+
 # ==========================================
 # UTILITÁRIO: LOGOS DAS EMPRESAS (CACHE NO DRIVE)
 # ==========================================
