@@ -8,7 +8,7 @@ JSON_KEY = 'credenciais.json'
 # 🔒 O Token agora é secreto! O código vai puxar diretamente do servidor Render.
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") 
 # O Chat ID pode ficar público, pois é apenas um endereço de destino e sem o Token ninguém consegue mandar mensagens para lá.
-SEU_CHAT_ID = "8867098987"
+TELEGRAM_CHAT_ID = "8867098987"
 
 # Adicione isso ao seu config.py
 DRIVE_FOLDER_ID = "1Q-dkO4oSd6_9zmOeZmPX8nmuVWzdjHOq"
