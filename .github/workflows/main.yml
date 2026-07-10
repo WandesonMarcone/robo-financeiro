@@ -13,9 +13,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configurar Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: '3.12'
 
       - name: Instalar dependências
         run: pip install -r requirements.txt
