@@ -17,6 +17,23 @@ DRIVE_FOLDER_ID = "1Q-dkO4oSd6_9zmOeZmPX8nmuVWzdjHOq"
 FIXAS_ACOES = ["PETR4", "VALE3", "ITUB4", "BBDC4"] 
 FIXAS_FIIS = ["GARE11", "MXRF11", "VISC11", "HGLG11"] # Pode alterar e colocar os seus FIIs reais aqui
 
+# ==========================================
+# CATEGORIAS DO MENU INSTITUCIONAL
+# ==========================================
+
+# 1. FIIs (Fundos Imobiliários)
+FIXAS_FIIS = ["GARE11", "MXRF11", "VISC11"] # Os seus favoritos
+FII_TIJOLO = ["GARE11", "VISC11", "HGLG11", "PQDP11"]
+FII_PAPEL = ["MXRF11", "KNRI11"]
+FII_FOF = ["HGRU11"] # Coloque os seus FOFs aqui
+
+# 2. Ações e Empresas
+FIXAS_ACOES = ["PETR4", "VALE3", "WEGE3"] # As suas favoritas
+ACOES_BANCOS = ["BBAS3", "ITSA4", "B3SA3"]
+ACOES_ENERGIA = ["TAEE11", "EGIE3"]
+ACOES_SANEAMENTO = ["RADL3"] # Coloque as suas aqui (RADL3 é saúde, mas é só um exemplo!)
+
+
 # Adicione novos sites de RI aqui de forma simples!
 # O formato é: "TICKER": "URL_DA_CENTRAL_DE_RESULTADOS"
 MAPA_RI_SITES = {
