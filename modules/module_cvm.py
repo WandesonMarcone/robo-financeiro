@@ -132,22 +132,33 @@ def extrair_texto_pdf(pdf_bytes):
         return f"Erro ao aplicar Raio-X no PDF: {str(e)}"
 
 def extrair_resumo_ia(ticker, tipo_documento, texto_bruto, link_drive=None):
-    """Trava de segurança adicionada: Não envia para IA se não houver texto."""
+    """Trava de segurança e blindagem anti-alucinação."""
     if not texto_bruto or len(texto_bruto.strip()) < 20:
         return f"❌ As fontes oficiais blindaram o acesso ou não há texto extraível no momento para o documento '{tipo_documento}' de {ticker}."
 
+    tipo_ativo = "Fundo Imobiliário (FII)" if ticker.endswith("11") else "Ação de Empresa"
+    nome_oficial = obter_palavra_chave_cvm(ticker)
+
     prompt = f"""
-    Atue como um analista financeiro institucional sênior. O utilizador pediu uma análise sobre o documento '{tipo_documento}' do ativo {ticker}.
-    Abaixo estão os dados extraídos das bases oficiais:
+    Atue como um analista financeiro institucional sênior. 
+    O ativo em análise é: {ticker} (Nome Oficial: {nome_oficial} - Tipo: {tipo_ativo}).
+    
+    O utilizador pediu uma análise sobre o documento '{tipo_documento}'.
+    Abaixo estão os dados extraídos das bases abertas (Aviso: pode haver ruído geral do mercado):
     
     {texto_bruto[:15000]}
     
-    Forneça um laudo com:
+    REGRAS CRÍTICAS:
+    1. Leia o texto acima. Se os dados falarem majoritariamente de OUTRAS empresas (como OI, Orizon, Alupar, etc.) que não tenham relação direta com {ticker} ou {nome_oficial}, IGNORE-OS COMPLETAMENTE.
+    2. Se não houver informação específica e relevante sobre {ticker}, responda APENAS: "Nenhum fato relevante ou documento recente encontrado especificamente para o ativo nas bases de dados consultadas." Não invente parcerias ou operações.
+    
+    Se houver dados reais sobre {ticker}, forneça um laudo com:
     1. 📝 Principais destaques: Resumo claro do que aconteceu.
     2. 💰 Impacto Financeiro: Como isso afeta o DRE, Vacância, Caixa ou Dividendos.
     3. 🎯 Veredito do Especialista: Este evento gera uma Oportunidade ou Risco? Justifique.
     """
-    resumo = module_ia.analisar_fatos_com_ia(ticker + f" - {tipo_documento}\n\n" + prompt)
+    
+    resumo = module_ia.analisar_fatos_com_ia(prompt)
 
     if link_drive:
         resumo += f"\n\n📂 **Documento Oficial (Salvo no Drive):** [Acessar Arquivo Completo]({link_drive})"
