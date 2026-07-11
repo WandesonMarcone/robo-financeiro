@@ -215,7 +215,7 @@ def comando_risco(message):
 # ==========================================
 # MENUS DE NAVEGAÇÃO E LOGS
 # ==========================================
-@bot.message_handler(commands=['menu'])
+@bot.message_handler(commands=['menu', 'start'])
 def enviar_menu(message):
     """Menu limpo, sem exibir logs."""
     try:
@@ -228,6 +228,7 @@ def enviar_menu(message):
 
         bot.send_message(message.chat.id, mensagem_final, reply_markup=markup, parse_mode="Markdown")
     except Exception as e:
+        import traceback
         traceback.print_exc()
         bot.reply_to(message, "❌ Erro ao abrir o menu.")
 
@@ -239,21 +240,14 @@ def mostrar_logs(message):
         aba_logs = planilha.worksheet("BD_Logs")
         linhas = aba_logs.get_all_values()
 
-        # Pega as últimas 10 linhas, ignorando o cabeçalho
         ultimas_linhas = linhas[-10:] if len(linhas) > 10 else linhas[1:] 
-
-        # Hoje para filtro básico
         hoje_str = datetime.now().strftime("%d/%m/%Y")
-
         texto_logs = f"📜 *Logs Recentes (Foco em: {hoje_str}):*\n\n"
 
-        # O Google Sheets costuma retornar '2026-07-10 14:30:00'
         for linha in ultimas_linhas:
             data_hora = linha[0]
             nivel = linha[1]
             erro_limpo = str(linha[2]).replace('*', '').replace('_', '').replace('[', '(').replace(']', ')')
-
-            # Formatação limpa
             texto_logs += f"📅 `{data_hora[:10]}` 🕒 `{data_hora[11:16]}` | {nivel}\n💬 {erro_limpo}\n\n"
 
         bot.reply_to(message, texto_logs, parse_mode="Markdown")
@@ -287,36 +281,76 @@ def callback_geral(call):
             bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=resultado, reply_markup=markup, parse_mode="Markdown")
             return
 
-        elif dados == "menu_acoes":
-            bot.answer_callback_query(call.id, "A carregar Carteira de Ações...")
-            aba_acoes = conectar_gspread().open_by_url(config.SPREADSHEET_URL).worksheet("BD_Acoes")
-            dados_planilha = aba_acoes.get_all_values()
+        # 1.1 Módulo Hierárquico de FIIs
+        elif dados == "menu_fiis":
             markup = InlineKeyboardMarkup()
-            encontrou = False
-            for row in dados_planilha[1:]:
-                if row and row[0].strip() and not row[0].replace(',', '').isnumeric():
-                    ticker = row[0].strip().upper()
-                    markup.row(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"acao_{ticker}"))
-                    encontrou = True
-            markup.row(InlineKeyboardButton("🔙 Voltar", callback_data="voltar_menu"))
-            texto = "📈 *Selecione uma Ação para Raio-X e Documentos:*" if encontrou else "Nenhuma ação encontrada."
-            bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=texto, reply_markup=markup, parse_mode="Markdown")
+            markup.row(InlineKeyboardButton("⭐ Meus Favoritos", callback_data="lista_fiis_favoritos"))
+            markup.row(InlineKeyboardButton("🔥 Oportunidades (Desconto)", callback_data="lista_fiis_oportunidades"))
+            markup.row(
+                InlineKeyboardButton("🧱 Tijolo", callback_data="lista_fiis_tijolo"),
+                InlineKeyboardButton("📄 Papel", callback_data="lista_fiis_papel")
+            )
+            markup.row(InlineKeyboardButton("🏢 FOFs (Fundos de Fundos)", callback_data="lista_fiis_fof"))
+            markup.row(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
+            bot.edit_message_text("🏢 *Módulo FIIs*\nFiltre o mercado por estratégia ou segmento:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
             return
 
-        elif dados == "menu_fiis":
-            bot.answer_callback_query(call.id, "A carregar Carteira de FIIs...")
-            aba_fiis = conectar_gspread().open_by_url(config.SPREADSHEET_URL).worksheet("BD_FIIs")
-            dados_planilha = aba_fiis.get_all_values()
+        # 1.2 Módulo Hierárquico de Ações
+        elif dados == "menu_acoes":
             markup = InlineKeyboardMarkup()
-            encontrou = False
-            for row in dados_planilha[1:]:
-                if row and row[0].strip() and not row[0].replace(',', '').isnumeric():
-                    ticker = row[0].strip().upper()
+            markup.row(InlineKeyboardButton("⭐ Meus Favoritos", callback_data="lista_acoes_favoritos"))
+            markup.row(InlineKeyboardButton("🔥 Oportunidades do Dia", callback_data="lista_acoes_oportunidades"))
+            markup.row(
+                InlineKeyboardButton("🏦 Bancos", callback_data="lista_acoes_bancos"),
+                InlineKeyboardButton("⚡ Energia", callback_data="lista_acoes_energia")
+            )
+            markup.row(InlineKeyboardButton("🚰 Saneamento & Utilidades", callback_data="lista_acoes_saneamento"))
+            markup.row(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
+            bot.edit_message_text("📈 *Módulo de Ações*\nFiltre o mercado por setor ou tese de investimento:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+            return
+
+        # 1.3 Submenus de FIIs (Geração de Listas)
+        elif dados.startswith("lista_fiis_"):
+            categoria = dados.split("_")[2]
+            bot.answer_callback_query(call.id, f"A carregar {categoria}...")
+            markup = InlineKeyboardMarkup()
+            
+            if categoria == "favoritos":
+                for ticker in config.FIXAS_FIIS:
                     markup.row(InlineKeyboardButton(f"🏢 {ticker}", callback_data=f"fii_{ticker}"))
-                    encontrou = True
-            markup.row(InlineKeyboardButton("🔙 Voltar", callback_data="voltar_menu"))
-            texto = "🏢 *Selecione um FII para Raio-X e Documentos:*" if encontrou else "Nenhum FII encontrado."
-            bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=texto, reply_markup=markup, parse_mode="Markdown")
+            else:
+                # Provisório: Mostra todos da planilha até configurarmos as listas
+                aba_fiis = conectar_gspread().open_by_url(config.SPREADSHEET_URL).worksheet("BD_FIIs")
+                dados_planilha = aba_fiis.get_all_values()
+                for row in dados_planilha[1:]:
+                    if row and row[0].strip() and not row[0].replace(',', '').isnumeric():
+                        ticker = row[0].strip().upper()
+                        markup.row(InlineKeyboardButton(f"🏢 {ticker}", callback_data=f"fii_{ticker}"))
+
+            markup.row(InlineKeyboardButton("🔙 Voltar aos FIIs", callback_data="menu_fiis"))
+            bot.edit_message_text(f"🏢 *Categoria: {categoria.capitalize()}*\nSelecione um ativo para Raio-X:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+            return
+
+        # 1.4 Submenus de Ações (Geração de Listas)
+        elif dados.startswith("lista_acoes_"):
+            categoria = dados.split("_")[2]
+            bot.answer_callback_query(call.id, f"A carregar {categoria}...")
+            markup = InlineKeyboardMarkup()
+            
+            if categoria == "favoritos":
+                for ticker in getattr(config, 'FIXAS_ACOES', []):
+                    markup.row(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"acao_{ticker}"))
+            else:
+                # Provisório: Mostra todos da planilha até configurarmos as listas
+                aba_acoes = conectar_gspread().open_by_url(config.SPREADSHEET_URL).worksheet("BD_Acoes")
+                dados_planilha = aba_acoes.get_all_values()
+                for row in dados_planilha[1:]:
+                    if row and row[0].strip() and not row[0].replace(',', '').isnumeric():
+                        ticker = row[0].strip().upper()
+                        markup.row(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"acao_{ticker}"))
+
+            markup.row(InlineKeyboardButton("🔙 Voltar às Ações", callback_data="menu_acoes"))
+            bot.edit_message_text(f"📈 *Categoria: {categoria.capitalize()}*\nSelecione um ativo para Raio-X:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
             return
 
         # 2. Perfil do Ativo (Quando clica num Ticker)
@@ -342,7 +376,6 @@ def callback_geral(call):
 
             foto_dado = obter_e_salvar_logo(ticker)
             bot.delete_message(call.message.chat.id, call.message.message_id)
-
             bot.send_photo(call.message.chat.id, foto_dado, caption=texto, reply_markup=markup, parse_mode="Markdown")
             return
 
@@ -356,7 +389,11 @@ def callback_geral(call):
             resumo = module_cvm.buscar_fatos_relevantes(ticker, is_fii)
             markup = InlineKeyboardMarkup()
             markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=f"acao_{ticker}" if not is_fii else f"fii_{ticker}"))
-            bot.delete_message(call.message.chat.id, call.message.message_id)
+            
+            try:
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+            except: pass
+            
             bot.send_message(call.message.chat.id, resumo, reply_markup=markup, parse_mode="Markdown")
             return
 
@@ -366,7 +403,11 @@ def callback_geral(call):
             resumo = module_cvm.buscar_relatorios_gerenciais(ticker)
             markup = InlineKeyboardMarkup()
             markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=f"fii_{ticker}"))
-            bot.delete_message(call.message.chat.id, call.message.message_id)
+            
+            try:
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+            except: pass
+            
             bot.send_message(call.message.chat.id, resumo, reply_markup=markup, parse_mode="Markdown")
             return
 
@@ -376,40 +417,39 @@ def callback_geral(call):
             resumo = module_cvm.buscar_resultados_trimestrais(ticker)
             markup = InlineKeyboardMarkup()
             markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=f"acao_{ticker}"))
-            bot.delete_message(call.message.chat.id, call.message.message_id)
+            
+            try:
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+            except: pass
+            
             bot.send_message(call.message.chat.id, resumo, reply_markup=markup, parse_mode="Markdown")
             return
 
         elif dados.startswith("ia_"):
             ticker = dados.split("_")[1]
             bot.answer_callback_query(call.id, f"🧠 IA a analisar {ticker}...")
-            
-            # --- A SUA IDEIA APLICADA AQUI ---
-            # Define se é FII ou Ação
+
             tipo_ativo = "Fundo Imobiliário (FII)" if ticker.endswith("11") else "Ação de Empresa"
-            # Puxa o nome real usando a função que já temos no module_cvm
             nome_oficial = module_cvm.obter_palavra_chave_cvm(ticker)
-            
-            # O Prompt Blindado
+
             prompt = f"""
             Faça um resumo financeiro geral da saúde e dos últimos movimentos do ativo {ticker}. 
             Para te dar contexto exato: trata-se do {tipo_ativo} chamado '{nome_oficial}'. 
             Foque exclusivamente neste ativo. Não confunda com outras empresas.
             """
-            
+
             analise = module_ia.analisar_fatos_com_ia(prompt)
-            # ---------------------------------
-            
+
             markup = InlineKeyboardMarkup()
             markup.row(InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="voltar_menu"))
-            
+
             try:
                 bot.delete_message(call.message.chat.id, call.message.message_id)
             except:
                 pass
-            
+
             texto_final = f"🧠 *Análise Groq/Llama 3 - {ticker} ({nome_oficial})*\n\n{analise}"
-            
+
             try:
                 bot.send_message(call.message.chat.id, texto_final, reply_markup=markup, parse_mode="Markdown")
             except Exception as erro_telegram:
@@ -417,8 +457,12 @@ def callback_geral(call):
                     bot.send_message(call.message.chat.id, texto_final, reply_markup=markup)
                 else:
                     bot.send_message(call.message.chat.id, f"⚠️ Erro de formatação. Análise Bruta:\n\n{analise}", reply_markup=markup)
-            
+
             return
+
+    except Exception as e:
+        print(f"Erro no botão {call.data}: {e}")
+        bot.answer_callback_query(call.id, "❌ Erro ao processar o comando.")
 
 # ==========================================
 # MOTOR DO SERVIDOR WEB WEBHOOK
