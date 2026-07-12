@@ -1,8 +1,10 @@
 import logging
+import requests
+from datetime import datetime
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from banco_dados import DadosFinanceirosFiis, DocumentosQualitativos # Importa as tabelas do banco
+from banco_dados import DadosFinanceirosFiis, DocumentosQualitativos, Ativo
 
 logger = logging.getLogger(__name__)
 
@@ -11,50 +13,110 @@ class FiisFnetScraper:
     
     def __init__(self, db_session: Session):
         self.session = db_session
+        # Endpoint oficial (oculto) de onde a B3 puxa a tabela de FIIs
         self.base_url_fnet = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json'
+        }
 
-    def atualizar_fiis(self, data_inicio: str) -> None:
+    def atualizar_fiis(self, data_inicio: str = None) -> None:
         """Método principal orquestrador para FIIs."""
-        logger.info(f"Iniciando raspagem FNET a partir de {data_inicio}")
+        logger.info(f"Iniciando raspagem FNET (FIIs)...")
         feed_fnet = self._buscar_feed_fnet(data_inicio)
         
-        informes = self._extrair_informe_mensal(feed_fnet)
+        if not feed_fnet:
+            logger.warning("Nenhum dado retornado do FNET.")
+            return
+
         documentos = self._extrair_relatorios_gerenciais(feed_fnet)
-        
-        self._salvar_dados_fiis(informes)
         self._salvar_documentos(documentos)
-        logger.info("Atualização de FIIs concluída.")
+        logger.info(f"Atualização concluída. Encontrados {len(documentos)} documentos estratégicos recentes.")
 
-    def _buscar_feed_fnet(self, data_inicio: str) -> List[Dict[str, Any]]:
-        """Faz a requisição paginada (JSON) na API pública do FNET."""
-        # TODO: Usar requests para bater na URL do FNET, manipulando headers e paginação.
-        pass
+    def _buscar_feed_fnet(self, data_inicio: str = None) -> List[Dict[str, Any]]:
+        """Faz a requisição JSON na API pública do FNET."""
+        # Parâmetros exatos que o site da B3 usa para puxar apenas FIIs
+        params = {
+            'd': 1,
+            's': 0, # Start (Para paginação)
+            'l': 100, # Limit (Traz os últimos 100 documentos)
+            'tipoFundo': 1, # 1 significa FII no sistema da CVM
+            'idCategoriaDocumento': 0,
+            'idTipoDocumento': 0,
+            'idEspecieDocumento': 0
+        }
+        
+        if data_inicio:
+            params['dataInicial'] = data_inicio
 
-    def _extrair_informe_mensal(self, feed: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Filtra o feed procurando 'Informe Mensal' e faz o parse do XML/JSON da CVM."""
-        # TODO: Lógica para pegar PL, Caixa, Ativo Total
-        pass
+        try:
+            response = requests.get(self.base_url_fnet, headers=self.headers, params=params, timeout=15)
+            if response.status_code == 200:
+                dados = response.json()
+                return dados.get('data', []) # O FNET retorna os itens dentro da chave 'data'
+            else:
+                logger.error(f"Bloqueio ou erro no FNET: HTTP {response.status_code}")
+                return []
+        except Exception as e:
+            logger.error(f"Falha ao conectar no FNET: {e}")
+            return []
 
     def _extrair_relatorios_gerenciais(self, feed: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Filtra o feed procurando 'Relatório Gerencial' ou 'Fato Relevante' 
-        e constrói a URL oficial de download do PDF no FNET.
-        """
-        # A URL de download do FNET geralmente tem a estrutura:
-        # https://fnet.bmfbovespa.com.br/fnet/publico/downloadDocumento?id={idDocumento}
-        pass
+        """Filtra o feed procurando 'Relatório Gerencial' ou 'Fato Relevante' e constrói a URL oficial."""
+        documentos_estruturados = []
+        
+        for item in feed:
+            ticker = item.get('nomePregao', '').strip()
+            categoria = item.get('descricaoCategoriaDocumento', '').upper()
+            tipo_doc = item.get('descricaoTipoDocumento', '').upper()
+            assunto = item.get('descricaoAssunto', '')
+            id_doc = item.get('id')
+            data_entrega_str = item.get('dataEntrega', '') # Ex: '11/07/2026 18:30'
 
-    def _salvar_dados_fiis(self, dados: List[Dict[str, Any]]) -> None:
-        """Idempotência para os Informes Mensais."""
-        pass # Lógica similar ao _salvar_no_banco usando IntegrityError
+            if not ticker or not id_doc:
+                continue
+
+            # Filtramos apenas os documentos vitais (Relatórios Gerenciais e Fatos Relevantes)
+            if "GERENCIAL" in tipo_doc or "FATO RELEVANTE" in categoria or "FATO RELEVANTE" in tipo_doc:
+                try:
+                    data_publicacao = datetime.strptime(data_entrega_str.split(' ')[0], '%d/%m/%Y').date()
+                except:
+                    data_publicacao = datetime.now().date()
+
+                # A MÁGICA: Esta URL pula o site da B3 e vai direto para a tela de impressão do PDF
+                url_pdf = f"https://fnet.bmfbovespa.com.br/fnet/publico/exibirDocumento?id={id_doc}"
+
+                documentos_estruturados.append({
+                    'ticker_temporario': ticker, # Guardamos provisoriamente para achar o ID no banco depois
+                    'data_publicacao': data_publicacao,
+                    'tipo_documento': "Relatório Gerencial" if "GERENCIAL" in tipo_doc else "Fato Relevante",
+                    'url_pdf': url_pdf,
+                    'assunto': assunto[:250]
+                })
+
+        return documentos_estruturados
 
     def _salvar_documentos(self, documentos: List[Dict[str, Any]]) -> None:
-        """Idempotência para PDFs: Só salva se a URL for inédita no banco."""
+        """Idempotência para PDFs: Relaciona o ticker com o banco e salva sem duplicar."""
         for doc in documentos:
+            ticker_alvo = doc.pop('ticker_temporario')
+            
+            # Busca quem é este FII na nossa tabela 'ativos'
+            ativo = self.session.query(Ativo).filter(Ativo.ticker == ticker_alvo).first()
+            
+            # Se você ainda não tem esse FII cadastrado na base, ele cadastra automaticamente!
+            if not ativo:
+                ativo = Ativo(ticker=ticker_alvo, cnpj="00.000.000/0000-00", tipo="FII")
+                self.session.add(ativo)
+                self.session.commit()
+                
+            doc['ativo_id'] = ativo.id
+
             try:
                 novo_doc = DocumentosQualitativos(**doc)
                 self.session.add(novo_doc)
                 self.session.commit()
             except IntegrityError:
+                # O banco avisou que este documento já foi guardado. Cancelamos a transação e seguimos.
                 self.session.rollback()
-                # O PDF gerencial já está mapeado no nosso banco. Ignorar.
+                pass
