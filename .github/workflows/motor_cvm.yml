@@ -9,8 +9,8 @@ on:
 jobs:
   atualizar-dados-financeiros:
     runs-on: ubuntu-latest
-    permissions:               # ADICIONE ESTA LINHA
-      contents: write          # ADICIONE ESTA LINHA
+    permissions:
+      contents: write
 
     steps:
       - name: 📥 Checkout do Repositório
@@ -42,7 +42,3 @@ jobs:
           
           git commit -m "🤖 [Auto] Atualização diária do Banco de Dados CVM/B3" || echo "Nenhuma mudança para commitar."
           git push
-
-          else
-            echo "❌ ERRO: O arquivo não foi encontrado na pasta pipeline_dados/ !"
-          fi
