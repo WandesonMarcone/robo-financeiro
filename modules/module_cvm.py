@@ -168,12 +168,13 @@ def buscar_resultados_trimestrais(ticker):
 
     session = SessionDB()
     try:
+        # Busca aproximação pelo CNPJ/Ticker raiz (ex: PETR)
         dados_acao = session.query(DadosFinanceirosAcoes).join(Ativo).filter(
-            Ativo.ticker.like(f"%{ticker[:4]}%") # Busca aproximação (ex: PETR)
+            Ativo.ticker.like(f"%{ticker[:4]}%") 
         ).order_by(DadosFinanceirosAcoes.data_referencia.desc()).first()
 
         if not dados_acao:
-            # Fallback (Plano B): Se o banco ainda não tiver a ação, tenta o Yahoo Finance
+            # Plano B: Se o banco ainda não tiver a ação, tenta o Yahoo Finance
             asset = buscar_ticker_seguro(ticker)
             dre_yf = asset.quarterly_income_stmt
             if dre_yf.empty:
@@ -181,15 +182,29 @@ def buscar_resultados_trimestrais(ticker):
             contexto = "Fonte: Yahoo Finance\n" + dre_yf.iloc[:, :2].to_string()
             return extrair_resumo_ia(ticker, "Resultados Trimestrais", contexto)
 
+        # ----------------------------------------------------
+        # NOVO: IDENTIFICADOR AUTOMÁTICO DE TRIMESTRE
+        # ----------------------------------------------------
+        mes = dados_acao.data_referencia.month
+        ano = dados_acao.data_referencia.year
+        
+        if mes <= 3: trimestre_str = "1º Trimestre (1T)"
+        elif mes <= 6: trimestre_str = "2º Trimestre (2T)"
+        elif mes <= 9: trimestre_str = "3º Trimestre (3T)"
+        else: trimestre_str = "4º Trimestre / Anual (4T)"
+
         contexto = f"""
         Balanço Oficial (Fonte: CVM / DFP-ITR):
-        - Data de Referência: {dados_acao.data_referencia}
+        - PERÍODO: {trimestre_str} de {ano} (Data base de fechamento: {dados_acao.data_referencia})
         - Lucro Líquido: R$ {dados_acao.lucro_liquido:,.2f}
         - Receita: R$ {dados_acao.receita:,.2f}
         - Caixa Disponível: R$ {dados_acao.caixa:,.2f}
-        - Passivo (Dívida): R$ {dados_acao.passivo_total:,.2f}
+        - Passivo (Dívida Total): R$ {dados_acao.passivo_total:,.2f}
+        
+        INSTRUÇÃO OBRIGATÓRIA PARA A IA: Inicie a sua resposta destacando explicitamente que se trata da análise do {trimestre_str} de {ano}.
         """
-        return extrair_resumo_ia(ticker, "Resultados Trimestrais CVM", contexto)
+        
+        return extrair_resumo_ia(ticker, f"Balanço Oficial CVM ({trimestre_str} {ano})", contexto)
     except Exception as e:
         return f"Erro ao ler balanço: {e}"
     finally:
