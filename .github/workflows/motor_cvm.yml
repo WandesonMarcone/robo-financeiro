@@ -38,7 +38,7 @@ jobs:
           ls -R  # Este comando lista todas as pastas e arquivos para nós
           
           if [ -f "pipeline_dados/banco_institucional.db" ]; then
-            git add pipeline_dados/banco_institucional.db
+            git add -f pipeline_dados/banco_institucional.db
             git commit -m "🤖 [Auto] Atualização diária do Banco de Dados CVM/B3" || echo "Nenhuma mudança para commitar."
             git push
           else
