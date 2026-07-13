@@ -217,10 +217,72 @@ def callback_geral(call):
             markup.row(InlineKeyboardButton("🏢 FIIs (Imobiliários)", callback_data="menu_fiis"),
                        InlineKeyboardButton("📈 Ações (Empresas)", callback_data="menu_acoes"))
             markup.row(InlineKeyboardButton("🌍 Visão Macro & Notícias", callback_data="menu_macro"))
+            markup.row(InlineKeyboardButton("ℹ️ Ajuda / Sobre", callback_data="menu_ajuda")) # Adicionado aqui também
             bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, 
                                   text="🤖 *Terminal Institucional* 🤖\nSelecione o módulo de análise abaixo:", 
                                   reply_markup=markup, parse_mode="Markdown")
             return
+
+        # --- NOVA SEÇÃO: AJUDA E LOGS ---
+        elif dados == "menu_ajuda":
+            markup = InlineKeyboardMarkup()
+            markup.row(InlineKeyboardButton("⚠️ Histórico de Logs", callback_data="ver_logs"))
+            markup.row(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
+            texto_ajuda = (
+                "ℹ️ *Painel de Ajuda / Sobre*\n\n"
+                "Este é o seu Terminal Institucional. O robô monitora, coleta e "
+                "processa dados oficiais da CVM e B3 automaticamente todos os dias.\n\n"
+                "Selecione uma opção abaixo para auditar o sistema."
+            )
+            bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, 
+                                  text=texto_ajuda, reply_markup=markup, parse_mode="Markdown")
+            return
+
+        elif dados == "ver_logs":
+            bot.answer_callback_query(call.id, "A buscar e organizar logs...")
+            markup = InlineKeyboardMarkup()
+            markup.row(InlineKeyboardButton("🔙 Voltar para Ajuda", callback_data="menu_ajuda"))
+            
+            try:
+                planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
+                aba_logs = planilha.worksheet("BD_Logs")
+                linhas = aba_logs.get_all_values()
+                
+                if len(linhas) > 1:
+                    # Pega os dados, remove o cabeçalho e inverte (para o mais novo ficar no topo)
+                    logs_dados = linhas[1:]
+                    logs_dados.reverse()
+                    
+                    # Pega apenas os 10 mais recentes para não bugar a mensagem do Telegram
+                    logs_recentes = logs_dados[:10]
+                    
+                    texto_logs = "📜 *Histórico de Logs (Mais Recentes Primeiro):*\n"
+                    
+                    data_atual = ""
+                    for linha in logs_recentes:
+                        data_completa = linha[0] # Ex: 13/07/2026 10:45:00
+                        data_dia = data_completa[:10]
+                        hora = data_completa[11:16]
+                        erro_limpo = str(linha[2]).replace('*', '').replace('_', '').replace('[', '(').replace(']', ')')
+                        
+                        # Se mudou de dia, cria um título novo (agrupa pela data visualmente)
+                        if data_dia != data_atual:
+                            texto_logs += f"\n📅 *{data_dia}*\n"
+                            data_atual = data_dia
+                            
+                        texto_logs += f" 🕒 `{hora}` - {erro_limpo}\n"
+                else:
+                    texto_logs = "✅ *Status perfeito:* Nenhum log de erro registrado."
+                    
+                bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, 
+                                      text=texto_logs, reply_markup=markup, parse_mode="Markdown")
+            except Exception as e:
+                bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, 
+                                      text=f"❌ Erro ao ler logs na planilha: {e}", reply_markup=markup, parse_mode="Markdown")
+            return
+        # --------------------------------
+        
+        # Daqui para baixo o código continua igual (menu_macro, menu_fiis, etc...)
 
         elif dados == "menu_macro":
             bot.answer_callback_query(call.id, "🌍 Coletando dados macroeconômicos oficiais...")
