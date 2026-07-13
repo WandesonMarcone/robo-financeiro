@@ -5,6 +5,8 @@ from typing import List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from banco_dados import DadosFinanceirosFiis, DocumentosQualitativos, Ativo
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
 
