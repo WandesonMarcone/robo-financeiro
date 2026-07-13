@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 # Adiciona o diretório atual ao path para evitar erros de importação
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from banco_dados import Base
+from banco_dados import Base, DocumentosQualitativos
 from coletor_cvm import AcoesCVMReader
 from coletor_fnet import FiisFnetScraper
 
