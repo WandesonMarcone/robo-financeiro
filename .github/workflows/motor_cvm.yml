@@ -33,11 +33,14 @@ jobs:
         run: |
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
-          # Checa se o arquivo existe antes de adicionar
+          
+          echo "🔍 Procurando o arquivo do banco..."
+          ls -R  # Este comando lista todas as pastas e arquivos para nós
+          
           if [ -f "pipeline_dados/banco_institucional.db" ]; then
             git add pipeline_dados/banco_institucional.db
-            git commit -m "🤖 [Auto] Atualização diária do Banco de Dados CVM/B3" || echo "Nenhuma mudança no arquivo para commitar."
+            git commit -m "🤖 [Auto] Atualização diária do Banco de Dados CVM/B3" || echo "Nenhuma mudança para commitar."
             git push
           else
-            echo "⚠️ Arquivo de banco de dados não encontrado. O pipeline não gerou o arquivo?"
+            echo "❌ ERRO: O arquivo não foi encontrado na pasta pipeline_dados/ !"
           fi
