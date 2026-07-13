@@ -9,6 +9,8 @@ on:
 jobs:
   atualizar-dados-financeiros:
     runs-on: ubuntu-latest
+    permissions:               # ADICIONE ESTA LINHA
+      contents: write          # ADICIONE ESTA LINHA
 
     steps:
       - name: 📥 Checkout do Repositório
