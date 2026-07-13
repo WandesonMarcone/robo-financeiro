@@ -11,11 +11,17 @@ from googleapiclient.http import MediaIoBaseUpload
 from sqlalchemy import func
 
 import config
-from models import Ativo, DocumentosQualitativos, SessionDB
 from modules.utils import conectar_gspread
 from modules import module_cvm
 from modules import module_ia
 from modules import module_macro
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
+
+# Cria o motor do banco de dados diretamente no bot usando o seu arquivo original
+engine = create_engine("sqlite:///pipeline_dados/banco_institucional.db")
+SessionDB = sessionmaker(bind=engine)
 
 print(f"DEBUG: Groq Key encontrada: {'SIM' if os.environ.get('GROQ_API_KEY') else 'NÃO'}")
 
