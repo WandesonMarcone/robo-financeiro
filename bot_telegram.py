@@ -232,6 +232,37 @@ def enviar_menu(message):
         traceback.print_exc()
         bot.reply_to(message, "❌ Erro ao abrir o menu.")
 
+@bot.message_handler(commands=['status'])
+def status_banco(message):
+    """Mostra um resumo da saúde do seu banco de dados."""
+    session = SessionDB()
+    try:
+        # 1. Conta quantos ativos temos registrados
+        total_ativos = session.query(Ativo).count()
+        
+        # 2. Conta quantos documentos temos no banco
+        total_docs = session.query(DocumentosQualitativos).count()
+        
+        # 3. Pega os 5 últimos ativos adicionados
+        ultimos = session.query(Ativo.ticker).order_by(Ativo.id.desc()).limit(5).all()
+        lista_tickers = ", ".join([a[0] for a in ultimos])
+        
+        # 4. Pega a data do documento mais recente (para saber se o motor está atualizado)
+        ultima_data = session.query(func.max(DocumentosQualitativos.data_publicacao)).scalar()
+        
+        resposta = (
+            f"📊 **Painel de Controle do Robô**\n\n"
+            f"🏢 **Ativos monitorados:** {total_ativos}\n"
+            f"📄 **Documentos salvos:** {total_docs}\n"
+            f"📅 **Última atualização:** {ultima_data}\n\n"
+            f"🚀 **Últimos ativos:**\n{lista_tickers}"
+        )
+        bot.reply_to(message, resposta)
+    except Exception as e:
+        bot.reply_to(message, f"❌ Erro ao consultar banco: {e}")
+    finally:
+        session.close()
+
 @bot.message_handler(commands=['logs'])
 def mostrar_logs(message):
     """Mostra os logs agrupados pela data."""
