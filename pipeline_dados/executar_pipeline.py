@@ -58,3 +58,9 @@ def iniciar_motor():
 
     finally:
         session.close()
+
+# ==========================================
+# GATILHO DE EXECUÇÃO
+# ==========================================
+if __name__ == "__main__":
+    iniciar_motor()
