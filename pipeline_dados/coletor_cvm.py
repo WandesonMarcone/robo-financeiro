@@ -12,22 +12,66 @@ from banco_dados import DadosFinanceirosAcoes, Ativo
 logger = logging.getLogger(__name__)
 
 # ==========================================
-# 🧠 O CÉREBRO TRADUTOR (O FILTRO VIP)
+# 🧠 O CÉREBRO TRADUTOR (O FILTRO VIP B3)
 # ==========================================
 # Coloque aqui os CNPJs das ações que você quer que o robô monitore.
 # O que não estiver nesta lista será ignorado para manter o banco leve e rápido.
 MAPA_CNPJ_B3 = {
-    '33.000.167/0001-01': 'PETR4',  # Petrobras
-    '33.592.510/0001-54': 'VALE3',  # Vale
+    # --- Bancos e Financeiros ---
     '00.000.000/0001-91': 'BBAS3',  # Banco do Brasil
     '60.872.504/0001-23': 'ITUB4',  # Itaú Unibanco
     '60.746.948/0001-12': 'BBDC4',  # Bradesco
-    '84.683.601/0001-74': 'WEGE3',  # WEG
-    '00.001.180/0001-26': 'ELET3',  # Eletrobras
-    '07.526.557/0001-00': 'ABEV3',  # Ambev
+    '90.400.888/0001-42': 'SANB11', # Santander Brasil
     '09.346.601/0001-25': 'B3SA3',  # B3
-    '47.960.950/0001-21': 'MGLU3'   # Magazine Luiza
-    # Quer adicionar mais? É só procurar o CNPJ da empresa e colocar aqui!
+    '00.360.305/0001-04': 'BBSE3',  # BB Seguridade
+    
+    # --- Petróleo, Gás e Mineração ---
+    '33.000.167/0001-01': 'PETR4',  # Petrobras
+    '33.592.510/0001-54': 'VALE3',  # Vale
+    '06.082.980/0001-03': 'PRIO3',  # Prio (PetroRio)
+    '01.838.723/0001-27': 'BRKM5',  # Braskem
+    '02.351.877/0001-52': 'CSNA3',  # Siderúrgica Nacional
+    '60.940.145/0001-14': 'GGBR4',  # Gerdau
+    
+    # --- Energia e Utilidades Públicas ---
+    '00.001.180/0001-26': 'ELET3',  # Eletrobras
+    '84.683.601/0001-74': 'WEGE3',  # WEG
+    '02.932.971/0001-15': 'EGIE3',  # Engie Brasil
+    '01.206.065/0001-46': 'SBSP3',  # Sabesp
+    '06.981.180/0001-16': 'CMIG4',  # Cemig
+    '39.381.153/0001-08': 'CPLE6',  # Copel
+    '03.256.096/0001-40': 'ENEV3',  # Eneva
+    
+    # --- Varejo e Consumo ---
+    '47.960.950/0001-21': 'MGLU3',  # Magazine Luiza
+    '07.526.557/0001-00': 'ABEV3',  # Ambev
+    '00.001.180/0001-26': 'LREN3',  # Lojas Renner (CNPJ matriz freq. na CVM)
+    '16.670.085/0001-55': 'RENT3',  # Localiza
+    '06.164.253/0001-87': 'CRFB3',  # Carrefour Brasil
+    '08.582.208/0001-08': 'NTCO3',  # Natura
+    '47.508.411/0001-56': 'PCAR3',  # Grupo Pão de Açúcar
+    '33.014.556/0001-96': 'ASAI3',  # Assaí
+    
+    # --- Carnes e Proteínas ---
+    '02.916.265/0001-60': 'JBSS3',  # JBS
+    '01.838.723/0001-27': 'BEEF3',  # Minerva
+    '01.017.595/0001-38': 'MRFG3',  # Marfrig
+    
+    # --- Papel, Celulose e Indústria ---
+    '16.404.287/0001-55': 'SUZB3',  # Suzano
+    '89.637.490/0001-45': 'KLBN11', # Klabin
+    '02.497.801/0001-24': 'EMBR3',  # Embraer
+    '50.282.735/0001-83': 'VIVA3',  # Vivara
+    
+    # --- Saúde e Educação ---
+    '43.181.368/0001-22': 'RADL3',  # Raia Drogasil
+    '60.933.603/0001-78': 'HAPV3',  # Hapvida
+    '02.800.026/0001-40': 'YDUQ3',  # Yduqs
+    
+    # --- Telecom e Tecnologia ---
+    '02.558.157/0001-62': 'VIVT3',  # Vivo (Telefônica)
+    '02.421.421/0001-11': 'TIMS3',  # TIM
+    '01.246.689/0001-36': 'TOTS3'   # Totvs
 }
 
 class AcoesCVMReader:
