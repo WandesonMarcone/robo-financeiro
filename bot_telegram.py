@@ -13,6 +13,8 @@ import requests
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from googleapiclient.http import MediaIoBaseUpload
+from sqlalchemy import func
+from models import Ativo, DocumentosQualitativos, SessionDB
 
 from modules.utils import conectar_gspread
 from modules import module_cvm
