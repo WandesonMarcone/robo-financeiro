@@ -11,7 +11,7 @@ from googleapiclient.http import MediaIoBaseUpload
 from sqlalchemy import func
 
 import config
-from models import Ativo, DocumentosQualitativos, SessionDB
+from pipeline_dados.models import Ativo, DocumentosQualitativos, SessionDB
 from modules.utils import conectar_gspread
 from modules import module_cvm
 from modules import module_ia
@@ -21,6 +21,25 @@ print(f"DEBUG: Groq Key encontrada: {'SIM' if os.environ.get('GROQ_API_KEY') els
 
 bot = telebot.TeleBot(config.TELEGRAM_BOT_TOKEN, threaded=False)
 app = Flask(__name__)
+
+# ==========================================
+# ROTAS DO SERVIDOR WEB (WEBHOOK TELEGRAM)
+# ==========================================
+@app.route('/' + config.TELEGRAM_BOT_TOKEN, methods=['POST'])
+def webhook_handler():
+    """Recebe os avisos do Telegram e repassa para o robô processar."""
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return "OK", 200
+    return "Erro", 403
+
+@app.route('/')
+def index():
+    """Página inicial para o Render saber que o servidor está vivo."""
+    return "Bot Institucional Ativo e Operante!", 200
+# ==========================================
 
 # ==========================================
 # UTILITÁRIO: LOGOS DAS EMPRESAS (CACHE NO DRIVE)
@@ -169,7 +188,7 @@ def enviar_menu(message):
         markup.row(InlineKeyboardButton("🏢 FIIs (Imobiliários)", callback_data="menu_fiis"),
                    InlineKeyboardButton("📈 Ações (Empresas)", callback_data="menu_acoes"))
         markup.row(InlineKeyboardButton("🌍 Visão Macro & Notícias", callback_data="menu_macro"))
-        
+
         # O novo botão de Ajuda / Logs
         markup.row(InlineKeyboardButton("ℹ️ Ajuda / Sobre", callback_data="menu_ajuda"))
 
@@ -242,38 +261,38 @@ def callback_geral(call):
             bot.answer_callback_query(call.id, "A buscar e organizar logs...")
             markup = InlineKeyboardMarkup()
             markup.row(InlineKeyboardButton("🔙 Voltar para Ajuda", callback_data="menu_ajuda"))
-            
+
             try:
                 planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
                 aba_logs = planilha.worksheet("BD_Logs")
                 linhas = aba_logs.get_all_values()
-                
+
                 if len(linhas) > 1:
                     # Pega os dados, remove o cabeçalho e inverte (para o mais novo ficar no topo)
                     logs_dados = linhas[1:]
                     logs_dados.reverse()
-                    
+
                     # Pega apenas os 10 mais recentes para não bugar a mensagem do Telegram
                     logs_recentes = logs_dados[:10]
-                    
+
                     texto_logs = "📜 *Histórico de Logs (Mais Recentes Primeiro):*\n"
-                    
+
                     data_atual = ""
                     for linha in logs_recentes:
                         data_completa = linha[0] # Ex: 13/07/2026 10:45:00
                         data_dia = data_completa[:10]
                         hora = data_completa[11:16]
                         erro_limpo = str(linha[2]).replace('*', '').replace('_', '').replace('[', '(').replace(']', ')')
-                        
+
                         # Se mudou de dia, cria um título novo (agrupa pela data visualmente)
                         if data_dia != data_atual:
                             texto_logs += f"\n📅 *{data_dia}*\n"
                             data_atual = data_dia
-                            
+
                         texto_logs += f" 🕒 `{hora}` - {erro_limpo}\n"
                 else:
                     texto_logs = "✅ *Status perfeito:* Nenhum log de erro registrado."
-                    
+
                 bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, 
                                       text=texto_logs, reply_markup=markup, parse_mode="Markdown")
             except Exception as e:
@@ -281,7 +300,7 @@ def callback_geral(call):
                                       text=f"❌ Erro ao ler logs na planilha: {e}", reply_markup=markup, parse_mode="Markdown")
             return
         # --------------------------------
-        
+
         # Daqui para baixo o código continua igual (menu_macro, menu_fiis, etc...)
 
         elif dados == "menu_macro":
@@ -387,23 +406,3 @@ def callback_geral(call):
         # 3. Funções de Documentos (A conexão com o module_cvm)
         elif dados.startswith("doc_"):
             bot.answer_callback_query(call.id, "A vasculhar o banco de dados oficial...")
-            partes = dados.split("_")
-            acao_solicitada = partes[1] # 'trimestre', 'fato' ou 'gerencial'
-            ticker = partes[2]
-            
-            bot.send_message(call.message.chat.id, f"⏳ Analisando dados oficiais de {ticker}. Aguarde um instante...", parse_mode="Markdown")
-            
-            resultado = "Dados não encontrados."
-            
-            if acao_solicitada == "trimestre":
-                resultado = module_cvm.buscar_resultados_trimestrais(ticker)
-            elif acao_solicitada == "gerencial":
-                resultado = module_cvm.buscar_relatorios_gerenciais(ticker)
-            elif acao_solicitada == "fato":
-                resultado = module_cvm.buscar_fatos_relevantes(ticker)
-                
-            bot.send_message(call.message.chat.id, resultado, parse_mode="Markdown")
-
-    except Exception as e:
-        print(f"Erro no Callback: {e}")
-        bot.answer_callback_query(call.id, f"Erro interno: {str(e)[:50]}")
