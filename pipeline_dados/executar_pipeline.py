@@ -18,7 +18,7 @@ DB_PATH = "sqlite:///pipeline_dados/banco_institucional.db"
 
 def iniciar_motor():
     print("🚀 Iniciando o Motor de Dados CVM/B3...")
-    
+
     # 1. Cria a conexão e as tabelas (se não existirem)
     engine = create_engine(DB_PATH)
     Base.metadata.create_all(engine)
@@ -27,13 +27,20 @@ def iniciar_motor():
 
     try:
         data_hoje = datetime.now()
-        
+
         # 2. Roda o Coletor de FIIs (FNET)
         print("\n--- MOTOR FIIs (FNET) ---")
         motor_fiis = FiisFnetScraper(session)
-        # Puxa documentos a partir do dia 1º do mês atual
-        # Puxa documentos desde o início do ano
-        data_inicio = "01/01/2026"
+        
+        # Lógica Incremental: Busca a data mais recente no banco
+        ultima_data = session.query(func.max(DocumentosQualitativos.data_publicacao)).scalar()
+        if ultima_data:
+            data_inicio = (ultima_data + timedelta(days=1)).strftime("%d/%m/%Y")
+            print(f"🔄 Modo Incremental: Buscando dados a partir de {data_inicio}")
+        else:
+            data_inicio = "01/01/2026"
+            print(f"💥 Modo Inicial: Buscando dados desde {data_inicio}")
+            
         motor_fiis.atualizar_fiis(data_inicio)
 
         # 3. Roda o Coletor de Ações (CVM)
@@ -41,13 +48,10 @@ def iniciar_motor():
         motor_acoes = AcoesCVMReader(session)
         ano_atual = data_hoje.year
         motor_acoes.atualizar_acoes(ano_atual)
-        
+
         print("\n✅ Todos os motores rodaram com sucesso e os dados foram salvos!")
     except Exception as e:
         print(f"❌ Erro na execução do pipeline: {e}")
         session.rollback()
     finally:
         session.close()
-
-if __name__ == "__main__":
-    iniciar_motor()
