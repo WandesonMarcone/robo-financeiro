@@ -1,55 +1,26 @@
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-import threading
-import traceback
-from flask import Flask, request
-import config
-from datetime import datetime
-import time
-import schedule
 import io
 import json
 import requests
+import os
+from flask import Flask, request
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from googleapiclient.http import MediaIoBaseUpload
 from sqlalchemy import func
-from models import Ativo, DocumentosQualitativos, SessionDB
 
+import config
+from models import Ativo, DocumentosQualitativos, SessionDB
 from modules.utils import conectar_gspread
 from modules import module_cvm
 from modules import module_ia
 from modules import module_macro
 
-import os
 print(f"DEBUG: Groq Key encontrada: {'SIM' if os.environ.get('GROQ_API_KEY') else 'NÃO'}")
-
 
 bot = telebot.TeleBot(config.TELEGRAM_BOT_TOKEN, threaded=False)
 app = Flask(__name__)
-
-# [COLOQUE AQUI LOGO APÓS A DEFINIÇÃO DO BOT E APP]
-
-def tarefa_busca_proativa():
-    """Esta função rodará a cada 1 hora automaticamente."""
-    print("⏳ Executando busca proativa de documentos na CVM...")
-    # Lista de ativos que quer vigiar
-    ativos_para_vigiar = ["GARE11", "PETR4", "MXRF11", "GGRC11"] 
-    
-    for ticker in ativos_para_vigiar:
-        try:
-            # Busca o fato relevante
-            resultado = module_cvm.buscar_fatos_relevantes(ticker)
-            # Envia para você
-            bot.send_message(config.TELEGRAM_CHAT_ID, f"🔔 *Notificação Proativa - {ticker}*\n\n{resultado}", parse_mode="Markdown")
-        except Exception as e:
-            print(f"Erro na busca proativa de {ticker}: {e}")
-
-def rodar_agendador():
-    schedule.every(1).hours.do(tarefa_busca_proativa)
-    while True:
-        schedule.run_pending()
-        time.sleep(60)
 
 # ==========================================
 # UTILITÁRIO: LOGOS DAS EMPRESAS (CACHE NO DRIVE)
@@ -85,7 +56,7 @@ def obter_e_salvar_logo(ticker):
             if arquivos:
                 file_id = arquivos[0]['id']
                 foto_bytes = service.files().get_media(fileId=file_id).execute()
-                
+
                 # Prepara para o Telegram (Exige Nome e Cursor no início)
                 img_stream = io.BytesIO(foto_bytes)
                 img_stream.name = nome_arquivo
@@ -172,7 +143,7 @@ def comando_adicionar(message):
             return
 
         ticker = partes[1].strip().upper()
-        bot.reply_to(message, f"A procurar {ticker} e a injetar no Banco de Dados...")
+        bot.reply_to(message, f"A procurar {ticker} e a injetar na Planilha do Google...")
 
         planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
         is_fii = True if ticker.endswith('11') else False
@@ -187,33 +158,6 @@ def comando_adicionar(message):
     except Exception as e:
         bot.reply_to(message, f"❌ Erro ao adicionar ativo: {e}")
 
-@bot.message_handler(commands=['cvm'])
-def cvm_command(message):
-    args = message.text.split()
-    if len(args) < 2:
-        bot.reply_to(message, "⚠️ *Comando incompleto!*\nUse: `/cvm TICKER` (Exemplo: `/cvm GARE11`)", parse_mode="Markdown")
-        return
-
-    ticker = args[1].upper()
-    bot.reply_to(message, f"🔍 *Consultando bases oficiais (CVM/B3) para {ticker}...*", parse_mode="Markdown")
-
-    try:
-        is_fii = ticker.endswith(('11', '13', '14')) 
-        resultado = module_cvm.buscar_relatorios_gerenciais(ticker)
-        bot.reply_to(message, resultado, parse_mode="Markdown")
-    except Exception as e:
-        bot.reply_to(message, f"❌ Erro ao buscar documento para {ticker}: {e}")
-
-@bot.message_handler(commands=['risco'])
-def comando_risco(message):
-    try:
-        ticker = message.text.split()[1].upper()
-        bot.reply_to(message, f"📊 Calculando matriz de risco (QuantStats) para {ticker}...")
-        resultado = module_cvm.analisar_performance_quantstats(ticker)
-        bot.reply_to(message, resultado, parse_mode="Markdown")
-    except:
-        bot.reply_to(message, "Use: /risco TICKER")
-
 # ==========================================
 # MENUS DE NAVEGAÇÃO E LOGS
 # ==========================================
@@ -227,11 +171,9 @@ def enviar_menu(message):
         markup.row(InlineKeyboardButton("🌍 Visão Macro & Notícias", callback_data="menu_macro"))
 
         mensagem_final = "🤖 *Terminal Institucional* 🤖\nSelecione o módulo de análise abaixo:"
-
         bot.send_message(message.chat.id, mensagem_final, reply_markup=markup, parse_mode="Markdown")
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        print(f"Erro no menu inicial: {e}")
         bot.reply_to(message, "❌ Erro ao abrir o menu.")
 
 @bot.message_handler(commands=['status'])
@@ -239,24 +181,17 @@ def status_banco(message):
     """Mostra um resumo da saúde do seu banco de dados."""
     session = SessionDB()
     try:
-        # 1. Conta quantos ativos temos registrados
         total_ativos = session.query(Ativo).count()
-        
-        # 2. Conta quantos documentos temos no banco
         total_docs = session.query(DocumentosQualitativos).count()
-        
-        # 3. Pega os 5 últimos ativos adicionados
         ultimos = session.query(Ativo.ticker).order_by(Ativo.id.desc()).limit(5).all()
         lista_tickers = ", ".join([a[0] for a in ultimos])
-        
-        # 4. Pega a data do documento mais recente (para saber se o motor está atualizado)
         ultima_data = session.query(func.max(DocumentosQualitativos.data_publicacao)).scalar()
-        
+
         resposta = (
-            f"📊 **Painel de Controle do Robô**\n\n"
-            f"🏢 **Ativos monitorados:** {total_ativos}\n"
-            f"📄 **Documentos salvos:** {total_docs}\n"
-            f"📅 **Última atualização:** {ultima_data}\n\n"
+            f"📊 **Painel de Controle do Motor de Dados**\n\n"
+            f"🏢 **Ativos monitorados (SQLite):** {total_ativos}\n"
+            f"📄 **Documentos salvos (SQLite):** {total_docs}\n"
+            f"📅 **Última atualização (SQLite):** {ultima_data}\n\n"
             f"🚀 **Últimos ativos:**\n{lista_tickers}"
         )
         bot.reply_to(message, resposta)
@@ -264,28 +199,6 @@ def status_banco(message):
         bot.reply_to(message, f"❌ Erro ao consultar banco: {e}")
     finally:
         session.close()
-
-@bot.message_handler(commands=['logs'])
-def mostrar_logs(message):
-    """Mostra os logs agrupados pela data."""
-    try:
-        planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
-        aba_logs = planilha.worksheet("BD_Logs")
-        linhas = aba_logs.get_all_values()
-
-        ultimas_linhas = linhas[-10:] if len(linhas) > 10 else linhas[1:] 
-        hoje_str = datetime.now().strftime("%d/%m/%Y")
-        texto_logs = f"📜 *Logs Recentes (Foco em: {hoje_str}):*\n\n"
-
-        for linha in ultimas_linhas:
-            data_hora = linha[0]
-            nivel = linha[1]
-            erro_limpo = str(linha[2]).replace('*', '').replace('_', '').replace('[', '(').replace(']', ')')
-            texto_logs += f"📅 `{data_hora[:10]}` 🕒 `{data_hora[11:16]}` | {nivel}\n💬 {erro_limpo}\n\n"
-
-        bot.reply_to(message, texto_logs, parse_mode="Markdown")
-    except Exception as e:
-        bot.reply_to(message, f"❌ Erro ao ler logs: {e}")
 
 # ==========================================
 # PORTEIRO DOS BOTÕES (Callback Handler Único)
@@ -323,7 +236,6 @@ def callback_geral(call):
                 InlineKeyboardButton("🧱 Tijolo", callback_data="lista_fiis_tijolo"),
                 InlineKeyboardButton("📄 Papel", callback_data="lista_fiis_papel")
             )
-            markup.row(InlineKeyboardButton("🏢 FOFs (Fundos de Fundos)", callback_data="lista_fiis_fof"))
             markup.row(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
             bot.edit_message_text("🏢 *Módulo FIIs*\nFiltre o mercado por estratégia ou segmento:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
             return
@@ -337,22 +249,20 @@ def callback_geral(call):
                 InlineKeyboardButton("🏦 Bancos", callback_data="lista_acoes_bancos"),
                 InlineKeyboardButton("⚡ Energia", callback_data="lista_acoes_energia")
             )
-            markup.row(InlineKeyboardButton("🚰 Saneamento & Utilidades", callback_data="lista_acoes_saneamento"))
             markup.row(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
             bot.edit_message_text("📈 *Módulo de Ações*\nFiltre o mercado por setor ou tese de investimento:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
             return
 
-        # 1.3 Submenus de FIIs (Geração de Listas)
+        # 1.3 Submenus de FIIs (Geração de Listas via Google Sheets)
         elif dados.startswith("lista_fiis_"):
             categoria = dados.split("_")[2]
             bot.answer_callback_query(call.id, f"A carregar {categoria}...")
             markup = InlineKeyboardMarkup()
-            
+
             if categoria == "favoritos":
                 for ticker in config.FIXAS_FIIS:
                     markup.row(InlineKeyboardButton(f"🏢 {ticker}", callback_data=f"fii_{ticker}"))
             else:
-                # Provisório: Mostra todos da planilha até configurarmos as listas
                 aba_fiis = conectar_gspread().open_by_url(config.SPREADSHEET_URL).worksheet("BD_FIIs")
                 dados_planilha = aba_fiis.get_all_values()
                 for row in dados_planilha[1:]:
@@ -364,17 +274,16 @@ def callback_geral(call):
             bot.edit_message_text(f"🏢 *Categoria: {categoria.capitalize()}*\nSelecione um ativo para Raio-X:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
             return
 
-        # 1.4 Submenus de Ações (Geração de Listas)
+        # 1.4 Submenus de Ações (Geração de Listas via Google Sheets)
         elif dados.startswith("lista_acoes_"):
             categoria = dados.split("_")[2]
             bot.answer_callback_query(call.id, f"A carregar {categoria}...")
             markup = InlineKeyboardMarkup()
-            
+
             if categoria == "favoritos":
                 for ticker in getattr(config, 'FIXAS_ACOES', []):
                     markup.row(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"acao_{ticker}"))
             else:
-                # Provisório: Mostra todos da planilha até configurarmos as listas
                 aba_acoes = conectar_gspread().open_by_url(config.SPREADSHEET_URL).worksheet("BD_Acoes")
                 dados_planilha = aba_acoes.get_all_values()
                 for row in dados_planilha[1:]:
@@ -395,145 +304,41 @@ def callback_geral(call):
             markup = InlineKeyboardMarkup()
 
             if tipo == "acao":
-                markup.row(InlineKeyboardButton("📊 Resultados 1º Tri (ITR)", callback_data=f"doc_trimestre_{ticker}"))
+                markup.row(InlineKeyboardButton("📊 Resultados Oficiais (CVM)", callback_data=f"doc_trimestre_{ticker}"))
                 markup.row(InlineKeyboardButton("🚨 Fatos Relevantes", callback_data=f"doc_fato_{ticker}_acao"))
-                markup.row(InlineKeyboardButton("🧠 Avaliação IA (Geral)", callback_data=f"ia_{ticker}"))
                 markup.row(InlineKeyboardButton("🔙 Voltar para Ações", callback_data="menu_acoes"))
-                texto = f"📌 *Painel de Controle: {ticker}*\n\nAqui você extrai os documentos oficiais e balanços direto das fontes regulatórias."
+                texto = f"📌 *Painel de Controle: {ticker}*\n\nAqui você extrai os balanços direto do banco de dados institucional CVM/B3."
             else:
                 markup.row(InlineKeyboardButton("📑 Relatório Gerencial", callback_data=f"doc_gerencial_{ticker}"))
                 markup.row(InlineKeyboardButton("🚨 Fatos Relevantes", callback_data=f"doc_fato_{ticker}_fii"))
-                markup.row(InlineKeyboardButton("🧠 Resumo IA (Geral)", callback_data=f"ia_{ticker}"))
                 markup.row(InlineKeyboardButton("🔙 Voltar para FIIs", callback_data="menu_fiis"))
-                texto = f"📌 *Painel de Controle: {ticker}*\n\nAcesse relatórios gerenciais e comunicados ao mercado."
+                texto = f"📌 *Painel de Controle: {ticker}*\n\nAcesse relatórios gerenciais e comunicados oficiais do FNET."
 
             foto_dado = obter_e_salvar_logo(ticker)
             bot.delete_message(call.message.chat.id, call.message.message_id)
             bot.send_photo(call.message.chat.id, foto_dado, caption=texto, reply_markup=markup, parse_mode="Markdown")
             return
 
-        # ADICIONE ESTE BLOCO PARA CONSERTAR OS BOTÕES DE VOLTAR
-        elif dados == "menu_acoes":
-            try:
-                bot.delete_message(call.message.chat.id, call.message.message_id)
-            except:
-                pass
-            mostrar_menu_acoes(call.message)
-
-        elif dados == "menu_fiis":
-            try:
-                bot.delete_message(call.message.chat.id, call.message.message_id)
-            except:
-                pass
-            mostrar_menu_fiis(call.message)
-        
-        # 3. Funções de Documentos e IA
-        elif dados.startswith("doc_fato_"):
+        # 3. Funções de Documentos (A conexão com o module_cvm)
+        elif dados.startswith("doc_"):
+            bot.answer_callback_query(call.id, "A vasculhar o banco de dados oficial...")
             partes = dados.split("_")
+            acao_solicitada = partes[1] # 'trimestre', 'fato' ou 'gerencial'
             ticker = partes[2]
-            tipo_ativo = partes[3]
-            bot.answer_callback_query(call.id, f"A ler Fatos Relevantes para {ticker}...")
-            is_fii = True if tipo_ativo == 'fii' else False
-            resumo = module_cvm.buscar_fatos_relevantes(ticker, is_fii)
-            markup = InlineKeyboardMarkup()
-            markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=f"acao_{ticker}" if not is_fii else f"fii_{ticker}"))
             
-            try:
-                bot.delete_message(call.message.chat.id, call.message.message_id)
-            except: pass
+            bot.send_message(call.message.chat.id, f"⏳ Analisando dados oficiais de {ticker}. Aguarde um instante...", parse_mode="Markdown")
             
-            bot.send_message(call.message.chat.id, resumo, reply_markup=markup, parse_mode="Markdown")
-            return
-
-        elif dados.startswith("doc_gerencial_"):
-            ticker = dados.split("_")[2]
-            bot.answer_callback_query(call.id, f"A extrair relatórios de {ticker}...")
-            resumo = module_cvm.buscar_relatorios_gerenciais(ticker)
-            markup = InlineKeyboardMarkup()
-            markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=f"fii_{ticker}"))
+            resultado = "Dados não encontrados."
             
-            try:
-                bot.delete_message(call.message.chat.id, call.message.message_id)
-            except: pass
-            
-            bot.send_message(call.message.chat.id, resumo, reply_markup=markup, parse_mode="Markdown")
-            return
-
-        elif dados.startswith("doc_trimestre_"):
-            ticker = dados.split("_")[2]
-            bot.answer_callback_query(call.id, f"A baixar balanço ITR de {ticker}...")
-            resumo = module_cvm.buscar_resultados_trimestrais(ticker)
-            markup = InlineKeyboardMarkup()
-            markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=f"acao_{ticker}"))
-            
-            try:
-                bot.delete_message(call.message.chat.id, call.message.message_id)
-            except: pass
-            
-            bot.send_message(call.message.chat.id, resumo, reply_markup=markup, parse_mode="Markdown")
-            return
-
-        elif dados.startswith("ia_"):
-            ticker = dados.split("_")[1]
-            bot.answer_callback_query(call.id, f"🧠 IA a analisar {ticker}...")
-
-            tipo_ativo = "Fundo Imobiliário (FII)" if ticker.endswith("11") else "Ação de Empresa"
-            nome_oficial = module_cvm.obter_palavra_chave_cvm(ticker)
-
-            prompt = f"""
-            Faça um resumo financeiro geral da saúde e dos últimos movimentos do ativo {ticker}. 
-            Para te dar contexto exato: trata-se do {tipo_ativo} chamado '{nome_oficial}'. 
-            Foque exclusivamente neste ativo. Não confunda com outras empresas.
-            """
-
-            analise = module_ia.analisar_fatos_com_ia(prompt)
-
-            markup = InlineKeyboardMarkup()
-            markup.row(InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="voltar_menu"))
-
-            try:
-                bot.delete_message(call.message.chat.id, call.message.message_id)
-            except:
-                pass
-
-            texto_final = f"🧠 *Análise Groq/Llama 3 - {ticker} ({nome_oficial})*\n\n{analise}"
-
-            try:
-                bot.send_message(call.message.chat.id, texto_final, reply_markup=markup, parse_mode="Markdown")
-            except Exception as erro_telegram:
-                if "parse entities" in str(erro_telegram).lower():
-                    bot.send_message(call.message.chat.id, texto_final, reply_markup=markup)
-                else:
-                    bot.send_message(call.message.chat.id, f"⚠️ Erro de formatação. Análise Bruta:\n\n{analise}", reply_markup=markup)
-
-            return
+            if acao_solicitada == "trimestre":
+                resultado = module_cvm.buscar_resultados_trimestrais(ticker)
+            elif acao_solicitada == "gerencial":
+                resultado = module_cvm.buscar_relatorios_gerenciais(ticker)
+            elif acao_solicitada == "fato":
+                resultado = module_cvm.buscar_fatos_relevantes(ticker)
+                
+            bot.send_message(call.message.chat.id, resultado, parse_mode="Markdown")
 
     except Exception as e:
-        print(f"Erro no botão {call.data}: {e}")
-        bot.answer_callback_query(call.id, "❌ Erro ao processar o comando.")
-
-# ==========================================
-# MOTOR DO SERVIDOR WEB WEBHOOK
-# ==========================================
-@app.route(f'/{config.TELEGRAM_BOT_TOKEN}', methods=['POST'])
-def webhook():
-    json_string = request.get_data().decode('utf-8')
-    update = telebot.types.Update.de_json(json_string)
-
-    def processo_paralelo():
-        try:
-            bot.process_new_updates([update])
-        except Exception as e:
-            if "message is not modified" not in str(e):
-                print(f"❌ Erro na Thread do Telegram: {e}")
-
-    thread = threading.Thread(target=processo_paralelo)
-    thread.start()
-
-    return "OK", 200
-
-# ==========================================
-# INICIAR AGENDADOR PROATIVO
-# ==========================================
-thread_agendador = threading.Thread(target=rodar_agendador, daemon=True)
-thread_agendador.start()
+        print(f"Erro no Callback: {e}")
+        bot.answer_callback_query(call.id, f"Erro interno: {str(e)[:50]}")
