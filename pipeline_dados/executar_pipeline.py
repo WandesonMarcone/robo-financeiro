@@ -51,7 +51,10 @@ def iniciar_motor():
 
         print("\n✅ Todos os motores rodaram com sucesso e os dados foram salvos!")
     except Exception as e:
-        print(f"❌ Erro na execução do pipeline: {e}")
+        import traceback
+        print(f"❌ ERRO CRÍTICO NO PIPELINE:")
+        traceback.print_exc() # Isso vai mostrar a linha exata do erro no log do GitHub
         session.rollback()
+
     finally:
         session.close()
