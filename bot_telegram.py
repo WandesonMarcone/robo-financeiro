@@ -163,12 +163,15 @@ def comando_adicionar(message):
 # ==========================================
 @bot.message_handler(commands=['menu', 'start'])
 def enviar_menu(message):
-    """Menu limpo, sem exibir logs."""
+    """Menu principal limpo com acesso à seção de Ajuda."""
     try:
         markup = InlineKeyboardMarkup()
         markup.row(InlineKeyboardButton("🏢 FIIs (Imobiliários)", callback_data="menu_fiis"),
                    InlineKeyboardButton("📈 Ações (Empresas)", callback_data="menu_acoes"))
         markup.row(InlineKeyboardButton("🌍 Visão Macro & Notícias", callback_data="menu_macro"))
+        
+        # O novo botão de Ajuda / Logs
+        markup.row(InlineKeyboardButton("ℹ️ Ajuda / Sobre", callback_data="menu_ajuda"))
 
         mensagem_final = "🤖 *Terminal Institucional* 🤖\nSelecione o módulo de análise abaixo:"
         bot.send_message(message.chat.id, mensagem_final, reply_markup=markup, parse_mode="Markdown")
