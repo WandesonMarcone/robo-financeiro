@@ -33,7 +33,11 @@ jobs:
         run: |
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
-          git add pipeline_dados/banco_institucional.db
-          # O comando abaixo tenta commitar. Se não houver documento novo hoje, ele não faz nada e não dá erro.
-          git commit -m "🤖 [Auto] Atualização diária do Banco de Dados CVM/B3" || echo "Nenhum dado novo para salvar hoje."
-          git push
+          # Checa se o arquivo existe antes de adicionar
+          if [ -f "pipeline_dados/banco_institucional.db" ]; then
+            git add pipeline_dados/banco_institucional.db
+            git commit -m "🤖 [Auto] Atualização diária do Banco de Dados CVM/B3" || echo "Nenhuma mudança no arquivo para commitar."
+            git push
+          else
+            echo "⚠️ Arquivo de banco de dados não encontrado. O pipeline não gerou o arquivo?"
+          fi
