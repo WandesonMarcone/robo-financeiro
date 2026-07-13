@@ -379,6 +379,21 @@ def callback_geral(call):
             bot.send_photo(call.message.chat.id, foto_dado, caption=texto, reply_markup=markup, parse_mode="Markdown")
             return
 
+        # ADICIONE ESTE BLOCO PARA CONSERTAR OS BOTÕES DE VOLTAR
+        elif dados == "menu_acoes":
+            try:
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+            except:
+                pass
+            mostrar_menu_acoes(call.message)
+
+        elif dados == "menu_fiis":
+            try:
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+            except:
+                pass
+            mostrar_menu_fiis(call.message)
+        
         # 3. Funções de Documentos e IA
         elif dados.startswith("doc_fato_"):
             partes = dados.split("_")
