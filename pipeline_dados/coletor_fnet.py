@@ -38,7 +38,7 @@ class FiisFnetScraper:
     def _buscar_feed_fnet(self, data_inicio: str = None) -> List[Dict[str, Any]]:
         """Faz a requisição com estratégia de RETRY automática."""
         params = {
-            'd': 1, 's': 0, 'l': 500,
+            'd': 1, 's': 0, 'l': 50,
             'tipoFundo': 1, 'idCategoriaDocumento': 0,
             'idTipoDocumento': 0, 'idEspecieDocumento': 0
         }
