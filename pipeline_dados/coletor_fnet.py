@@ -10,9 +10,25 @@ from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
 
+# ==========================================
+# 🧠 O CÉREBRO FILTRO (LISTA VIP DE FIIs)
+# ==========================================
+# O robô vai ignorar qualquer fundo que não esteja nesta lista, mantendo o banco leve e rápido.
+FII_VIP = [
+    'GARE11', 
+    'MXRF11', 
+    'VISC11', 
+    'CVBI11', 
+    'HGLG11',
+    # Quer acompanhar outros fundos no futuro? É só adicionar aqui!
+    'XPML11',
+    'KNCR11',
+    'BTLG11'
+]
+
 class FiisFnetScraper:
     """Motor de captura de Informes e Relatórios Gerenciais via API do sistema FNET da B3/CVM."""
-    
+
     def __init__(self, db_session: Session):
         self.session = db_session
         # Endpoint oficial (oculto) de onde a B3 puxa a tabela de FIIs
@@ -26,7 +42,7 @@ class FiisFnetScraper:
         """Método principal orquestrador para FIIs."""
         logger.info(f"Iniciando raspagem FNET (FIIs)...")
         feed_fnet = self._buscar_feed_fnet(data_inicio)
-        
+
         if not feed_fnet:
             logger.warning("Nenhum dado retornado do FNET.")
             return
@@ -58,7 +74,7 @@ class FiisFnetScraper:
         try:
             # Usa a session com retry
             response = session.get(self.base_url_fnet, headers=self.headers, params=params, timeout=60)
-            
+
             if response.status_code == 200:
                 dados = response.json()
                 return dados.get('data', [])
@@ -72,16 +88,28 @@ class FiisFnetScraper:
     def _extrair_relatorios_gerenciais(self, feed: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Filtra o feed procurando 'Relatório Gerencial' ou 'Fato Relevante' e constrói a URL oficial."""
         documentos_estruturados = []
-        
+
         for item in feed:
-            ticker = item.get('nomePregao', '').strip()
+            ticker_bruto = item.get('nomePregao', '').strip().upper()
             categoria = item.get('descricaoCategoriaDocumento', '').upper()
             tipo_doc = item.get('descricaoTipoDocumento', '').upper()
             assunto = item.get('descricaoAssunto', '')
             id_doc = item.get('id')
             data_entrega_str = item.get('dataEntrega', '') # Ex: '11/07/2026 18:30'
 
-            if not ticker or not id_doc:
+            if not ticker_bruto or not id_doc:
+                continue
+            
+            # 🛑 TRAVA DE SEGURANÇA E LIMPEZA: 
+            # Verifica se algum dos nossos Tickers VIP está no nome que a B3 enviou.
+            ticker_limpo = None
+            for vip in FII_VIP:
+                if vip in ticker_bruto:
+                    ticker_limpo = vip # Garante que vai salvar bonitinho (ex: MXRF11) sem sujeira
+                    break
+            
+            # Se não achou nenhum dos nossos VIPs, pula para o próximo fundo
+            if not ticker_limpo:
                 continue
 
             # Filtramos apenas os documentos vitais (Relatórios Gerenciais e Fatos Relevantes)
@@ -95,7 +123,7 @@ class FiisFnetScraper:
                 url_pdf = f"https://fnet.bmfbovespa.com.br/fnet/publico/exibirDocumento?id={id_doc}"
 
                 documentos_estruturados.append({
-                    'ticker_temporario': ticker, # Guardamos provisoriamente para achar o ID no banco depois
+                    'ticker_temporario': ticker_limpo, # Agora vai o nome limpo e traduzido
                     'data_publicacao': data_publicacao,
                     'tipo_documento': "Relatório Gerencial" if "GERENCIAL" in tipo_doc else "Fato Relevante",
                     'url_pdf': url_pdf,
@@ -108,16 +136,20 @@ class FiisFnetScraper:
         """Idempotência para PDFs: Relaciona o ticker com o banco e salva sem duplicar."""
         for doc in documentos:
             ticker_alvo = doc.pop('ticker_temporario')
-            
+
             # Busca quem é este FII na nossa tabela 'ativos'
             ativo = self.session.query(Ativo).filter(Ativo.ticker == ticker_alvo).first()
-            
+
             # Se você ainda não tem esse FII cadastrado na base, ele cadastra automaticamente!
             if not ativo:
                 ativo = Ativo(ticker=ticker_alvo, cnpj="00.000.000/0000-00", tipo="FII")
                 self.session.add(ativo)
-                self.session.commit()
-                
+                try:
+                    self.session.commit()
+                except:
+                    self.session.rollback()
+                    continue
+
             doc['ativo_id'] = ativo.id
 
             try:
