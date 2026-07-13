@@ -39,7 +39,7 @@ class FiisFnetScraper:
         params = {
             'd': 1,
             's': 0, # Start (Para paginação)
-            'l': 500, # ALTO VOLUME: Traz os últimos 5000 documentos
+            'l': 50, # ALTO VOLUME: Traz os últimos 5000 documentos
             'tipoFundo': 1, # 1 significa FII no sistema da CVM
             'idCategoriaDocumento': 0,
             'idTipoDocumento': 0,
