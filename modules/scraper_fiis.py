@@ -29,7 +29,10 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     # 🛡️ Extração da tabela geral do Fundamentus (O Arrastão)
     try:
         url = "https://www.fundamentus.com.br/fii_resultado.php"
-        headers = {'User-Agent': 'Mozilla/5.0'}
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+        }
         response = get_request_with_retry(url, headers=headers)
         df = pd.read_html(io.StringIO(response.text), decimal=',', thousands='.')[0]
         df['Papel'] = df['Papel'].str.strip().str.upper()
