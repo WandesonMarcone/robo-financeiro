@@ -11,7 +11,7 @@ from googleapiclient.http import MediaIoBaseUpload
 from sqlalchemy import func
 
 import config
-from models import Ativo, DocumentosQualitativos, SessionDB
+from pipeline_dados.models import Ativo, DocumentosQualitativos, SessionDB
 from modules.utils import conectar_gspread
 from modules import module_cvm
 from modules import module_ia
