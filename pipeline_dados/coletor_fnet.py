@@ -50,10 +50,11 @@ class FiisFnetScraper:
             params['dataInicial'] = data_inicio
 
         try:
-            response = requests.get(self.base_url_fnet, headers=self.headers, params=params, timeout=15)
+            # Aumentamos o timeout de 15 para 60 segundos
+            response = requests.get(self.base_url_fnet, headers=self.headers, params=params, timeout=60)
             if response.status_code == 200:
                 dados = response.json()
-                return dados.get('data', []) # O FNET retorna os itens dentro da chave 'data'
+                return dados.get('data', []) 
             else:
                 logger.error(f"Bloqueio ou erro no FNET: HTTP {response.status_code}")
                 return []
