@@ -30,7 +30,8 @@ def iniciar_motor():
         print("\n--- MOTOR FIIs (FNET) ---")
         motor_fiis = FiisFnetScraper(session)
         # Puxa documentos a partir do dia 1º do mês atual
-        data_inicio = f"01/{data_hoje.strftime('%m/%Y')}"
+        # Puxa documentos desde o início do ano
+        data_inicio = "01/01/2026"
         motor_fiis.atualizar_fiis(data_inicio)
 
         # 3. Roda o Coletor de Ações (CVM)
