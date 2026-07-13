@@ -406,3 +406,23 @@ def callback_geral(call):
         # 3. Funções de Documentos (A conexão com o module_cvm)
         elif dados.startswith("doc_"):
             bot.answer_callback_query(call.id, "A vasculhar o banco de dados oficial...")
+            partes = dados.split("_")
+            acao_solicitada = partes[1] # 'trimestre', 'fato' ou 'gerencial'
+            ticker = partes[2]
+
+            bot.send_message(call.message.chat.id, f"⏳ Analisando dados oficiais de {ticker}. Aguarde um instante...", parse_mode="Markdown")
+
+            resultado = "Dados não encontrados."
+
+            if acao_solicitada == "trimestre":
+                resultado = module_cvm.buscar_resultados_trimestrais(ticker)
+            elif acao_solicitada == "gerencial":
+                resultado = module_cvm.buscar_relatorios_gerenciais(ticker)
+            elif acao_solicitada == "fato":
+                resultado = module_cvm.buscar_fatos_relevantes(ticker)
+
+            bot.send_message(call.message.chat.id, resultado, parse_mode="Markdown")
+
+    except Exception as e:
+        print(f"Erro no Callback: {e}")
+        bot.answer_callback_query(call.id, f"Erro interno: {str(e)[:50]}")
