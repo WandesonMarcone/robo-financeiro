@@ -34,13 +34,15 @@ jobs:
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
           
-          echo "🔍 Procurando o arquivo do banco..."
-          ls -R  # Este comando lista todas as pastas e arquivos para nós
+          echo "🔍 Verificando se o arquivo está ignorado pelo Git..."
+          git check-ignore -v pipeline_dados/banco_institucional.db || echo "Arquivo não está ignorado."
+
+          echo "🚀 Forçando adição do banco..."
+          git add -f pipeline_dados/banco_institucional.db
           
-          if [ -f "pipeline_dados/banco_institucional.db" ]; then
-            git add -f pipeline_dados/banco_institucional.db
-            git commit -m "🤖 [Auto] Atualização diária do Banco de Dados CVM/B3" || echo "Nenhuma mudança para commitar."
-            git push
+          git commit -m "🤖 [Auto] Atualização diária do Banco de Dados CVM/B3" || echo "Nenhuma mudança para commitar."
+          git push
+
           else
             echo "❌ ERRO: O arquivo não foi encontrado na pasta pipeline_dados/ !"
           fi
