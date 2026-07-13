@@ -34,32 +34,37 @@ class FiisFnetScraper:
         logger.info(f"Atualização concluída. Encontrados {len(documentos)} documentos estratégicos recentes.")
 
     def _buscar_feed_fnet(self, data_inicio: str = None) -> List[Dict[str, Any]]:
-        """Faz a requisição JSON na API pública do FNET."""
-        # Parâmetros exatos que o site da B3 usa para puxar apenas FIIs
+        """Faz a requisição com estratégia de RETRY automática."""
         params = {
-            'd': 1,
-            's': 0, # Start (Para paginação)
-            'l': 50, # ALTO VOLUME: Traz os últimos 5000 documentos
-            'tipoFundo': 1, # 1 significa FII no sistema da CVM
-            'idCategoriaDocumento': 0,
-            'idTipoDocumento': 0,
-            'idEspecieDocumento': 0
+            'd': 1, 's': 0, 'l': 500,
+            'tipoFundo': 1, 'idCategoriaDocumento': 0,
+            'idTipoDocumento': 0, 'idEspecieDocumento': 0
         }
-        
         if data_inicio:
             params['dataInicial'] = data_inicio
 
+        # CONFIGURAÇÃO DE RETRY (Blindagem)
+        session = requests.Session()
+        retry_strategy = Retry(
+            total=3,                # Tenta 3 vezes
+            backoff_factor=1,       # Espera 1s, 2s, 4s entre tentativas
+            status_forcelist=[500, 502, 503, 504] # Só tenta de novo se o erro for de servidor
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        session.mount("https://", adapter)
+
         try:
-            # Aumentamos o timeout de 15 para 60 segundos
-            response = requests.get(self.base_url_fnet, headers=self.headers, params=params, timeout=60)
+            # Usa a session com retry
+            response = session.get(self.base_url_fnet, headers=self.headers, params=params, timeout=60)
+            
             if response.status_code == 200:
                 dados = response.json()
-                return dados.get('data', []) 
+                return dados.get('data', [])
             else:
-                logger.error(f"Bloqueio ou erro no FNET: HTTP {response.status_code}")
+                print(f"Erro no FNET: HTTP {response.status_code}")
                 return []
         except Exception as e:
-            logger.error(f"Falha ao conectar no FNET: {e}")
+            print(f"Falha total ao conectar no FNET após tentativas: {e}")
             return []
 
     def _extrair_relatorios_gerenciais(self, feed: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
