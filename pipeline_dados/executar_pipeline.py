@@ -3,6 +3,8 @@ import sys
 from datetime import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import func
+from datetime import datetime, timedelta
 
 # Adiciona o diretório atual ao path para evitar erros de importação
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
