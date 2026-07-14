@@ -1,5 +1,7 @@
 import logging
 import requests
+import json
+from modules.dropbox_manager import salvar_pdf_e_gerar_link
 from datetime import datetime
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
