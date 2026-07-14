@@ -106,41 +106,47 @@ class FiisFnetScraper:
     def _extrair_relatorios_gerenciais(self, feed: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Filtra o feed procurando 'Relatório Gerencial' ou 'Fato Relevante' e constrói a URL oficial."""
         documentos_estruturados = []
+        espiou = 0 # Contador para o nosso espião não inundar o log com 27 mil linhas
 
         for item in feed:
             ticker_bruto = item.get('nomePregao', '').strip().upper()
+            nome_fundo = item.get('nomeFundo', '').strip().upper() # Pegando também a Razão Social para investigar
             categoria = item.get('descricaoCategoriaDocumento', '').upper()
             tipo_doc = item.get('descricaoTipoDocumento', '').upper()
             assunto = item.get('descricaoAssunto', '')
             id_doc = item.get('id')
-            data_entrega_str = item.get('dataEntrega', '') # Ex: '11/07/2026 18:30'
+            data_entrega_str = item.get('dataEntrega', '') 
+
+            # 🕵️ AQUI ESTÁ O NOSSO ESPIÃO:
+            # Se for um Relatório Gerencial, ele vai gritar no log como a B3 escreveu o nome!
+            if "GERENCIAL" in tipo_doc and espiou < 30:
+                print(f"🕵️ ESPIÃO FNET -> nomePregao: '{ticker_bruto}' | nomeFundo: '{nome_fundo}' | assunto: '{assunto}'")
+                espiou += 1
 
             if not ticker_bruto or not id_doc:
                 continue
-
-             # 🛑 TRAVA DE SEGURANÇA E TRADUÇÃO: 
-            # Checamos se a chave (ex: "MAXI REN") está no nome que a B3 enviou. Se tiver, vira MXRF11!
+            
+            # 🛑 TRAVA DE SEGURANÇA E TRADUÇÃO: 
             ticker_limpo = None
             for chave_b3, ticker_oficial in MAPA_FNET_B3.items():
-                if chave_b3 in ticker_bruto:
+                # Agora o filtro procura a nossa chave tanto no nome do pregão quanto no nome completo do fundo!
+                if chave_b3 in ticker_bruto or chave_b3 in nome_fundo:
                     ticker_limpo = ticker_oficial
                     break
             
             if not ticker_limpo:
                 continue
 
-            # Filtramos apenas os documentos vitais (Relatórios Gerenciais e Fatos Relevantes)
             if "GERENCIAL" in tipo_doc or "FATO RELEVANTE" in categoria or "FATO RELEVANTE" in tipo_doc:
                 try:
                     data_publicacao = datetime.strptime(data_entrega_str.split(' ')[0], '%d/%m/%Y').date()
                 except:
                     data_publicacao = datetime.now().date()
 
-                # A MÁGICA: Esta URL pula o site da B3 e vai direto para a tela de impressão do PDF
                 url_pdf = f"https://fnet.bmfbovespa.com.br/fnet/publico/exibirDocumento?id={id_doc}"
 
                 documentos_estruturados.append({
-                    'ticker_temporario': ticker_limpo, # Agora vai o nome limpo e traduzido
+                    'ticker_temporario': ticker_limpo, 
                     'data_publicacao': data_publicacao,
                     'tipo_documento': "Relatório Gerencial" if "GERENCIAL" in tipo_doc else "Fato Relevante",
                     'url_pdf': url_pdf,
