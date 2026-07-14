@@ -113,7 +113,7 @@ class FiisFnetScraper:
 
     def _extrair_relatorios_gerenciais(self, feed: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         documentos_estruturados = []
-        
+
         # 🕸️ A REDE DE ARRASTÃO: Tipos vitais para o investidor de FIIs
         tipos_desejados = ["GERENCIAL", "FATO", "INFORME", "AVISO", "COMUNICADO", "MERCADO"]
 
@@ -136,7 +136,7 @@ class FiisFnetScraper:
                 if chave_b3 in ticker_bruto or chave_b3 in nome_fundo:
                     ticker_limpo = ticker_oficial
                     break
-            
+
             if not ticker_limpo:
                 continue
 
@@ -153,8 +153,16 @@ class FiisFnetScraper:
                 except:
                     data_publicacao = datetime.now().date()
 
-                # Pula a interface da B3 e vai direto para o PDF
-                url_pdf = f"https://fnet.bmfbovespa.com.br/fnet/publico/exibirDocumento?id={id_doc}"
+                # 📦 MOTOR DROPBOX: Interceptamos a URL instável da B3 e enviamos para o Dropbox
+                # 1. URL de download direto (usando Referer para contornar bloqueios)
+                url_download_b3 = f"https://fnet.bmfbovespa.com.br/fnet/publico/exibirDocumentoDownload?id={id_doc}"
+                
+                # 2. Preparamos os dados para o Dropbox
+                nome_oficial_doc = tipo_doc if tipo_doc else categoria
+                data_str = str(data_publicacao) # Ex: "2026-07-14"
+                
+                # 3. O nosso entregador faz o download, upload e retorna o link permanente
+                url_pdf = salvar_pdf_e_gerar_link(url_download_b3, ticker_limpo, nome_oficial_doc, data_str)
 
                 # Salva o nome real que a B3 enviou para você saber exatamente o que é
                 nome_oficial_doc = tipo_doc if tipo_doc else categoria
