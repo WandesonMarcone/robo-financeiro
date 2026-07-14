@@ -52,38 +52,54 @@ class FiisFnetScraper:
         logger.info(f"Atualização concluída. Encontrados {len(documentos)} documentos estratégicos recentes.")
 
     def _buscar_feed_fnet(self, data_inicio: str = None) -> List[Dict[str, Any]]:
-        """Faz a requisição com estratégia de RETRY automática."""
-        params = {
-            'd': 1, 's': 0, 'l': 50,
-            'tipoFundo': 1, 'idCategoriaDocumento': 0,
-            'idTipoDocumento': 0, 'idEspecieDocumento': 0
-        }
-        if data_inicio:
-            params['dataInicial'] = data_inicio
+        """Faz a requisição com paginação para varrer TODOS os documentos do ano."""
+        todos_documentos = []
+        limite_por_pagina = 100  # Pegamos 100 de cada vez para ir mais rápido
+        inicio_pag = 0
 
-        # CONFIGURAÇÃO DE RETRY (Blindagem)
         session = requests.Session()
         retry_strategy = Retry(
-            total=3,                # Tenta 3 vezes
-            backoff_factor=1,       # Espera 1s, 2s, 4s entre tentativas
-            status_forcelist=[500, 502, 503, 504] # Só tenta de novo se o erro for de servidor
+            total=3,                
+            backoff_factor=1,       
+            status_forcelist=[500, 502, 503, 504] 
         )
         adapter = HTTPAdapter(max_retries=retry_strategy)
         session.mount("https://", adapter)
 
-        try:
-            # Usa a session com retry
-            response = session.get(self.base_url_fnet, headers=self.headers, params=params, timeout=60)
+        logger.info("Iniciando leitura das páginas do FNET...")
 
-            if response.status_code == 200:
-                dados = response.json()
-                return dados.get('data', [])
-            else:
-                print(f"Erro no FNET: HTTP {response.status_code}")
-                return []
-        except Exception as e:
-            print(f"Falha total ao conectar no FNET após tentativas: {e}")
-            return []
+        while True: # O loop só para quando a B3 disser que acabaram os documentos
+            params = {
+                'd': 1, 's': inicio_pag, 'l': limite_por_pagina,
+                'tipoFundo': 1, 'idCategoriaDocumento': 0,
+                'idTipoDocumento': 0, 'idEspecieDocumento': 0
+            }
+            if data_inicio:
+                params['dataInicial'] = data_inicio
+
+            try:
+                response = session.get(self.base_url_fnet, headers=self.headers, params=params, timeout=60)
+
+                if response.status_code == 200:
+                    dados = response.json()
+                    feed_pagina = dados.get('data', [])
+                    
+                    if not feed_pagina:
+                        # Se a B3 retornar uma lista vazia, significa que chegamos no fim!
+                        break
+                    
+                    todos_documentos.extend(feed_pagina)
+                    inicio_pag += limite_por_pagina # "Vira a página" para os próximos 100
+                    
+                    print(f"📖 Varrendo B3... {len(todos_documentos)} documentos analisados até agora.")
+                else:
+                    print(f"Erro no FNET na página {inicio_pag}: HTTP {response.status_code}")
+                    break
+            except Exception as e:
+                print(f"Falha ao conectar no FNET na página {inicio_pag}: {e}")
+                break
+        
+        return todos_documentos
 
     def _extrair_relatorios_gerenciais(self, feed: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Filtra o feed procurando 'Relatório Gerencial' ou 'Fato Relevante' e constrói a URL oficial."""
