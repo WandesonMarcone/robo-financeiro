@@ -230,42 +230,37 @@ def status_banco(message):
 
 @bot.message_handler(commands=['relatorios', 'docs'])
 def enviar_ultimos_relatorios(message):
-    """Busca os últimos 10 relatórios e fatos relevantes salvos no banco e envia no Telegram."""
+    """Busca os últimos 10 relatórios salvos no banco e envia no Telegram."""
     bot.reply_to(message, "🔎 Buscando os últimos documentos no cofre...")
-    
+
+    session = SessionDB()
     try:
-        session = Session()
-        
-        # Faz uma busca no banco juntando o Documento com o Nome do Fundo (Ativo), do mais novo pro mais velho
         ultimos_docs = session.query(DocumentosQualitativos, Ativo)\
             .join(Ativo, DocumentosQualitativos.ativo_id == Ativo.id)\
             .order_by(DocumentosQualitativos.data_publicacao.desc())\
             .limit(10).all()
-            
-        session.close()
 
         if not ultimos_docs:
             bot.send_message(message.chat.id, "📭 Nenhum documento encontrado no banco ainda.")
             return
 
         resposta = "📄 **Últimos Relatórios Capturados:**\n\n"
-        
+
         for doc, ativo in ultimos_docs:
             data_formatada = doc.data_publicacao.strftime('%d/%m/%Y')
             resposta += f"🏢 **{ativo.ticker}** - {data_formatada}\n"
             resposta += f"🏷️ Tipo: {doc.tipo_documento}\n"
-            # Adiciona o assunto se tiver, senão deixa em branco
             if doc.assunto and doc.assunto.strip():
                 resposta += f"📌 Assunto: {doc.assunto}\n"
             resposta += f"🔗 [Acessar PDF]({doc.url_pdf})\n"
             resposta += "➖➖➖➖➖➖➖➖➖➖\n"
 
-        # Envia a mensagem formatada (parse_mode='Markdown' para deixar os links clicáveis e o texto em negrito)
         bot.send_message(message.chat.id, resposta, parse_mode='Markdown', disable_web_page_preview=True)
-
     except Exception as e:
-        logger.error(f"Erro ao buscar relatórios: {e}")
+        print(f"Erro ao buscar relatórios: {e}")
         bot.send_message(message.chat.id, "❌ Ops! Deu um erro ao tentar ler o banco de dados.")
+    finally:
+        session.close()
 
 # ==========================================
 # PORTEIRO DOS BOTÕES (Callback Handler Único)
