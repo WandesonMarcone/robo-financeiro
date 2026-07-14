@@ -152,7 +152,7 @@ class FiisFnetScraper:
                     data_publicacao = datetime.now().date()
 
                 # Pula a interface da B3 e vai direto para o PDF
-                url_pdf = f"https://fnet.bmfbovespa.com.br/fnet/publico/exibirDocumentoDownload?id={id_doc}"
+                url_pdf = f"https://fnet.bmfbovespa.com.br/fnet/publico/exibirDocumento?id={id_doc}"
 
                 # Salva o nome real que a B3 enviou para você saber exatamente o que é
                 nome_oficial_doc = tipo_doc if tipo_doc else categoria
