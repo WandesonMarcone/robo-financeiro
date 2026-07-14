@@ -157,67 +157,6 @@ def obter_e_salvar_logo(ticker):
     return "https://cdn-icons-png.flaticon.com/512/2933/2933116.png"
 
 # ==========================================
-# COMANDOS DE STATUS E RELATÓRIOS
-# ==========================================
-@bot.message_handler(commands=['status'])
-def status_banco(message):
-    """Mostra um resumo da saúde do seu banco de dados."""
-    session = SessionDB()
-    try:
-        total_ativos = session.query(Ativo).count()
-        total_docs = session.query(DocumentosQualitativos).count()
-        ultimos = session.query(Ativo.ticker).order_by(Ativo.id.desc()).limit(5).all()
-        lista_tickers = ", ".join([a[0] for a in ultimos])
-        ultima_data = session.query(func.max(DocumentosQualitativos.data_publicacao)).scalar()
-
-        resposta = (
-            f"📊 **Painel de Controle do Motor de Dados**\n\n"
-            f"🏢 **Ativos monitorados (SQLite):** {total_ativos}\n"
-            f"📄 **Documentos salvos (SQLite):** {total_docs}\n"
-            f"📅 **Última atualização (SQLite):** {ultima_data}\n\n"
-            f"🚀 **Últimos ativos:**\n{lista_tickers}"
-        )
-        bot.reply_to(message, resposta)
-    except Exception as e:
-        bot.reply_to(message, f"❌ Erro ao consultar banco: {e}")
-    finally:
-        session.close()
-
-@bot.message_handler(commands=['relatorios', 'docs'])
-def enviar_ultimos_relatorios(message):
-    """Busca os últimos 10 relatórios salvos no banco e envia no Telegram."""
-    bot.reply_to(message, "🔎 Buscando os últimos documentos no cofre...")
-
-    session = SessionDB()
-    try:
-        ultimos_docs = session.query(DocumentosQualitativos, Ativo)\
-            .join(Ativo, DocumentosQualitativos.ativo_id == Ativo.id)\
-            .order_by(DocumentosQualitativos.data_publicacao.desc())\
-            .limit(10).all()
-
-        if not ultimos_docs:
-            bot.send_message(message.chat.id, "📭 Nenhum documento encontrado no banco ainda.")
-            return
-
-        resposta = "📄 **Últimos Relatórios Capturados:**\n\n"
-
-        for doc, ativo in ultimos_docs:
-            data_formatada = doc.data_publicacao.strftime('%d/%m/%Y')
-            resposta += f"🏢 **{ativo.ticker}** - {data_formatada}\n"
-            resposta += f"🏷️ Tipo: {doc.tipo_documento}\n"
-            if doc.assunto and doc.assunto.strip():
-                resposta += f"📌 Assunto: {doc.assunto}\n"
-            resposta += f"🔗 [Acessar PDF]({doc.url_pdf})\n"
-            resposta += "➖➖➖➖➖➖➖➖➖➖\n"
-
-        bot.send_message(message.chat.id, resposta, parse_mode='Markdown', disable_web_page_preview=True)
-    except Exception as e:
-        print(f"Erro ao buscar relatórios: {e}")
-        bot.send_message(message.chat.id, "❌ Ops! Deu um erro ao tentar ler o banco de dados.")
-    finally:
-        session.close()
-
-# ==========================================
 # COMANDO: ADICIONAR ATIVO (/adicionar)
 # ==========================================
 @bot.message_handler(commands=['adicionar'])
@@ -264,6 +203,69 @@ def enviar_menu(message):
     except Exception as e:
         print(f"Erro no menu inicial: {e}")
         bot.reply_to(message, "❌ Erro ao abrir o menu.")
+
+@bot.message_handler(commands=['status'])
+def status_banco(message):
+    """Mostra um resumo da saúde do seu banco de dados."""
+    session = SessionDB()
+    try:
+        total_ativos = session.query(Ativo).count()
+        total_docs = session.query(DocumentosQualitativos).count()
+        ultimos = session.query(Ativo.ticker).order_by(Ativo.id.desc()).limit(5).all()
+        lista_tickers = ", ".join([a[0] for a in ultimos])
+        ultima_data = session.query(func.max(DocumentosQualitativos.data_publicacao)).scalar()
+
+        resposta = (
+            f"📊 **Painel de Controle do Motor de Dados**\n\n"
+            f"🏢 **Ativos monitorados (SQLite):** {total_ativos}\n"
+            f"📄 **Documentos salvos (SQLite):** {total_docs}\n"
+            f"📅 **Última atualização (SQLite):** {ultima_data}\n\n"
+            f"🚀 **Últimos ativos:**\n{lista_tickers}"
+        )
+        bot.reply_to(message, resposta)
+    except Exception as e:
+        bot.reply_to(message, f"❌ Erro ao consultar banco: {e}")
+    finally:
+        session.close()
+
+@bot.message_handler(commands=['relatorios', 'docs'])
+def enviar_ultimos_relatorios(message):
+    """Busca os últimos 10 relatórios e fatos relevantes salvos no banco e envia no Telegram."""
+    bot.reply_to(message, "🔎 Buscando os últimos documentos no cofre...")
+    
+    try:
+        session = Session()
+        
+        # Faz uma busca no banco juntando o Documento com o Nome do Fundo (Ativo), do mais novo pro mais velho
+        ultimos_docs = session.query(DocumentosQualitativos, Ativo)\
+            .join(Ativo, DocumentosQualitativos.ativo_id == Ativo.id)\
+            .order_by(DocumentosQualitativos.data_publicacao.desc())\
+            .limit(10).all()
+            
+        session.close()
+
+        if not ultimos_docs:
+            bot.send_message(message.chat.id, "📭 Nenhum documento encontrado no banco ainda.")
+            return
+
+        resposta = "📄 **Últimos Relatórios Capturados:**\n\n"
+        
+        for doc, ativo in ultimos_docs:
+            data_formatada = doc.data_publicacao.strftime('%d/%m/%Y')
+            resposta += f"🏢 **{ativo.ticker}** - {data_formatada}\n"
+            resposta += f"🏷️ Tipo: {doc.tipo_documento}\n"
+            # Adiciona o assunto se tiver, senão deixa em branco
+            if doc.assunto and doc.assunto.strip():
+                resposta += f"📌 Assunto: {doc.assunto}\n"
+            resposta += f"🔗 [Acessar PDF]({doc.url_pdf})\n"
+            resposta += "➖➖➖➖➖➖➖➖➖➖\n"
+
+        # Envia a mensagem formatada (parse_mode='Markdown' para deixar os links clicáveis e o texto em negrito)
+        bot.send_message(message.chat.id, resposta, parse_mode='Markdown', disable_web_page_preview=True)
+
+    except Exception as e:
+        logger.error(f"Erro ao buscar relatórios: {e}")
+        bot.send_message(message.chat.id, "❌ Ops! Deu um erro ao tentar ler o banco de dados.")
 
 # ==========================================
 # PORTEIRO DOS BOTÕES (Callback Handler Único)
