@@ -30,6 +30,7 @@ cssselect
 html5lib
 beautifulsoup4
 groq
+dropbox==11.36.2
 
 # Novas Bibliotecas Institucionais (O motor do novo CVM)
 quantstats
