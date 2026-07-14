@@ -118,15 +118,14 @@ class FiisFnetScraper:
             if not ticker_bruto or not id_doc:
                 continue
 
-            # 🛑 TRAVA DE SEGURANÇA E LIMPEZA: 
-            # Verifica se algum dos nossos Tickers VIP está no nome que a B3 enviou.
+             # 🛑 TRAVA DE SEGURANÇA E TRADUÇÃO: 
+            # Checamos se a chave (ex: "MAXI REN") está no nome que a B3 enviou. Se tiver, vira MXRF11!
             ticker_limpo = None
-            for vip in FII_VIP:
-                if vip in ticker_bruto:
-                    ticker_limpo = vip # Garante que vai salvar bonitinho (ex: MXRF11) sem sujeira
+            for chave_b3, ticker_oficial in MAPA_FNET_B3.items():
+                if chave_b3 in ticker_bruto:
+                    ticker_limpo = ticker_oficial
                     break
-
-            # Se não achou nenhum dos nossos VIPs, pula para o próximo fundo
+            
             if not ticker_limpo:
                 continue
 
