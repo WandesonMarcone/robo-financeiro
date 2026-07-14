@@ -106,26 +106,23 @@ class FiisFnetScraper:
     def _extrair_relatorios_gerenciais(self, feed: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Filtra o feed procurando 'Relatório Gerencial' ou 'Fato Relevante' e constrói a URL oficial."""
         documentos_estruturados = []
-        espiou = 0 # Contador
+        espiou = 0 
 
         for item in feed:
+            # 🕵️ O ESPIÃO SUPREMO: Vai imprimir o dicionário cru e inteiro da B3!
+            if espiou < 2:
+                print("==================================================")
+                print(f"🕵️ DICIONÁRIO BRUTO DA B3: {item}")
+                print("==================================================")
+                espiou += 1
+                
             ticker_bruto = item.get('nomePregao', '').strip().upper()
             nome_fundo = item.get('nomeFundo', '').strip().upper()
-            categoria = item.get('descricaoCategoriaDocumento', '').upper()
-            tipo_doc = item.get('descricaoTipoDocumento', '').upper()
-            assunto = item.get('descricaoAssunto', '')
             id_doc = item.get('id')
-            data_entrega_str = item.get('dataEntrega', '') 
-
-            # 🕵️ ESPIÃO SEM FILTRO: Vai pegar os primeiros 30 documentos de qualquer fundo para vermos a estrutura!
-            if espiou < 30:
-                print(f"🕵️ ESPIÃO FNET -> Pregão: '{ticker_bruto}' | Categoria: '{categoria}' | Tipo: '{tipo_doc}' | Assunto: '{assunto}'")
-                espiou += 1
 
             if not ticker_bruto or not id_doc:
                 continue
             
-            # Trava de Segurança e Tradução (Mantida)
             ticker_limpo = None
             for chave_b3, ticker_oficial in MAPA_FNET_B3.items():
                 if chave_b3 in ticker_bruto or chave_b3 in nome_fundo:
@@ -135,22 +132,8 @@ class FiisFnetScraper:
             if not ticker_limpo:
                 continue
 
-            # (O resto do filtro continua igual por enquanto, até descobrirmos os nomes corretos)
-            if "GERENCIAL" in tipo_doc or "FATO RELEVANTE" in categoria or "FATO RELEVANTE" in tipo_doc:
-                try:
-                    data_publicacao = datetime.strptime(data_entrega_str.split(' ')[0], '%d/%m/%Y').date()
-                except:
-                    data_publicacao = datetime.now().date()
-
-                url_pdf = f"https://fnet.bmfbovespa.com.br/fnet/publico/exibirDocumento?id={id_doc}"
-
-                documentos_estruturados.append({
-                    'ticker_temporario': ticker_limpo, 
-                    'data_publicacao': data_publicacao,
-                    'tipo_documento': "Relatório Gerencial" if "GERENCIAL" in tipo_doc else "Fato Relevante",
-                    'url_pdf': url_pdf,
-                    'assunto': assunto[:250]
-                })
+            # Para o código não quebrar enquanto descobrimos as gavetas, desativei o filtro temporariamente
+            pass
 
         return documentos_estruturados
 
