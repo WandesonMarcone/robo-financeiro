@@ -11,27 +11,28 @@ from urllib3.util.retry import Retry
 logger = logging.getLogger(__name__)
 
 # ==========================================
-# 🧠 O CÉREBRO FILTRO (LISTA VIP DE FIIs)
+# 🧠 O CÉREBRO TRADUTOR FNET (MAPA DE NOME PARA TICKER)
 # ==========================================
-# O robô vai ignorar qualquer fundo que não esteja nesta lista, mantendo o banco leve e rápido.
-FII_VIP = [
-    'GARE11', 
-    'MXRF11', 
-    'VISC11', 
-    'CVBI11', 
-    'HGLG11',
-    # Quer acompanhar outros fundos no futuro? É só adicionar aqui!
-    'XPML11',
-    'KNCR11',
-    'BTLG11'
-]
+# O FNET não envia o "11". Ele envia nomes de pregão quebrados (ex: "FII MAXI REN").
+# Este dicionário traduz o nome esquisito da B3 para o seu Ticker real (VIP).
+MAPA_FNET_B3 = {
+    'MAXI REN': 'MXRF11',
+    'CSHG LOG': 'HGLG11',
+    'VINCI SC': 'VISC11',
+    'VBI CRI': 'CVBI11',
+    'GARE': 'GARE11',
+    
+    # Futuros FIIs que você quiser acompanhar
+    'XP MALLS': 'XPML11',
+    'KINEA RI': 'KNCR11',
+    'BTLG': 'BTLG11'
+}
 
 class FiisFnetScraper:
     """Motor de captura de Informes e Relatórios Gerenciais via API do sistema FNET da B3/CVM."""
 
     def __init__(self, db_session: Session):
         self.session = db_session
-        # Endpoint oficial (oculto) de onde a B3 puxa a tabela de FIIs
         self.base_url_fnet = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -39,7 +40,6 @@ class FiisFnetScraper:
         }
 
     def atualizar_fiis(self, data_inicio: str = None) -> None:
-        """Método principal orquestrador para FIIs."""
         logger.info(f"Iniciando raspagem FNET (FIIs)...")
         feed_fnet = self._buscar_feed_fnet(data_inicio)
 
@@ -54,7 +54,7 @@ class FiisFnetScraper:
     def _buscar_feed_fnet(self, data_inicio: str = None) -> List[Dict[str, Any]]:
         """Faz a requisição com paginação para varrer TODOS os documentos do ano."""
         todos_documentos = []
-        limite_por_pagina = 100  # Pegamos 100 de cada vez para ir mais rápido
+        limite_por_pagina = 100
         inicio_pag = 0
 
         session = requests.Session()
@@ -68,7 +68,7 @@ class FiisFnetScraper:
 
         logger.info("Iniciando leitura das páginas do FNET...")
 
-        while True: # O loop só para quando a B3 disser que acabaram os documentos
+        while True: 
             params = {
                 'd': 1, 's': inicio_pag, 'l': limite_por_pagina,
                 'tipoFundo': 1, 'idCategoriaDocumento': 0,
@@ -85,11 +85,10 @@ class FiisFnetScraper:
                     feed_pagina = dados.get('data', [])
                     
                     if not feed_pagina:
-                        # Se a B3 retornar uma lista vazia, significa que chegamos no fim!
                         break
                     
                     todos_documentos.extend(feed_pagina)
-                    inicio_pag += limite_por_pagina # "Vira a página" para os próximos 100
+                    inicio_pag += limite_por_pagina 
                     
                     print(f"📖 Varrendo B3... {len(todos_documentos)} documentos analisados até agora.")
                 else:
@@ -106,40 +105,38 @@ class FiisFnetScraper:
         documentos_estruturados = []
 
         for item in feed:
+            # O nomePregao vem quebrado, ex: "FII MAXI REN"
             ticker_bruto = item.get('nomePregao', '').strip().upper()
             categoria = item.get('descricaoCategoriaDocumento', '').upper()
             tipo_doc = item.get('descricaoTipoDocumento', '').upper()
             assunto = item.get('descricaoAssunto', '')
             id_doc = item.get('id')
-            data_entrega_str = item.get('dataEntrega', '') # Ex: '11/07/2026 18:30'
+            data_entrega_str = item.get('dataEntrega', '') 
 
             if not ticker_bruto or not id_doc:
                 continue
             
-            # 🛑 TRAVA DE SEGURANÇA E LIMPEZA: 
-            # Verifica se algum dos nossos Tickers VIP está no nome que a B3 enviou.
+            # 🛑 TRAVA DE SEGURANÇA E TRADUÇÃO: 
+            # Checamos se a chave (ex: "MAXI REN") está no nome que a B3 enviou. Se tiver, vira MXRF11!
             ticker_limpo = None
-            for vip in FII_VIP:
-                if vip in ticker_bruto:
-                    ticker_limpo = vip # Garante que vai salvar bonitinho (ex: MXRF11) sem sujeira
+            for chave_b3, ticker_oficial in MAPA_FNET_B3.items():
+                if chave_b3 in ticker_bruto:
+                    ticker_limpo = ticker_oficial
                     break
             
-            # Se não achou nenhum dos nossos VIPs, pula para o próximo fundo
             if not ticker_limpo:
                 continue
 
-            # Filtramos apenas os documentos vitais (Relatórios Gerenciais e Fatos Relevantes)
             if "GERENCIAL" in tipo_doc or "FATO RELEVANTE" in categoria or "FATO RELEVANTE" in tipo_doc:
                 try:
                     data_publicacao = datetime.strptime(data_entrega_str.split(' ')[0], '%d/%m/%Y').date()
                 except:
                     data_publicacao = datetime.now().date()
 
-                # A MÁGICA: Esta URL pula o site da B3 e vai direto para a tela de impressão do PDF
                 url_pdf = f"https://fnet.bmfbovespa.com.br/fnet/publico/exibirDocumento?id={id_doc}"
 
                 documentos_estruturados.append({
-                    'ticker_temporario': ticker_limpo, # Agora vai o nome limpo e traduzido
+                    'ticker_temporario': ticker_limpo, 
                     'data_publicacao': data_publicacao,
                     'tipo_documento': "Relatório Gerencial" if "GERENCIAL" in tipo_doc else "Fato Relevante",
                     'url_pdf': url_pdf,
@@ -153,10 +150,8 @@ class FiisFnetScraper:
         for doc in documentos:
             ticker_alvo = doc.pop('ticker_temporario')
 
-            # Busca quem é este FII na nossa tabela 'ativos'
             ativo = self.session.query(Ativo).filter(Ativo.ticker == ticker_alvo).first()
 
-            # Se você ainda não tem esse FII cadastrado na base, ele cadastra automaticamente!
             if not ativo:
                 ativo = Ativo(ticker=ticker_alvo, cnpj="00.000.000/0000-00", tipo="FII")
                 self.session.add(ativo)
@@ -173,6 +168,5 @@ class FiisFnetScraper:
                 self.session.add(novo_doc)
                 self.session.commit()
             except IntegrityError:
-                # O banco avisou que este documento já foi guardado. Cancelamos a transação e seguimos.
                 self.session.rollback()
                 pass
