@@ -37,7 +37,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           LOGO_DEV_TOKEN: ${{ secrets.LOGO_DEV_TOKEN }}
-          GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDENTIALS }} # Importante adicionar aqui também
+          GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDENTIALS }}
           DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
           DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}
           DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
