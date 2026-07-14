@@ -11,20 +11,22 @@ from urllib3.util.retry import Retry
 logger = logging.getLogger(__name__)
 
 # ==========================================
-# 🧠 O CÉREBRO FILTRO (LISTA VIP DE FIIs)
+# 🧠 O CÉREBRO TRADUTOR FNET (MAPA DE NOME PARA TICKER)
 # ==========================================
-# O robô vai ignorar qualquer fundo que não esteja nesta lista, mantendo o banco leve e rápido.
-FII_VIP = [
-    'GARE11', 
-    'MXRF11', 
-    'VISC11', 
-    'CVBI11', 
-    'HGLG11',
-    # Quer acompanhar outros fundos no futuro? É só adicionar aqui!
-    'XPML11',
-    'KNCR11',
-    'BTLG11'
-]
+# O FNET não envia o "11". Ele envia nomes de pregão quebrados (ex: "FII MAXI REN").
+# Este dicionário traduz o nome esquisito da B3 para o seu Ticker real (VIP).
+MAPA_FNET_B3 = {
+    'MAXI REN': 'MXRF11',
+    'CSHG LOG': 'HGLG11',
+    'VINCI SC': 'VISC11',
+    'VBI CRI': 'CVBI11',
+    'GARE': 'GARE11',
+    
+    # Futuros FIIs que você quiser acompanhar
+    'XP MALLS': 'XPML11',
+    'KINEA RI': 'KNCR11',
+    'BTLG': 'BTLG11'
+}
 
 class FiisFnetScraper:
     """Motor de captura de Informes e Relatórios Gerenciais via API do sistema FNET da B3/CVM."""
