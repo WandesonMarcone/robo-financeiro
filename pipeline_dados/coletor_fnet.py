@@ -106,30 +106,28 @@ class FiisFnetScraper:
     def _extrair_relatorios_gerenciais(self, feed: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Filtra o feed procurando 'Relatório Gerencial' ou 'Fato Relevante' e constrói a URL oficial."""
         documentos_estruturados = []
-        espiou = 0 # Contador para o nosso espião não inundar o log com 27 mil linhas
+        espiou = 0 # Contador
 
         for item in feed:
             ticker_bruto = item.get('nomePregao', '').strip().upper()
-            nome_fundo = item.get('nomeFundo', '').strip().upper() # Pegando também a Razão Social para investigar
+            nome_fundo = item.get('nomeFundo', '').strip().upper()
             categoria = item.get('descricaoCategoriaDocumento', '').upper()
             tipo_doc = item.get('descricaoTipoDocumento', '').upper()
             assunto = item.get('descricaoAssunto', '')
             id_doc = item.get('id')
             data_entrega_str = item.get('dataEntrega', '') 
 
-            # 🕵️ AQUI ESTÁ O NOSSO ESPIÃO:
-            # Se for um Relatório Gerencial, ele vai gritar no log como a B3 escreveu o nome!
-            if "GERENCIAL" in tipo_doc and espiou < 30:
-                print(f"🕵️ ESPIÃO FNET -> nomePregao: '{ticker_bruto}' | nomeFundo: '{nome_fundo}' | assunto: '{assunto}'")
+            # 🕵️ ESPIÃO SEM FILTRO: Vai pegar os primeiros 30 documentos de qualquer fundo para vermos a estrutura!
+            if espiou < 30:
+                print(f"🕵️ ESPIÃO FNET -> Pregão: '{ticker_bruto}' | Categoria: '{categoria}' | Tipo: '{tipo_doc}' | Assunto: '{assunto}'")
                 espiou += 1
 
             if not ticker_bruto or not id_doc:
                 continue
             
-            # 🛑 TRAVA DE SEGURANÇA E TRADUÇÃO: 
+            # Trava de Segurança e Tradução (Mantida)
             ticker_limpo = None
             for chave_b3, ticker_oficial in MAPA_FNET_B3.items():
-                # Agora o filtro procura a nossa chave tanto no nome do pregão quanto no nome completo do fundo!
                 if chave_b3 in ticker_bruto or chave_b3 in nome_fundo:
                     ticker_limpo = ticker_oficial
                     break
@@ -137,6 +135,7 @@ class FiisFnetScraper:
             if not ticker_limpo:
                 continue
 
+            # (O resto do filtro continua igual por enquanto, até descobrirmos os nomes corretos)
             if "GERENCIAL" in tipo_doc or "FATO RELEVANTE" in categoria or "FATO RELEVANTE" in tipo_doc:
                 try:
                     data_publicacao = datetime.strptime(data_entrega_str.split(' ')[0], '%d/%m/%Y').date()
