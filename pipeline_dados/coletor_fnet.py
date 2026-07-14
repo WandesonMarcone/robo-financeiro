@@ -91,21 +91,22 @@ class FiisFnetScraper:
                 if response.status_code == 200:
                     dados = response.json()
                     feed_pagina = dados.get('data', [])
-                    
+
                     if not feed_pagina:
-                        break # Fim das páginas da B3
-                    
+                        break # Fim das páginas da B3 (isso continua sendo um break normal, pois não é erro)
+
                     todos_documentos.extend(feed_pagina)
                     inicio_pag += limite_por_pagina 
-                    
+
                     print(f"📖 Varrendo B3... {len(todos_documentos)} documentos analisados até agora.")
                 else:
-                    print(f"Erro no FNET na página {inicio_pag}: HTTP {response.status_code}")
-                    break
+                    # Mudança 1: Dispara o erro de Status para o Gerenciador de Resiliência
+                    raise Exception(f"Erro HTTP {response.status_code} na página {inicio_pag}")
+                    
             except Exception as e:
-                print(f"Falha ao conectar no FNET na página {inicio_pag}: {e}")
-                break
-        
+                # Mudança 2: Grite o erro para o pipeline pausar e tentar de novo
+                raise Exception(f"Falha de conexão com a B3: {e}")
+
         return todos_documentos
 
     def _extrair_relatorios_gerenciais(self, feed: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
