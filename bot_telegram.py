@@ -113,6 +113,27 @@ def buscar_oportunidades(tipo):
         print(f"Erro no filtro de oportunidades: {e}")
         return []
 
+def processar_novo_filtro(message, tipo):
+    try:
+        if ":" not in message.text:
+            raise ValueError("Formato incorreto")
+
+        chave, valor = message.text.split(':')
+        chave = chave.strip()
+        valor = float(valor.strip())
+
+        filtros = carregar_filtros()
+
+        if chave in filtros[tipo]:
+            filtros[tipo][chave] = valor
+            salvar_filtros(filtros)
+            bot.reply_to(message, f"✅ {chave.upper()} ({tipo.upper()}) atualizado para {valor}!")
+        else:
+            bot.reply_to(message, f"❌ Chave '{chave}' não encontrada. Verifique o nome no filtros.json.")
+
+    except Exception as e:
+        bot.reply_to(message, "❌ Erro. Use formato: `chave: valor` (ex: `dy_min: 0.08`)")
+
 # ==========================================
 # CONFIGURAÇÕES INICIAIS
 # ==========================================
@@ -726,34 +747,6 @@ def callback_geral(call):
             )
             # Registra o próximo passo passando o 'tipo' como argumento
             bot.register_next_step_handler(msg, processar_novo_filtro, tipo)
-
-# ==========================================
-# 4. HANDLERS ISOLADOS (Edição de Filtros)
-# ==========================================
-
-def processar_novo_filtro(message, tipo):
-    try:
-        # Validação simples
-        if ":" not in message.text:
-            raise ValueError("Formato incorreto")
-
-        chave, valor = message.text.split(':')
-        chave = chave.strip()
-        valor = float(valor.strip())
-
-        # Carrega, altera e salva
-        filtros = carregar_filtros()
-        
-        # Verifica se a chave existe antes para evitar erros de digitação
-        if chave in filtros[tipo]:
-            filtros[tipo][chave] = valor
-            salvar_filtros(filtros)
-            bot.reply_to(message, f"✅ {chave.upper()} ({tipo.upper()}) atualizado para {valor}!")
-        else:
-            bot.reply_to(message, f"❌ Chave '{chave}' não encontrada. Verifique o nome no filtros.json.")
-            
-    except Exception as e:
-        bot.reply_to(message, "❌ Erro. Use formato: `chave: valor` (ex: `dy_min: 0.08`)")
 
 # --- MENSAGEM DE REINÍCIO (FIIs E AÇÕES) ---
 try:
