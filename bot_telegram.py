@@ -7,8 +7,6 @@ import os
 from flask import Flask, request
 from sqlalchemy import func, create_engine
 from sqlalchemy.orm import sessionmaker
-import dropbox # Necessário para tratar exceções da Logo
-
 import config
 from atualizador_documentos import rotina_de_atualizacao_em_massa
 from modules.utils import conectar_gspread
