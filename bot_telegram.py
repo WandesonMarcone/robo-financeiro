@@ -25,35 +25,94 @@ import pytz # Para lidar com o fuso horário do Brasil
 # CONFIGURAÇÃO FILTRO OPORTUNIDADE🚀
 # ==========================================
 import json
+import os
 
 def carregar_filtros():
+    """Lê o arquivo de filtros, com proteção contra arquivo inexistente."""
+    # Se o arquivo não existir, retorna um dicionário de segurança (padrão)
+    if not os.path.exists('filtros.json'):
+        print("⚠️ Arquivo filtros.json não encontrado. Usando filtros padrão.")
+        return {
+            "fii": {"pvp_min": 0.5, "pvp_max": 1.15, "dy_min": 0.08, "liq_min": 1000000, "vac_max": 0.15},
+            "acao": {"pl_min": 2, "pl_max": 15, "pvp_min": 0.5, "pvp_max": 2.5, "dy_min": 0.06, "roe_min": 0.10}
+        }
+        
     with open('filtros.json', 'r') as f:
         return json.load(f)
 
 def salvar_filtros(filtros):
+    """Salva as alterações feitas pelo Telegram no arquivo local."""
     with open('filtros.json', 'w') as f:
         json.dump(filtros, f, indent=4)
 
+def converter_numero(valor_string):
+    """Limpa textos como 'R$ 1.050,50' ou '8,5%' da planilha e transforma em número puro"""
+    try:
+        texto = str(valor_string).replace('R$', '').replace('%', '').strip()
+        if not texto or texto == '-': return 0.0
+        # Resolve o padrão brasileiro de milhar e decimal
+        if ',' in texto and '.' in texto:
+            texto = texto.replace('.', '')
+        texto = texto.replace(',', '.')
+        return float(texto)
+    except:
+        return 0.0
+
 def buscar_oportunidades(tipo):
-    """tipo deve ser 'fii' ou 'acao'"""
+    """Vasculha a planilha real e retorna os ativos que passam no filtros.json"""
     filtros = carregar_filtros()[tipo]
-    # Aqui entra o seu código que carrega o DataFrame (df)
-    # Exemplo: df = carregar_planilha_para_dataframe(tipo)
-    
-    if tipo == 'fii':
-        return df[
-            (df['P/VP'] >= filtros['pvp_min']) & (df['P/VP'] <= filtros['pvp_max']) &
-            (df['Dividend Yield'] >= filtros['dy_min']) &
-            (df['Liquidez'] >= filtros['liq_min']) &
-            (df['Vacância Média'] <= filtros['vac_max'])
-        ].index.tolist()
-    else: # Ação
-        return df[
-            (df['P/L'] >= filtros['pl_min']) & (df['P/L'] <= filtros['pl_max']) &
-            (df['P/VP'] >= filtros['pvp_min']) & (df['P/VP'] <= filtros['pvp_max']) &
-            (df['Div.Yield'] >= filtros['dy_min']) &
-            (df['ROE'] >= filtros['roe_min'])
-        ].index.tolist()
+    is_fii = (tipo == 'fii')
+    nome_aba = "BD_FIIs" if is_fii else "BD_Acoes"
+
+    try:
+        planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
+        aba = planilha.worksheet(nome_aba)
+        matriz = aba.get_all_values()
+        
+        oportunidades = []
+
+        for linha in matriz[1:]: # Começa do [1:] para pular a linha de cabeçalho
+            try:
+                ticker = linha[0].strip()
+                if not ticker: continue
+
+                if is_fii:
+                    # Mapeamento de FIIs: P/VP (índice 5), DY (índice 6)
+                    pvp = converter_numero(linha[5])
+                    dy = converter_numero(linha[6])
+                    
+                    # Ajuste fino: Se no JSON estiver 0.08 e na planilha 8.5
+                    dy_min = filtros.get('dy_min', 0)
+                    if dy_min < 1 and dy >= 1: dy_min *= 100 
+
+                    if (filtros['pvp_min'] <= pvp <= filtros['pvp_max']) and (dy >= dy_min):
+                        oportunidades.append(ticker)
+                else:
+                    # Mapeamento de Ações: P/L (5), P/VP (6), DY (3), ROE (19)
+                    dy = converter_numero(linha[3])
+                    pl = converter_numero(linha[5])
+                    pvp = converter_numero(linha[6])
+                    roe = converter_numero(linha[19])
+                    
+                    dy_min = filtros.get('dy_min', 0)
+                    if dy_min < 1 and dy >= 1: dy_min *= 100
+                        
+                    roe_min = filtros.get('roe_min', 0)
+                    if roe_min < 1 and roe >= 1: roe_min *= 100
+
+                    if (filtros['pl_min'] <= pl <= filtros['pl_max']) and \
+                       (filtros['pvp_min'] <= pvp <= filtros['pvp_max']) and \
+                       (dy >= dy_min) and (roe >= roe_min):
+                        oportunidades.append(ticker)
+                        
+            except IndexError:
+                # Se a linha na planilha estiver vazia pela metade, ignora e segue
+                pass 
+
+        return oportunidades
+    except Exception as e:
+        print(f"Erro no filtro de oportunidades: {e}")
+        return []
 
 # ==========================================
 # CONFIGURAÇÕES INICIAIS
