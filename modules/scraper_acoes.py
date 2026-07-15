@@ -7,11 +7,11 @@ import config
 from modules.utils import formatar, precisa_atualizar, get_request_with_retry
 
 traducao_setores = {
-    'energy': 'Energia', 'financial services': 'Financeiro', 'Basic Materials': 'Materiais Básicos', 
-    'Utilities': 'Utilidade Pública', 'Industrials': 'Indústria', 'Consumer Defensive': 'Consumo Defensivo', 
-    'Consumer Cyclical': 'Consumo Cíclico', 'Healthcare': 'Saúde', 'Technology': 'Tecnologia', 
-    'Communication Services': 'Comunicações', 'Real Estate': 'Imobiliário', 'Healthcare': 'Saúde',
-    'Consumer Staples': 'Consumo Defensivo', 'Consumer Discretionary': 'Consumo Cíclico'
+    'energy': 'Energia', 'financial services': 'Financeiro', 'basic materials': 'Materiais Básicos', 
+    'utilities': 'Utilidade Pública', 'industrials': 'Indústria', 'consumer defensive': 'Consumo Defensivo', 
+    'consumer cyclical': 'Consumo Cíclico', 'healthcare': 'Saúde', 'technology': 'Tecnologia', 
+    'communication services': 'Comunicações', 'real estate': 'Imobiliário', 'healthcare': 'Saúde',
+    'consumer staples': 'Consumo Defensivo', 'consumer discretionary': 'Consumo Cíclico'
 }
 
 def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
