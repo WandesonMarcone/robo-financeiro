@@ -16,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 # Configura a conexão com a sua memória SQLite
 engine = create_engine("sqlite:///pipeline_dados/banco_institucional.db")
 SessionDB = sessionmaker(bind=engine)
+drive_manager = GoogleDriveManager()
 
 # O seu mapa para corrigir os nomes da B3
 MAPA_FNET_B3 = {
