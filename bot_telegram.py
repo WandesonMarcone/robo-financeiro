@@ -11,7 +11,6 @@ import dropbox # Necessário para tratar exceções da Logo
 
 import config
 from atualizador_documentos import rotina_de_atualizacao_em_massa
-from atualizador_documentos import rotina_de_atualizacao
 from modules.utils import conectar_gspread
 from pipeline_dados import coletor_cvm
 from modules import module_cvm
