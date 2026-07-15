@@ -42,9 +42,11 @@ def obter_tickers_da_planilha():
         print(f"Erro ao ler planilha: {e}")
         return []
 
+import os
+import time # Adicionado para dar uma pausa e a B3 não nos bloquear
+
 def rotina_de_atualizacao_em_massa():
-    """Função Mestra para capturar TODOS os tipos de documentos e organizar no Drive"""
-    # 1. MAPEAMENTO DOS DOCUMENTOS (Adicionado conforme sua lista)
+    # A NOSSA PRANCHETA: A lista de tudo que queremos buscar
     MAPA_TIPOS = {
         "14": "Relatório Gerencial",
         "10": "Relatório Trimestral",
@@ -58,12 +60,13 @@ def rotina_de_atualizacao_em_massa():
     b3 = FnetDownloader()
     drive_manager = GoogleDriveManager()
     lista_de_fiis = obter_tickers_da_planilha()
-    print(f"🚀 Iniciando varredura TOTAL para {len(lista_de_fiis)} FIIs...")
+    print(f"🚀 Iniciando varredura BLINDADA para {len(lista_de_fiis)} FIIs...")
 
     relatorios_salvos = 0
     session = SessionDB()
     data_hoje = datetime.now().strftime("%d/%m/%Y")
 
+    # 1º LOOP: Passa FII por FII (ex: XPML11, HGLG11...)
     for ticker in lista_de_fiis:
         nome_pesquisa = ticker
         for chave, valor in MAPA_FNET_B3.items():
@@ -77,57 +80,58 @@ def rotina_de_atualizacao_em_massa():
             session.add(ativo_db)
             session.commit()
 
-        # REMOVIDO O FILTRO DE TIPO AQUI (Assumindo que o FnetDownloader retorna tudo se não filtrar)
-        # Se o seu FnetDownloader exigir um tipo, verifique se existe um valor que signifique "Todos"
-        documentos = b3.pesquisar_documentos(nome_pesquisa, data_inicio=data_hoje)
+        print(f"\n🏢 Analisando: {ticker}")
 
-        # Ajuste aqui: verifique se o seu scraper retorna uma tupla com (id, data, tipo)
-        # Se retornar apenas (id, data), você precisará usar uma função interna para descobrir o tipo.
-        for id_doc, data_ref, tipo_doc in documentos: 
+        # 2º LOOP (A TRAVA DE SEGURANÇA): Pergunta à B3 categoria por categoria
+        for id_categoria, nome_categoria in MAPA_TIPOS.items():
+            
+            documentos = b3.pesquisar_documentos(nome_pesquisa, data_inicio=data_hoje, id_categoria=id_categoria)
 
-            # 2. TRADUÇÃO DO ID PARA O NOME DA PASTA
-            categoria_nome = MAPA_TIPOS.get(str(tipo_doc_id), "Outros Documentos")
+            # Dá uma pausa de 1 segundo para a B3 não achar que somos um ataque hacker e bloquear nosso IP
+            time.sleep(1)
 
-            # Trava Anti-Duplicata
-            doc_existente = session.query(DocumentosQualitativos).filter(
-                DocumentosQualitativos.ativo_id == ativo_db.id,
-                DocumentosQualitativos.assunto.contains(id_doc) 
-            ).first()
+            for id_doc, data_ref, tipo_doc_id in documentos: 
 
-            if doc_existente:
-                continue
+                # Trava Anti-Duplicata
+                doc_existente = session.query(DocumentosQualitativos).filter(
+                    DocumentosQualitativos.ativo_id == ativo_db.id,
+                    DocumentosQualitativos.assunto.contains(id_doc) 
+                ).first()
 
-            print(f"⬇️ Baixando {tipo_doc} de {ticker} (ID: {id_doc})...")
-            pdf_bytes = b3.baixar_pdf(id_doc)
+                if doc_existente:
+                    continue
 
-            if pdf_bytes:
-                temp_filename = f"/tmp/{ticker}_{id_doc}.pdf"
-                with open(temp_filename, "wb") as f:
-                    f.write(pdf_bytes)
+                print(f"⬇️ Encontrado: {nome_categoria} (ID B3: {id_doc})")
+                pdf_bytes = b3.baixar_pdf(id_doc)
 
-                # 3. UPLOAD DINÂMICO
-                # Aqui ele criará: Raiz > XPML11 > Fato Relevante > PDF
-                link_gerado = drive_manager.upload_pdf_organizado(
-                    caminho_arquivo=temp_filename,
-                    nome_arquivo=f"{categoria_nome}_{data_ref}_{id_doc}.pdf",
-                    ticker=ticker,
-                    categoria=categoria_nome # <-- Agora o Drive cria pastas automáticas por categoria (Ex: Fato Relevante, Comunicado)
-                )
+                if pdf_bytes:
+                    temp_filename = f"/tmp/{ticker}_{id_doc}.pdf"
+                    with open(temp_filename, "wb") as f:
+                        f.write(pdf_bytes)
 
-                if os.path.exists(temp_filename):
-                    os.remove(temp_filename)
-
-                if link_gerado:
-                    novo_doc = DocumentosQualitativos(
-                        ativo_id=ativo_db.id,
-                        tipo_documento=tipo_doc, # <-- Salva o tipo correto no banco
-                        data_publicacao=datetime.now(),
-                        assunto=f"{tipo_doc} ref. {data_ref} (ID B3: {id_doc})",
-                        url_pdf=link_gerado
+                    # UPLOAD: Cria as pastas automaticamente Ex: Drive/HGLG11/Fato Relevante/...
+                    link_gerado = drive_manager.upload_pdf_organizado(
+                        caminho_arquivo=temp_filename,
+                        nome_arquivo=f"{nome_categoria}_{data_ref}_{id_doc}.pdf",
+                        ticker=ticker,
+                        categoria=nome_categoria 
                     )
-                    session.add(novo_doc)
-                    session.commit()
-                    relatorios_salvos += 1
+
+                    if os.path.exists(temp_filename):
+                        os.remove(temp_filename)
+
+                    if link_gerado:
+                        novo_doc = DocumentosQualitativos(
+                            ativo_id=ativo_db.id,
+                            tipo_documento=nome_categoria,
+                            data_publicacao=datetime.now(),
+                            assunto=f"{nome_categoria} ref. {data_ref} (ID B3: {id_doc})",
+                            url_pdf=link_gerado
+                        )
+                        session.add(novo_doc)
+                        session.commit()
+                        relatorios_salvos += 1
+                        print(f"✅ Salvo no Drive: {ticker} -> {nome_categoria}")
 
     session.close()
     return relatorios_salvos
