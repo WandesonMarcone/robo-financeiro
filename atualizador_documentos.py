@@ -21,7 +21,7 @@ def obter_tickers_da_planilha():
         planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
         aba = planilha.worksheet("BD_FIIs")
         # Pega todos os valores da coluna 1 (A), ignorando o cabeçalho
-        tickers = aba.col_values(1)[1:] 
+        tickers = aba.col_values(1)
         # Remove espaços em branco e deixa tudo em maiúsculo
         tickers = [t.strip().upper() for t in tickers if t.strip()]
         return list(set(tickers)) # Retorna lista sem duplicatas
