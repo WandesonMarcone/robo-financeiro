@@ -25,6 +25,29 @@ class GoogleDriveManager:
         # Inicia o motor do Google Drive
         self.service = build('drive', 'v3', credentials=self.creds)
 
+    def upload_imagem_logo(self, bytes_imagem, nome_arquivo, pasta_destino_id):
+        """Salva uma imagem (bytes) no Drive e torna pública"""
+        file_metadata = {
+            'name': nome_arquivo,
+            'parents': [pasta_destino_id]
+        }
+        media = MediaFileUpload(io.BytesIO(bytes_imagem), mimetype='image/png', resumable=True)
+        
+        arquivo = self.service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id'
+        ).execute()
+        
+        file_id = arquivo.get('id')
+        self.service.permissions().create(
+            fileId=file_id,
+            body={'type': 'anyone', 'role': 'reader'}
+        ).execute()
+        
+        link = self.service.files().get(fileId=file_id, fields='webViewLink').execute()
+        return link.get('webViewLink')
+
     def upload_pdf(self, caminho_arquivo, nome_arquivo):
         print(f"☁️ Subindo {nome_arquivo} para o Google Drive (100GB)...")
         try:
