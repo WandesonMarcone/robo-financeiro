@@ -27,55 +27,66 @@ def autenticar_dropbox():
 
 def salvar_pdf_e_gerar_link(url_origem, ticker, tipo_doc, data_str):
     """
-    Baixa o arquivo da B3/CVM e salva no Dropbox organizando em pastas.
-    Retorna o link público final do Dropbox.
+    Baixa o arquivo da B3/CVM usando disfarce avançado (Sessão e Cookies) 
+    e salva no Dropbox organizando em pastas.
     """
     dbx = autenticar_dropbox()
     if not dbx:
-        return url_origem # Se o Dropbox falhar, devolve o link original da B3 para não quebrar o robô
+        return url_origem # Fallback
 
     try:
-        # 1. Faz o download do arquivo disfarçado de navegador
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Referer': 'https://fnet.bmfbovespa.com.br/' # Ajuda a pular o bloqueio da B3
-        }
-        
+        # 1. CRIAR UMA SESSÃO HUMANA (Isso guarda os Cookies mágicos da B3)
+        sessao = requests.Session()
+        sessao.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Referer': 'https://fnet.bmfbovespa.com.br/'
+        })
+
+        # 2. BATER NA PORTA DA FRENTE PRIMEIRO (Para a B3 nos dar o JSESSIONID)
+        url_recepcao = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosCVM?tipoFundo=1"
+        try:
+            sessao.get(url_recepcao, timeout=15)
+        except:
+            pass # Se demorar, a gente ignora e tenta o download mesmo assim
+
+        # 3. AGORA SIM, PEDIMOS O DOWNLOAD DO ARQUIVO
         print(f"⬇️ Baixando documento de {ticker}: {url_origem}")
-        resposta = requests.get(url_origem, headers=headers, stream=True, timeout=30)
+        resposta = sessao.get(url_origem, stream=True, timeout=45)
         
+        # A B3 às vezes retorna erro 500 mesmo com cookies se o arquivo for muito antigo. 
+        # O nosso robô lida com isso.
         if resposta.status_code != 200:
-            print(f"⚠️ Erro HTTP {resposta.status_code} ao baixar da B3.")
+            print(f"⚠️ B3 negou o download (HTTP {resposta.status_code}). Usando link original.")
+            return url_origem
+
+        # Para garantir que não estamos a baixar uma página de erro disfarçada
+        if 'application/pdf' not in resposta.headers.get('Content-Type', '').lower():
+            print("⚠️ O arquivo retornado não é um PDF válido. Usando link original.")
             return url_origem
 
         conteudo_pdf = resposta.content
 
-        # 2. Constrói o caminho organizado dentro do Dropbox
-        # Ex: /Terminal_Institucional/XPML11/Relatorio_Gerencial_2026-07-14.pdf
+        # 4. SALVAR NO DROPBOX
         nome_arquivo = f"{tipo_doc.replace(' ', '_')}_{data_str}.pdf"
         caminho_dropbox = f"/Terminal_Institucional/{ticker.upper()}/{nome_arquivo}"
 
-        # 3. Faz o Upload
-        dbx.files_upload(
-            conteudo_pdf, 
-            caminho_dropbox, 
-            mode=dropbox.files.WriteMode("overwrite")
-        )
+        dbx.files_upload(conteudo_pdf, caminho_dropbox, mode=dropbox.files.WriteMode("overwrite"))
 
-        # 4. Gera o link público infinito
+        # 5. GERAR O LINK PERMANENTE
         try:
             link = dbx.sharing_create_shared_link_with_settings(caminho_dropbox)
-            # Trocamos dl=0 por raw=1 para o PDF abrir direto na tela do Telegram/Navegador
             url_final = link.url.replace("?dl=0", "?raw=1") 
             print(f"✅ Salvo no Dropbox com sucesso: {url_final}")
             return url_final
             
         except ApiError as e:
-            # Se o link já foi criado em uma execução anterior, nós o buscamos
             if e.error.is_shared_link_already_exists():
                 links = dbx.sharing_list_shared_links(path=caminho_dropbox, direct_only=True).links
                 if links:
                     url_final = links[0].url.replace("?dl=0", "?raw=1")
+                    print(f"✅ Arquivo já existia. Link recuperado: {url_final}")
                     return url_final
             print(f"⚠️ Erro ao gerar link compartilhado: {e}")
             return url_origem
