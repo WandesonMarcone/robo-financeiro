@@ -292,14 +292,28 @@ def callback_geral(call):
             markup.row(InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="voltar_menu"))
             bot.edit_message_text(resultado, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- MENU PRINCIPAL FIIs ---
+        # --- MENU FIIs (Estrutura Organizada) ---
         elif dados == "menu_fiis":
-            markup = InlineKeyboardMarkup()
-            markup.row(InlineKeyboardButton("⭐ Favoritos (Fixos)", callback_data="favoritos_fiis"))
-            markup.row(InlineKeyboardButton("📂 FIIs por Segmento (BD)", callback_data="agrupar_fiis"))
-            markup.row(InlineKeyboardButton("🔥 Oportunidades (Filtro Scraper)", callback_data="oportunidades_fiis"))
-            markup.row(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
-            bot.edit_message_text("🏢 *Módulo FIIs*\nEscolha a visão do mercado:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            markup = InlineKeyboardMarkup(row_width=2)
+            
+            # Linha 1 e 2
+            markup.add(InlineKeyboardButton("⭐ Meus Favoritos", callback_data="favoritos_fiis"))
+            markup.add(InlineKeyboardButton("🔥 Oportunidades", callback_data="oportunidades_fiis"))
+            
+            # Linha 3 (Papel e Tijolo lado a lado)
+            markup.add(
+                InlineKeyboardButton("📄 Papel", callback_data="setor_fii_Papel"),
+                InlineKeyboardButton("🏢 Tijolo", callback_data="setor_fii_Tijolo")
+            )
+            
+            # Linha 4
+            markup.add(InlineKeyboardButton("🏗️ Híbrido/FOFs", callback_data="setor_fii_Hibrido"))
+            
+            # Rodapé
+            markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
+            
+            bot.edit_message_text("🏢 *Módulo FIIs*\nEscolha a categoria desejada:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
 
         # --- MENU PRINCIPAL AÇÕES ---
         elif dados == "menu_acoes":
