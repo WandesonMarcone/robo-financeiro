@@ -40,6 +40,6 @@ jobs:
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
-          DRIVE_ROOT_FOLDER_ID: "1Q-dkO4oSd6_9zmOeZmPX8nmuVWzdjHOq"
+          DRIVE_ROOT_FOLDER_ID: ${{ secrets.DRIVE_ROOT_FOLDER_ID }}"
         run: python bot_telegram.py
 
