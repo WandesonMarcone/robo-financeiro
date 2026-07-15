@@ -601,21 +601,52 @@ def callback_geral(call):
                     )
                 bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
+        # =======================================================
+        # 3. SUBMENU: DOCUMENTOS (Links Dinâmicos Inteligentes)
+        # =======================================================
         elif dados.startswith("docs_"):
             partes = dados.split("_")
             ticker, tipo = partes[1], partes[2]
             markup = InlineKeyboardMarkup()
-            markup.row(InlineKeyboardButton("📄 Relatório Gerencial (Julho)", url="https://dropbox.com/link_aqui"))
+            
+            # Truque: Como não temos um PDF para cada ativo na planilha ainda,
+            # nós geramos links automáticos para o StatusInvest e Fundamentus!
+            categoria_status = "fundos-imobiliarios" if tipo == "fii" else "acoes"
+            link_statusinvest = f"https://statusinvest.com.br/{categoria_status}/{ticker.lower()}"
+            link_fundamentus = f"https://www.fundamentus.com.br/detalhes.php?papel={ticker}"
+            
+            markup.row(InlineKeyboardButton("📊 Ver no StatusInvest", url=link_statusinvest))
+            markup.row(InlineKeyboardButton("📈 Ver no Fundamentus", url=link_fundamentus))
             markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"{tipo}_{ticker}"))
-            bot.edit_message_text(f"📑 **Central de Documentos: {ticker}**", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            
+            texto_docs = (
+                f"📑 **Central de Documentos: {ticker}**\n\n"
+                f"Acesse os portais abaixo para ler os relatórios gerenciais, balanços oficiais e fatos relevantes atualizados do ativo."
+            )
+            bot.edit_message_text(texto_docs, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=True)
 
+        # =======================================================
+        # 4. SUBMENU: ANÁLISE DE IA (Placeholder de Luxo)
+        # =======================================================
         elif dados.startswith("ia_"):
             bot.answer_callback_query(call.id, "Gerando análise avançada...")
             partes = dados.split("_")
             ticker, tipo = partes[1], partes[2]
+            
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"{tipo}_{ticker}"))
-            texto_ia = f"⚠️ **Análise de Risco: {ticker}**\n\n🔹 **Alavancagem:** (Conectar IA)"
+            
+            # Um aviso profissional até você conectar a API do Gemini/OpenAI
+            texto_ia = (
+                f"⚠️ **Análise de Inteligência Artificial: {ticker}**\n\n"
+                f"🤖 _Módulo IA em Fase de Treinamento._\n\n"
+                f"Em breve, o bot fará o cruzamento autônomo de:\n"
+                f"🔹 Histórico de Dividendos vs Inflação\n"
+                f"🔹 Vacância e Qualidade Física dos Imóveis\n"
+                f"🔹 Notícias recentes e fatos relevantes\n"
+                f"🔹 Risco de Alavancagem da Dívida\n\n"
+                f"*(Aguardando integração final)*"
+            )
             bot.edit_message_text(texto_ia, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
     except Exception as e:
