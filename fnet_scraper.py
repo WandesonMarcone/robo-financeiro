@@ -60,26 +60,23 @@ class FnetDownloader:
         except requests.exceptions.RequestException as e:
             print(f"❌ Erro de conexão ao baixar o documento {id_documento}: {e}")
             return None
-    def pesquisar_documentos(self, ticker):
-        """
-        Pesquisa na B3 os últimos 'Relatórios Gerenciais' do Fundo.
-        Retorna uma lista de IDs de documentos encontrados.
-        """
+
+    def pesquisar_documentos(self, ticker, data_inicio="01/01/2026"):
         if not self.session.cookies:
             self.iniciar_sessao()
 
-        # O Categoria 14 na B3 costuma ser "Relatório Gerencial"
         url_pesquisa = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
         
-        # Parâmetros que simulam a busca do formulário do site
+        # Adicionamos a dataInicial e aumentamos o limite ('l': '50')
         params = {
-            'd': '1', 's': '0', 'l': '10', # Pega os 10 últimos
-            'tipoFundo': '1', # 1 = FII
-            'idCategoriaDocumento': '14', # 14 = Relatório Gerencial
-            'nomeEmissor': ticker
+            'd': '1', 's': '0', 'l': '50', 
+            'tipoFundo': '1', 
+            'idCategoriaDocumento': '14', 
+            'nomeEmissor': ticker,
+            'dataInicial': data_inicio # Filtra de Janeiro pra cá
         }
         
-        print(f"🔎 Pesquisando relatórios para {ticker}...")
+        print(f"🔎 Pesquisando relatórios para {ticker} desde {data_inicio}...")
         try:
             resposta = self.session.get(url_pesquisa, params=params, headers=self.headers, timeout=15)
             resposta.raise_for_status()
@@ -87,10 +84,8 @@ class FnetDownloader:
             dados_json = resposta.json()
             ids_encontrados = []
             
-            # A B3 retorna um JSON com uma lista chamada 'data'
             for item in dados_json.get('data', []):
                 id_doc = item.get('id')
-                # Pega a data de referência para nomear o arquivo depois
                 data_ref = item.get('dataReferencia', '').replace('/', '-') 
                 if id_doc:
                     ids_encontrados.append((str(id_doc), data_ref))
