@@ -292,55 +292,64 @@ def callback_geral(call):
             markup.row(InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="voltar_menu"))
             bot.edit_message_text(resultado, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- MENU FIIs (Estrutura Organizada) ---
+        # --- MENU PRINCIPAL FIIs (Dinâmico) ---
         elif dados == "menu_fiis":
+            bot.answer_callback_query(call.id, "Carregando FIIs...")
             markup = InlineKeyboardMarkup(row_width=2)
             
-            # Linha 1 e 2
-            markup.add(InlineKeyboardButton("⭐ Meus Favoritos", callback_data="favoritos_fiis"))
-            markup.add(InlineKeyboardButton("🔥 Oportunidades", callback_data="oportunidades_fiis"))
-            
-            # Linha 3 (Papel e Tijolo lado a lado)
+            # 1. Botões Estáticos (Sempre presentes)
             markup.add(
-                InlineKeyboardButton("📄 Papel", callback_data="setor_fii_Papel"),
-                InlineKeyboardButton("🏢 Tijolo", callback_data="setor_fii_Tijolo")
+                InlineKeyboardButton("⭐ Meus Favoritos", callback_data="favoritos_fiis"),
+                InlineKeyboardButton("🔥 Oportunidades", callback_data="oportunidades_fiis")
             )
             
-            # Linha 4
-            markup.add(InlineKeyboardButton("🏗️ Híbrido/FOFs", callback_data="setor_fii_Hibrido"))
-            
-            # Rodapé
+            # 2. Botões Dinâmicos (Setores/Segmentos da Planilha)
+            try:
+                planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
+                aba = planilha.worksheet("BD_FIIs")
+                matriz = aba.get_all_values()
+                
+                # Identifica coluna de setor (assumindo que você usa "Segmento" ou "Tipo")
+                cabecalhos = [c.lower().strip() for c in matriz[0]]
+                idx = next((i for i, c in enumerate(cabecalhos) if c in ["setor", "segmento", "tipo"]), -1)
+                
+                if idx != -1:
+                    setores = sorted(list(set(linha[idx].strip() for linha in matriz[1:] if linha[idx].strip())))
+                    for s in setores:
+                        markup.add(InlineKeyboardButton(f"📁 {s}", callback_data=f"setor_fii_{s[:12]}"))
+            except Exception as e:
+                print(f"Erro ao ler setores: {e}")
+
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
-            
-            bot.edit_message_text("🏢 *Módulo FIIs*\nEscolha a categoria desejada:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            bot.edit_message_text("🏢 *Módulo FIIs*\nSelecione uma categoria ou favorito:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-
-        # --- MENU AÇÕES (Estrutura Organizada por Setor) ---
+        # --- MENU PRINCIPAL AÇÕES (Dinâmico) ---
         elif dados == "menu_acoes":
+            bot.answer_callback_query(call.id, "Carregando Ações...")
             markup = InlineKeyboardMarkup(row_width=2)
+            
             markup.add(
-                InlineKeyboardButton("⭐ Favoritas", callback_data="favoritos_acoes"),
+                InlineKeyboardButton("⭐ Minhas Favoritas", callback_data="favoritos_acoes"),
                 InlineKeyboardButton("🔥 Oportunidades", callback_data="oportunidades_acoes")
             )
-            # Setores traduzidos e organizados
-            markup.add(
-                InlineKeyboardButton("⚡ Energia", callback_data="setor_acao_Energia"),
-                InlineKeyboardButton("💎 Mat. Básicos", callback_data="setor_acao_Materiais Básicos")
-            )
-            markup.add(
-                InlineKeyboardButton("🏦 Financeiro", callback_data="setor_acao_Financeiro"),
-                InlineKeyboardButton("⚙️ Industrial", callback_data="setor_acao_Industrial")
-            )
-            markup.add(
-                InlineKeyboardButton("🛒 Consumo Def.", callback_data="setor_acao_Consumo Defensivo"),
-                InlineKeyboardButton("🏥 Saúde", callback_data="setor_acao_Saúde")
-            )
-            markup.add(
-                InlineKeyboardButton("🔌 Utilidade Púb.", callback_data="setor_acao_Utilidade Pública"),
-                InlineKeyboardButton("📱 Comunicação", callback_data="setor_acao_Comunicação")
-            )
-            markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="voltar_menu"))
-            bot.edit_message_text("📈 *Módulo de Ações*\nSelecione o setor desejado:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            
+            try:
+                planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
+                aba = planilha.worksheet("BD_Acoes")
+                matriz = aba.get_all_values()
+                
+                cabecalhos = [c.lower().strip() for c in matriz[0]]
+                idx = next((i for i, c in enumerate(cabecalhos) if c in ["setor", "segmento", "tipo"]), -1)
+                
+                if idx != -1:
+                    setores = sorted(list(set(linha[idx].strip() for linha in matriz[1:] if linha[idx].strip())))
+                    for s in setores:
+                        markup.add(InlineKeyboardButton(f"📁 {s}", callback_data=f"setor_acao_{s[:12]}"))
+            except Exception as e:
+                print(f"Erro ao ler setores: {e}")
+
+            markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
+            bot.edit_message_text("📈 *Módulo de Ações*\nSelecione um setor ou favorita:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # ==========================================
         # GERADORES DE BOTÕES DINÂMICOS (FAVORITOS FIXOS)
