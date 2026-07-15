@@ -106,6 +106,32 @@ def comando_adicionar(message):
     except Exception as e:
         bot.reply_to(message, f"❌ Erro ao adicionar ativo: {e}")
 
+# Importa a sua função de atualização
+from atualizador_documentos import rotina_de_atualizacao
+
+# --- COMANDO SECRETO PARA TESTAR NO CELULAR ---
+@bot.message_handler(commands=['teste_b3'])
+def comando_teste_b3(message):
+    # Apenas você pode rodar esse comando (segurança)
+    if str(message.chat.id) != str(config.TELEGRAM_CHAT_ID):
+        return
+
+    bot.reply_to(message, "⏳ Iniciando teste de comunicação com a B3...")
+    
+    try:
+        # Tenta rodar a rotina com um ID de documento válido de teste
+        id_teste = "1184168" 
+        ticker_teste = "HGLG11"
+        
+        link_gerado = rotina_de_atualizacao(id_teste, ticker_teste)
+        
+        if link_gerado:
+            bot.reply_to(message, f"✅ *Sucesso absoluto!*\nO PDF foi baixado da B3 e salvo no seu Dropbox.\nLink: {link_gerado}", parse_mode="Markdown")
+        else:
+            bot.reply_to(message, "❌ *Falha no processo.*\nO arquivo não pôde ser baixado ou salvo no Dropbox.", parse_mode="Markdown")
+            
+    except Exception as e:
+        bot.reply_to(message, f"⚠️ *Erro no código:* {e}", parse_mode="Markdown")
 
 # ==========================================
 # COMANDOS DE STATUS E RELATÓRIOS
