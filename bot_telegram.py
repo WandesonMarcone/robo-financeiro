@@ -16,7 +16,7 @@ from pipeline_dados import coletor_cvm
 from modules import module_cvm
 from modules import module_ia
 from modules import module_macro
-from modules.dropbox_manager import autenticar_dropbox # Importando o seu motor blindado
+from modules.GoogleDriveManager import GoogleDriveManager
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
