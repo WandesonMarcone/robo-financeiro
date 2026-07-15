@@ -7,12 +7,14 @@ import os
 from flask import Flask, request
 from sqlalchemy import func, create_engine
 from sqlalchemy.orm import sessionmaker
+import dropbox # Necessário para tratar exceções da Logo
 
 import config
 from modules.utils import conectar_gspread
 from modules import module_cvm
 from modules import module_ia
 from modules import module_macro
+from modules.dropbox_manager import autenticar_dropbox # Importando o seu motor blindado
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 
 # ==========================================
@@ -127,6 +129,44 @@ def enviar_ultimos_relatorios(message):
     finally:
         session.close()
 
+
+# ==========================================
+# MOTOR DE LOGOS (GitHub -> Dropbox -> Telegram)
+# ==========================================
+def obter_link_logo(ticker, tipo):
+    """Verifica se a logo está no Dropbox. Se não, baixa do GitHub, salva no Dropbox e retorna o link."""
+    try:
+        dbx = autenticar_dropbox()
+        if not dbx: return ""
+
+        pasta_tipo = "fiis" if tipo == "fii" else "acoes"
+        caminho_dropbox = f"/Terminal_Institucional/Logos/{pasta_tipo}/{ticker.upper()}.png"
+        
+        # 1. TENTA BUSCAR DO DROPBOX (O Cache)
+        try:
+            links = dbx.sharing_list_shared_links(path=caminho_dropbox, direct_only=True).links
+            if links:
+                return links[0].url.replace("?dl=0", "?raw=1")
+        except:
+            pass # Se não existe, a gente segue para o passo 2
+            
+        # 2. SE NÃO TEM NO DROPBOX, BAIXA DO GITHUB
+        github_url = f"https://raw.githubusercontent.com/WandesonMarcone/icones-bolsabr/main/{pasta_tipo}/{ticker.upper()}.png"
+        
+        resp = requests.get(github_url, timeout=10)
+        if resp.status_code == 200:
+            # 3. FAZ UPLOAD PRO DROPBOX PARA SALVAR PARA SEMPRE
+            dbx.files_upload(resp.content, caminho_dropbox, mode=dropbox.files.WriteMode("overwrite"))
+            # 4. GERA O LINK PÚBLICO
+            link = dbx.sharing_create_shared_link_with_settings(caminho_dropbox)
+            return link.url.replace("?dl=0", "?raw=1")
+            
+    except Exception as e:
+        print(f"Erro ao processar logo de {ticker}: {e}")
+        
+    return "" # Se der qualquer erro (ex: ação não tem logo no github), retorna vazio para não quebrar o bot
+
+
 # ==========================================
 # O NOVO MOTOR DE DASHBOARD (Arquitetura)
 # ==========================================
@@ -145,16 +185,20 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
     """Gera a mensagem principal com os botões interativos e dados em tempo real"""
     icone = "🏢 Fundo" if tipo == "fii" else "📈 Ação"
     voltar_cmd = "menu_fiis" if tipo == "fii" else "menu_acoes"
-    
-    # 1. Puxar os indicadores da Planilha
+
+    # 1. Puxar as Logos e Dados
+    url_logo = obter_link_logo(ticker, tipo)
     indicadores = _buscar_dados_planilha(ticker)
-    
+
     # 2. Puxar Resumo da IA
-    resumo_ia = f"Fundo/Ação focado na geração de valor e exploração de ativos estratégicos no mercado brasileiro." # Substituir pelo modulo_ia
-    
+    resumo_ia = f"Fundo/Ação focado na geração de valor e exploração de ativos estratégicos no mercado brasileiro."
+
     # 3. Montar a tela exata da sua arquitetura
+    # O [\u200c] é um link invisível. O Telegram vai ler o link da logo e renderizar a imagem no topo da mensagem!
+    link_invisivel = f"[\u200c]({url_logo})" if url_logo else ""
+    
     texto = (
-        f"{icone}: **{ticker}**\n"
+        f"{link_invisivel}{icone}: **{ticker}**\n"
         f"📝 **Resumo:** _{resumo_ia}_\n\n"
         f"💰 **Preço:** R$ {indicadores['preco']}\n"
         f"💸 **Dividend Yield:** {indicadores['dy']}\n"
@@ -211,17 +255,14 @@ def callback_geral(call):
             markup.row(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
             texto_ajuda = (
                 "ℹ️ *Painel de Ajuda / Sobre*\n\n"
-                "O robô monitora, coleta e processa dados oficiais da CVM e B3 automaticamente.\n\n"
+                "O robô monitora e processa dados da CVM e B3.\n\n"
                 "📌 *Comandos Rápidos:*\n"
-                "`/status` - Saúde do Banco de Dados SQLite\n"
-                "`/relatorios` - Últimos documentos (PDFs do Dropbox)\n"
-                "`/adicionar TICKER` - Insere ativos na Planilha e no Radar\n\n"
-                "📊 *A Nova Arquitetura de Ativos:*\n"
-                "Ao selecionar um FII ou Ação, você terá acesso imediato a:\n"
-                "- Resumo IA Direto ao Ponto\n"
-                "- Indicadores Financeiros (P/L, P/VP, DY)\n"
-                "- Submenu `[📑 Documentos]` organizados por mês (via Dropbox)\n"
-                "- Submenu `[⚠️ Análise de IA]` para varredura de riscos operacionais."
+                "`/status` - Saúde do BD SQLite\n"
+                "`/relatorios` - Últimos PDFs\n"
+                "`/adicionar TICKER` - Insere ativos\n\n"
+                "📊 *Nova Arquitetura:*\n"
+                "- Resumo IA, Indicadores (P/L, P/VP, DY)\n"
+                "- Submenus de Documentos e Análise IA."
             )
             bot.edit_message_text(texto_ajuda, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
@@ -229,11 +270,10 @@ def callback_geral(call):
             bot.answer_callback_query(call.id, "A buscar logs...")
             markup = InlineKeyboardMarkup()
             markup.row(InlineKeyboardButton("🔙 Voltar para Ajuda", callback_data="menu_ajuda"))
-            # Sua lógica de logs continua igual
-            bot.edit_message_text("📜 *Histórico de Logs (Mais Recentes):* \n[Em integração com a planilha...]", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            bot.edit_message_text("📜 *Histórico de Logs:* \n[Integração futura...]", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         elif dados == "menu_macro":
-            bot.answer_callback_query(call.id, "🌍 Coletando dados macroeconômicos oficiais...")
+            bot.answer_callback_query(call.id, "🌍 Coletando dados...")
             resultado = module_macro.obter_dados_macro()
             markup = InlineKeyboardMarkup()
             markup.row(InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="voltar_menu"))
@@ -242,128 +282,132 @@ def callback_geral(call):
         # --- MENU PRINCIPAL FIIs ---
         elif dados == "menu_fiis":
             markup = InlineKeyboardMarkup()
-            markup.row(InlineKeyboardButton("⭐ Meus Favoritos", callback_data="favoritos_fiis"))
-            markup.row(InlineKeyboardButton("📂 Minha Carteira (Planilha)", callback_data="carteira_fiis"))
+            markup.row(InlineKeyboardButton("⭐ Favoritos (Fixos)", callback_data="favoritos_fiis"))
+            markup.row(InlineKeyboardButton("📂 FIIs por Segmento (BD)", callback_data="agrupar_fiis"))
+            markup.row(InlineKeyboardButton("🔥 Oportunidades (Filtro Scraper)", callback_data="oportunidades_fiis"))
             markup.row(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
-            bot.edit_message_text("🏢 *Módulo FIIs*\nEscolha de onde quer carregar a lista:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            bot.edit_message_text("🏢 *Módulo FIIs*\nEscolha a visão do mercado:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # --- MENU PRINCIPAL AÇÕES ---
         elif dados == "menu_acoes":
             markup = InlineKeyboardMarkup()
-            markup.row(InlineKeyboardButton("⭐ Meus Favoritos", callback_data="favoritos_acoes"))
-            markup.row(InlineKeyboardButton("📂 Minha Carteira (Planilha)", callback_data="carteira_acoes"))
+            markup.row(InlineKeyboardButton("⭐ Favoritas (Fixas)", callback_data="favoritos_acoes"))
+            markup.row(InlineKeyboardButton("📂 Ações por Setor (BD)", callback_data="agrupar_acoes"))
+            markup.row(InlineKeyboardButton("🔥 Oportunidades do Dia", callback_data="oportunidades_acoes"))
             markup.row(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
-            bot.edit_message_text("📈 *Módulo de Ações*\nEscolha de onde quer carregar a lista:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            bot.edit_message_text("📈 *Módulo de Ações*\nEscolha a visão do mercado:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # ==========================================
-        # GERADORES DE BOTÕES DINÂMICOS (FAVORITOS)
+        # GERADORES DE BOTÕES DINÂMICOS (FAVORITOS FIXOS)
         # ==========================================
         elif dados == "favoritos_fiis":
-            markup = InlineKeyboardMarkup(row_width=3) # Coloca 3 botões por linha para ficar bonito
-            # Lê direto do seu config.py
+            markup = InlineKeyboardMarkup(row_width=3)
             botoes = [InlineKeyboardButton(ticker, callback_data=f"fii_{ticker}") for ticker in config.FIXAS_FIIS]
             markup.add(*botoes)
             markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_fiis"))
-            bot.edit_message_text("⭐ *Seus FIIs Favoritos*\nSelecione um ativo para abrir o painel:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            bot.edit_message_text("⭐ *Seus FIIs Favoritos*\nSelecione um ativo:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         elif dados == "favoritos_acoes":
             markup = InlineKeyboardMarkup(row_width=3)
-            # Lê direto do seu config.py
             botoes = [InlineKeyboardButton(ticker, callback_data=f"acao_{ticker}") for ticker in config.FIXAS_ACOES]
             markup.add(*botoes)
             markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_acoes"))
-            bot.edit_message_text("⭐ *Suas Ações Favoritas*\nSelecione um ativo para abrir o painel:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            bot.edit_message_text("⭐ *Suas Ações Favoritas*\nSelecione um ativo:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # ==========================================
-        # GERADORES DE BOTÕES DINÂMICOS (PLANILHA)
+        # MÁGICA: AGRUPAMENTO POR SETOR DA PLANILHA
         # ==========================================
-        elif dados in ["carteira_fiis", "carteira_acoes"]:
-            bot.answer_callback_query(call.id, "Buscando seus ativos na Planilha do Google...")
-            
-            is_fii = True if dados == "carteira_fiis" else False
+        elif dados in ["agrupar_fiis", "agrupar_acoes"]:
+            bot.answer_callback_query(call.id, "Organizando o Banco de Dados...")
+            is_fii = True if dados == "agrupar_fiis" else False
             nome_aba = "BD_FIIs" if is_fii else "BD_Acoes"
-            prefixo = "fii" if is_fii else "acao"
+            callback_prefixo = "setor_fii" if is_fii else "setor_acao"
             menu_voltar = "menu_fiis" if is_fii else "menu_acoes"
-            
+
             try:
-                # Conecta e puxa a Coluna A inteira
                 planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
                 aba = planilha.worksheet(nome_aba)
-                tickers_planilha = aba.col_values(1)[1:] # O [1:] pula o cabeçalho (Linha 1)
+                matriz = aba.get_all_values()
 
-                markup = InlineKeyboardMarkup(row_width=3)
-                botoes = [InlineKeyboardButton(tkr.strip(), callback_data=f"{prefixo}_{tkr.strip()}") for tkr in tickers_planilha if tkr.strip()]
+                if len(matriz) <= 1:
+                    bot.edit_message_text(f"📭 A aba {nome_aba} está vazia.", chat_id, msg_id)
+                    return
+
+                # Descobre automaticamente qual coluna é o "Setor/Segmento"
+                cabecalhos = [c.lower().strip() for c in matriz[0]]
+                indice_setor = -1
+                for i, col in enumerate(cabecalhos):
+                    if col in ["setor", "segmento", "tipo", "classificação"]:
+                        indice_setor = i
+                        break
+
+                markup = InlineKeyboardMarkup(row_width=2)
+
+                if indice_setor == -1:
+                    markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
+                    bot.edit_message_text(f"⚠️ Não encontrei uma coluna chamada 'Setor' ou 'Segmento' na aba {nome_aba}.", chat_id, msg_id, reply_markup=markup)
+                    return
+
+                # Puxa setores únicos
+                setores_unicos = set()
+                for linha in matriz[1:]:
+                    if len(linha) > indice_setor and linha[indice_setor].strip():
+                        setores_unicos.add(linha[indice_setor].strip())
+
+                # Cria Botões das "Pastas"
+                botoes = []
+                for setor in sorted(setores_unicos):
+                    setor_curto = setor[:12] # Limite do Telegram
+                    botoes.append(InlineKeyboardButton(f"📁 {setor}", callback_data=f"{callback_prefixo}_{setor_curto}"))
                 
-                if not botoes:
-                    texto = f"📭 Sua carteira na aba `{nome_aba}` está vazia. Use o comando `/adicionar TICKER` para incluir."
-                else:
+                markup.add(*botoes)
+                markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
+                
+                titulo = "FIIs por Segmento" if is_fii else "Ações por Setor"
+                bot.edit_message_text(f"📂 *{titulo}*\nEscolha a categoria:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+            except Exception as e:
+                bot.edit_message_text(f"❌ Erro na planilha: {e}", chat_id, msg_id)
+
+        # ==========================================
+        # LISTAR ATIVOS DENTRO DE UM SETOR ESPECÍFICO
+        # ==========================================
+        elif dados.startswith("setor_fii_") or dados.startswith("setor_acao_"):
+            bot.answer_callback_query(call.id, "Buscando ativos desta categoria...")
+            is_fii = True if "setor_fii_" in dados else False
+            nome_aba = "BD_FIIs" if is_fii else "BD_Acoes"
+            prefixo_ticker = "fii" if is_fii else "acao"
+            menu_voltar = "agrupar_fiis" if is_fii else "agrupar_acoes"
+            
+            # Pega o nome do setor que o usuário clicou (ex: "Tijolo")
+            setor_buscado = dados.split("_", 2)[2] 
+
+            try:
+                planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
+                aba = planilha.worksheet(nome_aba)
+                matriz = aba.get_all_values()
+                
+                # Identifica a coluna do setor de novo
+                cabecalhos = [c.lower().strip() for c in matriz[0]]
+                indice_setor = next(i for i, col in enumerate(cabecalhos) if col in ["setor", "segmento", "tipo", "classificação"])
+
+                # Puxa todos os Tickers (Coluna A) que batem com o setor clicado
+                tickers_encontrados = []
+                for linha in matriz[1:]:
+                    if len(linha) > indice_setor and linha[indice_setor].strip()[:12] == setor_buscado:
+                        tickers_encontrados.append(linha[0].strip())
+                
+                markup = InlineKeyboardMarkup(row_width=3)
+                botoes = [InlineKeyboardButton(tkr, callback_data=f"{prefixo_ticker}_{tkr}") for tkr in tickers_encontrados]
+                
+                if botoes:
                     markup.add(*botoes)
-                    texto = f"📂 *Sua Carteira ({nome_aba})*\nSelecione um ativo para abrir o painel:"
+                    texto = f"📂 *Ativos - {setor_buscado}*\nSelecione para abrir o terminal:"
+                else:
+                    texto = f"📭 Nenhum ativo encontrado nesta categoria."
                 
                 markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
                 bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-                
+
             except Exception as e:
-                markup = InlineKeyboardMarkup()
-                markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
-                bot.edit_message_text(f"❌ Erro ao ler a planilha: {e}", chat_id, msg_id, reply_markup=markup)
-
-        # --- A MÁGICA DA NOVA ARQUITETURA DE DADOS ---
-
-        # 1. Abre a tela principal do Ativo
-        elif dados.startswith("fii_") or dados.startswith("acao_"):
-            partes = dados.split("_")
-            tipo = partes[0] # 'fii' ou 'acao'
-            ticker = partes[1]
-            gerar_painel_ativo(ticker, tipo, chat_id, msg_id)
-
-        # 2. Submenu: Dados Importantes (Google Sheets Completo)
-        elif dados.startswith("dados_"):
-            partes = dados.split("_")
-            ticker = partes[1]
-            tipo = partes[2]
-            
-            markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"{tipo}_{ticker}"))
-            
-            texto_dados = f"📎 **Dados Completos: {ticker}**\n\n_(Aqui o bot puxará toda a linha correspondente a este ativo lá do Google Sheets...)_"
-            bot.edit_message_text(texto_dados, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-
-        # 3. Submenu: Documentos por Mês (Banco de Dados + Dropbox)
-        elif dados.startswith("docs_"):
-            partes = dados.split("_")
-            ticker = partes[1]
-            tipo = partes[2]
-            
-            markup = InlineKeyboardMarkup()
-            # Simulando o submenu de meses/documentos
-            markup.row(InlineKeyboardButton("📄 Relatório Gerencial (Julho)", url="https://dropbox.com/link_aqui"))
-            markup.row(InlineKeyboardButton("📄 Fato Relevante (Junho)", url="https://dropbox.com/link_aqui"))
-            markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"{tipo}_{ticker}"))
-            
-            texto_docs = f"📑 **Central de Documentos: {ticker}**\nEscolha o arquivo abaixo para abrir no Dropbox:"
-            bot.edit_message_text(texto_docs, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-
-        # 4. Submenu: Análise IA
-        elif dados.startswith("ia_"):
-            bot.answer_callback_query(call.id, "Gerando análise de risco avançada...")
-            partes = dados.split("_")
-            ticker = partes[1]
-            tipo = partes[2]
-            
-            markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"{tipo}_{ticker}"))
-            
-            texto_ia = (
-                f"⚠️ **Análise de Risco Operacional: {ticker}**\n\n"
-                "🔹 **Pontos de Atenção:** (Conectar IA aqui)\n"
-                "🔹 **Alavancagem:** (Conectar IA aqui)\n"
-                "🔹 **Vacância/Vencimentos:** (Conectar IA aqui)"
-            )
-            bot.edit_message_text(texto_ia, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-
-    except Exception as e:
-        print(f"Erro no callback: {e}")
-
-if __name__ == '__main__':
-    bot.polling(none_stop=True)
+                bot.edit_message_text(f"❌ Erro ao ler
