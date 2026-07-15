@@ -513,20 +513,58 @@ def callback_geral(call):
         # ==========================================
         # ABRIR TELA DO ATIVO (GARE11, PETR4, etc)
         # ==========================================
+        # =======================================================
+        # 1. PAINEL PRINCIPAL DO ATIVO
+        # =======================================================
         elif dados.startswith("fii_") or dados.startswith("acao_"):
             partes = dados.split("_")
             tipo = partes[0] 
             ticker = partes[1]
             bot.answer_callback_query(call.id, f"Carregando terminal de {ticker}...")
+            # Essa função você já configurou! Ela vai buscar a logo e o resumo.
             gerar_painel_ativo(ticker, tipo, chat_id, msg_id)
 
-        # ... (Mantém os submenus "dados_", "docs_" e "ia_") ...
+        # =======================================================
+        # 2. SUBMENU: DADOS COMPLETOS (Puxa da sua Planilha)
+        # =======================================================
         elif dados.startswith("dados_"):
+            bot.answer_callback_query(call.id, "Buscando indicadores...")
             partes = dados.split("_")
             ticker, tipo = partes[1], partes[2]
+            is_fii = (tipo == "fii")
+            
+            # Puxa os dados reais da sua função recém-criada
+            indicadores = _buscar_dados_planilha(ticker, is_fii)
+            
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"{tipo}_{ticker}"))
-            bot.edit_message_text(f"📎 **Dados Completos: {ticker}**\n\n_(Aqui o bot puxará toda a linha do Google Sheets)_", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            
+            if not indicadores:
+                bot.edit_message_text(f"❌ Não encontrei os dados detalhados de **{ticker}** na planilha.", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            else:
+                # Monta um relatório robusto baseado no tipo do ativo
+                if is_fii:
+                    texto = (
+                        f"📎 **Dados Completos: {ticker}**\n\n"
+                        f"🏢 **Setor:** {indicadores.get('setor', 'N/A')}\n"
+                        f"💰 **Preço:** R$ {indicadores.get('preco', 'N/A')}\n"
+                        f"⚖️ **P/VP:** {indicadores.get('pvp', 'N/A')}\n"
+                        f"💸 **DY (12m):** {indicadores.get('dy', 'N/A')}\n"
+                        f"💵 **Valor Patrimonial (VPA):** {indicadores.get('vpa', 'N/A')}\n\n"
+                        f"_(Você pode mapear mais colunas lá no dicionário da função _buscar_dados_planilha)_"
+                    )
+                else:
+                    texto = (
+                        f"📎 **Dados Completos: {ticker}**\n\n"
+                        f"📈 **Setor:** {indicadores.get('setor', 'N/A')}\n"
+                        f"💰 **Preço:** R$ {indicadores.get('preco', 'N/A')}\n"
+                        f"📊 **P/L:** {indicadores.get('pl', 'N/A')}\n"
+                        f"⚖️ **P/VP:** {indicadores.get('pvp', 'N/A')}\n"
+                        f"💸 **DY (12m):** {indicadores.get('dy', 'N/A')}\n"
+                        f"🚀 **ROE:** {indicadores.get('roe', 'N/A')}\n\n"
+                        f"_(Você pode mapear mais colunas lá no dicionário da função _buscar_dados_planilha)_"
+                    )
+                bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         elif dados.startswith("docs_"):
             partes = dados.split("_")
