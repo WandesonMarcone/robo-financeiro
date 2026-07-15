@@ -422,7 +422,7 @@ def callback_geral(call):
             is_fii = True if "setor_fii_" in dados else False
             nome_aba = "BD_FIIs" if is_fii else "BD_Acoes"
             prefixo_ticker = "fii" if is_fii else "acao"
-            menu_voltar = "agrupar_fiis" if is_fii else "agrupar_acoes"
+            menu_voltar = "menu_fiis" if is_fii else "menu_acoes"
             
             # Pega o nome do setor que o usuário clicou (ex: "Tijolo")
             setor_buscado = dados.split("_", 2)[2] 
