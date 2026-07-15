@@ -118,6 +118,7 @@ def buscar_oportunidades(tipo):
 # ==========================================
 # CONFIGURAÇÕES INICIAIS
 # ==========================================
+drive_manager = GoogleDriveManager()
 engine = create_engine("sqlite:///pipeline_dados/banco_institucional.db")
 SessionDB = sessionmaker(bind=engine)
 
