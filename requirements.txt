@@ -10,6 +10,8 @@ urllib3<2.0.0
 pandas
 yfinance
 requests
+apscheduler==3.10.4
+
 pytz
 pyTelegramBotAPI
 gspread
