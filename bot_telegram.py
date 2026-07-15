@@ -239,21 +239,74 @@ def callback_geral(call):
             markup.row(InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="voltar_menu"))
             bot.edit_message_text(resultado, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
+        # --- MENU PRINCIPAL FIIs ---
         elif dados == "menu_fiis":
             markup = InlineKeyboardMarkup()
-            # Botões temporários para testarmos a arquitetura nova
-            markup.row(InlineKeyboardButton("🏢 XPML11", callback_data="fii_XPML11"),
-                       InlineKeyboardButton("🏢 KNCR11", callback_data="fii_KNCR11"))
+            markup.row(InlineKeyboardButton("⭐ Meus Favoritos", callback_data="favoritos_fiis"))
+            markup.row(InlineKeyboardButton("📂 Minha Carteira (Planilha)", callback_data="carteira_fiis"))
             markup.row(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
-            bot.edit_message_text("🏢 *Módulo FIIs*\nSelecione um ativo para abrir o Terminal:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            bot.edit_message_text("🏢 *Módulo FIIs*\nEscolha de onde quer carregar a lista:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
+        # --- MENU PRINCIPAL AÇÕES ---
         elif dados == "menu_acoes":
             markup = InlineKeyboardMarkup()
-            # Botões temporários para testarmos a arquitetura nova
-            markup.row(InlineKeyboardButton("📈 PETR4", callback_data="acao_PETR4"),
-                       InlineKeyboardButton("📈 VALE3", callback_data="acao_VALE3"))
+            markup.row(InlineKeyboardButton("⭐ Meus Favoritos", callback_data="favoritos_acoes"))
+            markup.row(InlineKeyboardButton("📂 Minha Carteira (Planilha)", callback_data="carteira_acoes"))
             markup.row(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
-            bot.edit_message_text("📈 *Módulo de Ações*\nSelecione um ativo para abrir o Terminal:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            bot.edit_message_text("📈 *Módulo de Ações*\nEscolha de onde quer carregar a lista:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        # ==========================================
+        # GERADORES DE BOTÕES DINÂMICOS (FAVORITOS)
+        # ==========================================
+        elif dados == "favoritos_fiis":
+            markup = InlineKeyboardMarkup(row_width=3) # Coloca 3 botões por linha para ficar bonito
+            # Lê direto do seu config.py
+            botoes = [InlineKeyboardButton(ticker, callback_data=f"fii_{ticker}") for ticker in config.FIXAS_FIIS]
+            markup.add(*botoes)
+            markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_fiis"))
+            bot.edit_message_text("⭐ *Seus FIIs Favoritos*\nSelecione um ativo para abrir o painel:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        elif dados == "favoritos_acoes":
+            markup = InlineKeyboardMarkup(row_width=3)
+            # Lê direto do seu config.py
+            botoes = [InlineKeyboardButton(ticker, callback_data=f"acao_{ticker}") for ticker in config.FIXAS_ACOES]
+            markup.add(*botoes)
+            markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_acoes"))
+            bot.edit_message_text("⭐ *Suas Ações Favoritas*\nSelecione um ativo para abrir o painel:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        # ==========================================
+        # GERADORES DE BOTÕES DINÂMICOS (PLANILHA)
+        # ==========================================
+        elif dados in ["carteira_fiis", "carteira_acoes"]:
+            bot.answer_callback_query(call.id, "Buscando seus ativos na Planilha do Google...")
+            
+            is_fii = True if dados == "carteira_fiis" else False
+            nome_aba = "BD_FIIs" if is_fii else "BD_Acoes"
+            prefixo = "fii" if is_fii else "acao"
+            menu_voltar = "menu_fiis" if is_fii else "menu_acoes"
+            
+            try:
+                # Conecta e puxa a Coluna A inteira
+                planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
+                aba = planilha.worksheet(nome_aba)
+                tickers_planilha = aba.col_values(1)[1:] # O [1:] pula o cabeçalho (Linha 1)
+
+                markup = InlineKeyboardMarkup(row_width=3)
+                botoes = [InlineKeyboardButton(tkr.strip(), callback_data=f"{prefixo}_{tkr.strip()}") for tkr in tickers_planilha if tkr.strip()]
+                
+                if not botoes:
+                    texto = f"📭 Sua carteira na aba `{nome_aba}` está vazia. Use o comando `/adicionar TICKER` para incluir."
+                else:
+                    markup.add(*botoes)
+                    texto = f"📂 *Sua Carteira ({nome_aba})*\nSelecione um ativo para abrir o painel:"
+                
+                markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
+                bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+                
+            except Exception as e:
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
+                bot.edit_message_text(f"❌ Erro ao ler a planilha: {e}", chat_id, msg_id, reply_markup=markup)
 
         # --- A MÁGICA DA NOVA ARQUITETURA DE DADOS ---
 
