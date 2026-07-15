@@ -315,14 +315,32 @@ def callback_geral(call):
             bot.edit_message_text("🏢 *Módulo FIIs*\nEscolha a categoria desejada:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
 
-        # --- MENU PRINCIPAL AÇÕES ---
+        # --- MENU AÇÕES (Estrutura Organizada por Setor) ---
         elif dados == "menu_acoes":
-            markup = InlineKeyboardMarkup()
-            markup.row(InlineKeyboardButton("⭐ Favoritas (Fixas)", callback_data="favoritos_acoes"))
-            markup.row(InlineKeyboardButton("📂 Ações por Setor (BD)", callback_data="agrupar_acoes"))
-            markup.row(InlineKeyboardButton("🔥 Oportunidades do Dia", callback_data="oportunidades_acoes"))
-            markup.row(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
-            bot.edit_message_text("📈 *Módulo de Ações*\nEscolha a visão do mercado:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            markup = InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                InlineKeyboardButton("⭐ Favoritas", callback_data="favoritos_acoes"),
+                InlineKeyboardButton("🔥 Oportunidades", callback_data="oportunidades_acoes")
+            )
+            # Setores traduzidos e organizados
+            markup.add(
+                InlineKeyboardButton("⚡ Energia", callback_data="setor_acao_Energia"),
+                InlineKeyboardButton("💎 Mat. Básicos", callback_data="setor_acao_Materiais Básicos")
+            )
+            markup.add(
+                InlineKeyboardButton("🏦 Financeiro", callback_data="setor_acao_Financeiro"),
+                InlineKeyboardButton("⚙️ Industrial", callback_data="setor_acao_Industrial")
+            )
+            markup.add(
+                InlineKeyboardButton("🛒 Consumo Def.", callback_data="setor_acao_Consumo Defensivo"),
+                InlineKeyboardButton("🏥 Saúde", callback_data="setor_acao_Saúde")
+            )
+            markup.add(
+                InlineKeyboardButton("🔌 Utilidade Púb.", callback_data="setor_acao_Utilidade Pública"),
+                InlineKeyboardButton("📱 Comunicação", callback_data="setor_acao_Comunicação")
+            )
+            markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="voltar_menu"))
+            bot.edit_message_text("📈 *Módulo de Ações*\nSelecione o setor desejado:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # ==========================================
         # GERADORES DE BOTÕES DINÂMICOS (FAVORITOS FIXOS)
