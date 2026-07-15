@@ -3,6 +3,8 @@ from modules.GoogleDriveManager import GoogleDriveManager
 from modules.utils import conectar_gspread
 import config
 from datetime import datetime
+import os # Adicione este import no topo do arquivo
+from modules.GoogleDriveManager import GoogleDriveManager
 
 # ==========================================
 # IMPORTAÇÕES DO BANCO DE DADOS
@@ -40,59 +42,61 @@ def obter_tickers_da_planilha():
         return []
 
 def rotina_de_atualizacao_em_massa():
-    """Função Mestra com Memória Anti-Duplicata e Foco no Fluxo Diário"""
+    """Função Mestra com Memória Anti-Duplicata e Google Drive"""
     b3 = FnetDownloader()
+    drive_manager = GoogleDriveManager() # Iniciamos o Gerenciador aqui
     lista_de_fiis = obter_tickers_da_planilha()
     print(f"🚀 Iniciando atualização diária para {len(lista_de_fiis)} FIIs...")
-    
+
     relatorios_salvos = 0
     session = SessionDB()
-    
-    # Define a data de hoje para filtrar apenas o que saiu agora
     data_hoje = datetime.now().strftime("%d/%m/%Y")
-    
+
     for ticker in lista_de_fiis:
-        # Verifica se o ticker precisa ser "traduzido"
         nome_pesquisa = ticker
         for chave, valor in MAPA_FNET_B3.items():
             if valor == ticker:
                 nome_pesquisa = chave
                 break 
-                
-        # Garante que o Ativo existe no Banco de Dados
+
         ativo_db = session.query(Ativo).filter(Ativo.ticker == ticker).first()
         if not ativo_db:
             ativo_db = Ativo(ticker=ticker)
             session.add(ativo_db)
             session.commit()
-        
-        # O Librariano pesquisa APENAS documentos a partir de hoje
+
         documentos = b3.pesquisar_documentos(nome_pesquisa, data_inicio=data_hoje)
-        
-        # A Trava Anti-Duplicata continua protegendo a integridade
+
         for id_doc, data_ref in documentos:
-            
             doc_existente = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.ativo_id == ativo_db.id,
                 DocumentosQualitativos.assunto.contains(id_doc) 
             ).first()
-            
+
             if doc_existente:
                 continue
-            
-            print(f"⬇️ Baixando documento inédito do dia: {ticker} (Data: {data_ref})...")
+
+            print(f"⬇️ Baixando documento inédito: {ticker} (ID: {id_doc})...")
             pdf_bytes = b3.baixar_pdf(id_doc)
-            
+
             if pdf_bytes:
-                nome_formatado = f"Relatorio_Gerencial_{data_ref}_ID{id_doc}"
-                
-                link_gerado = upload_para_dropbox(
-                    conteudo_pdf=pdf_bytes, 
-                    ticker=ticker, 
-                    tipo_doc=nome_formatado, 
-                    data_str="Oficial"
+                # 1. SALVAR EM ARQUIVO TEMPORÁRIO (O Drive precisa de um caminho de arquivo)
+                temp_filename = f"/tmp/{ticker}_{id_doc}.pdf"
+                with open(temp_filename, "wb") as f:
+                    f.write(pdf_bytes)
+
+                # 2. FAZER O UPLOAD NO GOOGLE DRIVE
+                link_gerado = drive_manager.upload_pdf_organizado(
+                    caminho_arquivo=temp_filename,
+                    nome_arquivo=f"Relatorio_{data_ref}_{id_doc}.pdf",
+                    ticker=ticker,
+                    categoria="Relatórios Gerenciais"
                 )
-                
+
+                # 3. LIMPEZA (Apaga o arquivo temporário)
+                if os.path.exists(temp_filename):
+                    os.remove(temp_filename)
+
                 if link_gerado:
                     novo_doc = DocumentosQualitativos(
                         ativo_id=ativo_db.id,
@@ -104,6 +108,6 @@ def rotina_de_atualizacao_em_massa():
                     session.add(novo_doc)
                     session.commit()
                     relatorios_salvos += 1
-    
+
     session.close()
     return relatorios_salvos
