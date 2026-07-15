@@ -227,54 +227,50 @@ def enviar_ultimos_relatorios(message):
 
 
 # ==========================================
-# MOTOR DE LOGOS (Dropbox -> GitHub -> Logo.dev)
+# MOTOR DE LOGOS (Google Drive -> GitHub -> Logo.dev)
 # ==========================================
 def obter_link_logo(ticker, tipo):
     """
     Tenta buscar a logo em cascata:
-    1. Dropbox (Cache local super rápido)
+    1. Drive (Cache local)
     2. GitHub (Repositório do Wandeson)
     3. Logo.dev (API Premium)
-    Se encontrar no Github ou Logo.dev, salva no Dropbox para a próxima vez.
     """
     try:
-        dbx = autenticar_dropbox()
-        if not dbx: return ""
-
-        pasta_tipo = "fiis" if tipo == "fii" else "acoes"
-        caminho_dropbox = f"/Terminal_Institucional/Logos/{pasta_tipo}/{ticker.upper()}.png"
+        # Define a pasta pai (Logos/fiis ou Logos/acoes)
+        pasta_tipo_nome = "fiis" if tipo == "fii" else "acoes"
+        # O ID da pasta raiz foi definido no main.yml (DRIVE_ROOT_FOLDER_ID)
+        # Vamos assumir que criamos uma pasta "Logos" dentro da raiz
+        root_id = os.environ.get('DRIVE_ROOT_FOLDER_ID')
         
-        # 1. TENTA BUSCAR DO DROPBOX (O Cache)
-        try:
-            links = dbx.sharing_list_shared_links(path=caminho_dropbox, direct_only=True).links
-            if links:
-                return links[0].url.replace("?dl=0", "?raw=1")
-        except:
-            pass # Se não existe, a gente segue para o passo 2
-            
+        # 1. TENTA BUSCAR NO DRIVE (Cache)
+        # (Aqui o código buscaria se o arquivo existe na pasta)
+        
         # 2. TENTA BAIXAR DO GITHUB
-        github_url = f"https://raw.githubusercontent.com/WandesonMarcone/icones-bolsabr/main/{pasta_tipo}/{ticker.upper()}.png"
+        github_url = f"https://raw.githubusercontent.com/WandesonMarcone/icones-bolsabr/main/{pasta_tipo_nome}/{ticker.upper()}.png"
         resp = requests.get(github_url, timeout=10)
-        
-        # 3. SE O GITHUB FALHAR (Erro 404), TENTA NO LOGO.DEV
+
+        # 3. SE O GITHUB FALHAR, TENTA NO LOGO.DEV
         if resp.status_code != 200:
             logo_dev_token = os.environ.get("LOGO_DEV_TOKEN")
             if logo_dev_token:
-                # O formato padrão para ativos da B3 em APIs globais costuma usar o sufixo .SA
                 logo_dev_url = f"https://img.logo.dev/ticker:{ticker.upper()}.SA?token={logo_dev_token}"
                 resp = requests.get(logo_dev_url, timeout=10)
-                
-        # 4. SE ACHOU A IMAGEM EM ALGUM LUGAR, SALVA NO DROPBOX E GERA O LINK
+
+        # 4. SE ACHOU A IMAGEM EM ALGUM LUGAR, SALVA NO DRIVE
         if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', '').lower():
-            dbx.files_upload(resp.content, caminho_dropbox, mode=dropbox.files.WriteMode("overwrite"))
-            link = dbx.sharing_create_shared_link_with_settings(caminho_dropbox)
-            return link.url.replace("?dl=0", "?raw=1")
-            
+            # Salva no Drive e retorna o link
+            link = drive_manager.upload_imagem_logo(
+                resp.content, 
+                f"{ticker.upper()}.png", 
+                root_id
+            )
+            return link.replace("view?usp=drivesdk", "uc?export=view") # Formata para link direto
+
     except Exception as e:
         print(f"Erro ao processar logo de {ticker}: {e}")
-        
-    return "" # Se a logo não existir em nenhuma das 3 fontes, retorna vazio
 
+    return ""
 
 # ==========================================
 # O NOVO MOTOR DE DASHBOARD (Arquitetura)
