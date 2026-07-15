@@ -1,23 +1,24 @@
-# arquivo: atualizador_documentos.py
-
 from fnet_scraper import FnetDownloader
-# Comentamos o Dropbox por enquanto para não dar erro
-# from dropbox_manager import upload_para_dropbox 
+from dropbox_manager import upload_para_dropbox # Agora importamos de verdade!
 
 def rotina_de_atualizacao(id_do_relatorio, ticker):
-    """Função mestre que baixa da B3"""
+    """Função mestre: Baixa da B3 e faz upload pro Dropbox"""
     # 1. Instancia o downloader da B3
     b3 = FnetDownloader()
     
-    # 2. Baixa o PDF para a memória
+    # 2. Baixa o PDF para a memória (Os seus 2701.26 KB!)
     pdf_bytes = b3.baixar_pdf(id_do_relatorio)
     
-    # 3. Verifica se baixou com sucesso
+    # 3. Verifica se baixou e envia para a nuvem
     if pdf_bytes:
-        tamanho = len(pdf_bytes) / 1024 # Calcula tamanho em KB
-        print(f"🚀 Sucesso! Documento do {ticker} baixado. Tamanho: {tamanho:.2f} KB")
-        # Retornamos uma mensagem de sucesso fictícia no lugar do link do Dropbox
-        return f"Arquivo baixado na memória com sucesso ({tamanho:.2f} KB)!"
+        # Você pode passar o tipo de documento e a data conforme quiser
+        link_gerado = upload_para_dropbox(
+            conteudo_pdf=pdf_bytes, 
+            ticker=ticker, 
+            tipo_doc="Relatorio_Gerencial", 
+            data_str="Oficial"
+        )
+        return link_gerado
     else:
-        print(f"⚠️ Falha ao processar o documento do {ticker}.")
+        print(f"⚠️ Falha ao baixar o documento do {ticker} da B3.")
         return None
