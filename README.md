@@ -13,3 +13,12 @@ Automação completa de monitoramento de ações e FIIs, com análise quantitati
 
 ## Como rodar
 Este repositório é configurado para rodar via GitHub Actions (para automação de planilha) e Render (para o bot Telegram).
+
+IDDescrição do Documento
+14Relatório Gerencial (O que você usa hoje)
+10Relatório Trimestral
+15Fato Relevante
+12Informe Mensal
+3Demonstrações Financeiras (ITR/DFP)
+17Carta ao Cotista
+23Aviso aos Cotistas
