@@ -17,6 +17,9 @@ from modules import module_ia
 from modules import module_macro
 from modules.dropbox_manager import autenticar_dropbox # Importando o seu motor blindado
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+import pytz # Para lidar com o fuso horário do Brasil
 
 # ==========================================
 # CONFIGURAÇÃO FILTRO OPORTUNIDADE🚀
@@ -742,5 +745,48 @@ try:
 except Exception as e:
     print(f"Erro ao enviar aviso de reinício: {e}")
 
+# ==========================================
+# ROTINA DIÁRIA AUTOMÁTICA (O "Despertador")
+# ==========================================
+def varredura_diaria_b3():
+    """Função que o agendador vai chamar todos os dias sozinhos"""
+    # Envia um aviso pra você de que o robô acordou
+    bot.send_message(config.TELEGRAM_CHAT_ID, "⚙️ *Bom dia! Iniciando a varredura automática da B3...*", parse_mode="Markdown")
+    
+    # Aqui, no futuro, você vai puxar uma lista da sua planilha. 
+    # Por enquanto, vamos manter o nosso ativo de teste.
+    ativos_para_atualizar = [
+        ("1184168", "HGLG11")
+    ]
+    
+    for id_doc, ticker in ativos_para_atualizar:
+        try:
+            link = rotina_de_atualizacao(id_doc, ticker)
+            if link:
+                bot.send_message(config.TELEGRAM_CHAT_ID, f"✅ *{ticker} atualizado!*\nLink no Dropbox: [Acessar PDF]({link})", parse_mode="Markdown")
+            else:
+                bot.send_message(config.TELEGRAM_CHAT_ID, f"⚠️ Erro ao atualizar {ticker}.")
+        except Exception as e:
+            bot.send_message(config.TELEGRAM_CHAT_ID, f"❌ Erro no ativo {ticker}: {e}")
+            
+    bot.send_message(config.TELEGRAM_CHAT_ID, "🏁 *Varredura finalizada! Voltando a dormir.*", parse_mode="Markdown")
+
+# ==========================================
+# LIGANDO O AGENDADOR DE TAREFAS
+# ==========================================
+# Configura o fuso horário para o Brasil (Importante, pois o servidor do Render fica nos EUA)
+fuso_horario = pytz.timezone('America/Sao_Paulo')
+scheduler = BackgroundScheduler(timezone=fuso_horario)
+
+# Agenda para rodar todos os dias de segunda a sexta (mon-fri) às 08h00 da manhã
+scheduler.add_job(varredura_diaria_b3, CronTrigger(day_of_week='mon-fri', hour=8, minute=0))
+
+# Inicia o agendador em segundo plano
+scheduler.start()
+
+# ==========================================
+# 6. A ÚLTIMA LINHA DO ARQUIVO (Sempre fica no fim)
+# ==========================================
 if __name__ == '__main__':
+    print("Bot rodando e agendador ativado!")
     bot.polling(none_stop=True)
