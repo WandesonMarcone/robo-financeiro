@@ -74,11 +74,10 @@ class FnetDownloader:
             'dataInicial': data_inicio
         }
         
-        # Só adiciona o filtro se você passar um ID específico
+        # Aqui está a trava: Ele só adiciona o filtro se o chefe mandar
         if id_categoria:
             params['idCategoriaDocumento'] = id_categoria
 
-        print(f"🔎 Pesquisando documentos para {ticker} (Data: {data_inicio})...")
         try:
             resposta = self.session.get(url_pesquisa, params=params, headers=self.headers, timeout=15)
             resposta.raise_for_status()
@@ -90,17 +89,12 @@ class FnetDownloader:
                 id_doc = item.get('id')
                 data_ref = item.get('dataReferencia', '').replace('/', '-') 
                 
-                # A B3 geralmente retorna o campo 'idTipoDocumento' ou 'idCategoriaDocumento'
-                # Vamos pegar o ID da categoria para sabermos qual pasta criar no Drive
-                id_cat = item.get('idCategoriaDocumento') 
-                
                 if id_doc:
-                    # Agora retornamos 3 valores: ID do documento, Data, e o ID do Tipo (ex: 15)
-                    ids_encontrados.append((str(id_doc), data_ref, str(id_cat)))
+                    # Ele já devolve o id_categoria junto, para não nos perdermos
+                    ids_encontrados.append((str(id_doc), data_ref, str(id_categoria)))
 
-            print(f"✅ Encontrados {len(ids_encontrados)} documentos.")
             return ids_encontrados
 
         except Exception as e:
-            print(f"❌ Erro ao pesquisar {ticker}: {e}")
+            print(f"❌ Erro ao pesquisar {ticker} na categoria {id_categoria}: {e}")
             return []
