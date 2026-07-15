@@ -411,3 +411,54 @@ def callback_geral(call):
 
             except Exception as e:
                 bot.edit_message_text(f"❌ Erro ao ler ativos: {e}", chat_id, msg_id)
+
+        # ==========================================
+        # OPORTUNIDADES (Via Scrapers)
+        # ==========================================
+        elif dados in ["oportunidades_fiis", "oportunidades_acoes"]:
+            bot.answer_callback_query(call.id, "Rodando filtros do Scraper...")
+            # TODO: Conectar com o seu módulo de scraper_fiis/acoes no futuro
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_fiis" if "fiis" in dados else "menu_acoes"))
+            bot.edit_message_text("🔥 *Módulo de Oportunidades*\n_Integração com os filtros do scraper em construção._", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        # ==========================================
+        # ABRIR TELA DO ATIVO (GARE11, PETR4, etc)
+        # ==========================================
+        elif dados.startswith("fii_") or dados.startswith("acao_"):
+            partes = dados.split("_")
+            tipo = partes[0] 
+            ticker = partes[1]
+            bot.answer_callback_query(call.id, f"Carregando terminal de {ticker}...")
+            gerar_painel_ativo(ticker, tipo, chat_id, msg_id)
+
+        # ... (Mantém os submenus "dados_", "docs_" e "ia_") ...
+        elif dados.startswith("dados_"):
+            partes = dados.split("_")
+            ticker, tipo = partes[1], partes[2]
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"{tipo}_{ticker}"))
+            bot.edit_message_text(f"📎 **Dados Completos: {ticker}**\n\n_(Aqui o bot puxará toda a linha do Google Sheets)_", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        elif dados.startswith("docs_"):
+            partes = dados.split("_")
+            ticker, tipo = partes[1], partes[2]
+            markup = InlineKeyboardMarkup()
+            markup.row(InlineKeyboardButton("📄 Relatório Gerencial (Julho)", url="https://dropbox.com/link_aqui"))
+            markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"{tipo}_{ticker}"))
+            bot.edit_message_text(f"📑 **Central de Documentos: {ticker}**", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        elif dados.startswith("ia_"):
+            bot.answer_callback_query(call.id, "Gerando análise avançada...")
+            partes = dados.split("_")
+            ticker, tipo = partes[1], partes[2]
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"{tipo}_{ticker}"))
+            texto_ia = f"⚠️ **Análise de Risco: {ticker}**\n\n🔹 **Alavancagem:** (Conectar IA)"
+            bot.edit_message_text(texto_ia, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+    except Exception as e:
+        print(f"Erro no callback: {e}")
+
+if __name__ == '__main__':
+    bot.polling(none_stop=True)
