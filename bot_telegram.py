@@ -410,4 +410,4 @@ def callback_geral(call):
                 bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
             except Exception as e:
-                bot.edit_message_text(f"❌ Erro ao ler
+                bot.edit_message_text(f"❌ Erro ao ler ativos: {e}", chat_id, msg_id)
