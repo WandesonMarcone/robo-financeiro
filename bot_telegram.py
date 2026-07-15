@@ -806,47 +806,56 @@ except Exception as e:
     print(f"Erro ao enviar aviso de reinício: {e}")
 
 # ==========================================
-# ROTINA DIÁRIA AUTOMÁTICA (O "Despertador")
+# ROTINA DIÁRIA AUTOMÁTICA (O Despertador Mestre de Documentos)
 # ==========================================
-def varredura_diaria_b3():
-    """Função que o agendador vai chamar todos os dias sozinhos"""
-    # Envia um aviso pra você de que o robô acordou
-    bot.send_message(config.TELEGRAM_CHAT_ID, "⚙️ *Bom dia! Iniciando a varredura automática da B3...*", parse_mode="Markdown")
+def varredura_diaria():
+    """Função que o agendador chama todos os dias às 08h00 para buscar PDFs"""
+    bot.send_message(config.TELEGRAM_CHAT_ID, "⚙️ *Bom dia! Iniciando a varredura automática de documentos...*", parse_mode="Markdown")
     
-    # Aqui, no futuro, você vai puxar uma lista da sua planilha. 
-    # Por enquanto, vamos manter o nosso ativo de teste.
-    ativos_para_atualizar = [
-        ("1184168", "HGLG11")
-    ]
-    
-    for id_doc, ticker in ativos_para_atualizar:
-        try:
-            link = rotina_de_atualizacao(id_doc, ticker)
-            if link:
-                bot.send_message(config.TELEGRAM_CHAT_ID, f"✅ *{ticker} atualizado!*\nLink no Dropbox: [Acessar PDF]({link})", parse_mode="Markdown")
-            else:
-                bot.send_message(config.TELEGRAM_CHAT_ID, f"⚠️ Erro ao atualizar {ticker}.")
-        except Exception as e:
-            bot.send_message(config.TELEGRAM_CHAT_ID, f"❌ Erro no ativo {ticker}: {e}")
-            
-    bot.send_message(config.TELEGRAM_CHAT_ID, "🏁 *Varredura finalizada! Voltando a dormir.*", parse_mode="Markdown")
+    # ------------------------------------------
+    # 1. ETAPA FIIs (Fnet / B3)
+    # ------------------------------------------
+    try:
+        bot.send_message(config.TELEGRAM_CHAT_ID, "🏢 Buscando novos Relatórios de FIIs na B3...")
+        
+        # Chama o nosso Maestro que lê a planilha e baixa tudo!
+        qtd_fiis_salvos = rotina_de_atualizacao_em_massa()
+        
+        bot.send_message(config.TELEGRAM_CHAT_ID, f"✅ B3 finalizada! {qtd_fiis_salvos} novos documentos de FIIs salvos no Dropbox.")
+    except Exception as e:
+        bot.send_message(config.TELEGRAM_CHAT_ID, f"❌ Erro na varredura da B3: {e}")
+
+    # ------------------------------------------
+    # 2. ETAPA AÇÕES (Documentos CVM)
+    # ------------------------------------------
+    try:
+        bot.send_message(config.TELEGRAM_CHAT_ID, "📈 Iniciando coleta de documentos e balanços de Ações na CVM...")
+        
+        # Aqui chamamos o coletor CORRETO (o arquivista de PDFs)
+        # Substitua 'rodar_coleta' pelo nome exato da função que dispara o seu coletor_cvm
+        coletor_cvm.rodar_coleta() 
+        
+        bot.send_message(config.TELEGRAM_CHAT_ID, "✅ CVM finalizada com sucesso! Novos PDFs de ações salvos.")
+    except Exception as e:
+        bot.send_message(config.TELEGRAM_CHAT_ID, f"❌ Erro na varredura de documentos da CVM: {e}")
+        
+    # Encerramento
+    bot.send_message(config.TELEGRAM_CHAT_ID, "🏁 *Todas as rotinas finalizadas! O cofre de documentos está 100% atualizado para hoje.*", parse_mode="Markdown")
 
 # ==========================================
 # LIGANDO O AGENDADOR DE TAREFAS
 # ==========================================
-# Configura o fuso horário para o Brasil (Importante, pois o servidor do Render fica nos EUA)
 fuso_horario = pytz.timezone('America/Sao_Paulo')
 scheduler = BackgroundScheduler(timezone=fuso_horario)
 
-# Agenda para rodar todos os dias de segunda a sexta (mon-fri) às 08h00 da manhã
-scheduler.add_job(varredura_diaria_b3, CronTrigger(day_of_week='mon-fri', hour=8, minute=0))
+# Agenda a função unificada de documentos
+scheduler.add_job(varredura_diaria, CronTrigger(day_of_week='mon-fri', hour=8, minute=0))
 
-# Inicia o agendador em segundo plano
+# Se você quiser adicionar o agendamento do module_cvm (para rodar 4x ao dia), 
+# você pode fazer isso criando uma nova função e um novo 'scheduler.add_job' aqui no futuro!
+
 scheduler.start()
 
-# ==========================================
-# 6. A ÚLTIMA LINHA DO ARQUIVO (Sempre fica no fim)
-# ==========================================
 if __name__ == '__main__':
     print("Bot rodando e agendador ativado!")
     bot.polling(none_stop=True)
