@@ -40,15 +40,16 @@ def obter_tickers_da_planilha():
         return []
 
 def rotina_de_atualizacao_em_massa():
-    """Função Mestra com Memória Anti-Duplicata"""
+    """Função Mestra com Memória Anti-Duplicata e Foco no Fluxo Diário"""
     b3 = FnetDownloader()
     lista_de_fiis = obter_tickers_da_planilha()
-    print(f"🚀 Iniciando atualização histórica para {len(lista_de_fiis)} FIIs...")
+    print(f"🚀 Iniciando atualização diária para {len(lista_de_fiis)} FIIs...")
     
     relatorios_salvos = 0
-    
-    # 1. Abre o Banco de Dados
     session = SessionDB()
+    
+    # Define a data de hoje para filtrar apenas o que saiu agora
+    data_hoje = datetime.now().strftime("%d/%m/%Y")
     
     for ticker in lista_de_fiis:
         # Verifica se o ticker precisa ser "traduzido"
@@ -58,39 +59,31 @@ def rotina_de_atualizacao_em_massa():
                 nome_pesquisa = chave
                 break 
                 
-        # 2. Garante que o Ativo existe no Banco de Dados
+        # Garante que o Ativo existe no Banco de Dados
         ativo_db = session.query(Ativo).filter(Ativo.ticker == ticker).first()
         if not ativo_db:
-            # Se o ativo for novo (adicionado na planilha ontem, por exemplo), cadastra ele no banco
             ativo_db = Ativo(ticker=ticker)
             session.add(ativo_db)
             session.commit()
-            print(f"🏢 Novo ativo {ticker} registrado no banco de dados!")
         
-        # 3. O Librariano pesquisa TUDO desde 1º de Janeiro
-        data_hoje = datetime.now().strftime("%d/%m/%Y")
+        # O Librariano pesquisa APENAS documentos a partir de hoje
         documentos = b3.pesquisar_documentos(nome_pesquisa, data_inicio=data_hoje)
         
-        # 4. A Trava Anti-Duplicata em ação
+        # A Trava Anti-Duplicata continua protegendo a integridade
         for id_doc, data_ref in documentos:
             
-            # Pergunta pro banco: "Já temos esse ID B3 salvo no assunto deste Ativo?"
             doc_existente = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.ativo_id == ativo_db.id,
                 DocumentosQualitativos.assunto.contains(id_doc) 
             ).first()
             
             if doc_existente:
-                # Se já tem, ignora e vai pro próximo da lista na velocidade da luz
-                print(f"⏩ Documento de {data_ref} ({ticker}) já está no cofre. Pulando...")
                 continue
             
-            # Se chegou aqui, é porque é INÉDITO! Pode baixar.
-            print(f"⬇️ Baixando documento inédito: {ticker} (Data: {data_ref})...")
+            print(f"⬇️ Baixando documento inédito do dia: {ticker} (Data: {data_ref})...")
             pdf_bytes = b3.baixar_pdf(id_doc)
             
             if pdf_bytes:
-                # Adiciona o ID da B3 no nome do arquivo para controle
                 nome_formatado = f"Relatorio_Gerencial_{data_ref}_ID{id_doc}"
                 
                 link_gerado = upload_para_dropbox(
@@ -101,7 +94,6 @@ def rotina_de_atualizacao_em_massa():
                 )
                 
                 if link_gerado:
-                    # 5. Salva na Memória do Banco de Dados para nunca mais baixar!
                     novo_doc = DocumentosQualitativos(
                         ativo_id=ativo_db.id,
                         tipo_documento="Relatório Gerencial",
@@ -110,10 +102,8 @@ def rotina_de_atualizacao_em_massa():
                         url_pdf=link_gerado
                     )
                     session.add(novo_doc)
-                    session.commit() # Confirma a gravação
-                    
+                    session.commit()
                     relatorios_salvos += 1
     
-    # 6. Fecha o banco de dados e finaliza
     session.close()
     return relatorios_salvos
