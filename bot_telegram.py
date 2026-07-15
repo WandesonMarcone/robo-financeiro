@@ -710,25 +710,26 @@ def callback_geral(call):
     except Exception as e:
         print(f"Erro no callback: {e}")
 
+        # =======================================================
+        # 5. SUBMENU: EDITAR FILTROS
+        # =======================================================
+        elif dados.startswith("editar_"):
+            tipo = dados.split("_")[1] 
+
+            msg = bot.edit_message_text(
+                f"📝 *Edição de Filtros ({tipo.upper()})*\n"
+                "Envie a alteração no formato: `chave: valor`\n"
+                "Exemplos:\n"
+                "- Para FIIs: `pvp_max: 1.10`\n"
+                "- Para Ações: `pl_max: 15.0`",
+                chat_id, msg_id, parse_mode="Markdown"
+            )
+            # Registra o próximo passo passando o 'tipo' como argumento
+            bot.register_next_step_handler(msg, processar_novo_filtro, tipo)
+
 # ==========================================
 # 4. HANDLERS ISOLADOS (Edição de Filtros)
 # ==========================================
-# --- ACIONAR EDIÇÃO (Botões: editar_fii ou editar_acao) ---
-@bot.callback_query_handler(func=lambda call: call.data.startswith("editar_"))
-def editar_filtros(call):
-    # Extrai o tipo baseado no callback (ex: editar_fii -> tipo = 'fii')
-    tipo = call.data.split("_")[1] 
-    
-    msg = bot.edit_message_text(
-        f"📝 *Edição de Filtros ({tipo.upper()})*\n"
-        "Envie a alteração no formato: `chave: valor`\n"
-        "Exemplos:\n"
-        "- Para FIIs: `pvp_max: 1.10`\n"
-        "- Para Ações: `pl_max: 15.0`",
-        call.message.chat.id, call.message.message_id, parse_mode="Markdown"
-    )
-    # Registra o próximo passo passando o 'tipo' como argumento
-    bot.register_next_step_handler(msg, processar_novo_filtro, tipo)
 
 def processar_novo_filtro(message, tipo):
     try:
