@@ -1,5 +1,5 @@
 from fnet_scraper import FnetDownloader
-from modules.dropbox_manager import upload_para_dropbox
+from modules.GoogleDriveManager import GoogleDriveManager
 from modules.utils import conectar_gspread
 import config
 from datetime import datetime
