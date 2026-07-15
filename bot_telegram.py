@@ -789,7 +789,7 @@ def varredura_diaria():
         # Chama o nosso Maestro que lê a planilha e baixa tudo!
         qtd_fiis_salvos = rotina_de_atualizacao_em_massa()
         
-        bot.send_message(config.TELEGRAM_CHAT_ID, f"✅ B3 finalizada! {qtd_fiis_salvos} novos documentos de FIIs salvos no Dropbox.")
+        bot.send_message(config.TELEGRAM_CHAT_ID, f"✅ B3 finalizada! {qtd_fiis_salvos} novos documentos de FIIs salvos no Google Drive.")
     except Exception as e:
         bot.send_message(config.TELEGRAM_CHAT_ID, f"❌ Erro na varredura da B3: {e}")
 
