@@ -548,5 +548,68 @@ def callback_geral(call):
     except Exception as e:
         print(f"Erro no callback: {e}")
 
+# ==========================================
+# 4. HANDLERS ISOLADOS (Edição de Filtros)
+# ==========================================
+# --- ACIONAR EDIÇÃO (Botões: editar_fii ou editar_acao) ---
+@bot.callback_query_handler(func=lambda call: call.data.startswith("editar_"))
+def editar_filtros(call):
+    # Extrai o tipo baseado no callback (ex: editar_fii -> tipo = 'fii')
+    tipo = call.data.split("_")[1] 
+    
+    msg = bot.edit_message_text(
+        f"📝 *Edição de Filtros ({tipo.upper()})*\n"
+        "Envie a alteração no formato: `chave: valor`\n"
+        "Exemplos:\n"
+        "- Para FIIs: `pvp_max: 1.10`\n"
+        "- Para Ações: `pl_max: 15.0`",
+        call.message.chat.id, call.message.message_id, parse_mode="Markdown"
+    )
+    # Registra o próximo passo passando o 'tipo' como argumento
+    bot.register_next_step_handler(msg, processar_novo_filtro, tipo)
+
+def processar_novo_filtro(message, tipo):
+    try:
+        # Validação simples
+        if ":" not in message.text:
+            raise ValueError("Formato incorreto")
+
+        chave, valor = message.text.split(':')
+        chave = chave.strip()
+        valor = float(valor.strip())
+
+        # Carrega, altera e salva
+        filtros = carregar_filtros()
+        
+        # Verifica se a chave existe antes para evitar erros de digitação
+        if chave in filtros[tipo]:
+            filtros[tipo][chave] = valor
+            salvar_filtros(filtros)
+            bot.reply_to(message, f"✅ {chave.upper()} ({tipo.upper()}) atualizado para {valor}!")
+        else:
+            bot.reply_to(message, f"❌ Chave '{chave}' não encontrada. Verifique o nome no filtros.json.")
+            
+    except Exception as e:
+        bot.reply_to(message, "❌ Erro. Use formato: `chave: valor` (ex: `dy_min: 0.08`)")
+
+# --- MENSAGEM DE REINÍCIO (FIIs E AÇÕES) ---
+try:
+    # Busca oportunidades de ambos
+    opps_fii = buscar_oportunidades('fii')
+    opps_acao = buscar_oportunidades('acao')
+
+    # Cria strings legíveis (seguro caso estejam vazias)
+    fii_str = ", ".join(opps_fii[:5]) if opps_fii else "Nenhuma encontrada."
+    acao_str = ", ".join(opps_acao[:5]) if opps_acao else "Nenhuma encontrada."
+
+    msg = (
+        "🚀 *Bot Reiniciado com sucesso!*\n\n"
+        f"🏢 *Oportunidades FIIs:* {fii_str}\n\n"
+        f"📈 *Oportunidades Ações:* {acao_str}"
+    )
+    bot.send_message(config.TELEGRAM_CHAT_ID, msg, parse_mode="Markdown")
+except Exception as e:
+    print(f"Erro ao enviar aviso de reinício: {e}")
+
 if __name__ == '__main__':
     bot.polling(none_stop=True)
