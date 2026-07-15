@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from banco_dados import DadosFinanceirosAcoes, Ativo 
+from pipeline_dados.banco_dados import DadosFinanceirosAcoes, Ativo 
 
 logger = logging.getLogger(__name__)
 
