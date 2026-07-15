@@ -25,6 +25,7 @@ lxml
 xlrd
 python-dateutil
 xmltodict
+setuptools==70.0.0
 openpyxl
 cssselect
 html5lib
