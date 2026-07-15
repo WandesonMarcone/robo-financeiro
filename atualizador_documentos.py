@@ -43,11 +43,11 @@ def obter_tickers_da_planilha():
         return []
 
 def rotina_de_atualizacao_em_massa():
-    """Função Mestra com Memória Anti-Duplicata e Google Drive"""
+    """Função Mestra para capturar TODOS os tipos de documentos e organizar no Drive"""
     b3 = FnetDownloader()
-    drive_manager = GoogleDriveManager() # Iniciamos o Gerenciador aqui
+    drive_manager = GoogleDriveManager()
     lista_de_fiis = obter_tickers_da_planilha()
-    print(f"🚀 Iniciando atualização diária para {len(lista_de_fiis)} FIIs...")
+    print(f"🚀 Iniciando varredura TOTAL para {len(lista_de_fiis)} FIIs...")
 
     relatorios_salvos = 0
     session = SessionDB()
@@ -66,9 +66,15 @@ def rotina_de_atualizacao_em_massa():
             session.add(ativo_db)
             session.commit()
 
+        # REMOVIDO O FILTRO DE TIPO AQUI (Assumindo que o FnetDownloader retorna tudo se não filtrar)
+        # Se o seu FnetDownloader exigir um tipo, verifique se existe um valor que signifique "Todos"
         documentos = b3.pesquisar_documentos(nome_pesquisa, data_inicio=data_hoje)
 
-        for id_doc, data_ref in documentos:
+        # Ajuste aqui: verifique se o seu scraper retorna uma tupla com (id, data, tipo)
+        # Se retornar apenas (id, data), você precisará usar uma função interna para descobrir o tipo.
+        for id_doc, data_ref, tipo_doc in documentos: 
+
+            # Trava Anti-Duplicata
             doc_existente = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.ativo_id == ativo_db.id,
                 DocumentosQualitativos.assunto.contains(id_doc) 
@@ -77,33 +83,32 @@ def rotina_de_atualizacao_em_massa():
             if doc_existente:
                 continue
 
-            print(f"⬇️ Baixando documento inédito: {ticker} (ID: {id_doc})...")
+            print(f"⬇️ Baixando {tipo_doc} de {ticker} (ID: {id_doc})...")
             pdf_bytes = b3.baixar_pdf(id_doc)
 
             if pdf_bytes:
-                # 1. SALVAR EM ARQUIVO TEMPORÁRIO (O Drive precisa de um caminho de arquivo)
+                # 1. SALVAR TEMPORÁRIO
                 temp_filename = f"/tmp/{ticker}_{id_doc}.pdf"
                 with open(temp_filename, "wb") as f:
                     f.write(pdf_bytes)
 
-                # 2. FAZER O UPLOAD NO GOOGLE DRIVE
+                # 2. UPLOAD DINÂMICO (Usa o tipo_doc como categoria da pasta!)
                 link_gerado = drive_manager.upload_pdf_organizado(
                     caminho_arquivo=temp_filename,
-                    nome_arquivo=f"Relatorio_{data_ref}_{id_doc}.pdf",
+                    nome_arquivo=f"{tipo_doc}_{data_ref}_{id_doc}.pdf",
                     ticker=ticker,
-                    categoria="Relatórios Gerenciais"
+                    categoria=tipo_doc  # <-- Agora o Drive cria pastas automáticas por categoria (Ex: Fato Relevante, Comunicado)
                 )
 
-                # 3. LIMPEZA (Apaga o arquivo temporário)
                 if os.path.exists(temp_filename):
                     os.remove(temp_filename)
 
                 if link_gerado:
                     novo_doc = DocumentosQualitativos(
                         ativo_id=ativo_db.id,
-                        tipo_documento="Relatório Gerencial",
+                        tipo_documento=tipo_doc, # <-- Salva o tipo correto no banco
                         data_publicacao=datetime.now(),
-                        assunto=f"Relatório ref. {data_ref} (ID B3: {id_doc})",
+                        assunto=f"{tipo_doc} ref. {data_ref} (ID B3: {id_doc})",
                         url_pdf=link_gerado
                     )
                     session.add(novo_doc)
