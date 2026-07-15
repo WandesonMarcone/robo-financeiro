@@ -1,5 +1,5 @@
 from fnet_scraper import FnetDownloader
-from modules.Dropbox_manager import upload_para_dropbox
+from modules.dropbox_manager import upload_para_dropbox
 from modules.utils import conectar_gspread
 import config
 
