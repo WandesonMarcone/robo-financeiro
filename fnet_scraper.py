@@ -61,38 +61,46 @@ class FnetDownloader:
             print(f"❌ Erro de conexão ao baixar o documento {id_documento}: {e}")
             return None
 
-    def pesquisar_documentos(self, ticker, data_inicio="01/01/2026"):
+    def pesquisar_documentos(self, ticker, data_inicio="01/01/2026", id_categoria=None):
         if not self.session.cookies:
             self.iniciar_sessao()
 
         url_pesquisa = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
-        
-        # Adicionamos a dataInicial e aumentamos o limite ('l': '50')
+
         params = {
             'd': '1', 's': '0', 'l': '50', 
             'tipoFundo': '1', 
-            'idCategoriaDocumento': '14', 
             'nomeEmissor': ticker,
-            'dataInicial': data_inicio # Filtra de Janeiro pra cá
+            'dataInicial': data_inicio
         }
         
-        print(f"🔎 Pesquisando relatórios para {ticker} desde {data_inicio}...")
+        # Só adiciona o filtro se você passar um ID específico
+        if id_categoria:
+            params['idCategoriaDocumento'] = id_categoria
+
+        print(f"🔎 Pesquisando documentos para {ticker} (Data: {data_inicio})...")
         try:
             resposta = self.session.get(url_pesquisa, params=params, headers=self.headers, timeout=15)
             resposta.raise_for_status()
-            
+
             dados_json = resposta.json()
             ids_encontrados = []
-            
+
             for item in dados_json.get('data', []):
                 id_doc = item.get('id')
                 data_ref = item.get('dataReferencia', '').replace('/', '-') 
+                
+                # A B3 geralmente retorna o campo 'idTipoDocumento' ou 'idCategoriaDocumento'
+                # Vamos pegar o ID da categoria para sabermos qual pasta criar no Drive
+                id_cat = item.get('idCategoriaDocumento') 
+                
                 if id_doc:
-                    ids_encontrados.append((str(id_doc), data_ref))
-                    
-            print(f"✅ Encontrados {len(ids_encontrados)} relatórios para {ticker}.")
+                    # Agora retornamos 3 valores: ID do documento, Data, e o ID do Tipo (ex: 15)
+                    ids_encontrados.append((str(id_doc), data_ref, str(id_cat)))
+
+            print(f"✅ Encontrados {len(ids_encontrados)} documentos.")
             return ids_encontrados
-            
+
         except Exception as e:
             print(f"❌ Erro ao pesquisar {ticker}: {e}")
             return []
