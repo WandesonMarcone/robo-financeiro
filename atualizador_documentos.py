@@ -44,6 +44,17 @@ def obter_tickers_da_planilha():
 
 def rotina_de_atualizacao_em_massa():
     """Função Mestra para capturar TODOS os tipos de documentos e organizar no Drive"""
+    # 1. MAPEAMENTO DOS DOCUMENTOS (Adicionado conforme sua lista)
+    MAPA_TIPOS = {
+        "14": "Relatório Gerencial",
+        "10": "Relatório Trimestral",
+        "15": "Fato Relevante",
+        "12": "Informe Mensal",
+        "3": "Demonstrações Financeiras",
+        "17": "Carta ao Cotista",
+        "23": "Aviso aos Cotistas"
+    }
+
     b3 = FnetDownloader()
     drive_manager = GoogleDriveManager()
     lista_de_fiis = obter_tickers_da_planilha()
@@ -74,6 +85,9 @@ def rotina_de_atualizacao_em_massa():
         # Se retornar apenas (id, data), você precisará usar uma função interna para descobrir o tipo.
         for id_doc, data_ref, tipo_doc in documentos: 
 
+            # 2. TRADUÇÃO DO ID PARA O NOME DA PASTA
+            categoria_nome = MAPA_TIPOS.get(str(tipo_doc_id), "Outros Documentos")
+
             # Trava Anti-Duplicata
             doc_existente = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.ativo_id == ativo_db.id,
@@ -87,17 +101,17 @@ def rotina_de_atualizacao_em_massa():
             pdf_bytes = b3.baixar_pdf(id_doc)
 
             if pdf_bytes:
-                # 1. SALVAR TEMPORÁRIO
                 temp_filename = f"/tmp/{ticker}_{id_doc}.pdf"
                 with open(temp_filename, "wb") as f:
                     f.write(pdf_bytes)
 
-                # 2. UPLOAD DINÂMICO (Usa o tipo_doc como categoria da pasta!)
+                # 3. UPLOAD DINÂMICO
+                # Aqui ele criará: Raiz > XPML11 > Fato Relevante > PDF
                 link_gerado = drive_manager.upload_pdf_organizado(
                     caminho_arquivo=temp_filename,
-                    nome_arquivo=f"{tipo_doc}_{data_ref}_{id_doc}.pdf",
+                    nome_arquivo=f"{categoria_nome}_{data_ref}_{id_doc}.pdf",
                     ticker=ticker,
-                    categoria=tipo_doc  # <-- Agora o Drive cria pastas automáticas por categoria (Ex: Fato Relevante, Comunicado)
+                    categoria=categoria_nome # <-- Agora o Drive cria pastas automáticas por categoria (Ex: Fato Relevante, Comunicado)
                 )
 
                 if os.path.exists(temp_filename):
