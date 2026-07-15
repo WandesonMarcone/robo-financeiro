@@ -131,10 +131,16 @@ def enviar_ultimos_relatorios(message):
 
 
 # ==========================================
-# MOTOR DE LOGOS (GitHub -> Dropbox -> Telegram)
+# MOTOR DE LOGOS (Dropbox -> GitHub -> Logo.dev)
 # ==========================================
 def obter_link_logo(ticker, tipo):
-    """Verifica se a logo está no Dropbox. Se não, baixa do GitHub, salva no Dropbox e retorna o link."""
+    """
+    Tenta buscar a logo em cascata:
+    1. Dropbox (Cache local super rápido)
+    2. GitHub (Repositório do Wandeson)
+    3. Logo.dev (API Premium)
+    Se encontrar no Github ou Logo.dev, salva no Dropbox para a próxima vez.
+    """
     try:
         dbx = autenticar_dropbox()
         if not dbx: return ""
@@ -150,21 +156,28 @@ def obter_link_logo(ticker, tipo):
         except:
             pass # Se não existe, a gente segue para o passo 2
             
-        # 2. SE NÃO TEM NO DROPBOX, BAIXA DO GITHUB
+        # 2. TENTA BAIXAR DO GITHUB
         github_url = f"https://raw.githubusercontent.com/WandesonMarcone/icones-bolsabr/main/{pasta_tipo}/{ticker.upper()}.png"
-        
         resp = requests.get(github_url, timeout=10)
-        if resp.status_code == 200:
-            # 3. FAZ UPLOAD PRO DROPBOX PARA SALVAR PARA SEMPRE
+        
+        # 3. SE O GITHUB FALHAR (Erro 404), TENTA NO LOGO.DEV
+        if resp.status_code != 200:
+            logo_dev_token = os.environ.get("LOGO_DEV_TOKEN")
+            if logo_dev_token:
+                # O formato padrão para ativos da B3 em APIs globais costuma usar o sufixo .SA
+                logo_dev_url = f"https://img.logo.dev/ticker:{ticker.upper()}.SA?token={logo_dev_token}"
+                resp = requests.get(logo_dev_url, timeout=10)
+                
+        # 4. SE ACHOU A IMAGEM EM ALGUM LUGAR, SALVA NO DROPBOX E GERA O LINK
+        if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', '').lower():
             dbx.files_upload(resp.content, caminho_dropbox, mode=dropbox.files.WriteMode("overwrite"))
-            # 4. GERA O LINK PÚBLICO
             link = dbx.sharing_create_shared_link_with_settings(caminho_dropbox)
             return link.url.replace("?dl=0", "?raw=1")
             
     except Exception as e:
         print(f"Erro ao processar logo de {ticker}: {e}")
         
-    return "" # Se der qualquer erro (ex: ação não tem logo no github), retorna vazio para não quebrar o bot
+    return "" # Se a logo não existir em nenhuma das 3 fontes, retorna vazio
 
 
 # ==========================================
