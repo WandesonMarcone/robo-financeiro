@@ -1,5 +1,5 @@
 from fnet_scraper import FnetDownloader
-from dropbox_manager import upload_para_dropbox # Agora importamos de verdade!
+from module.dropbox_manager import upload_para_dropbox # Agora importamos de verdade!
 
 def rotina_de_atualizacao(id_do_relatorio, ticker):
     """Função mestre: Baixa da B3 e faz upload pro Dropbox"""
