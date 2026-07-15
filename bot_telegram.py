@@ -368,60 +368,7 @@ def callback_geral(call):
             markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_acoes"))
             bot.edit_message_text("⭐ *Suas Ações Favoritas*\nSelecione um ativo:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # ==========================================
-        # MÁGICA: AGRUPAMENTO POR SETOR DA PLANILHA
-        # ==========================================
-        elif dados in ["agrupar_fiis", "agrupar_acoes"]:
-            bot.answer_callback_query(call.id, "Organizando o Banco de Dados...")
-            is_fii = True if dados == "agrupar_fiis" else False
-            nome_aba = "BD_FIIs" if is_fii else "BD_Acoes"
-            callback_prefixo = "setor_fii" if is_fii else "setor_acao"
-            menu_voltar = "menu_fiis" if is_fii else "menu_acoes"
 
-            try:
-                planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
-                aba = planilha.worksheet(nome_aba)
-                matriz = aba.get_all_values()
-
-                if len(matriz) <= 1:
-                    bot.edit_message_text(f"📭 A aba {nome_aba} está vazia.", chat_id, msg_id)
-                    return
-
-                # Descobre automaticamente qual coluna é o "Setor/Segmento"
-                cabecalhos = [c.lower().strip() for c in matriz[0]]
-                indice_setor = -1
-                for i, col in enumerate(cabecalhos):
-                    if col in ["setor", "segmento", "tipo", "classificação"]:
-                        indice_setor = i
-                        break
-
-                markup = InlineKeyboardMarkup(row_width=2)
-
-                if indice_setor == -1:
-                    markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
-                    bot.edit_message_text(f"⚠️ Não encontrei uma coluna chamada 'Setor' ou 'Segmento' na aba {nome_aba}.", chat_id, msg_id, reply_markup=markup)
-                    return
-
-                # Puxa setores únicos
-                setores_unicos = set()
-                for linha in matriz[1:]:
-                    if len(linha) > indice_setor and linha[indice_setor].strip():
-                        setores_unicos.add(linha[indice_setor].strip())
-
-                # Cria Botões das "Pastas"
-                botoes = []
-                for setor in sorted(setores_unicos):
-                    setor_curto = setor[:12] # Limite do Telegram
-                    botoes.append(InlineKeyboardButton(f"📁 {setor}", callback_data=f"{callback_prefixo}_{setor_curto}"))
-                
-                markup.add(*botoes)
-                markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
-                
-                titulo = "FIIs por Segmento" if is_fii else "Ações por Setor"
-                bot.edit_message_text(f"📂 *{titulo}*\nEscolha a categoria:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-
-            except Exception as e:
-                bot.edit_message_text(f"❌ Erro na planilha: {e}", chat_id, msg_id)
 
         # ==========================================
         # LISTAR ATIVOS DENTRO DE UM SETOR ESPECÍFICO
