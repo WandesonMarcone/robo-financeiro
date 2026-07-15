@@ -18,6 +18,40 @@ from modules.dropbox_manager import autenticar_dropbox # Importando o seu motor 
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 
 # ==========================================
+# CONFIGURAÇÃO FILTRO OPORTUNIDADE🚀
+# ==========================================
+import json
+
+def carregar_filtros():
+    with open('filtros.json', 'r') as f:
+        return json.load(f)
+
+def salvar_filtros(filtros):
+    with open('filtros.json', 'w') as f:
+        json.dump(filtros, f, indent=4)
+
+def buscar_oportunidades(tipo):
+    """tipo deve ser 'fii' ou 'acao'"""
+    filtros = carregar_filtros()[tipo]
+    # Aqui entra o seu código que carrega o DataFrame (df)
+    # Exemplo: df = carregar_planilha_para_dataframe(tipo)
+    
+    if tipo == 'fii':
+        return df[
+            (df['P/VP'] >= filtros['pvp_min']) & (df['P/VP'] <= filtros['pvp_max']) &
+            (df['Dividend Yield'] >= filtros['dy_min']) &
+            (df['Liquidez'] >= filtros['liq_min']) &
+            (df['Vacância Média'] <= filtros['vac_max'])
+        ].index.tolist()
+    else: # Ação
+        return df[
+            (df['P/L'] >= filtros['pl_min']) & (df['P/L'] <= filtros['pl_max']) &
+            (df['P/VP'] >= filtros['pvp_min']) & (df['P/VP'] <= filtros['pvp_max']) &
+            (df['Div.Yield'] >= filtros['dy_min']) &
+            (df['ROE'] >= filtros['roe_min'])
+        ].index.tolist()
+
+# ==========================================
 # CONFIGURAÇÕES INICIAIS
 # ==========================================
 engine = create_engine("sqlite:///pipeline_dados/banco_institucional.db")
