@@ -728,9 +728,6 @@ def callback_geral(call):
             )
             bot.edit_message_text(texto_ia, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-    except Exception as e:
-        print(f"Erro no callback: {e}")
-
         # =======================================================
         # 5. SUBMENU: EDITAR FILTROS
         # =======================================================
@@ -747,6 +744,8 @@ def callback_geral(call):
             )
             # Registra o próximo passo passando o 'tipo' como argumento
             bot.register_next_step_handler(msg, processar_novo_filtro, tipo)
+    except Exception as e:
+        print(f"Erro no callback: {e}")
 
 # --- MENSAGEM DE REINÍCIO (FIIs E AÇÕES) ---
 try:
