@@ -170,9 +170,6 @@ def comando_adicionar(message):
     except Exception as e:
         bot.reply_to(message, f"❌ Erro ao adicionar ativo: {e}")
 
-# Importa a sua função de atualização
-from atualizador_documentos import rotina_de_atualizacao
-
 # ==========================================
 # COMANDOS DE STATUS E RELATÓRIOS
 # ==========================================
