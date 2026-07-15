@@ -7,7 +7,7 @@ import config
 from modules.utils import formatar, precisa_atualizar, get_request_with_retry
 
 traducao_setores = {
-    'Energy': 'Energia', 'Financial Services': 'Financeiro', 'Basic Materials': 'Materiais Básicos', 
+    'energy': 'Energia', 'financial services': 'Financeiro', 'Basic Materials': 'Materiais Básicos', 
     'Utilities': 'Utilidade Pública', 'Industrials': 'Indústria', 'Consumer Defensive': 'Consumo Defensivo', 
     'Consumer Cyclical': 'Consumo Cíclico', 'Healthcare': 'Saúde', 'Technology': 'Tecnologia', 
     'Communication Services': 'Comunicações', 'Real Estate': 'Imobiliário', 'Healthcare': 'Saúde',
