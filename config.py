@@ -15,7 +15,7 @@ TELEGRAM_CHAT_ID = "8867098987"
 # Aqui ficam APENAS os ativos que você quer fixos no menu de favoritos 
 # para acesso em 1 clique (sem precisar navegar pelas pastas de setores).
 
-FIXAS_FIIS = ["GARE11", "MXRF11", "VISC11", "HGLG11"]
+FIXAS_FIIS = ["GARE11", "MXRF11", "VISC11", "HGLG11", "XPML11"]
 FIXAS_ACOES = ["PETR4", "VALE3", "WEGE3", "ITUB4"]
 
 # ==========================================
