@@ -21,14 +21,15 @@ drive_manager = GoogleDriveManager()
 
 # O seu mapa para corrigir os nomes da B3
 MAPA_FNET_B3 = {
-    'MAXI REN': 'MXRF11', 'MXRF': 'MXRF11',
-    'GUARDIAN': 'GARE11', 'GARE': 'GARE11',
-    'CSHG LOG': 'HGLG11', 'HGLG': 'HGLG11',
-    'VINCI SC': 'VISC11', 'VISC': 'VISC11',
-    'VBI CRI': 'CVBI11', 'CVBI': 'CVBI11',
-    'XP MALLS': 'XPML11',
-    'KINEA RI': 'KNCR11',
-    'BTLG': 'BTLG11'
+    'MAXI RENDA FII': 'MXRF11',
+    'GUARDIAN LOGÍSTICA FII': 'GARE11', # Nome oficial na B3
+    'CSHG LOGÍSTICA FII': 'HGLG11',
+    'VINCI SHOPPING CENTERS FII': 'VISC11',
+    'VBI CRI FII': 'CVBI11',
+    'XP MALLS FII': 'XPML11',
+    'KINEA RENDIMENTOS IMOBILIÁRIOS FII': 'KNCR11',
+    'BTG PACTUAL LOGÍSTICA FII': 'BTLG11',
+    'RZ TR P - FUNDO DE INVESTIMENTO IMOBILIÁRIO': 'RZTR11'
 }
 
 def obter_tickers_da_planilha():
