@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from typing import List, Optional
-from sqlalchemy import Column, Integer, String, Float, Date, DateTime, ForeignKey, UniqueConstraint, Enum
+from sqlalchemy import Column, Integer, String, Float, Date, DateTime, ForeignKey, UniqueConstraint, Enum, Text
 from sqlalchemy.orm import declarative_base, relationship, Mapped, mapped_column
 import enum
 
@@ -31,7 +31,7 @@ class DadosFinanceirosAcoes(Base):
     ativo_id: Mapped[int] = mapped_column(ForeignKey('ativos.id'), nullable=False)
     data_referencia: Mapped[date] = mapped_column(Date, nullable=False)
     tipo_doc: Mapped[str] = mapped_column(String(10), nullable=False) # Ex: 'ITR', 'DFP'
-    
+
     receita: Mapped[Optional[float]] = mapped_column(Float)
     lucro_liquido: Mapped[Optional[float]] = mapped_column(Float)
     ebitda: Mapped[Optional[float]] = mapped_column(Float)
@@ -47,7 +47,7 @@ class DadosFinanceirosFiis(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     ativo_id: Mapped[int] = mapped_column(ForeignKey('ativos.id'), nullable=False)
     data_referencia: Mapped[date] = mapped_column(Date, nullable=False) # Último dia do mês do informe
-    
+
     patrimonio_liquido: Mapped[Optional[float]] = mapped_column(Float)
     ativo_total: Mapped[Optional[float]] = mapped_column(Float)
     disponibilidades_caixa: Mapped[Optional[float]] = mapped_column(Float)
@@ -64,8 +64,25 @@ class DocumentosQualitativos(Base):
     ativo_id: Mapped[int] = mapped_column(ForeignKey('ativos.id'), nullable=False)
     data_publicacao: Mapped[date] = mapped_column(Date, nullable=False)
     tipo_documento: Mapped[str] = mapped_column(String(50), nullable=False) # 'Relatório Gerencial', 'Fato Relevante'
-    url_pdf: Mapped[str] = mapped_column(String(500), nullable=False)
+    
+    # ⚠️ ALTERAÇÃO: url_pdf agora é opcional (nullable=True), pois na nova arquitetura da FNET, 
+    # o documento entra como PENDENTE no banco ANTES de o upload ser feito para o Drive.
+    url_pdf: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    
     assunto: Mapped[Optional[str]] = mapped_column(String(255)) # Opcional: título do comunicado
 
+    # ==========================================
+    # 🆕 MÁQUINA DE ESTADOS & INTELIGÊNCIA ARTIFICIAL (NOVA ARQUITETURA FNET)
+    # ==========================================
+    id_b3: Mapped[Optional[str]] = mapped_column(String(50), unique=True, nullable=True)
+    
+    # 🛡️ PROTEÇÃO CVM: O default fica "SALVO". Assim, o coletor_CVM continua salvando
+    # direto no banco sem quebrar. O robô da FNET vai inserir como "PENDENTE" manualmente.
+    status_processamento: Mapped[str] = mapped_column(String(20), default="SALVO", nullable=False) 
+    
+    hash_sha256: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
+    resumo_ia: Mapped[Optional[str]] = mapped_column(Text, nullable=True) # Textos longos gerados pelo Groq
+    log_erro: Mapped[Optional[str]] = mapped_column(Text, nullable=True) # Auditoria de falhas
+    data_atualizacao: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=True)
+
     ativo: Mapped["Ativo"] = relationship(back_populates="documentos")
-  
