@@ -9,6 +9,12 @@ from modules.utils import conectar_gspread
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+# Adicionando o Groq para classificar
+from groq import Groq 
+import PyPDF2 # Importante: você precisará instalar isso no seu ambiente (pip install PyPDF2)
+
+# Configuração do Groq
+client = Groq(api_key=config.GROQ_API_KEY)
 
 engine = create_engine("sqlite:///pipeline_dados/banco_institucional.db")
 SessionDB = sessionmaker(bind=engine)
@@ -38,6 +44,21 @@ MAPA_ISCAS = {
     'TRXF11': 'TRX REAL ESTATE FUNDO',
     'CVBI11': 'VBI CRI'
 }
+
+def classificar_documento_com_ia(nome_original, texto_extraido):
+    """Pergunta ao Groq qual o tipo real do documento"""
+    prompt = f"O documento se chama '{nome_original}'. O texto inicial é: {texto_extraido[:500]}. " \
+             "Classifique como: 'Relatorio Gerencial', 'Fato Relevante', 'Informe Mensal', 'Demonstracoes Financeiras', 'Aviso aos Cotistas' ou 'Outros'. " \
+             "Responda APENAS com o nome da categoria."
+    
+    try:
+        chat = client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama3-8b-8192"
+        )
+        return chat.choices[0].message.content.strip()
+    except:
+        return nome_original # Se a IA falhar, usa o nome original
 
 def obter_tickers_da_planilha():
     try:
@@ -80,6 +101,33 @@ def rotina_de_atualizacao_em_massa():
             id_doc = doc['id']
             data_ref = doc['data_ref']
             nome_categoria_real = doc['tipo_doc'] # <--- A ETIQUETA REAL DA B3
+
+        pdf_bytes = b3.baixar_pdf(id_doc)
+        if pdf_bytes:
+            temp_filename = f"/tmp/{ticker}_{id_doc}.pdf"
+            with open(temp_filename, "wb") as f:
+                f.write(pdf_bytes)
+
+            # EXTRAÇÃO DE TEXTO PARA A IA
+            texto_pdf = ""
+            try:
+                reader = PyPDF2.PdfReader(temp_filename)
+                texto_pdf = reader.pages[0].extract_text()
+            except:
+                pass
+            
+            # IA RENOMEANDO O DOCUMENTO CORRETAMENTE
+            nome_categoria_inteligente = classificar_documento_com_ia(doc['tipo_doc'], texto_pdf)
+            
+            # Arrumando a pasta pelo mês do documento (como você pediu)
+            partes_data = data_ref.split('-')
+            mes_pasta = f"{partes_data[2]}-{partes_data[1]}" if len(partes_data) == 3 else datetime.now().strftime("%Y-%m")
+
+            link_gerado = drive_manager.upload_pdf_organizado(
+                caminho_arquivo=temp_filename,
+                nome_arquivo=f"{nome_categoria_inteligente}_{data_ref}_{id_doc}.pdf",
+                ticker=ticker,
+                mes_ref=mes_pasta
 
             # Verifica se algum dos nossos fundos publicou o documento
             for ticker in lista_de_fiis:
