@@ -1,46 +1,61 @@
-# Bibliotecas de sistema e garantias
+# ==========================================
+# ⚙️ NÚCLEO DO SISTEMA E SERVIDOR (RENDER)
+# ==========================================
 setuptools>=65.0.0
 wheel>=0.40.0
 greenlet==3.0.3
-
-# TRAVA DE SEGURANÇA PARA O BRFINANCE (Resolve o erro DEFAULT_CIPHERS)
-urllib3<2.0.0
-
-# Bibliotecas do seu robô e IA
-pandas
-yfinance
-requests
-apscheduler==3.10.4
-google-api-python-client==2.115.0
-google-auth-httplib2==0.2.0
-google-auth-oauthlib==1.2.0
-pytz
-pyTelegramBotAPI
-gspread
 Flask
 gunicorn
+
+# ==========================================
+# 🤖 BOT E AUTOMAÇÃO
+# ==========================================
+pyTelegramBotAPI
+apscheduler==3.10.4
 schedule
-google-api-python-client
-google-auth-httplib2
-google-auth-oauthlib
-PyPDF2
-SQLAlchemy
+pytz
+
+# ==========================================
+# 📊 DADOS FINANCEIROS E SCRAPING BÁSICO
+# ==========================================
+pandas
+requests
+yfinance
+urllib3<2.0.0 # Trava de segurança para o brfinance
 lxml
-xlrd
-python-dateutil
-xmltodict
-setuptools==70.0.0
-openpyxl
 cssselect
 html5lib
 beautifulsoup4
-groq
-dropbox==11.36.2
+xmltodict
+python-dateutil
 
-# Novas Bibliotecas Institucionais (O motor do novo CVM)
+# ==========================================
+# 🏛️ INSTITUCIONAL E DADOS DA CVM
+# ==========================================
 quantstats
 finlogic
 brfinance
+playwright==1.42.0 # Motor Headless para invasão ao StatusInvest
 
-# Playwright (necessário para a sua "invasão" ao StatusInvest)
-playwright==1.42.0
+# ==========================================
+# ☁️ ECOSSISTEMA GOOGLE (SHEETS E DRIVE)
+# ==========================================
+gspread
+google-api-python-client==2.115.0
+google-auth-httplib2==0.2.0
+google-auth-oauthlib==1.2.0
+
+# ==========================================
+# 🧠 INTELIGÊNCIA ARTIFICIAL E PDFs
+# ==========================================
+groq
+PyPDF2
+pdfplumber # Leitor de texto bruto para alimentar o Llama 3
+
+# ==========================================
+# 🗄️ BANCO DE DADOS E ARMAZENAMENTO EXTRA
+# ==========================================
+SQLAlchemy
+openpyxl
+xlrd
+dropbox==11.36.2
