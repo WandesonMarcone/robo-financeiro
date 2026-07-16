@@ -76,7 +76,7 @@ def rotina_de_atualizacao_em_massa():
 
         ativo_db = session.query(Ativo).filter(Ativo.ticker == ticker).first()
         if not ativo_db:
-            ativo_db = Ativo(ticker=ticker, cnpj="00.000.000/0000-00", tipo="FII")
+            ativo_db = Ativo(ticker=ticker, cnpj=f"PENDENTE-{ticker}", tipo="FII") 
             session.add(ativo_db)
             session.commit()
 
