@@ -5,8 +5,8 @@ class FnetDownloader:
     def __init__(self):
         self.session = requests.Session()
         self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'application/json, text/plain, */*'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         }
         self.url_download = "https://fnet.bmfbovespa.com.br/fnet/publico/downloadDocumento"
 
@@ -30,7 +30,7 @@ class FnetDownloader:
         except Exception:
             return None
 
-    def capturar_tudo(self, data_inicio, id_categoria):
+    def capturar_tudo(self, data_inicio):
         if not self.session.cookies:
             self.iniciar_sessao()
 
@@ -43,13 +43,12 @@ class FnetDownloader:
                 'd': '1', 's': str(start), 'l': '50', 
                 'tipoFundo': '1', 
                 'dataInicial': data_inicio,
-                'idCategoriaDocumento': id_categoria # <-- A MIRA LASER VOLTOU
             }
 
             try:
                 res = self.session.get(url_pesquisa, params=params, headers=self.headers, timeout=15)
                 data = res.json().get('data', [])
-                
+
                 if not data:
                     break 
 
@@ -57,12 +56,10 @@ class FnetDownloader:
                     descricao_fundo = item.get('descricaoFundo', '').upper()
                     id_doc = item.get('id')
                     data_ref = item.get('dataReferencia', '').replace('/', '-')
-                    
+
                     # A ETIQUETA PERFEITA CONTINUA AQUI
-                    tipo_doc = item.get('tipoDocumento', '').strip().title()
-                    if not tipo_doc:
-                        tipo_doc = "Documento Nao Classificado"
-                    
+                    tipo_doc = item.get('tipoDocumento', 'Documento Sem Tipo').strip().title"
+
                     if id_doc:
                         documentos_gerais.append({
                             'id': str(id_doc),
@@ -70,9 +67,9 @@ class FnetDownloader:
                             'nome_fundo': descricao_fundo,
                             'tipo_doc': tipo_doc
                         })
-                
+
                 time.sleep(1.5) # Pausa maior (1.5s) para o Firewall da B3 não nos pegar
             except Exception as e:
                 break
-                
+
         return documentos_gerais
