@@ -153,25 +153,27 @@ def rotina_de_atualizacao_em_massa():
 
                             if os.path.exists(temp_filename): os.remove(temp_filename)
 
-                            # Salva no Banco
-                            if link_gerado:
-                                # Garantimos que o FII existe no banco antes de salvar o documento
-                                ativo_db = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-                                if not ativo_db:
-                                    ativo_db = Ativo(ticker=ticker, cnpj=f"PENDENTE-{ticker}", tipo="FII") 
-                                    session.add(ativo_db)
-                                    session.commit()
-
-                                novo_doc = DocumentosQualitativos(
-                                    ativo_id=ativo_db.id,
-                                    tipo_documento=nome_inteligente, 
-                                    data_publicacao=datetime.now(),
-                                    assunto=f"{nome_inteligente} ref. {data_ref} (ID B3: {id_doc})",
-                                    url_pdf=link_gerado
-                                )
-                                session.add(novo_doc)
-                                session.commit()
-                                print(f"☁️ ✅ Salvo no Drive e Banco: {ticker} -> {nome_inteligente}")
+                        # 5. Salva no Banco de Dados com a Categoria Perfeita
+                        if link_gerado:
+                            ativo_db = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+                            if not ativo_db:
+                                ativo_db = Ativo(ticker=ticker, cnpj=f"PENDENTE-{ticker}", tipo="FII") 
+                                session.add(ativo_db)
+                            
+                            # GARANTIA: Forçamos que nome_inteligente seja uma string executando o método
+                            # Se por acaso ele estiver armazenando a função, executamos agora:
+                            categoria_final = nome_inteligente() if callable(nome_inteligente) else str(nome_inteligente)
+                            
+                            novo_doc = DocumentosQualitativos(
+                                ativo_id=ativo_db.id,
+                                tipo_documento=categoria_final.title(), # Garantia de parênteses aqui
+                                data_publicacao=datetime.now(),
+                                assunto=f"{categoria_final.title()} ref. {data_ref} (ID B3: {id_doc})", # Garantia de parênteses aqui
+                                url_pdf=link_gerado
+                            )
+                            session.add(novo_doc)
+                            session.commit()
+                            print(f"☁️ ✅ Salvo: {ticker} -> {categoria_final} (Pasta: {mes_pasta})")
                         
                         else:
                             # Se a peneira (Mapa) achou, mas o documento não tem o Ticker: Rejeita!
