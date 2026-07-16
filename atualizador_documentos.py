@@ -67,14 +67,6 @@ def rotina_de_atualizacao_em_massa():
     print(f"📦 B3 entregou {len(todos_documentos)} documentos. Analisando...")
 
     for doc in todos_documentos:
-        nome_fundo_b3 = normalizar_texto(doc['nome_fundo'])
-        id_doc = doc['id']
-        data_ref = doc['data_ref']
-        # Usamos o nome original da B3 (o que funcionou no seu teste)
-        nome_categoria_real = doc['tipo_doc'] 
-
-        # Loop pelos FIIs para ver se algum é dono desse documento
-        for doc in todos_documentos:
             try: # 🛡️ Try/Except para o robô não morrer se um PDF der erro
                 nome_fundo_b3 = normalizar_texto(doc['nome_fundo'])
                 id_doc = doc['id']
