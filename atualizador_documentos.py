@@ -1,10 +1,10 @@
+import os
+import time
+from datetime import datetime
+import config
 from fnet_scraper import FnetDownloader
 from modules.GoogleDriveManager import GoogleDriveManager
 from modules.utils import conectar_gspread
-import config
-from datetime import datetime
-import os # Adicione este import no topo do arquivo
-from modules.GoogleDriveManager import GoogleDriveManager
 
 # ==========================================
 # IMPORTAÇÕES DO BANCO DE DADOS
