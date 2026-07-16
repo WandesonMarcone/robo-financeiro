@@ -5,7 +5,7 @@ class FnetDownloader:
     def __init__(self):
         # Inicia a sessão que vai guardar os cookies magicamente
         self.session = requests.Session()
-        
+
         # Disfarce perfeito de um navegador moderno (User-Agent)
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -14,7 +14,7 @@ class FnetDownloader:
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1'
         }
-        
+
         # URL base de onde saem os downloads do FNET
         self.url_download = "https://fnet.bmfbovespa.com.br/fnet/publico/downloadDocumento"
 
@@ -34,28 +34,24 @@ class FnetDownloader:
         Realiza o download do documento e verifica se é realmente um PDF.
         Retorna os bytes do arquivo ou None se falhar.
         """
-        # Se a sessão não tiver cookies, inicia
         if not self.session.cookies:
             self.iniciar_sessao()
 
         params = {'id': id_documento}
-        
+
         try:
             print(f"📥 Baixando documento ID: {id_documento}...")
-            # Envia a requisição de download usando a sessão
             resposta = self.session.get(self.url_download, params=params, headers=self.headers, timeout=15)
-            
-            # 1. Verifica se a requisição HTTP deu sucesso (Código 200)
             resposta.raise_for_status()
 
-            # 2. A TRAVA MESTRA: Verifica se a B3 mandou um PDF ou uma página de erro HTML
+            # A TRAVA MESTRA 1: Verifica se a B3 mandou um PDF ou uma página de erro HTML
             content_type = resposta.headers.get('Content-Type', '')
             if 'application/pdf' not in content_type:
                 print(f"❌ Falha: O arquivo retornado não é um PDF. Tipo recebido: {content_type}")
                 return None
-            
-            print(f"✅ Sucesso! PDF {id_documento} baixado com sucesso.")
-            return resposta.content # Retorna os bytes do PDF na memória
+
+            print(f"✅ Sucesso! PDF {id_documento} baixado.")
+            return resposta.content 
 
         except requests.exceptions.RequestException as e:
             print(f"❌ Erro de conexão ao baixar o documento {id_documento}: {e}")
@@ -67,14 +63,14 @@ class FnetDownloader:
 
         url_pesquisa = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
 
+        # "ticker" aqui na verdade é a variável "nome_pesquisa" que vem do atualizador (ex: XP MALLS)
         params = {
             'd': '1', 's': '0', 'l': '50', 
             'tipoFundo': '1', 
             'nomeEmissor': ticker,
             'dataInicial': data_inicio
         }
-        
-        # Aqui está a trava: Ele só adiciona o filtro se o chefe mandar
+
         if id_categoria:
             params['idCategoriaDocumento'] = id_categoria
 
@@ -86,11 +82,25 @@ class FnetDownloader:
             ids_encontrados = []
 
             for item in dados_json.get('data', []):
+                # ====================================================================
+                # 🛑 A TRAVA MESTRA 2 (ANTI-VAZAMENTO DE DADOS)
+                # ====================================================================
+                # Transformamos todo o pacote de dados do arquivo em texto maiúsculo
+                dados_brutos_b3 = str(item).upper()
+                termo_busca = ticker.upper()
+
+                # Se o nome que estamos caçando NÃO estiver em lugar nenhum dos metadados...
+                if termo_busca not in dados_brutos_b3:
+                    # Pode ser que a B3 tenha retornado um Ticker diferente. Ignoramos sumariamente.
+                    nome_fundo_errado = item.get('descricaoFundo', 'Fundo Desconhecido')
+                    print(f"🛡️ Vazamento de Dados evitado! A B3 enviou um doc do [{nome_fundo_errado}] enquanto procurávamos [{ticker}]. Descartando.")
+                    continue
+                # ====================================================================
+
                 id_doc = item.get('id')
                 data_ref = item.get('dataReferencia', '').replace('/', '-') 
-                
+
                 if id_doc:
-                    # Ele já devolve o id_categoria junto, para não nos perdermos
                     ids_encontrados.append((str(id_doc), data_ref, str(id_categoria)))
 
             return ids_encontrados
