@@ -9,6 +9,9 @@ JSON_KEY = 'credenciais.json'
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") 
 TELEGRAM_CHAT_ID = "8867098987"
 
+# --- CONFIGURAÇÕES DA IA (GROQ) ---
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+
 # ==========================================
 # PREFERÊNCIAS DO MENU: ⭐ MEUS FAVORITOS
 # ==========================================
