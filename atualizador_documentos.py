@@ -22,7 +22,7 @@ SessionDB = sessionmaker(bind=engine)
 # ==========================================
 # Aqui nós ensinamos ao robô qual é a palavra exata que destrava cada fundo na B3
 MAPA_FNET_B3 = {
-    'XPML11': 'XP MALLS',
+    'XPML11': 'FII XP MALLS',
     'MXRF11': 'MAXI RENDA',
     'HGLG11': 'CGHG LOG', # A B3 usa CGHG e não CSHG na maioria dos casos antigos
     'VISC11': 'VINCI SHOPPING',
