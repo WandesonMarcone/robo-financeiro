@@ -30,21 +30,20 @@ class FnetDownloader:
         except Exception:
             return None
 
-    def capturar_tudo(self, data_inicio, id_categoria):
-        """O ARRASTÃO: Traz TODOS os documentos de TODOS os fundos do Brasil"""
+    def capturar_tudo(self, data_inicio):
+        """O ARRASTÃO GLOBAL: Traz todos os documentos, sem filtrar categoria"""
         if not self.session.cookies:
             self.iniciar_sessao()
 
         url_pesquisa = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
         documentos_gerais = []
 
-        # Vai "paginar" a B3 (de 50 em 50) até acabar os documentos dos últimos 100 dias
         for start in range(0, 3000, 50):
+            # Removemos o 'idCategoriaDocumento' para a B3 não bugar
             params = {
                 'd': '1', 's': str(start), 'l': '50', 
                 'tipoFundo': '1', 
-                'dataInicial': data_inicio,
-                'idCategoriaDocumento': id_categoria
+                'dataInicial': data_inicio
             }
 
             try:
@@ -52,21 +51,26 @@ class FnetDownloader:
                 data = res.json().get('data', [])
                 
                 if not data:
-                    break # Acabaram os documentos dessa categoria!
+                    break 
 
                 for item in data:
                     descricao_fundo = item.get('descricaoFundo', '').upper()
                     id_doc = item.get('id')
                     data_ref = item.get('dataReferencia', '').replace('/', '-')
                     
+                    # A MÁGICA: Pegamos o nome real diretamente da fonte!
+                    # A função .title() deixa o texto bonito (Ex: "Relatório Gerencial")
+                    tipo_doc = item.get('tipoDocumento', 'Documento Sem Tipo').strip().title()
+                    
                     if id_doc:
                         documentos_gerais.append({
                             'id': str(id_doc),
                             'data_ref': data_ref,
-                            'nome_fundo': descricao_fundo
+                            'nome_fundo': descricao_fundo,
+                            'tipo_doc': tipo_doc
                         })
                 
-                time.sleep(0.5) # Pausa educada para a B3 não bloquear
+                time.sleep(0.5) 
             except Exception as e:
                 break
                 
