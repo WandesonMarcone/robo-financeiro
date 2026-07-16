@@ -96,102 +96,83 @@ def rotina_de_atualizacao_em_massa():
         
         print(f"📦 B3 entregou {len(todos_documentos)} documentos. Analisando...")
 
-        for doc in todos_documentos:
-            nome_fundo_b3 = normalizar_texto(doc['nome_fundo'])
-            id_doc = doc['id']
-            data_ref = doc['data_ref']
-            nome_categoria_real = doc['tipo_doc'] # <--- A ETIQUETA REAL DA B3
+    for doc in todos_documentos:
+        nome_fundo_b3 = normalizar_texto(doc['nome_fundo'])
+        id_doc = doc['id']
+        data_ref = doc['data_ref']
+        # Usamos o tipo_doc original como base
+        tipo_original = doc['tipo_doc'] 
 
-        pdf_bytes = b3.baixar_pdf(id_doc)
-        if pdf_bytes:
-            temp_filename = f"/tmp/{ticker}_{id_doc}.pdf"
-            with open(temp_filename, "wb") as f:
-                f.write(pdf_bytes)
-
-            # EXTRAÇÃO DE TEXTO PARA A IA
-            texto_pdf = ""
-            try:
-                reader = PyPDF2.PdfReader(temp_filename)
-                texto_pdf = reader.pages[0].extract_text()
-            except:
-                pass
+        # Verifica se algum dos nossos fundos publicou o documento
+        for ticker in lista_de_fiis:
+            isca = normalizar_texto(MAPA_ISCAS.get(ticker, ticker))
             
-            # IA RENOMEANDO O DOCUMENTO CORRETAMENTE
-            nome_categoria_inteligente = classificar_documento_com_ia(doc['tipo_doc'], texto_pdf)
-            
-            # Arrumando a pasta pelo mês do documento (como você pediu)
-            partes_data = data_ref.split('-')
-            mes_pasta = f"{partes_data[2]}-{partes_data[1]}" if len(partes_data) == 3 else datetime.now().strftime("%Y-%m")
-
-            link_gerado = drive_manager.upload_pdf_organizado(
-                caminho_arquivo=temp_filename,
-                nome_arquivo=f"{nome_categoria_inteligente}_{data_ref}_{id_doc}.pdf",
-                ticker=ticker,
-                mes_ref=mes_pasta
-
-            # Verifica se algum dos nossos fundos publicou o documento
-            for ticker in lista_de_fiis:
-                isca = normalizar_texto(MAPA_ISCAS.get(ticker, ticker))
+            if isca in nome_fundo_b3:
                 
-                # O Match: A isca está dentro do nome bizarro da B3?
-                if isca in nome_fundo_b3:
+                ativo_db = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+                if not ativo_db:
+                    ativo_db = Ativo(ticker=ticker, cnpj=f"PENDENTE-{ticker}", tipo="FII") 
+                    session.add(ativo_db)
+                    session.commit()
+
+                # Trava Anti-Duplicata no Banco
+                doc_existente = session.query(DocumentosQualitativos).filter(
+                    DocumentosQualitativos.ativo_id == ativo_db.id,
+                    DocumentosQualitativos.assunto.contains(id_doc) 
+                ).first()
+
+                if doc_existente:
+                    continue # Já temos, pula para o próximo
+
+                print(f"🎯 MATCH! {ticker} encontrado. Processando documento ID: {id_doc}")
+                pdf_bytes = b3.baixar_pdf(id_doc)
+
+                if pdf_bytes:
+                    temp_filename = f"/tmp/{ticker}_{id_doc}.pdf"
+                    with open(temp_filename, "wb") as f:
+                        f.write(pdf_bytes)
+
+                    # 1. EXTRAÇÃO DE TEXTO PARA A IA
+                    texto_pdf = ""
+                    try:
+                        reader = PyPDF2.PdfReader(temp_filename)
+                        if len(reader.pages) > 0:
+                            texto_pdf = reader.pages[0].extract_text()
+                    except:
+                        pass
                     
-                    ativo_db = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-                    if not ativo_db:
-                        ativo_db = Ativo(ticker=ticker, cnpj=f"PENDENTE-{ticker}", tipo="FII") 
-                        session.add(ativo_db)
-                        session.commit()
+                    # 2. IA RENOMEANDO O DOCUMENTO
+                    nome_categoria_inteligente = classificar_documento_com_ia(tipo_original, texto_pdf)
+                    
+                    # 3. Arrumando a pasta (YYYY-MM)
+                    partes_data = data_ref.split('-')
+                    mes_pasta = f"{partes_data[2]}-{partes_data[1]}" if len(partes_data) == 3 else datetime.now().strftime("%Y-%m")
 
-                    # Trava Anti-Duplicata no Banco
-                    doc_existente = session.query(DocumentosQualitativos).filter(
-                        DocumentosQualitativos.ativo_id == ativo_db.id,
-                        DocumentosQualitativos.assunto.contains(id_doc) 
-                    ).first()
+                    # 4. UPLOAD COM O NOME INTELIGENTE
+                    link_gerado = drive_manager.upload_pdf_organizado(
+                        caminho_arquivo=temp_filename,
+                        nome_arquivo=f"{nome_categoria_inteligente}_{data_ref}_{id_doc}.pdf",
+                        ticker=ticker,
+                        mes_ref=mes_pasta 
+                    )
 
-                    if doc_existente:
-                        continue
+                    if os.path.exists(temp_filename):
+                        os.remove(temp_filename)
 
-                    print(f"🎯 MATCH! {ticker} publicou: {nome_categoria_real} (ID: {id_doc})")
-                    pdf_bytes = b3.baixar_pdf(id_doc)
-
-                    # Só cria a pasta se o arquivo for um PDF real (ignora os XMLs)
-                    if pdf_bytes:
-                        temp_filename = f"/tmp/{ticker}_{id_doc}.pdf"
-                        with open(temp_filename, "wb") as f:
-                            f.write(pdf_bytes)
-
-                        # Arruma a pasta pelo MÊS do documento na B3 (YYYY-MM)
-                        partes_data = data_ref.split('-')
-                        if len(partes_data) == 3:
-                            mes_pasta = f"{partes_data[2]}-{partes_data[1]}" 
-                        else:
-                            mes_pasta = datetime.now().strftime("%Y-%m")
-
-                        link_gerado = drive_manager.upload_pdf_organizado(
-                            caminho_arquivo=temp_filename,
-                            nome_arquivo=f"{nome_categoria_real}_{data_ref}_{id_doc}.pdf",
-                            ticker=ticker,
-                            mes_ref=mes_pasta 
+                    # 5. Salva no Banco de Dados
+                    if link_gerado:
+                        novo_doc = DocumentosQualitativos(
+                            ativo_id=ativo_db.id,
+                            tipo_documento=nome_categoria_inteligente, 
+                            data_publicacao=datetime.now(),
+                            assunto=f"{nome_categoria_inteligente} ref. {data_ref} (ID B3: {id_doc})",
+                            url_pdf=link_gerado
                         )
-
-                        if os.path.exists(temp_filename):
-                            os.remove(temp_filename)
-
-                        # Salva no Banco de Dados com a Categoria Perfeita
-                        if link_gerado:
-                            novo_doc = DocumentosQualitativos(
-                                ativo_id=ativo_db.id,
-                                tipo_documento=nome_categoria_real, 
-                                data_publicacao=datetime.now(),
-                                assunto=f"{nome_categoria_real} ref. {data_ref} (ID B3: {id_doc})",
-                                url_pdf=link_gerado
-                            )
-                            session.add(novo_doc)
-                            session.commit()
-                            relatorios_salvos += 1
-                            print(f"☁️ ✅ Salvo: {ticker} -> {nome_categoria_real} (Pasta: {mes_pasta})")
-                    
-                    break # Documento alocado. Pula para o próximo doc da B3.
+                        session.add(novo_doc)
+                        session.commit()
+                        print(f"☁️ ✅ Salvo: {ticker} -> {nome_categoria_inteligente} (Pasta: {mes_pasta})")
+                
+                break # Encontramos o dono, paramos de procurar tickers para este documento
 
     session.close()
     return relatorios_salvos
