@@ -39,6 +39,31 @@ MAPA_ISCAS = {
     'CVBI11': 'VBI CRI'
 }
 
+from datetime import datetime, timedelta
+from fnet_scraper import FnetDownloader
+
+def descobrir_nomes_oficiais_b3():
+    b3 = FnetDownloader()
+    # Pega a data de 40 dias atrás
+    data_busca = (datetime.now() - timedelta(days=40)).strftime("%d/%m/%Y")
+    
+    print("📡 Baixando o catálogo gigante da B3 dos últimos 40 dias...")
+    
+    # Categoria 14 = Relatório Gerencial (Quase todos publicam todo mês)
+    todos_documentos = b3.capturar_tudo(data_inicio=data_busca, id_categoria="14")
+    
+    # Cria uma lista apenas com os nomes dos fundos, sem repetição
+    nomes_unicos = set()
+    for doc in todos_documentos:
+        nomes_unicos.add(doc['nome_fundo'])
+    
+    print(f"\n📊 Encontrados {len(nomes_unicos)} fundos diferentes que publicaram relatórios.")
+    print("=== LISTA OFICIAL DE NOMES DA B3 ===")
+    
+    # Imprime em ordem alfabética para facilitar sua leitura no Render
+    for nome in sorted(nomes_unicos):
+        print(nome)
+
 def obter_tickers_da_planilha():
     try:
         planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
