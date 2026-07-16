@@ -132,6 +132,22 @@ def enviar_ultimos_relatorios(message):
     finally:
         session.close()
 
+# ==========================================
+# COMANDO SECRETO PARA TESTAR A VARREDURA
+# ==========================================
+@bot.message_handler(commands=['forcar_varredura'])
+def acionar_varredura_manual(message):
+    bot.reply_to(message, "⚙️ *Iniciando varredura manual de documentos na B3...*\nIsso pode levar alguns minutos. Fique de olho nos logs do Render!", parse_mode="Markdown")
+    
+    try:
+        # Importa a função (ajuste o caminho se necessário dependendo de onde está seu arquivo)
+        from atualizador_documentos import rotina_de_atualizacao_em_massa
+        
+        relatorios_baixados = rotina_de_atualizacao_em_massa()
+        
+        bot.reply_to(message, f"✅ *Varredura Concluída!*\n\n📥 Documentos inéditos salvos no Drive: **{relatorios_baixados}**", parse_mode="Markdown")
+    except Exception as e:
+        bot.reply_to(message, f"❌ *Erro na varredura:* {e}", parse_mode="Markdown")
 
 # ==========================================
 # MOTOR DE LOGOS (Google Drive -> GitHub -> Logo.dev)
@@ -636,27 +652,53 @@ def callback_geral(call):
                 bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # =======================================================
-        # 3. SUBMENU: DOCUMENTOS (Links Dinâmicos Inteligentes)
+        # SUBMENU: DOCUMENTOS (Lendo do Banco/Google Drive)
         # =======================================================
         elif dados.startswith("docs_"):
             partes = dados.split("_")
             ticker, tipo = partes[1], partes[2]
             markup = InlineKeyboardMarkup()
+
+            # 1. Abre conexão com o banco para buscar os PDFs salvos
+            session = SessionDB()
+            ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
             
-            # Truque: Como não temos um PDF para cada ativo na planilha ainda,
-            # nós geramos links automáticos para o StatusInvest e Fundamentus!
+            docs_encontrados = False
+
+            if ativo:
+                # Busca os últimos 5 documentos deste ativo, ordenados do mais novo pro mais velho
+                documentos = session.query(DocumentosQualitativos)\
+                                    .filter(DocumentosQualitativos.ativo_id == ativo.id)\
+                                    .order_by(DocumentosQualitativos.data_publicacao.desc())\
+                                    .limit(5).all()
+
+                for doc in documentos:
+                    docs_encontrados = True
+                    # Cria um botão para cada documento usando o nome da categoria salvo pelo Drive!
+                    texto_botao = f"📄 {doc.tipo_documento}"
+                    markup.row(InlineKeyboardButton(texto_botao, url=doc.url_pdf))
+
+            session.close()
+
+            # 2. Mantém o link do StatusInvest como um apoio útil
             categoria_status = "fundos-imobiliarios" if tipo == "fii" else "acoes"
             link_statusinvest = f"https://statusinvest.com.br/{categoria_status}/{ticker.lower()}"
-            link_fundamentus = f"https://www.fundamentus.com.br/detalhes.php?papel={ticker}"
-            
             markup.row(InlineKeyboardButton("📊 Ver no StatusInvest", url=link_statusinvest))
-            markup.row(InlineKeyboardButton("📈 Ver no Fundamentus", url=link_fundamentus))
             markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"{tipo}_{ticker}"))
-            
-            texto_docs = (
-                f"📑 **Central de Documentos: {ticker}**\n\n"
-                f"Acesse os portais abaixo para ler os relatórios gerenciais, balanços oficiais e fatos relevantes atualizados do ativo."
-            )
+
+            # 3. Mensagem dinâmica dependendo se achou PDFs ou não
+            if docs_encontrados:
+                texto_docs = (
+                    f"📑 **Central de Documentos: {ticker}**\n\n"
+                    f"Aqui estão os arquivos oficiais mais recentes que o robô organizou no seu *Google Drive*:"
+                )
+            else:
+                texto_docs = (
+                    f"📑 **Central de Documentos: {ticker}**\n\n"
+                    f"⚠️ O robô ainda não baixou nenhum PDF para este ativo no Drive.\n\n"
+                    f"Você pode consultar o portal abaixo provisoriamente:"
+                )
+
             bot.edit_message_text(texto_docs, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=True)
 
         # =======================================================
