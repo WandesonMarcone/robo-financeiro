@@ -1,14 +1,10 @@
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import config
 from fnet_scraper import FnetDownloader
 from modules.GoogleDriveManager import GoogleDriveManager
 from modules.utils import conectar_gspread
-from datetime import datetime, timedelta
-import requests
-from bs4 import BeautifulSoup
-import re
 
 # ==========================================
 # IMPORTAÇÕES DO BANCO DE DADOS
@@ -20,66 +16,33 @@ from sqlalchemy.orm import sessionmaker
 # Configura a conexão com a sua memória SQLite
 engine = create_engine("sqlite:///pipeline_dados/banco_institucional.db")
 SessionDB = sessionmaker(bind=engine)
-drive_manager = GoogleDriveManager()
 
-def descobrir_nome_oficial_b3(ticker):
-    """
-    Acessa o StatusInvest, pega a Razão Social do FII e limpa o texto
-    para descobrir a palavra-chave exata que a B3 exige, de forma 100% automática.
-    """
-    try:
-        url = f"https://statusinvest.com.br/fundos-imobiliarios/{ticker.lower()}"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/115.0.0.0 Safari/537.36'
-        }
-        resp = requests.get(url, headers=headers, timeout=10)
-        
-        if resp.status_code != 200:
-            return ticker # Se o site falhar, devolve o ticker como plano B
-            
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        razao_social = ""
-        
-        # 1. Procura o campo exato de Razão Social no site
-        h3_razao = soup.find('h3', string=re.compile(r'Razão Social', re.IGNORECASE))
-        if h3_razao:
-            valor_tag = h3_razao.find_next('strong', class_='value')
-            if valor_tag:
-                razao_social = valor_tag.text.strip().upper()
-        
-        # 2. Fallback: Se não achar, pega o subtítulo do cabeçalho
-        if not razao_social:
-            h1_tag = soup.find('h1')
-            if h1_tag and h1_tag.find('small'):
-                razao_social = h1_tag.find('small').text.strip().upper()
-
-        if not razao_social:
-            return ticker 
-
-        # ==============================================================
-        # 🧹 O FILTRO MÁGICO DE LIMPEZA DE DADOS
-        # ==============================================================
-        # Tiramos todas as palavras genéricas institucionais
-        palavras_inuteis = [
-            "FUNDO", "DE", "INVESTIMENTO", "IMOBILIÁRIO", "IMOBILIARIO", 
-            "FII", "FDO", "INV", "IMOB", "RESPONSABILIDADE", "LIMITADA", 
-            "S.A.", "S/A", "-", "MULTIESTRATÉGIA", "LOGÍSTICA", "SHOPPING"
-        ]
-        
-        # Quebra a frase em palavras soltas
-        palavras_soltas = razao_social.replace('-', ' ').split()
-        
-        # Guarda só as palavras importantes (Ex: Sobra "XP" e "MALLS")
-        palavras_uteis = [p for p in palavras_soltas if p not in palavras_inuteis]
-        
-        # Junta as 2 primeiras palavras úteis. É o suficiente para a B3 achar.
-        nome_limpo = " ".join(palavras_uteis[:2])
-        
-        return nome_limpo
-
-    except Exception as e:
-        print(f"⚠️ Erro ao descobrir nome do {ticker}: {e}")
-        return ticker
+# ==========================================
+# 🗺️ O MAPA OFICIAL DA B3 (FORÇA BRUTA)
+# ==========================================
+# Aqui nós ensinamos ao robô qual é a palavra exata que destrava cada fundo na B3
+MAPA_FNET_B3 = {
+    'XPML11': 'XP MALLS',
+    'MXRF11': 'MAXI RENDA',
+    'HGLG11': 'CGHG LOG', # A B3 usa CGHG e não CSHG na maioria dos casos antigos
+    'VISC11': 'VINCI SHOPPING',
+    'KNCR11': 'KINEA RENDIMENTOS',
+    'GARE11': 'GUARDIAN LOG',
+    'BTLG11': 'BTG PACTUAL LOGÍSTICA',
+    'VILG11': 'VINCI LOGÍSTICA',
+    'CPSH11': 'CAPITÂNIA SHOPPING', 
+    'HGCR11': 'CSHG RECEBÍVEIS',
+    'VGIR11': 'VALORA RE III',
+    'RBRY11': 'RBR PRIVATE',
+    'CLIN11': 'CLAVE ÍNDICES',
+    'KNHF11': 'KINEA HEDGE',
+    'KNUQ11': 'KINEA ÚNICO',
+    'BTCI11': 'BTG PACTUAL CRÉDITO',
+    'RZTR11': 'RZ TR P',
+    'GGRC11': 'GGR COVEPI',
+    'TRXF11': 'TRX REAL ESTATE',
+    'CVBI11': 'VBI CRI'
+}
 
 def obter_tickers_da_planilha():
     """Conecta no Google Sheets e puxa todos os FIIs cadastrados na Coluna A."""
@@ -93,11 +56,7 @@ def obter_tickers_da_planilha():
         print(f"Erro ao ler planilha: {e}")
         return []
 
-import os
-import time # Adicionado para dar uma pausa e a B3 não nos bloquear
-
 def rotina_de_atualizacao_em_massa():
-    # A NOSSA PRANCHETA: A lista de tudo que queremos buscar
     MAPA_TIPOS = {
         "14": "Relatório Gerencial",
         "10": "Relatório Trimestral",
@@ -111,20 +70,21 @@ def rotina_de_atualizacao_em_massa():
     b3 = FnetDownloader()
     drive_manager = GoogleDriveManager()
     lista_de_fiis = obter_tickers_da_planilha()
-    print(f"🚀 Iniciando varredura BLINDADA para {len(lista_de_fiis)} FIIs...")
+    print(f"🚀 Iniciando varredura BLINDADA (Modo Dicionário) para {len(lista_de_fiis)} FIIs...")
 
     relatorios_salvos = 0
     session = SessionDB()
-    
-    # ⏪ TESTE DE FOGO: Busca tudo dos últimos 15 dias para popular o Drive
+
+    # ⏪ Busca retroativa de 40 dias
     data_busca = (datetime.now() - timedelta(days=40)).strftime("%d/%m/%Y")
 
-    # 1º LOOP: Passa FII por FII (ex: XPML11, HGLG11...)
+    # 1º LOOP: Passa FII por FII 
     for ticker in lista_de_fiis:
+
+        # Pega a palavra-chave do dicionário (se não achar, tenta usar o próprio ticker)
+        nome_pesquisa = MAPA_FNET_B3.get(ticker, ticker)
         
-        # 🧠 A MÁGICA ACONTECE AQUI: O robô descobre sozinho o nome de busca
-        nome_pesquisa = descobrir_nome_oficial_b3(ticker)
-        print(f"\n🏢 Analisando: {ticker} (Nome na B3: {nome_pesquisa})")
+        print(f"\n🏢 Analisando: {ticker} (Buscando na B3 por: {nome_pesquisa})")
 
         ativo_db = session.query(Ativo).filter(Ativo.ticker == ticker).first()
         if not ativo_db:
@@ -132,13 +92,12 @@ def rotina_de_atualizacao_em_massa():
             session.add(ativo_db)
             session.commit()
 
-        # 2º LOOP (A TRAVA DE SEGURANÇA): Pergunta à B3 categoria por categoria
+        # 2º LOOP: Categoria por Categoria
         for id_categoria, nome_categoria in MAPA_TIPOS.items():
 
-            # ⚠️ Troque data_inicio=data_hoje por data_inicio=data_busca
             documentos = b3.pesquisar_documentos(nome_pesquisa, data_inicio=data_busca, id_categoria=id_categoria)
 
-            # Dá uma pausa de 1 segundo para a B3 não achar que somos um ataque hacker e bloquear nosso IP
+            # Pausa educada para a B3 não nos bloquear
             time.sleep(1)
 
             for id_doc, data_ref, tipo_doc_id in documentos: 
@@ -152,7 +111,7 @@ def rotina_de_atualizacao_em_massa():
                 if doc_existente:
                     continue
 
-                print(f"⬇️ Encontrado: {nome_categoria} (ID B3: {id_doc})")
+                print(f"⬇️ Baixando: {nome_categoria} (ID B3: {id_doc})")
                 pdf_bytes = b3.baixar_pdf(id_doc)
 
                 if pdf_bytes:
@@ -160,15 +119,14 @@ def rotina_de_atualizacao_em_massa():
                     with open(temp_filename, "wb") as f:
                         f.write(pdf_bytes)
 
-                    # Cria a variável com o Mês atual (ex: 2026-07)
                     mes_atual = datetime.now().strftime("%Y-%m")
 
-                    # UPLOAD: Cria a arquitetura DadosFinanceiros -> Fundos Imobiliários -> Ticker -> Mês
+                    # UPLOAD NO DRIVE NA ESTRUTURA CERTA
                     link_gerado = drive_manager.upload_pdf_organizado(
                         caminho_arquivo=temp_filename,
                         nome_arquivo=f"{nome_categoria}_{data_ref}_{id_doc}.pdf",
                         ticker=ticker,
-                        mes_ref=mes_atual # <--- Aqui nós mandamos o Mês em vez da Categoria!
+                        mes_ref=mes_atual 
                     )
 
                     if os.path.exists(temp_filename):
@@ -185,7 +143,7 @@ def rotina_de_atualizacao_em_massa():
                         session.add(novo_doc)
                         session.commit()
                         relatorios_salvos += 1
-                        print(f"✅ Salvo no Drive: {ticker} -> {nome_categoria}")
+                        print(f"☁️ ✅ Salvo no Drive: {ticker} -> {nome_categoria}")
 
     session.close()
     return relatorios_salvos
