@@ -164,10 +164,27 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             # Captura de indicadores de saúde do fundo
             pvp = formatar(f.get('P/VP', 0))
             dy = formatar(f.get('Dividend Yield', 0))
-            vacancia = formatar(f.get('Vacância Média', 0))
             liquidez = formatar(f.get('Liquidez', 0))
             valor_mercado = formatar(f.get('Valor de Mercado', 0))
+            # 1. Pega os dados básicos (Fundamentus)
+            vacancia = formatar(f.get('Vacância Média', 0))
             qtd_imoveis = formatar(f.get('Qtd de imóveis', 0)) 
+            inquilinos_planilha = "N/D"
+
+            # 2. Faz a auditoria profunda no StatusInvest para ativos de Tijolo ou Híbridos
+            if tipo in ["Tijolo", "Híbrido", "FOF"]:
+                dados_profundos = buscar_dados_profundos_fii(ticker)
+                
+                if dados_profundos:
+                    # Se achou vacância real, substitui a mentira do Fundamentus
+                    if dados_profundos["vacancia_real"] is not None:
+                        vacancia = dados_profundos["vacancia_real"]
+                    
+                    # Se achou a quantidade de imóveis real, substitui
+                    if dados_profundos["imoveis_reais"] is not None:
+                        qtd_imoveis = dados_profundos["imoveis_reais"]
+
+                    inquilinos_planilha = dados_profundos["principais_inquilinos"]
 
             # Tratamento de segurança contra divisão por zero para cálculos derivados
             vpa = (preco / pvp) if pvp > 0 else 0
