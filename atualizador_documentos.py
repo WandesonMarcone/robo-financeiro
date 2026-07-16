@@ -119,7 +119,7 @@ def rotina_de_atualizacao_em_massa():
                         caminho_arquivo=temp_filename,
                         nome_arquivo=f"{nome_categoria_real}_{data_ref}_{id_doc}.pdf",
                         ticker=ticker,
-                        mes_ref=mes_atual # ❌ O ERRO ESTÁ NESTA PALAVRA
+                        mes_ref=mes_pasta # ✅ VARIÁVEL CORRETA
                     )
 
                     if os.path.exists(temp_filename):
