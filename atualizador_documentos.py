@@ -109,12 +109,15 @@ def rotina_de_atualizacao_em_massa():
                     with open(temp_filename, "wb") as f:
                         f.write(pdf_bytes)
 
-                    # UPLOAD: Cria as pastas automaticamente Ex: Drive/HGLG11/Fato Relevante/...
+                    # Cria a variável com o Mês atual (ex: 2026-07)
+                    mes_atual = datetime.now().strftime("%Y-%m")
+
+                    # UPLOAD: Cria a arquitetura DadosFinanceiros -> Fundos Imobiliários -> Ticker -> Mês
                     link_gerado = drive_manager.upload_pdf_organizado(
                         caminho_arquivo=temp_filename,
                         nome_arquivo=f"{nome_categoria}_{data_ref}_{id_doc}.pdf",
                         ticker=ticker,
-                        categoria=nome_categoria 
+                        mes_ref=mes_atual # <--- Aqui nós mandamos o Mês em vez da Categoria!
                     )
 
                     if os.path.exists(temp_filename):
