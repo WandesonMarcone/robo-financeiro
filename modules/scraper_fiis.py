@@ -205,7 +205,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
                 dy,                     # 06 | Coluna G: Dividend Yield
                 vacancia,               # 07 | Coluna H: Vacância Física/Financeira Média
                 qtd_imoveis,            # 08 | Coluna I: Quantidade Física de Imóveis
-                inquilinos_planilha     # 09 | Coluna J: LISTA DE INQUILINOS (Nova Coluna!)
+                inquilinos_planilha,     # 09 | Coluna J: LISTA DE INQUILINOS (Nova Coluna!)
                 "Pendente de IA",       # 10 | Coluna K: WALT 
                 "Pendente de IA",       # 11 | Coluna L: Alavancagem / Dívida
                 liquidez,               # 12 | Coluna M: Liquidez Média Diária Negociada
@@ -213,7 +213,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
                 vpa,                    # 14 | Coluna O: Valor Patrimonial Justo da Cota
                 lucro_12m,              # 15 | Coluna P: Montante de Lucro Distribuído (12M)
                 media_div_mensal,       # 16 | Coluna Q: Projeção de Dividendo Mensal
-                f"{agora_sp} OK",       # 17 | Coluna R: Carimbo de Conclusão da Carga
+                f"{agora_sp} OK"       # 17 | Coluna R: Carimbo de Conclusão da Carga
             ]
 
             # Sub-seleção para atualização (Ignora a coluna A se o fundo já existir)
