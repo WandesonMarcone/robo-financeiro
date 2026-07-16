@@ -78,6 +78,12 @@ def normalizar_texto(texto):
     return ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
 
 def rotina_de_atualizacao_em_massa():
+    
+    # 👇 ADICIONE ESTAS 3 LINHAS AQUI PARA O TESTE 👇
+    print("🛑 INICIANDO MODO DIAGNÓSTICO: RASTREADOR DE NOMES DA B3...")
+    descobrir_nomes_oficiais_b3()
+    return 0  # <--- Isso faz o robô parar depois de mostrar a lista, sem baixar PDFs!
+    # 👆 ========================================= 👆
     MAPA_TIPOS = {
         "14": "Relatório Gerencial",
         "10": "Relatório Trimestral",
