@@ -19,9 +19,6 @@ class FnetDownloader:
         self.url_download = "https://fnet.bmfbovespa.com.br/fnet/publico/downloadDocumento"
 
     def iniciar_sessao(self):
-        """
-        Faz uma requisição inicial apenas para receber os cookies da B3 (JSESSIONID)
-        """
         try:
             url_inicial = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
             self.session.get(url_inicial, headers=self.headers, timeout=10)
@@ -30,34 +27,29 @@ class FnetDownloader:
             print(f"⚠️ Erro ao iniciar sessão com a B3: {e}")
 
     def baixar_pdf(self, id_documento):
-        """
-        Realiza o download do documento e verifica se é realmente um PDF.
-        Retorna os bytes do arquivo ou None se falhar.
-        """
         if not self.session.cookies:
             self.iniciar_sessao()
 
         params = {'id': id_documento}
 
         try:
-            print(f"📥 Baixando documento ID: {id_documento}...")
+            # print(f"📥 Baixando documento ID: {id_documento}...") # Removido para limpar os logs
             resposta = self.session.get(self.url_download, params=params, headers=self.headers, timeout=15)
             resposta.raise_for_status()
 
-            # A TRAVA MESTRA 1: Verifica se a B3 mandou um PDF ou uma página de erro HTML
+            # A TRAVA MESTRA 1: Verifica se a B3 mandou um PDF ou um XML de erro
             content_type = resposta.headers.get('Content-Type', '')
             if 'application/pdf' not in content_type:
-                print(f"❌ Falha: O arquivo retornado não é um PDF. Tipo recebido: {content_type}")
+                print(f"❌ Falha: O arquivo ID {id_documento} não é um PDF. Tipo: {content_type}")
                 return None
 
-            print(f"✅ Sucesso! PDF {id_documento} baixado.")
+            print(f"✅ Sucesso! PDF {id_documento} baixado da B3.")
             return resposta.content 
 
         except requests.exceptions.RequestException as e:
             print(f"❌ Erro de conexão ao baixar o documento {id_documento}: {e}")
             return None
 
-    # MUDANÇA AQUI: Recebemos o "nome_pesquisa" diretamente (Ex: XP MALLS)
     def pesquisar_documentos(self, nome_pesquisa, data_inicio="01/01/2026", id_categoria=None):
         if not self.session.cookies:
             self.iniciar_sessao()
@@ -67,7 +59,7 @@ class FnetDownloader:
         params = {
             'd': '1', 's': '0', 'l': '50', 
             'tipoFundo': '1', 
-            'nomeEmissor': nome_pesquisa, # Usando a variável correta que chega na função
+            'nomeEmissor': nome_pesquisa, 
             'dataInicial': data_inicio
         }
 
@@ -81,15 +73,16 @@ class FnetDownloader:
             dados_json = resposta.json()
             ids_encontrados = []
 
-            print(f"DEBUG: B3 retornou {len(dados_json.get('data', []))} itens para a busca [{nome_pesquisa}].")
+            # print(f"DEBUG: B3 retornou {len(dados_json.get('data', []))} itens para a busca [{nome_pesquisa}].")
 
             for item in dados_json.get('data', []):
                 descricao_fundo = item.get('descricaoFundo', '').upper()
                 termo_busca = nome_pesquisa.upper() 
 
-                # A TRAVA MESTRA: Verifica se a palavra exata (XP MALLS) está no nome que a B3 enviou
+                # A TRAVA MESTRA 2: Só aceita se a palavra-chave estiver dentro da descrição oficial
                 if termo_busca not in descricao_fundo:
-                    print(f"🛡️ Descartando doc de: {descricao_fundo} (Procurando: {termo_busca})")
+                    # Descomente o print abaixo caso queira ver o escudo descartando coisas
+                    # print(f"🛡️ Descartando doc de: {descricao_fundo} (Procurando: {termo_busca})")
                     continue
 
                 id_doc = item.get('id')
