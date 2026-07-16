@@ -5,6 +5,7 @@ import config
 from fnet_scraper import FnetDownloader
 from modules.GoogleDriveManager import GoogleDriveManager
 from modules.utils import conectar_gspread
+from datetime import datetime, timedelta
 
 # ==========================================
 # IMPORTAÇÕES DO BANCO DE DADOS
@@ -64,9 +65,12 @@ def rotina_de_atualizacao_em_massa():
 
     relatorios_salvos = 0
     session = SessionDB()
-    data_hoje = datetime.now().strftime("%d/%m/%Y")
+    
+    # ⏪ TESTE DE FOGO: Busca tudo dos últimos 15 dias para popular o Drive
+    data_busca = (datetime.now() - timedelta(days=15)).strftime("%d/%m/%Y")
 
     # 1º LOOP: Passa FII por FII (ex: XPML11, HGLG11...)
+
     for ticker in lista_de_fiis:
         nome_pesquisa = ticker
         for chave, valor in MAPA_FNET_B3.items():
@@ -84,8 +88,9 @@ def rotina_de_atualizacao_em_massa():
 
         # 2º LOOP (A TRAVA DE SEGURANÇA): Pergunta à B3 categoria por categoria
         for id_categoria, nome_categoria in MAPA_TIPOS.items():
-            
-            documentos = b3.pesquisar_documentos(nome_pesquisa, data_inicio=data_hoje, id_categoria=id_categoria)
+
+            # ⚠️ Troque data_inicio=data_hoje por data_inicio=data_busca
+            documentos = b3.pesquisar_documentos(nome_pesquisa, data_inicio=data_busca, id_categoria=id_categoria)
 
             # Dá uma pausa de 1 segundo para a B3 não achar que somos um ataque hacker e bloquear nosso IP
             time.sleep(1)
