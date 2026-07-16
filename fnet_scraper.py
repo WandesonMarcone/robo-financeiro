@@ -58,9 +58,10 @@ class FnetDownloader:
                     id_doc = item.get('id')
                     data_ref = item.get('dataReferencia', '').replace('/', '-')
                     
-                    # A MÁGICA: Pegamos o nome real diretamente da fonte!
-                    # A função .title() deixa o texto bonito (Ex: "Relatório Gerencial")
-                    tipo_doc = item.get('tipoDocumento', 'Documento Sem Tipo').strip().title()
+                    # A MÁGICA ATUALIZADA:
+                    tipo_doc = item.get('tipoDocumento', '').strip().title()
+                    if not tipo_doc:
+                        tipo_doc = "Documento Nao Classificado"
                     
                     if id_doc:
                         documentos_gerais.append({
