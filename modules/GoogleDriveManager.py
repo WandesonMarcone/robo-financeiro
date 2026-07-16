@@ -50,39 +50,32 @@ class GoogleDriveManager:
         return pasta.get('id')
 
     def upload_pdf_organizado(self, caminho_arquivo, nome_arquivo, ticker, mes_ref):
-        """
-        Cria a hierarquia estrita: DadosFinanceiros -> Fundos Imobiliários -> Ticker -> Mês
-        e faz o upload do PDF.
-        """
-        print(f"☁️ Estruturando pastas: DadosFinanceiros -> Fundos Imobiliários -> {ticker} -> {mes_ref}...")
         try:
-            # 1. Nível 1: Pasta Raiz
+            print(f"☁️ Estruturando pastas: Fundos Imobiliários -> {ticker} -> {mes_ref}...")
             
-            # 2. Nível 2: Categoria de Ativo
-            fiis_id = self._obter_ou_criar_pasta("Fundos Imobiliários", parent_id=dados_fin_id)
+            # 1. Pasta Raiz (Fundos Imobiliários)
+            fiis_id = self._obter_ou_criar_pasta("Fundos Imobiliários")
             
-            # 3. Nível 3: O Fundo Específico
+            # 2. Pasta do Ticker (Ex: BTLG11)
             ticker_id = self._obter_ou_criar_pasta(ticker, parent_id=fiis_id)
             
-            # 4. Nível 4: O Mês do Documento
+            # 3. Pasta do Mês (Ex: 2026-07)
             mes_id = self._obter_ou_criar_pasta(mes_ref, parent_id=ticker_id)
 
-            # 5. Prepara o metadado apontando para a pasta do mês
+            # Faz o upload do arquivo para a pasta do mês
             file_metadata = {
                 'name': nome_arquivo,
                 'parents': [mes_id]
             }
             media = MediaFileUpload(caminho_arquivo, mimetype='application/pdf', resumable=True)
-
-            # 6. Upload físico
-            arquivo = self.service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-            file_id = arquivo.get('id')
-
-            # 7. Permissão pública
-            self.service.permissions().create(fileId=file_id, body={'type': 'anyone', 'role': 'reader'}).execute()
-            link_final = self.service.files().get(fileId=file_id, fields='webViewLink').execute()
             
-            return link_final.get('webViewLink')
+            arquivo_upado = self.service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id, webViewLink'
+            ).execute()
+
+            return arquivo_upado.get('webViewLink')
 
         except Exception as e:
             print(f"❌ Erro ao organizar pastas no Google Drive: {e}")
