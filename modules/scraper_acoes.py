@@ -102,7 +102,6 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
             pl = formatar(f.get('P/L', 0)) if f.get('P/L') else ((preco / lpa_yf) if lpa_yf > 0 else 0)
             pvp = formatar(f.get('P/VP', 0)) if f.get('P/VP') else ((preco / vpa_yf) if vpa_yf > 0 else 0)
             roe = formatar(f.get('ROE', 0))
-            setor = yf_info.get('sector', 'N/D')
 
             # =========================================================================
             # 🗺️ MAPEAMENTO COMPLETO (32 Colunas: B até AG)
