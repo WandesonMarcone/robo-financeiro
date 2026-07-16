@@ -7,8 +7,6 @@ class FnetDownloader:
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1'
         }
         self.url_download = "https://fnet.bmfbovespa.com.br/fnet/publico/downloadDocumento"
 
@@ -16,66 +14,60 @@ class FnetDownloader:
         try:
             url_inicial = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
             self.session.get(url_inicial, headers=self.headers, timeout=10)
-        except Exception as e:
-            print(f"⚠️ Erro ao iniciar sessão com a B3: {e}")
+        except Exception:
+            pass
 
     def baixar_pdf(self, id_documento):
         if not self.session.cookies:
             self.iniciar_sessao()
-
         params = {'id': id_documento}
         try:
-            resposta = self.session.get(self.url_download, params=params, headers=self.headers, timeout=15)
-            resposta.raise_for_status()
-
-            # Evita baixar arquivos XML mascarados
-            content_type = resposta.headers.get('Content-Type', '')
-            if 'application/pdf' not in content_type:
+            res = self.session.get(self.url_download, params=params, headers=self.headers, timeout=15)
+            res.raise_for_status()
+            if 'application/pdf' not in res.headers.get('Content-Type', ''):
                 return None
-
-            return resposta.content 
+            return res.content 
         except Exception:
             return None
 
-    def pesquisar_documentos(self, nome_pesquisa, data_inicio="01/01/2026", id_categoria=None):
+    def capturar_tudo(self, data_inicio, id_categoria):
+        """O ARRASTÃO: Traz TODOS os documentos de TODOS os fundos do Brasil"""
         if not self.session.cookies:
             self.iniciar_sessao()
 
         url_pesquisa = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
+        documentos_gerais = []
 
-        # Aqui usamos o ID numérico da categoria para evitar bugs da B3
-        params = {
-            'd': '1', 's': '0', 'l': '50', 
-            'tipoFundo': '1', 
-            'nomeEmissor': nome_pesquisa, 
-            'dataInicial': data_inicio
-        }
+        # Vai "paginar" a B3 (de 50 em 50) até acabar os documentos dos últimos 100 dias
+        for start in range(0, 3000, 50):
+            params = {
+                'd': '1', 's': str(start), 'l': '50', 
+                'tipoFundo': '1', 
+                'dataInicial': data_inicio,
+                'idCategoriaDocumento': id_categoria
+            }
 
-        if id_categoria:
-            params['idCategoriaDocumento'] = id_categoria
+            try:
+                res = self.session.get(url_pesquisa, params=params, headers=self.headers, timeout=15)
+                data = res.json().get('data', [])
+                
+                if not data:
+                    break # Acabaram os documentos dessa categoria!
 
-        try:
-            resposta = self.session.get(url_pesquisa, params=params, headers=self.headers, timeout=15)
-            resposta.raise_for_status()
-
-            dados_json = resposta.json()
-            ids_encontrados = []
-
-            for item in dados_json.get('data', []):
-                descricao_fundo = item.get('descricaoFundo', '').upper()
-                termo_busca = nome_pesquisa.upper() 
-
-                # MODO ESPIÃO: Se achou a palavra, imprime o nome oficial no log!
-                if termo_busca in descricao_fundo:
-                    print(f"🕵️ MODO ESPIÃO -> Nome oficial na B3: {descricao_fundo}")
-                    
+                for item in data:
+                    descricao_fundo = item.get('descricaoFundo', '').upper()
                     id_doc = item.get('id')
-                    data_ref = item.get('dataReferencia', '').replace('/', '-') 
+                    data_ref = item.get('dataReferencia', '').replace('/', '-')
+                    
                     if id_doc:
-                        ids_encontrados.append((str(id_doc), data_ref, str(id_categoria)))
-
-            return ids_encontrados
-
-        except Exception as e:
-            print(f"❌ Erro ao pesquisar {nome_pesquisa}: {e}")
-            return []
+                        documentos_gerais.append({
+                            'id': str(id_doc),
+                            'data_ref': data_ref,
+                            'nome_fundo': descricao_fundo
+                        })
+                
+                time.sleep(0.5) # Pausa educada para a B3 não bloquear
+            except Exception as e:
+                break
+                
+        return documentos_gerais
