@@ -7,18 +7,7 @@ from datetime import datetime
 import pytz
 import config
 from modules.utils import formatar, precisa_atualizar, get_request_with_retry
-import google.generativeai as genai
 
-
-def extrair_metadados_pdf(caminho_pdf):
-    """Envia o PDF para o Gemini extrair WALT e Alavancagem."""
-    # Configuração do modelo (Certifique-se de que a chave está no config)
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    
-    # Lógica de upload do arquivo para o Gemini e extração de texto/json
-    prompt = "Extraia o WALT, o percentual de Alavancagem e os principais inquilinos deste PDF."
-    # ... chamada ao modelo ...
-    return {"walt": "5.2 anos", "alavancagem": "15%"}
 
 def classificar_fii_e_emoji(setor):
     """
