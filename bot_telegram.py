@@ -4,10 +4,12 @@ import io
 import json
 import requests
 import os
+import config
+import threading
+import pytz # Para lidar com o fuso horário do Brasil
 from flask import Flask, request
 from sqlalchemy import func, create_engine
 from sqlalchemy.orm import sessionmaker
-import config
 from atualizador_documentos import rotina_de_atualizacao_em_massa
 from modules.utils import conectar_gspread
 from pipeline_dados import coletor_cvm
@@ -18,7 +20,6 @@ from modules.GoogleDriveManager import GoogleDriveManager
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-import pytz # Para lidar com o fuso horário do Brasil
 
 # ==========================================
 # CONFIGURAÇÕES INICIAIS
