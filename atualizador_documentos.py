@@ -86,6 +86,7 @@ def rotina_de_atualizacao_em_massa():
                     session.commit()
 
                 if session.query(DocumentosQualitativos).filter(DocumentosQualitativos.assunto.contains(id_doc)).first():
+        print(f"🔄 Processando documento {id_doc}...") # ADICIONE ISSO AQUI
                     continue
 
                 # 2. Download
