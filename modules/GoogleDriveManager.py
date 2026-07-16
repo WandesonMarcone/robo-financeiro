@@ -57,7 +57,6 @@ class GoogleDriveManager:
         print(f"☁️ Estruturando pastas: DadosFinanceiros -> Fundos Imobiliários -> {ticker} -> {mes_ref}...")
         try:
             # 1. Nível 1: Pasta Raiz
-            dados_fin_id = self._obter_ou_criar_pasta("DadosFinanceiros")
             
             # 2. Nível 2: Categoria de Ativo
             fiis_id = self._obter_ou_criar_pasta("Fundos Imobiliários", parent_id=dados_fin_id)
