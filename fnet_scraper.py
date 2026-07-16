@@ -57,17 +57,17 @@ class FnetDownloader:
             print(f"❌ Erro de conexão ao baixar o documento {id_documento}: {e}")
             return None
 
-    def pesquisar_documentos(self, ticker, data_inicio="01/01/2026", id_categoria=None):
+    # MUDANÇA AQUI: Recebemos o "nome_pesquisa" diretamente (Ex: XP MALLS)
+    def pesquisar_documentos(self, nome_pesquisa, data_inicio="01/01/2026", id_categoria=None):
         if not self.session.cookies:
             self.iniciar_sessao()
 
         url_pesquisa = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
 
-        # "ticker" aqui na verdade é a variável "nome_pesquisa" que vem do atualizador (ex: XP MALLS)
         params = {
             'd': '1', 's': '0', 'l': '50', 
             'tipoFundo': '1', 
-            'nomeEmissor': nome_pesquisa, # <-- Usa o nome aqui
+            'nomeEmissor': nome_pesquisa, # Usando a variável correta que chega na função
             'dataInicial': data_inicio
         }
 
@@ -80,30 +80,26 @@ class FnetDownloader:
 
             dados_json = resposta.json()
             ids_encontrados = []
-            
-            # ADICIONE ESTE PRINT PARA DEPURAR
-            print(f"DEBUG: B3 retornou {len(dados_json.get('data', []))} itens para o fundo {ticker}.")
+
+            print(f"DEBUG: B3 retornou {len(dados_json.get('data', []))} itens para a busca [{nome_pesquisa}].")
 
             for item in dados_json.get('data', []):
-                # 🛑 A TRAVA MESTRA CORRIGIDA
                 descricao_fundo = item.get('descricaoFundo', '').upper()
-                
-                # A trava agora procura "XP MALLS" em vez de "XPML11"
                 termo_busca = nome_pesquisa.upper() 
 
+                # A TRAVA MESTRA: Verifica se a palavra exata (XP MALLS) está no nome que a B3 enviou
                 if termo_busca not in descricao_fundo:
-                    # DEBUG: Isso vai nos mostrar o que ele está descartando e por quê
-                    print(f"DEBUG: Descartando doc de: {descricao_fundo} (Procurando: {termo_busca})")
+                    print(f"🛡️ Descartando doc de: {descricao_fundo} (Procurando: {termo_busca})")
                     continue
 
                 id_doc = item.get('id')
                 data_ref = item.get('dataReferencia', '').replace('/', '-') 
-                
+
                 if id_doc:
                     ids_encontrados.append((str(id_doc), data_ref, str(id_categoria)))
 
             return ids_encontrados
 
         except Exception as e:
-            print(f"❌ Erro ao pesquisar {ticker} na categoria {id_categoria}: {e}")
+            print(f"❌ Erro ao pesquisar {nome_pesquisa} na categoria {id_categoria}: {e}")
             return []
