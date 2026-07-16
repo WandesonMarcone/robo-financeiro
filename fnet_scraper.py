@@ -7,6 +7,8 @@ class FnetDownloader:
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
         }
         self.url_download = "https://fnet.bmfbovespa.com.br/fnet/publico/downloadDocumento"
 
@@ -15,33 +17,37 @@ class FnetDownloader:
             url_inicial = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
             self.session.get(url_inicial, headers=self.headers, timeout=10)
         except Exception as e:
-            print(f"⚠️ Erro na sessão B3: {e}")
+            print(f"⚠️ Erro ao iniciar sessão com a B3: {e}")
 
     def baixar_pdf(self, id_documento):
         if not self.session.cookies:
             self.iniciar_sessao()
+
         params = {'id': id_documento}
         try:
             resposta = self.session.get(self.url_download, params=params, headers=self.headers, timeout=15)
             resposta.raise_for_status()
 
-            if 'application/pdf' not in resposta.headers.get('Content-Type', ''):
-                return None # Ignora silenciosamente os XMLs da B3
+            # Evita baixar arquivos XML mascarados
+            content_type = resposta.headers.get('Content-Type', '')
+            if 'application/pdf' not in content_type:
+                return None
 
             return resposta.content 
         except Exception:
             return None
 
-    def pesquisar_documentos(self, cnpj, data_inicio="01/01/2026", id_categoria=None):
+    def pesquisar_documentos(self, nome_pesquisa, data_inicio="01/01/2026", id_categoria=None):
         if not self.session.cookies:
             self.iniciar_sessao()
 
         url_pesquisa = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
 
+        # Aqui usamos o ID numérico da categoria para evitar bugs da B3
         params = {
             'd': '1', 's': '0', 'l': '50', 
             'tipoFundo': '1', 
-            'nomeEmissor': cnpj, # O SEGREDO: A B3 aceita o CNPJ neste campo!
+            'nomeEmissor': nome_pesquisa, 
             'dataInicial': data_inicio
         }
 
@@ -55,15 +61,21 @@ class FnetDownloader:
             dados_json = resposta.json()
             ids_encontrados = []
 
-            # Sem travas de texto. Se veio pelo CNPJ, é o documento certo.
             for item in dados_json.get('data', []):
-                id_doc = item.get('id')
-                data_ref = item.get('dataReferencia', '').replace('/', '-') 
-                if id_doc:
-                    ids_encontrados.append((str(id_doc), data_ref, str(id_categoria)))
+                descricao_fundo = item.get('descricaoFundo', '').upper()
+                termo_busca = nome_pesquisa.upper() 
+
+                # MODO ESPIÃO: Se achou a palavra, imprime o nome oficial no log!
+                if termo_busca in descricao_fundo:
+                    print(f"🕵️ MODO ESPIÃO -> Nome oficial na B3: {descricao_fundo}")
+                    
+                    id_doc = item.get('id')
+                    data_ref = item.get('dataReferencia', '').replace('/', '-') 
+                    if id_doc:
+                        ids_encontrados.append((str(id_doc), data_ref, str(id_categoria)))
 
             return ids_encontrados
 
         except Exception as e:
-            print(f"❌ Erro ao pesquisar {cnpj}: {e}")
+            print(f"❌ Erro ao pesquisar {nome_pesquisa}: {e}")
             return []
