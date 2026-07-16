@@ -4,6 +4,7 @@ import io
 import json
 import requests
 import os
+import time
 import config
 import threading
 import pytz # Para lidar com o fuso horário do Brasil
@@ -90,6 +91,7 @@ def comando_auditoria_fnet(message):
 
 @bot.message_handler(commands=['mapear_nomes'])
 def comando_mapear_nomes_b3(message):
+    
     bot.send_message(message.chat.id, "🕵️‍♂️ Iniciando auditoria profunda. A B3 costuma ser lenta, então ativei o modo de 'Espera Longa' com tentativas automáticas. Isso pode levar alguns minutos...")
     
     url = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
@@ -145,6 +147,7 @@ def comando_mapear_nomes_b3(message):
             
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Erro crítico ao mapear: {str(e)}")
+
 
 # ==========================================
 # COMANDO: ADICIONAR ATIVO (/adicionar)
