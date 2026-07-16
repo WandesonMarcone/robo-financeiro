@@ -227,7 +227,7 @@ def _buscar_dados_planilha(ticker, is_fii):
                 "preco": row[3],   # Coluna D
                 "pvp": row[5],     # Coluna F
                 "dy": row[6],      # Coluna G
-                "vpa": row[13],    # Coluna N
+                "vpa": row[14],    # Coluna N
                 "raw": row         # Guarda a linha toda caso precise de detalhes
             }
         else:
@@ -591,7 +591,6 @@ def callback_geral(call):
                     texto = "📭 *Nenhuma oportunidade encontrada.*\n\nNenhum ativo atendeu aos critérios rigorosos do seu filtro atual."
                 
                 # 2. Adiciona os botões de gestão na parte inferior
-                markup.row(InlineKeyboardButton("✏️ Editar Filtros", callback_data=f"editar_{tipo}"))
                 markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
                 
                 bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
