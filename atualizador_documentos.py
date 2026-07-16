@@ -76,7 +76,7 @@ def rotina_de_atualizacao_em_massa():
     session = SessionDB()
 
     # ⏪ Busca retroativa de 40 dias
-    data_busca = (datetime.now() - timedelta(days=40)).strftime("%d/%m/%Y")
+    data_busca = (datetime.now() - timedelta(days=100)).strftime("%d/%m/%Y")
 
     # 1º LOOP: Passa FII por FII 
     for ticker in lista_de_fiis:
