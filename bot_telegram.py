@@ -49,6 +49,9 @@ def webhook_handler():
 def index():
     return "Bot Institucional Ativo e Operante!", 200
 
+# ==========================================
+# COMANDO: FNET/B3  (/auditar) (/mapear_nomes)
+# ==========================================
 import requests
 import json
 
@@ -84,6 +87,50 @@ def comando_auditoria_fnet(message):
             
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Erro na auditoria: {str(e)}")
+
+@bot.message_handler(commands=['mapear_nomes'])
+def comando_mapear_nomes_b3(message):
+    bot.send_message(message.chat.id, "🕵️‍♂️ Iniciando auditoria profunda. Baixando o catálogo de nomes da B3 dos últimos meses...\nIsso pode levar cerca de 30 segundos.")
+    
+    url = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'}
+    
+    nomes_unicos = set()
+    
+    try:
+        # Varre os últimos 5000 documentos da B3 (Traz um bom histórico recente)
+        for start in range(0, 5000, 50):
+            params = {'d': '1', 's': str(start), 'l': '50', 'tipoFundo': '1'}
+            res = requests.get(url, params=params, headers=headers, timeout=10)
+            data = res.json().get('data', [])
+            
+            if not data:
+                break
+                
+            for item in data:
+                descricao = item.get('descricaoFundo', '').upper().strip()
+                if descricao:
+                    nomes_unicos.add(descricao)
+                    
+            time.sleep(0.5) # Pausa amigável para não levar ban da B3
+            
+        # Pega a lista, ordena em ordem alfabética e transforma em texto
+        lista_ordenada = sorted(list(nomes_unicos))
+        texto_final = "\n".join(lista_ordenada)
+        
+        # Salva em um arquivo TXT temporário
+        caminho_arquivo = "/tmp/nomes_b3_auditoria.txt"
+        with open(caminho_arquivo, "w", encoding="utf-8") as f:
+            f.write(f"--- CATÁLOGO DE NOMES DA B3 ({len(lista_ordenada)} fundos encontrados) ---\n\n")
+            f.write(texto_final)
+            
+        # Envia o arquivo TXT pelo Telegram
+        with open(caminho_arquivo, "rb") as f:
+            bot.send_document(message.chat.id, f, caption="🎯 Auditoria concluída! Aqui está a lista exata de como a B3 escreve o nome dos fundos.\n\nAbra esse arquivo, pesquise pelos seus FIIs e use os nomes exatos para atualizar o seu `MAPA_ISCAS`.")
+            
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Erro ao mapear: {str(e)}")
+
 
 # ==========================================
 # COMANDO: ADICIONAR ATIVO (/adicionar)
