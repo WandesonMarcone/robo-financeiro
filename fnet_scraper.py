@@ -82,24 +82,19 @@ class FnetDownloader:
             ids_encontrados = []
 
             for item in dados_json.get('data', []):
-                # ====================================================================
-                # 🛑 A TRAVA MESTRA 2 (ANTI-VAZAMENTO DE DADOS)
-                # ====================================================================
-                # Transformamos todo o pacote de dados do arquivo em texto maiúsculo
-                dados_brutos_b3 = str(item).upper()
-                termo_busca = ticker.upper()
+                # 🛡️ TRAVA DE PRECISÃO ABSOLUTA
+                descricao_fundo = item.get('descricaoFundo', '').upper()
+                ticker_buscado = ticker.upper()
 
-                # Se o nome que estamos caçando NÃO estiver em lugar nenhum dos metadados...
-                if termo_busca not in dados_brutos_b3:
-                    # Pode ser que a B3 tenha retornado um Ticker diferente. Ignoramos sumariamente.
-                    nome_fundo_errado = item.get('descricaoFundo', 'Fundo Desconhecido')
-                    print(f"🛡️ Vazamento de Dados evitado! A B3 enviou um doc do [{nome_fundo_errado}] enquanto procurávamos [{ticker}]. Descartando.")
+                # Verifica se o ticker está exatamente na descrição do fundo
+                # Isso impede que o "GUARDIAN" (GARE11) pegue documentos do "GUARDIAN LIQUIDEZ DI"
+                if ticker_buscado not in descricao_fundo:
+                    print(f"🛡️ Descartando doc de: {descricao_fundo} (Procurando: {ticker_buscado})")
                     continue
-                # ====================================================================
 
                 id_doc = item.get('id')
                 data_ref = item.get('dataReferencia', '').replace('/', '-') 
-
+                
                 if id_doc:
                     ids_encontrados.append((str(id_doc), data_ref, str(id_categoria)))
 
