@@ -68,7 +68,7 @@ def rotina_de_atualizacao_em_massa():
     session = SessionDB()
     
     # ⏪ TESTE DE FOGO: Busca tudo dos últimos 15 dias para popular o Drive
-    data_busca = (datetime.now() - timedelta(days=15)).strftime("%d/%m/%Y")
+    data_busca = (datetime.now() - timedelta(days=40)).strftime("%d/%m/%Y")
 
     # 1º LOOP: Passa FII por FII (ex: XPML11, HGLG11...)
 
