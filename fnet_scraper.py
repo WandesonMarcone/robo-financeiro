@@ -38,7 +38,7 @@ class FnetDownloader:
         url_pesquisa = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
         documentos_gerais = []
 
-        for start in range(0, 3000, 50):
+        for start in range(0, 10000, 50):
             # Removemos o 'idCategoriaDocumento' para a B3 não bugar
             params = {
                 'd': '1', 's': str(start), 'l': '50', 
