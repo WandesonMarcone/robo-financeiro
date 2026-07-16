@@ -49,50 +49,44 @@ class GoogleDriveManager:
         pasta = self.service.files().create(body=metadata, fields='id').execute()
         return pasta.get('id')
 
-    def upload_pdf_organizado(self, caminho_arquivo, nome_arquivo, ticker, categoria):
+    def upload_pdf_organizado(self, caminho_arquivo, nome_arquivo, ticker, mes_ref):
         """
-        Cria pastas dinamicamente (Ticker -> Categoria) e faz o upload do PDF.
-        Retorna o link público do arquivo.
+        Cria a hierarquia estrita: DadosFinanceiros -> Fundos Imobiliários -> Ticker -> Mês
+        e faz o upload do PDF.
         """
-        print(f"☁️ Iniciando fluxo de upload estruturado para {ticker} -> {categoria}...")
+        print(f"☁️ Estruturando pastas: DadosFinanceiros -> Fundos Imobiliários -> {ticker} -> {mes_ref}...")
         try:
-            # 1. Garante a pasta do Ticker (ex: XPML11)
-            ticker_folder_id = self._obter_ou_criar_pasta(ticker)
+            # 1. Nível 1: Pasta Raiz
+            dados_fin_id = self._obter_ou_criar_pasta("DadosFinanceiros")
+            
+            # 2. Nível 2: Categoria de Ativo
+            fiis_id = self._obter_ou_criar_pasta("Fundos Imobiliários", parent_id=dados_fin_id)
+            
+            # 3. Nível 3: O Fundo Específico
+            ticker_id = self._obter_ou_criar_pasta(ticker, parent_id=fiis_id)
+            
+            # 4. Nível 4: O Mês do Documento
+            mes_id = self._obter_ou_criar_pasta(mes_ref, parent_id=ticker_id)
 
-            # 2. Garante a subpasta da Categoria (ex: Relatório Gerencial) dentro da pasta do Ticker
-            category_folder_id = self._obter_ou_criar_pasta(categoria, parent_id=ticker_folder_id)
-
-            # 3. Prepara o metadado do arquivo apontando para a pasta correta
+            # 5. Prepara o metadado apontando para a pasta do mês
             file_metadata = {
                 'name': nome_arquivo,
-                'parents': [category_folder_id]
+                'parents': [mes_id]
             }
             media = MediaFileUpload(caminho_arquivo, mimetype='application/pdf', resumable=True)
 
-            # 4. Faz o upload físico
-            arquivo = self.service.files().create(
-                body=file_metadata,
-                media_body=media,
-                fields='id'
-            ).execute()
-
+            # 6. Upload físico
+            arquivo = self.service.files().create(body=file_metadata, media_body=media, fields='id').execute()
             file_id = arquivo.get('id')
 
-            # 5. Torna o arquivo público ("Qualquer pessoa com o link pode ler")
-            permissao = {
-                'type': 'anyone',
-                'role': 'reader'
-            }
-            self.service.permissions().create(fileId=file_id, body=permissao).execute()
-
-            # 6. Pega o link de visualização
+            # 7. Permissão pública
+            self.service.permissions().create(fileId=file_id, body={'type': 'anyone', 'role': 'reader'}).execute()
             link_final = self.service.files().get(fileId=file_id, fields='webViewLink').execute()
             
-            print(f"✅ Upload de {nome_arquivo} concluído com sucesso!")
             return link_final.get('webViewLink')
 
         except Exception as e:
-            print(f"❌ Erro ao fazer upload estruturado no Google Drive: {e}")
+            print(f"❌ Erro ao organizar pastas no Google Drive: {e}")
             return None
 
     def upload_imagem_logo(self, bytes_imagem, nome_arquivo, pasta_destino_id):
