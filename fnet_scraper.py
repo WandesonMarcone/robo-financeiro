@@ -80,16 +80,18 @@ class FnetDownloader:
 
             dados_json = resposta.json()
             ids_encontrados = []
+            
+            # ADICIONE ESTE PRINT PARA DEPURAR
+            print(f"DEBUG: B3 retornou {len(dados_json.get('data', []))} itens para o fundo {ticker}.")
 
             for item in dados_json.get('data', []):
-                # 🛡️ TRAVA DE PRECISÃO ABSOLUTA
+                # 🛑 A TRAVA MESTRA (COM DEBUG)
                 descricao_fundo = item.get('descricaoFundo', '').upper()
                 ticker_buscado = ticker.upper()
 
-                # Verifica se o ticker está exatamente na descrição do fundo
-                # Isso impede que o "GUARDIAN" (GARE11) pegue documentos do "GUARDIAN LIQUIDEZ DI"
                 if ticker_buscado not in descricao_fundo:
-                    print(f"🛡️ Descartando doc de: {descricao_fundo} (Procurando: {ticker_buscado})")
+                    # DEBUG: Isso vai nos mostrar o que ele está descartando e por quê
+                     print(f"DEBUG: Descartando doc de: {descricao_fundo} (Procurando: {ticker_buscado})")
                     continue
 
                 id_doc = item.get('id')
