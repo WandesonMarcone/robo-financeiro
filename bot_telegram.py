@@ -49,6 +49,41 @@ def webhook_handler():
 def index():
     return "Bot Institucional Ativo e Operante!", 200
 
+import requests
+import json
+
+@bot.message_handler(commands=['auditar'])
+def comando_auditoria_fnet(message):
+    bot.send_message(message.chat.id, "⏳ Iniciando sondagem profunda na API da B3...")
+    
+    url = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
+    }
+    params = {
+        'd': '1', 's': '0', 'l': '1', # Pegando só o 1º documento mais recente
+        'tipoFundo': '1'
+    }
+
+    try:
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+        dados = response.json().get('data', [])
+        
+        if dados:
+            # Transforma o JSON em texto bonito com indentação
+            json_formatado = json.dumps(dados[0], indent=2, ensure_ascii=False)
+            
+            # O Telegram tem limite de 4096 caracteres por mensagem, então cortamos se for gigante
+            if len(json_formatado) > 4000:
+                json_formatado = json_formatado[:3900] + "\n... [CORTADO POR TAMANHO]"
+                
+            resposta_telegram = f"🚨 **JSON COMPLETO (Sondagem FNET)** 🚨\n\n```json\n{json_formatado}\n```"
+            bot.send_message(message.chat.id, resposta_telegram, parse_mode="Markdown")
+        else:
+            bot.send_message(message.chat.id, "❌ Nenhum dado retornado pela B3.")
+            
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Erro na auditoria: {str(e)}")
 
 # ==========================================
 # COMANDO: ADICIONAR ATIVO (/adicionar)
