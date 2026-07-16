@@ -90,7 +90,7 @@ def comando_auditoria_fnet(message):
 
 @bot.message_handler(commands=['mapear_nomes'])
 def comando_mapear_nomes_b3(message):
-    bot.send_message(message.chat.id, "🕵️‍♂️ Iniciando auditoria profunda. Baixando o catálogo de nomes da B3 dos últimos meses...\nIsso pode levar cerca de 30 segundos.")
+    bot.send_message(message.chat.id, "🕵️‍♂️ Iniciando auditoria profunda. A B3 costuma ser lenta, então ativei o modo de 'Espera Longa' com tentativas automáticas. Isso pode levar alguns minutos...")
     
     url = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'}
@@ -98,12 +98,27 @@ def comando_mapear_nomes_b3(message):
     nomes_unicos = set()
     
     try:
-        # Varre os últimos 5000 documentos da B3 (Traz um bom histórico recente)
+        # Varre os últimos 5000 documentos da B3
         for start in range(0, 5000, 50):
             params = {'d': '1', 's': str(start), 'l': '50', 'tipoFundo': '1'}
-            res = requests.get(url, params=params, headers=headers, timeout=10)
-            data = res.json().get('data', [])
             
+            sucesso = False
+            # 🔄 SISTEMA DE RETRY (Tenta até 3 vezes se a B3 der Timeout)
+            for tentativa in range(3):
+                try:
+                    # Aumentamos o timeout para 45 segundos para lidar com a lentidão da B3
+                    res = requests.get(url, params=params, headers=headers, timeout=45)
+                    res.raise_for_status() # Verifica se deu erro HTTP 500/404
+                    data = res.json().get('data', [])
+                    sucesso = True
+                    break # Se deu certo, quebra o loop de tentativas e segue a vida
+                except Exception as e:
+                    time.sleep(2) # Espera 2 segundos antes de tentar de novo
+            
+            if not sucesso:
+                bot.send_message(message.chat.id, f"⚠️ A B3 não respondeu na página {start} após 3 tentativas. O catálogo pode estar um pouco incompleto, mas estou gerando o arquivo com o que já peguei!")
+                break
+                
             if not data:
                 break
                 
@@ -112,7 +127,7 @@ def comando_mapear_nomes_b3(message):
                 if descricao:
                     nomes_unicos.add(descricao)
                     
-            time.sleep(0.5) # Pausa amigável para não levar ban da B3
+            time.sleep(1.5) # Pausa amigável para não levar ban da B3
             
         # Pega a lista, ordena em ordem alfabética e transforma em texto
         lista_ordenada = sorted(list(nomes_unicos))
@@ -126,11 +141,10 @@ def comando_mapear_nomes_b3(message):
             
         # Envia o arquivo TXT pelo Telegram
         with open(caminho_arquivo, "rb") as f:
-            bot.send_document(message.chat.id, f, caption="🎯 Auditoria concluída! Aqui está a lista exata de como a B3 escreve o nome dos fundos.\n\nAbra esse arquivo, pesquise pelos seus FIIs e use os nomes exatos para atualizar o seu `MAPA_ISCAS`.")
+            bot.send_document(message.chat.id, f, caption="🎯 Auditoria concluída! Aqui está a lista exata de como a B3 escreve o nome dos fundos.\n\nMe envie o conteúdo deste arquivo para gerarmos o Mapa de Iscas Master!")
             
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Erro ao mapear: {str(e)}")
-
+        bot.send_message(message.chat.id, f"❌ Erro crítico ao mapear: {str(e)}")
 
 # ==========================================
 # COMANDO: ADICIONAR ATIVO (/adicionar)
