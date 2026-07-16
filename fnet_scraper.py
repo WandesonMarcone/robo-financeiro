@@ -67,7 +67,7 @@ class FnetDownloader:
         params = {
             'd': '1', 's': '0', 'l': '50', 
             'tipoFundo': '1', 
-            'nomeEmissor': ticker,
+            'nomeEmissor': nome_pesquisa, # <-- Usa o nome aqui
             'dataInicial': data_inicio
         }
 
@@ -85,11 +85,13 @@ class FnetDownloader:
             print(f"DEBUG: B3 retornou {len(dados_json.get('data', []))} itens para o fundo {ticker}.")
 
             for item in dados_json.get('data', []):
-                # 🛑 A TRAVA MESTRA (COM DEBUG)
+                # 🛑 A TRAVA MESTRA CORRIGIDA
                 descricao_fundo = item.get('descricaoFundo', '').upper()
-                ticker_buscado = ticker.upper()
+                
+                # A trava agora procura "XP MALLS" em vez de "XPML11"
+                termo_busca = nome_pesquisa.upper() 
 
-                if ticker_buscado not in descricao_fundo:
+                if termo_busca not in descricao_fundo:
                     # DEBUG: Isso vai nos mostrar o que ele está descartando e por quê
                     print(f"DEBUG: Descartando doc de: {descricao_fundo} (Procurando: {ticker_buscado})")
                     continue
