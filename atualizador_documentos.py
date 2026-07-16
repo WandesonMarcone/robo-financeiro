@@ -114,12 +114,12 @@ def rotina_de_atualizacao_em_massa():
                         mes_ref=mes_pasta # <--- AGORA USA O MÊS DO DOCUMENTO!
                     )
                     
-                    # UPLOAD COM O NOME PERFEITO
+                    # UPLOAD COM O NOME E A PASTA PERFEITOS
                     link_gerado = drive_manager.upload_pdf_organizado(
                         caminho_arquivo=temp_filename,
                         nome_arquivo=f"{nome_categoria_real}_{data_ref}_{id_doc}.pdf",
                         ticker=ticker,
-                        mes_ref=mes_atual 
+                        mes_ref=mes_atual # ❌ O ERRO ESTÁ NESTA PALAVRA
                     )
 
                     if os.path.exists(temp_filename):
