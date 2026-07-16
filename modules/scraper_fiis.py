@@ -193,37 +193,39 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             lucro_12m = valor_mercado * dy 
 
             # =========================================================================
-            # 🗺️ MAPEAMENTO COMPLETO (16 Colunas: Distribuição de A até Q)
+            # 🗺️ MAPEAMENTO COMPLETO (Agora com 18 Colunas: Distribuição de A até R)
             # =========================================================================
             row_update_completo = [
                 ticker,                 # 00 | Coluna A: Ticker do Fundo
                 tipo,                   # 01 | Coluna B: Tipo de FII (Ex: Tijolo, Papel)
-                setor,                  # 02 | Coluna C: Segmento Específico (Fundamentus)
+                setor,                  # 02 | Coluna C: Segmento Específico
                 preco,                  # 03 | Coluna D: Cotação Atualizada
-                numero_cotas,           # 04 | Coluna E: Quantidade Total de Cotas (Cálculo)
-                pvp,                    # 05 | Coluna F: Múltiplo Preço / Valor Patrimonial
-                dy,                     # 06 | Coluna G: Dividend Yield (12 Meses)
+                numero_cotas,           # 04 | Coluna E: Quantidade Total de Cotas
+                pvp,                    # 05 | Coluna F: P/VP
+                dy,                     # 06 | Coluna G: Dividend Yield
                 vacancia,               # 07 | Coluna H: Vacância Física/Financeira Média
                 qtd_imoveis,            # 08 | Coluna I: Quantidade Física de Imóveis
-                "Mapeamento em Curso",  # 09 | Coluna J: WALT (Pendente de IA/CVM)
-                "Pendente",             # 10 | Coluna K: Alavancagem / Dívida (Pendente)
-                liquidez,               # 11 | Coluna L: Liquidez Média Diária Negociada
-                valor_mercado,          # 12 | Coluna M: Patrimônio Líquido Total / Valor de Mercado
-                vpa,                    # 13 | Coluna N: Valor Patrimonial Justo da Cota
-                lucro_12m,              # 14 | Coluna O: Montante de Lucro Distribuído (12 Meses)
-                media_div_mensal,       # 15 | Coluna P: Projeção de Dividendo Mensal por Cota
-                f"{agora_sp} OK"        # 16 | Coluna Q: Carimbo de Conclusão da Carga
+                inquilinos_planilha     # 09 | Coluna J: LISTA DE INQUILINOS (Nova Coluna!)
+                "Pendente de IA",       # 10 | Coluna K: WALT 
+                "Pendente de IA",       # 11 | Coluna L: Alavancagem / Dívida
+                liquidez,               # 12 | Coluna M: Liquidez Média Diária Negociada
+                valor_mercado,          # 13 | Coluna N: Patrimônio Líquido Total
+                vpa,                    # 14 | Coluna O: Valor Patrimonial Justo da Cota
+                lucro_12m,              # 15 | Coluna P: Montante de Lucro Distribuído (12M)
+                media_div_mensal,       # 16 | Coluna Q: Projeção de Dividendo Mensal
+                f"{agora_sp} OK",       # 17 | Coluna R: Carimbo de Conclusão da Carga
             ]
 
             # Sub-seleção para atualização (Ignora a coluna A se o fundo já existir)
             row_update_parcial = row_update_completo[1:] 
 
             # Verificação estrutural para determinar o posicionamento do range de escrita
+            # ATENÇÃO: Mudamos as letras finais do range de 'Q' para 'R' para caber a nova coluna
             if ticker in tickers_planilha:
                 linha_idx = tickers_planilha.index(ticker) + 2
-                batch_updates.append({'range': f'B{linha_idx}:Q{linha_idx}', 'values': [row_update_parcial]})
+                batch_updates.append({'range': f'B{linha_idx}:R{linha_idx}', 'values': [row_update_parcial]})
             else:
-                batch_updates.append({'range': f'A{proxima_linha_vazia}:Q{proxima_linha_vazia}', 'values': [row_update_completo]})
+                batch_updates.append({'range': f'A{proxima_linha_vazia}:R{proxima_linha_vazia}', 'values': [row_update_completo]})
                 proxima_linha_vazia += 1
 
             # --- CONSTRUÇÃO DOS BLOCOS DO TELEGRAM ---
