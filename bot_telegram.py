@@ -137,17 +137,23 @@ def enviar_ultimos_relatorios(message):
 # ==========================================
 @bot.message_handler(commands=['forcar_varredura'])
 def acionar_varredura_manual(message):
-    bot.reply_to(message, "⚙️ *Iniciando varredura manual de documentos na B3...*\nIsso pode levar alguns minutos. Fique de olho nos logs do Render!", parse_mode="Markdown")
+    # 1. Responde instantaneamente para o Telegram e pro Render não darem Timeout
+    bot.reply_to(message, "⚙️ *Iniciando varredura na B3 em segundo plano...*\nIsso pode levar alguns minutos. Pode continuar usando o bot normalmente, eu te aviso quando terminar!", parse_mode="Markdown")
     
-    try:
-        # Importa a função (ajuste o caminho se necessário dependendo de onde está seu arquivo)
-        from atualizador_documentos import rotina_de_atualizacao_em_massa
-        
-        relatorios_baixados = rotina_de_atualizacao_em_massa()
-        
-        bot.reply_to(message, f"✅ *Varredura Concluída!*\n\n📥 Documentos inéditos salvos no Drive: **{relatorios_baixados}**", parse_mode="Markdown")
-    except Exception as e:
-        bot.reply_to(message, f"❌ *Erro na varredura:* {e}", parse_mode="Markdown")
+    # 2. Cria a função pesada isolada
+    def tarefa_pesada_background():
+        try:
+            from atualizador_documentos import rotina_de_atualizacao_em_massa
+            relatorios_baixados = rotina_de_atualizacao_em_massa()
+            
+            # Quando terminar, envia uma nova mensagem avisando
+            bot.send_message(message.chat.id, f"✅ *Varredura Concluída!*\n\n📥 Documentos inéditos salvos no Drive: **{relatorios_baixados}**", parse_mode="Markdown")
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ *Erro na varredura:* {e}", parse_mode="Markdown")
+
+    # 3. Dá a ordem para o Python rodar isso em uma trilha separada (Thread)
+    thread = threading.Thread(target=tarefa_pesada_background)
+    thread.start()
 
 # ==========================================
 # MOTOR DE LOGOS (Google Drive -> GitHub -> Logo.dev)
