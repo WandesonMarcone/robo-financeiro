@@ -89,8 +89,8 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
             yf_info = yf.Ticker(f"{ticker}.SA").info
             # AQUI A TRADUÇÃO É FEITA:
             setor_eng = yf_info.get('sector', 'N/D')
-            # Ele tenta encontrar a tradução, se não achar, mantém o original
-            setor = traducao_setores.get(setor_eng, setor_eng) 
+            # Força o texto para minúsculo (.lower()) para bater com o dicionário
+            setor = traducao_setores.get(setor_eng.lower(), setor_eng) 
             preco_yf = formatar(yf_info.get('currentPrice') or yf_info.get('regularMarketPrice') or 0)
             f = df.loc[ticker] if (not df.empty and ticker in df.index) else {}
             preco = preco_yf if preco_yf > 0 else formatar(f.get('Cotação', 0))
