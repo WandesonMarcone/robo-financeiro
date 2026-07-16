@@ -17,7 +17,7 @@ SessionDB = sessionmaker(bind=engine)
 # 🗺️ O RADAR DE ISCAS CURTAS
 # ==========================================
 MAPA_ISCAS = {
-    'XPML11': 'XP MALLS',
+    'XPML11': 'XP LOG',
     'MXRF11': 'MAXI RENDA',
     'HGLG11': 'CGHG LOG',
     'VISC11': 'VINCI SHOPPING',
