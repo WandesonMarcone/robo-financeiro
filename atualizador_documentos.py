@@ -78,6 +78,7 @@ def rotina_de_atualizacao_em_massa():
             isca = normalizar_texto(MAPA_ISCAS.get(ticker, ticker))
             
             if isca in nome_fundo_b3:
+                print(f"🔄 Analisando ID {id_doc} para o fundo {ticker}...")
                 # 1. Banco de Dados
                 ativo_db = session.query(Ativo).filter(Ativo.ticker == ticker).first()
                 if not ativo_db:
@@ -86,7 +87,6 @@ def rotina_de_atualizacao_em_massa():
                     session.commit()
 
                 if session.query(DocumentosQualitativos).filter(DocumentosQualitativos.assunto.contains(id_doc)).first():
-        print(f"🔄 Processando documento {id_doc}...") # ADICIONE ISSO AQUI
                     continue
 
                 # 2. Download
