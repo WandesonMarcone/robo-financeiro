@@ -58,7 +58,7 @@ class FnetDownloader:
                     data_ref = item.get('dataReferencia', '').replace('/', '-')
 
                     # A ETIQUETA PERFEITA CONTINUA AQUI
-                    tipo_doc = item.get('tipoDocumento', 'Documento Sem Tipo').strip().title
+                    tipo_doc = item.get('tipoDocumento', 'Documento Sem Tipo').strip().title()
 
                     if id_doc:
                         documentos_gerais.append({
