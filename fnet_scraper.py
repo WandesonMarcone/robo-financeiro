@@ -93,7 +93,7 @@ class FnetDownloader:
 
                 if termo_busca not in descricao_fundo:
                     # DEBUG: Isso vai nos mostrar o que ele está descartando e por quê
-                    print(f"DEBUG: Descartando doc de: {descricao_fundo} (Procurando: {ticker_buscado})")
+                    print(f"DEBUG: Descartando doc de: {descricao_fundo} (Procurando: {termo_busca})")
                     continue
 
                 id_doc = item.get('id')
