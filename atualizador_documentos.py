@@ -6,6 +6,9 @@ from fnet_scraper import FnetDownloader
 from modules.GoogleDriveManager import GoogleDriveManager
 from modules.utils import conectar_gspread
 from datetime import datetime, timedelta
+import requests
+from bs4 import BeautifulSoup
+import re
 
 # ==========================================
 # IMPORTAÇÕES DO BANCO DE DADOS
@@ -19,18 +22,64 @@ engine = create_engine("sqlite:///pipeline_dados/banco_institucional.db")
 SessionDB = sessionmaker(bind=engine)
 drive_manager = GoogleDriveManager()
 
-# O seu mapa para corrigir os nomes da B3
-MAPA_FNET_B3 = {
-    'MAXI RENDA FII': 'MXRF11',
-    'GUARDIAN LOGÍSTICA FII': 'GARE11', # Nome oficial na B3
-    'CSHG LOGÍSTICA FII': 'HGLG11',
-    'VINCI SHOPPING CENTERS FII': 'VISC11',
-    'VBI CRI FII': 'CVBI11',
-    'XP MALLS FII': 'XPML11',
-    'KINEA RENDIMENTOS IMOBILIÁRIOS FII': 'KNCR11',
-    'BTG PACTUAL LOGÍSTICA FII': 'BTLG11',
-    'RZ TR P - FUNDO DE INVESTIMENTO IMOBILIÁRIO': 'RZTR11'
-}
+def descobrir_nome_oficial_b3(ticker):
+    """
+    Acessa o StatusInvest, pega a Razão Social do FII e limpa o texto
+    para descobrir a palavra-chave exata que a B3 exige, de forma 100% automática.
+    """
+    try:
+        url = f"https://statusinvest.com.br/fundos-imobiliarios/{ticker.lower()}"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/115.0.0.0 Safari/537.36'
+        }
+        resp = requests.get(url, headers=headers, timeout=10)
+        
+        if resp.status_code != 200:
+            return ticker # Se o site falhar, devolve o ticker como plano B
+            
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        razao_social = ""
+        
+        # 1. Procura o campo exato de Razão Social no site
+        h3_razao = soup.find('h3', string=re.compile(r'Razão Social', re.IGNORECASE))
+        if h3_razao:
+            valor_tag = h3_razao.find_next('strong', class_='value')
+            if valor_tag:
+                razao_social = valor_tag.text.strip().upper()
+        
+        # 2. Fallback: Se não achar, pega o subtítulo do cabeçalho
+        if not razao_social:
+            h1_tag = soup.find('h1')
+            if h1_tag and h1_tag.find('small'):
+                razao_social = h1_tag.find('small').text.strip().upper()
+
+        if not razao_social:
+            return ticker 
+
+        # ==============================================================
+        # 🧹 O FILTRO MÁGICO DE LIMPEZA DE DADOS
+        # ==============================================================
+        # Tiramos todas as palavras genéricas institucionais
+        palavras_inuteis = [
+            "FUNDO", "DE", "INVESTIMENTO", "IMOBILIÁRIO", "IMOBILIARIO", 
+            "FII", "FDO", "INV", "IMOB", "RESPONSABILIDADE", "LIMITADA", 
+            "S.A.", "S/A", "-", "MULTIESTRATÉGIA", "LOGÍSTICA", "SHOPPING"
+        ]
+        
+        # Quebra a frase em palavras soltas
+        palavras_soltas = razao_social.replace('-', ' ').split()
+        
+        # Guarda só as palavras importantes (Ex: Sobra "XP" e "MALLS")
+        palavras_uteis = [p for p in palavras_soltas if p not in palavras_inuteis]
+        
+        # Junta as 2 primeiras palavras úteis. É o suficiente para a B3 achar.
+        nome_limpo = " ".join(palavras_uteis[:2])
+        
+        return nome_limpo
+
+    except Exception as e:
+        print(f"⚠️ Erro ao descobrir nome do {ticker}: {e}")
+        return ticker
 
 def obter_tickers_da_planilha():
     """Conecta no Google Sheets e puxa todos os FIIs cadastrados na Coluna A."""
@@ -71,21 +120,17 @@ def rotina_de_atualizacao_em_massa():
     data_busca = (datetime.now() - timedelta(days=40)).strftime("%d/%m/%Y")
 
     # 1º LOOP: Passa FII por FII (ex: XPML11, HGLG11...)
-
     for ticker in lista_de_fiis:
-        nome_pesquisa = ticker
-        for chave, valor in MAPA_FNET_B3.items():
-            if valor == ticker:
-                nome_pesquisa = chave
-                break 
+        
+        # 🧠 A MÁGICA ACONTECE AQUI: O robô descobre sozinho o nome de busca
+        nome_pesquisa = descobrir_nome_oficial_b3(ticker)
+        print(f"\n🏢 Analisando: {ticker} (Nome na B3: {nome_pesquisa})")
 
         ativo_db = session.query(Ativo).filter(Ativo.ticker == ticker).first()
         if not ativo_db:
             ativo_db = Ativo(ticker=ticker, cnpj=f"PENDENTE-{ticker}", tipo="FII") 
             session.add(ativo_db)
             session.commit()
-
-        print(f"\n🏢 Analisando: {ticker}")
 
         # 2º LOOP (A TRAVA DE SEGURANÇA): Pergunta à B3 categoria por categoria
         for id_categoria, nome_categoria in MAPA_TIPOS.items():
