@@ -74,66 +74,76 @@ def rotina_de_atualizacao_em_massa():
         nome_categoria_real = doc['tipo_doc'] 
 
         # Loop pelos FIIs para ver se algum é dono desse documento
-        for ticker in lista_de_fiis:
-            isca = normalizar_texto(MAPA_ISCAS.get(ticker, ticker))
-            
-            if isca in nome_fundo_b3:
-                print(f"🔄 Analisando ID {id_doc} para o fundo {ticker}...")
-                # 1. Banco de Dados
-                ativo_db = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-                if not ativo_db:
-                    ativo_db = Ativo(ticker=ticker, cnpj=f"PENDENTE-{ticker}", tipo="FII") 
-                    session.add(ativo_db)
-                    session.commit()
+        for doc in todos_documentos:
+            try: # 🛡️ Try/Except para o robô não morrer se um PDF der erro
+                nome_fundo_b3 = normalizar_texto(doc['nome_fundo'])
+                id_doc = doc['id']
+                data_ref = doc['data_ref']
+                tipo_original = doc['tipo_doc'] 
 
-                if session.query(DocumentosQualitativos).filter(DocumentosQualitativos.assunto.contains(id_doc)).first():
-                    continue
+                for ticker in lista_de_fiis:
+                    isca = normalizar_texto(MAPA_ISCAS.get(ticker, ticker))
+                    
+                    if isca in nome_fundo_b3:
+                        # Trava Anti-Duplicata
+                        if session.query(DocumentosQualitativos).filter(DocumentosQualitativos.assunto.contains(id_doc)).first():
+                            continue
 
-                # 2. Download
-                pdf_bytes = b3.baixar_pdf(id_doc)
-                if pdf_bytes:
-                    temp_filename = f"/tmp/{ticker}_{id_doc}.pdf"
-                    with open(temp_filename, "wb") as f:
-                        f.write(pdf_bytes)
+                        print(f"🔄 Analisando ID {id_doc} para {ticker}...")
+                        pdf_bytes = b3.baixar_pdf(id_doc)
 
-                    # 3. Arrumar Mês do Documento (YYYY-MM)
-                    partes = data_ref.split('-')
-                    mes_pasta = f"{partes[2]}-{partes[1]}" if len(partes) == 3 else datetime.now().strftime("%Y-%m")
+                        if pdf_bytes:
+                            temp_filename = f"/tmp/{ticker}_{id_doc}.pdf"
+                            with open(temp_filename, "wb") as f:
+                                f.write(pdf_bytes)
 
-                    # 4. Upload (Forçando a nova pasta para cada Ticker e Mês)
-                    link_gerado = drive_manager.upload_pdf_organizado(
-                        caminho_arquivo=temp_filename,
-                        nome_arquivo=f"{nome_categoria_real}_{data_ref}_{id_doc}.pdf",
-                        ticker=ticker,
-                        mes_ref=mes_pasta 
-                    )
-
-                    if os.path.exists(temp_filename):
-                        os.remove(temp_filename)
-
-                        # 5. Salva no Banco de Dados com a Categoria Perfeita
-                        if link_gerado:
-                            ativo_db = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-                            if not ativo_db:
-                                ativo_db = Ativo(ticker=ticker, cnpj=f"PENDENTE-{ticker}", tipo="FII") 
-                                session.add(ativo_db)
+                            # Extração de texto para IA
+                            texto_pdf = ""
+                            try:
+                                reader = PyPDF2.PdfReader(temp_filename)
+                                if len(reader.pages) > 0:
+                                    texto_pdf = reader.pages[0].extract_text()
+                            except: pass
                             
-                            # GARANTIA: Forçamos que nome_inteligente seja uma string executando o método
-                            # Se por acaso ele estiver armazenando a função, executamos agora:
-                            categoria_final = nome_inteligente() if callable(nome_inteligente) else str(nome_inteligente)
-                            
-                            novo_doc = DocumentosQualitativos(
-                                ativo_id=ativo_db.id,
-                                tipo_documento=categoria_final.title(), # Garantia de parênteses aqui
-                                data_publicacao=datetime.now(),
-                                assunto=f"{categoria_final.title()} ref. {data_ref} (ID B3: {id_doc})", # Garantia de parênteses aqui
-                                url_pdf=link_gerado
+                            # 🎯 A CHAMADA CORRETA DA IA
+                            # Forçamos o resultado ser string e usamos .title() com parênteses!
+                            classificacao = classificar_documento_com_ia(tipo_original, texto_pdf)
+                            nome_limpo = str(classificacao).strip().title() 
+                            # Remove caracteres que não podem ir em nomes de arquivos (ex: / ou :)
+                            nome_inteligente = "".join([c for c in nome_limpo if c.isalnum() or c in (' ', '_', '-')]).strip()
+
+                            # Arruma pasta
+                            partes_data = data_ref.split('-')
+                            mes_pasta = f"{partes_data[2]}-{partes_data[1]}" if len(partes_data) == 3 else datetime.now().strftime("%Y-%m")
+
+                            # Upload
+                            link_gerado = drive_manager.upload_pdf_organizado(
+                                caminho_arquivo=temp_filename,
+                                nome_arquivo=f"{nome_inteligente}_{data_ref}_{id_doc}.pdf",
+                                ticker=ticker,
+                                mes_ref=mes_pasta 
                             )
-                            session.add(novo_doc)
-                            session.commit()
-                            print(f"☁️ ✅ Salvo: {ticker} -> {categoria_final} (Pasta: {mes_pasta})")
-                
-                break # Sai do loop de tickers, já achamos o dono do doc
+
+                            if os.path.exists(temp_filename): os.remove(temp_filename)
+
+                            # Salva no Banco
+                            if link_gerado:
+                                novo_doc = DocumentosQualitativos(
+                                    ativo_id=session.query(Ativo).filter(Ativo.ticker == ticker).first().id,
+                                    tipo_documento=nome_inteligente, 
+                                    data_publicacao=datetime.now(),
+                                    assunto=f"{nome_inteligente} ref. {data_ref} (ID B3: {id_doc})",
+                                    url_pdf=link_gerado
+                                )
+                                session.add(novo_doc)
+                                session.commit()
+                                print(f"☁️ ✅ Salvo: {ticker} -> {nome_inteligente}")
+                        
+                        break # Próximo doc
+
+            except Exception as e:
+                print(f"❌ Erro ao processar ID {id_doc}: {e}")
+                continue # Continua o loop principal mesmo se der erro
 
     session.close()
     return "Varredura concluída."
