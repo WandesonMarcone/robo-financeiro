@@ -99,7 +99,20 @@ def rotina_de_atualizacao_em_massa():
                     with open(temp_filename, "wb") as f:
                         f.write(pdf_bytes)
 
-                    mes_atual = datetime.now().strftime("%Y-%m")
+                    # A B3 entrega a data_ref no formato "DD-MM-YYYY". Vamos fatiar para "YYYY-MM"
+                    partes_data = data_ref.split('-')
+                    if len(partes_data) == 3:
+                        mes_pasta = f"{partes_data[2]}-{partes_data[1]}" # Fica YYYY-MM
+                    else:
+                        mes_pasta = datetime.now().strftime("%Y-%m") # Fallback de segurança
+
+                    # UPLOAD COM O NOME E A PASTA PERFEITOS
+                    link_gerado = drive_manager.upload_pdf_organizado(
+                        caminho_arquivo=temp_filename,
+                        nome_arquivo=f"{nome_categoria_real}_{data_ref}_{id_doc}.pdf",
+                        ticker=ticker,
+                        mes_ref=mes_pasta # <--- AGORA USA O MÊS DO DOCUMENTO!
+                    )
                     
                     # UPLOAD COM O NOME PERFEITO
                     link_gerado = drive_manager.upload_pdf_organizado(
