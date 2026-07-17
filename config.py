@@ -12,6 +12,9 @@ TELEGRAM_CHAT_ID = "8867098987"
 # --- CONFIGURAÇÕES DA IA (GROQ) ---
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
+# --- CONFIGURAÇÕES DA BASE DE DADOS (GROQ) ---
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
 # ==========================================
 # PREFERÊNCIAS DO MENU: ⭐ MEUS FAVORITOS
 # ==========================================
