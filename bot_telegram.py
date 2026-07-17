@@ -155,8 +155,45 @@ def comando_mapear_nomes_b3(message):
     thread.start()
 
 # ==========================================
-# COMANDO: CVM (/testar_cvm)
+# COMANDO: ATUALIZAR BANCO_DADOS (/atualizar_banco)
+# ==========================================
 
+@bot.message_handler(commands=['atualizar_banco'])
+def comando_atualizar_banco(message):
+    bot.send_message(message.chat.id, "⚙️ Iniciando injeção de SQL para atualizar a estrutura do Banco de Dados...")
+    
+    from sqlalchemy import text
+    from atualizador_documentos import engine # Puxa o motor do banco que já configuramos
+    
+    # Comandos crus de SQL para adicionar as colunas que faltam na tabela velha
+    colunas_novas = [
+        "ALTER TABLE documentos_qualitativos ADD COLUMN id_b3 VARCHAR(50);",
+        "ALTER TABLE documentos_qualitativos ADD COLUMN status_processamento VARCHAR(20) DEFAULT 'SALVO' NOT NULL;",
+        "ALTER TABLE documentos_qualitativos ADD COLUMN hash_sha256 VARCHAR(64);",
+        "ALTER TABLE documentos_qualitativos ADD COLUMN resumo_ia TEXT;",
+        "ALTER TABLE documentos_qualitativos ADD COLUMN log_erro TEXT;",
+        "ALTER TABLE documentos_qualitativos ADD COLUMN data_atualizacao DATETIME;"
+    ]
+    
+    sucessos = 0
+    erros = 0
+    
+    # Conecta direto no banco de dados e força a criação das colunas
+    with engine.begin() as conn:
+        for query in colunas_novas:
+            try:
+                conn.execute(text(query))
+                sucessos += 1
+            except Exception as e:
+                # Se der erro (ex: a coluna já existir), ele ignora e segue
+                erros += 1
+                pass
+                
+    bot.send_message(message.chat.id, f"✅ Atualização do banco concluída!\nColunas criadas: {sucessos}\nColunas já existentes ignoradas: {erros}\n\nO SQLite está pronto para a nova arquitetura. Pode rodar o /forcar_varredura novamente!")
+
+# ==========================================
+# COMANDO: CVM (/testar_cvm)
+# ==========================================
 @bot.message_handler(commands=['testar_cvm'])
 def comando_testar_cvm(message):
     bot.send_message(message.chat.id, "⚙️ Iniciando teste manual do Coletor CVM (Ano Atual)...")
