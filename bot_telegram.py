@@ -577,6 +577,65 @@ def buscar_oportunidades(tipo):
         return []
 
 # ==========================================
+# PAINEL DE APROVAÇÃO MANUAL (HUMAN-IN-THE-LOOP)
+# ==========================================
+@bot.callback_query_handler(func=lambda call: call.data.startswith('rev_'))
+def processar_botao_revisao(call):
+    # O call.data chega assim: rev_C_15_1abc123456789...
+    partes = call.data.split('_', 3)
+    acao = partes[1]    # 'C' (Confirmar) ou 'A' (Apagar)
+    doc_id = partes[2]  # ID do documento no banco
+    file_id = partes[3] # ID do arquivo no Google Drive
+    
+    bot.answer_callback_query(call.id, "Processando sua ordem no Drive...")
+    
+    session = SessionDB()
+    try:
+        doc_db = session.query(DocumentosQualitativos).get(doc_id)
+        if not doc_db:
+            bot.edit_message_text("❌ Este documento não existe mais no banco de dados.", call.message.chat.id, call.message.message_id)
+            return
+            
+        ticker = doc_db.ativo.ticker
+        
+        # Reconstrói a pasta do mês (ex: 2026-04) a partir da data_ref salva no assunto
+        mes_ref = datetime.now().strftime("%Y-%m")
+        if doc_db.assunto and '-' in doc_db.assunto:
+            partes_data = doc_db.assunto.split('-')
+            if len(partes_data) == 3:
+                mes_ref = f"{partes_data[2]}-{partes_data[1]}"
+                
+        if acao == 'C':
+            # 1. Move o arquivo lá no Google Drive
+            novo_link = drive_manager.mover_arquivo(file_id, ticker, mes_ref)
+            if novo_link:
+                # 2. Atualiza o banco
+                doc_db.status_processamento = "SALVO_DRIVE"
+                doc_db.url_pdf = novo_link
+                session.commit()
+                # 3. Muda a mensagem do Telegram
+                bot.edit_message_text(f"✅ **Aprovado!**\nO arquivo foi movido para a pasta oficial do `{ticker}`.", call.message.chat.id, call.message.message_id, parse_mode="Markdown")
+            else:
+                bot.edit_message_text("❌ Falha ao mover arquivo no Drive. Verifique os logs.", call.message.chat.id, call.message.message_id)
+                
+        elif acao == 'A':
+            # 1. Deleta do Google Drive
+            sucesso = drive_manager.deletar_arquivo(file_id)
+            if sucesso:
+                # 2. Atualiza o banco
+                doc_db.status_processamento = "REJEITADO_MANUAL"
+                session.commit()
+                # 3. Muda a mensagem do Telegram
+                bot.edit_message_text(f"🗑️ **Lixeira!**\nO arquivo suspeito do `{ticker}` foi apagado do Drive e do sistema.", call.message.chat.id, call.message.message_id, parse_mode="Markdown")
+            else:
+                bot.edit_message_text("❌ Falha ao apagar arquivo no Drive. Verifique os logs.", call.message.chat.id, call.message.message_id)
+                
+    except Exception as e:
+        print(f"Erro na revisão manual: {e}")
+    finally:
+        session.close()
+
+# ==========================================
 # MENUS DE NAVEGAÇÃO E CALLBACKS
 # ==========================================
 @bot.message_handler(commands=['menu', 'start'])
