@@ -29,7 +29,18 @@ from atualizador_documentos import SessionDB
 # CONFIGURAÇÕES INICIAIS
 # ==========================================
 drive_manager = GoogleDriveManager()
-engine = create_engine("sqlite:///pipeline_dados/banco_institucional.db")
+import os
+from sqlalchemy import create_engine
+
+# Pega o banco das variáveis do sistema 
+url_banco = os.environ.get('DATABASE_URL', 'sqlite:///pipeline_dados/banco_institucional.db')
+
+# Corrige o prefixo caso o Render mande postgres:// em vez de postgresql://
+if url_banco.startswith("postgres://"):
+    url_banco = url_banco.replace("postgres://", "postgresql://", 1)
+
+engine = create_engine(url_banco)
+
 SessionDB = sessionmaker(bind=engine)
 
 # Logo abaixo de SessionDB = sessionmaker(bind=engine)
