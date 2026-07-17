@@ -1,8 +1,0 @@
-{
-  "fii": {
-    "pvp_min": 0.85, "pvp_max": 1.05, "dy_min": 0.08, "liq_min": 3000000, "vac_max": 0.10
-  },
-  "acao": {
-    "pl_min": 2.0, "pl_max": 15.0, "pvp_min": 0.2, "pvp_max": 1.5, "dy_min": 0.06, "roe_min": 0.10
-  }
-}
