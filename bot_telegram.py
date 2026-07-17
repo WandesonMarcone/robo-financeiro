@@ -951,7 +951,7 @@ time.sleep(1)
 # 2. Configura a nova URL do Render (A casa nova!)
 nova_url_render = "https://robo-fii-v2.onrender.com/" + config.TELEGRAM_BOT_TOKEN
 bot.set_webhook(url=nova_url_render)
-
+# ANTIGA URL "robo-financeiro-7wkd.onrender.com"
 print(f"✅ Webhook configurado com sucesso para: {nova_url_render[:35]}...")
 
 # 3. Inicia o servidor Flask (Se for rodar direto, o Gunicorn assume se estiver no Render)
