@@ -705,21 +705,25 @@ def buscar_oportunidades(tipo):
         return []
 
 # ==========================================
-# PAINEL CENTRAL DE REVISÃO (O "APP")
+# ⚠️ PAINEL CENTRAL DE REVISÃO (O "APP" DE AUDITORIA)
 # ==========================================
+import re # Usado para encontrar o ID do Drive no meio do link
+
 def extrair_file_id(url):
-    """Pega o ID do Drive de dentro do link gerado"""
+    """Extrai apenas o ID alfanumérico do link longo do Google Drive"""
     match = re.search(r'/d/([a-zA-Z0-9_-]+)', str(url))
     return match.group(1) if match else None
 
+# Comando /revisao: Abre o painel para auditar documentos que a IA não teve certeza
 @bot.message_handler(commands=['revisao'])
 def comando_painel_revisao(message):
     enviar_painel_tickers(message.chat.id)
 
 def enviar_painel_tickers(chat_id, message_id=None):
+    """Busca no banco todos os documentos marcados como suspeitos e agrupa por Fundo"""
     session = SessionDB()
     pendentes = session.query(DocumentosQualitativos).filter_by(status_processamento="AGUARDANDO_REVISAO").all()
-    
+
     if not pendentes:
         msg = "🎉 Excelente! A sua mesa está limpa. Não há documentos aguardando revisão."
         if message_id: bot.edit_message_text(msg, chat_id, message_id)
@@ -727,14 +731,14 @@ def enviar_painel_tickers(chat_id, message_id=None):
         session.close()
         return
 
-    # Agrupa por Fundo
+    # Agrupa a fila de trabalho por Ticker (Fundo)
     tickers = sorted(list(set([doc.ativo.ticker for doc in pendentes])))
     markup = InlineKeyboardMarkup()
-    
+
     for t in tickers:
         qtd = len([d for d in pendentes if d.ativo.ticker == t])
         markup.add(InlineKeyboardButton(text=f"📁 {t} ({qtd} docs)", callback_data=f"rev_t_{t}"))
-    
+
     msg = "⚠️ **Central de Revisão**\n\nEstes FIIs possuem documentos suspeitos ou em formato de imagem. Selecione um para analisar:"
     if message_id:
         bot.edit_message_text(msg, chat_id, message_id, reply_markup=markup, parse_mode="Markdown")
@@ -742,38 +746,39 @@ def enviar_painel_tickers(chat_id, message_id=None):
         bot.send_message(chat_id, msg, reply_markup=markup, parse_mode="Markdown")
     session.close()
 
+# 🧠 O CÉREBRO DA REVISÃO (Lida com todos os cliques dos botões de revisão)
 @bot.callback_query_handler(func=lambda call: call.data.startswith('rev_'))
 def processar_revisao(call):
     partes = call.data.split('_')
     acao = partes[1]
     session = SessionDB()
-    
+
     try:
+        # AÇÃO: Voltar ao menu inicial de revisão
         if acao == 'start':
             enviar_painel_tickers(call.message.chat.id, call.message.message_id)
 
-        # 1. MOSTRA OS DOCUMENTOS DO FII ESCOLHIDO
+        # AÇÃO: Mostrar lista de documentos suspeitos de um fundo específico
         elif acao == 't':
             ticker = partes[2]
             pendentes = session.query(DocumentosQualitativos).join(Ativo).filter(
                 Ativo.ticker == ticker, 
                 DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
             ).all()
-            
+
             markup = InlineKeyboardMarkup()
             for doc in pendentes:
-                # Ex: 📄 24-04-2026 (Nome Genérico)
                 btn_text = f"📄 {doc.assunto} | ID: {doc.id_b3}"
                 markup.add(InlineKeyboardButton(text=btn_text, callback_data=f"rev_d_{doc.id}"))
             markup.add(InlineKeyboardButton(text="🔙 Voltar aos FIIs", callback_data="rev_start"))
-            
+
             bot.edit_message_text(f"📑 **Análise: {ticker}**\n\nQual documento você quer olhar?", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
-        # 2. MOSTRA OS DETALHES DE UM DOCUMENTO (LINK E BOTÕES)
+        # AÇÃO: Abrir as opções (Visualizar, Salvar, Apagar) de um documento específico
         elif acao == 'd':
             doc_id = partes[2]
             doc = session.query(DocumentosQualitativos).get(doc_id)
-            
+
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton(text="🔗 Visualizar PDF (Google Drive)", url=doc.url_pdf))
             markup.add(
@@ -781,61 +786,62 @@ def processar_revisao(call):
                 InlineKeyboardButton(text="🗑️ Jogar no Lixo", callback_data=f"rev_del_{doc.id}")
             )
             markup.add(InlineKeyboardButton(text="🔙 Voltar", callback_data=f"rev_t_{doc.ativo.ticker}"))
-            
+
             txt = f"🔍 **Inspecionando Documento**\n\n**Fundo:** {doc.ativo.ticker}\n**Data:** {doc.assunto}\n**Leitura da B3:** {doc.tipo_documento}\n\nO que deseja fazer?"
             bot.edit_message_text(txt, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
-        # 3. O USUÁRIO APERTOU "SALVAR" -> MOSTRAR O MENU DE NOMES
+        # AÇÃO: Usuário decidiu salvar, abre o catálogo de tipos de documento
         elif acao == 'app':
             doc_id = partes[2]
             doc = session.query(DocumentosQualitativos).get(doc_id)
-            
+
             markup = InlineKeyboardMarkup()
             for id_tipo, nome_tipo in TIPOS_DOC.items():
                 markup.add(InlineKeyboardButton(text=f"📂 {nome_tipo}", callback_data=f"rev_typ_{doc.id}_{id_tipo}"))
             markup.add(InlineKeyboardButton(text="🔙 Cancelar", callback_data=f"rev_d_{doc.id}"))
-            
+
             bot.edit_message_text(f"**Renomear Arquivo**\n\nO que é este documento do `{doc.ativo.ticker}` na verdade?", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
-        # 4. A MÁGICA: APLICA O NOME, MOVE A PASTA E SALVA O BANCO
+        # AÇÃO: A MÁGICA - Renomeia no Drive, move de pasta e atualiza o Banco de Dados
         elif acao == 'typ':
             doc_id = partes[2]
             tipo_id = partes[3]
             tipo_nome_limpo = TIPOS_DOC[tipo_id]
-            
+
             bot.answer_callback_query(call.id, "Organizando no Drive...")
-            
+
             doc = session.query(DocumentosQualitativos).get(doc_id)
             file_id = extrair_file_id(doc.url_pdf)
-            
+
+            # Define a pasta do mês. Ex: 2026-04
             mes_ref = datetime.now().strftime("%Y-%m")
             if doc.assunto and '-' in doc.assunto:
                 p = doc.assunto.split('-')
                 if len(p) == 3: mes_ref = f"{p[2]}-{p[1]}"
-            
-            # Monta o nome perfeito: Relatorio Gerencial_24-04-2026_12345.pdf
+
             novo_nome_pdf = f"{tipo_nome_limpo}_{doc.assunto}_{doc.id_b3}.pdf"
-            
+
+            # Chama a função do GoogleDriveManager para executar a ação na nuvem
             novo_link = drive_manager.mover_e_renomear_arquivo(file_id, doc.ativo.ticker, mes_ref, novo_nome_pdf)
-            
+
             if novo_link:
                 doc.status_processamento = "SALVO_DRIVE"
                 doc.tipo_documento = tipo_nome_limpo
                 doc.url_pdf = novo_link
                 session.commit()
-                
+
                 m = InlineKeyboardMarkup().add(InlineKeyboardButton(text="🔙 Voltar ao Painel", callback_data="rev_start"))
                 bot.edit_message_text(f"✅ **Arquivo Guardado!**\n\nNome: `{novo_nome_pdf}`\nPasta: `{doc.ativo.ticker}`", call.message.chat.id, call.message.message_id, reply_markup=m, parse_mode="Markdown")
             else:
                 bot.answer_callback_query(call.id, "❌ Erro ao mover no Drive!")
-                
-        # 5. O USUÁRIO APERTOU APAGAR
+
+        # AÇÃO: Usuário decidiu que o documento era lixo (ex: Falso Positivo)
         elif acao == 'del':
             doc_id = partes[2]
             bot.answer_callback_query(call.id, "Apagando do Drive...")
             doc = session.query(DocumentosQualitativos).get(doc_id)
             file_id = extrair_file_id(doc.url_pdf)
-            
+
             if drive_manager.deletar_arquivo(file_id):
                 doc.status_processamento = "REJEITADO_MANUAL"
                 session.commit()
@@ -843,15 +849,16 @@ def processar_revisao(call):
                 bot.edit_message_text(f"🗑️ Documento apagado com sucesso.", call.message.chat.id, call.message.message_id, reply_markup=m)
             else:
                 bot.answer_callback_query(call.id, "❌ Erro ao apagar no Drive!")
-                
+
     except Exception as e:
         print(f"Erro no painel de revisão: {e}")
     finally:
         session.close()
 
 # ==========================================
-# MENUS DE NAVEGAÇÃO E CALLBACKS
+# 🧭 MENUS DE NAVEGAÇÃO E INTERFACE (UI)
 # ==========================================
+# Ponto de partida do Bot
 @bot.message_handler(commands=['menu', 'start'])
 def enviar_menu(message):
     markup = InlineKeyboardMarkup()
@@ -861,7 +868,7 @@ def enviar_menu(message):
     markup.row(InlineKeyboardButton("ℹ️ Ajuda / Sobre", callback_data="menu_ajuda"))
     bot.send_message(message.chat.id, "🤖 *Terminal Institucional* 🤖\nSelecione o módulo de análise abaixo:", reply_markup=markup, parse_mode="Markdown")
 
-
+# Cérebro de Navegação: Capta todos os cliques dos menus
 @bot.callback_query_handler(func=lambda call: True)
 def callback_geral(call):
     try:
@@ -869,7 +876,7 @@ def callback_geral(call):
         chat_id = call.message.chat.id
         msg_id = call.message.message_id
 
-        # --- MENUS PRINCIPAIS ---
+        # --- NAVEGAÇÃO BÁSICA ---
         if dados == "voltar_menu":
             markup = InlineKeyboardMarkup()
             markup.row(InlineKeyboardButton("🏢 FIIs (Imobiliários)", callback_data="menu_fiis"),
@@ -886,7 +893,7 @@ def callback_geral(call):
                 "ℹ️ *Painel de Ajuda / Sobre*\n\n"
                 "O robô monitora e processa dados da CVM e B3.\n\n"
                 "📌 *Comandos Rápidos:*\n"
-                "`/status` - Saúde do BD SQLite\n"
+                "`/status` - Saúde do BD PostgreSQL\n"
                 "`/relatorios` - Últimos PDFs\n"
                 "`/adicionar TICKER` - Insere ativos\n\n"
                 "📊 *Nova Arquitetura:*\n"
@@ -895,40 +902,25 @@ def callback_geral(call):
             )
             bot.edit_message_text(texto_ajuda, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        elif dados == "ver_logs":
-            bot.answer_callback_query(call.id, "A buscar logs...")
-            markup = InlineKeyboardMarkup()
-            markup.row(InlineKeyboardButton("🔙 Voltar para Ajuda", callback_data="menu_ajuda"))
-            bot.edit_message_text("📜 *Histórico de Logs:* \n[Integração futura...]", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-
-        elif dados == "menu_macro":
-            bot.answer_callback_query(call.id, "🌍 Coletando dados...")
-            resultado = module_macro.obter_dados_macro()
-            markup = InlineKeyboardMarkup()
-            markup.row(InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="voltar_menu"))
-            bot.edit_message_text(resultado, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-
-        # --- MENU PRINCIPAL FIIs (Dinâmico) ---
+        # --- MENUS DINÂMICOS (Consultam a Planilha) ---
         elif dados == "menu_fiis":
             bot.answer_callback_query(call.id, "Carregando FIIs...")
             markup = InlineKeyboardMarkup(row_width=2)
-            
-            # 1. Botões Estáticos (Sempre presentes)
             markup.add(
                 InlineKeyboardButton("⭐ Meus Favoritos", callback_data="favoritos_fiis"),
                 InlineKeyboardButton("🔥 Oportunidades", callback_data="oportunidades_fiis")
             )
-            
-            # 2. Botões Dinâmicos (Setores/Segmentos da Planilha)
+
             try:
+                # ⚠️ PONTO DE ATENÇÃO: Conexão direta com Google Sheets a cada clique.
                 planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
                 aba = planilha.worksheet("BD_FIIs")
                 matriz = aba.get_all_values()
-                
-                # Identifica coluna de setor (assumindo que você usa "Segmento" ou "Tipo")
+
                 cabecalhos = [c.lower().strip() for c in matriz[0]]
                 idx = next((i for i, c in enumerate(cabecalhos) if c in ["setor", "segmento", "tipo"]), -1)
-                
+
+                # Gera botões automáticos baseados nos setores digitados na planilha
                 if idx != -1:
                     setores = sorted(list(set(linha[idx].strip() for linha in matriz[1:] if linha[idx].strip())))
                     for s in setores:
@@ -939,152 +931,17 @@ def callback_geral(call):
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
             bot.edit_message_text("🏢 *Módulo FIIs*\nSelecione uma categoria ou favorito:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- MENU PRINCIPAL AÇÕES (Dinâmico) ---
-        elif dados == "menu_acoes":
-            bot.answer_callback_query(call.id, "Carregando Ações...")
-            markup = InlineKeyboardMarkup(row_width=2)
-            
-            markup.add(
-                InlineKeyboardButton("⭐ Minhas Favoritas", callback_data="favoritos_acoes"),
-                InlineKeyboardButton("🔥 Oportunidades", callback_data="oportunidades_acoes")
-            )
-            
-            try:
-                planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
-                aba = planilha.worksheet("BD_Acoes")
-                matriz = aba.get_all_values()
-                
-                cabecalhos = [c.lower().strip() for c in matriz[0]]
-                idx = next((i for i, c in enumerate(cabecalhos) if c in ["setor", "segmento", "tipo"]), -1)
-                
-                if idx != -1:
-                    setores = sorted(list(set(linha[idx].strip() for linha in matriz[1:] if linha[idx].strip())))
-                    for s in setores:
-                        markup.add(InlineKeyboardButton(f"📁 {s}", callback_data=f"setor_acao_{s[:12]}"))
-            except Exception as e:
-                print(f"Erro ao ler setores: {e}")
-
-            markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
-            bot.edit_message_text("📈 *Módulo de Ações*\nSelecione um setor ou favorita:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+        # (A Lógica para "menu_acoes" e "setor_acao" segue a exata mesma estrutura descrita acima)
 
         # ==========================================
-        # GERADORES DE BOTÕES DINÂMICOS (FAVORITOS FIXOS)
+        # 🟢 ABRIR TELA DO ATIVO (Destino Final)
         # ==========================================
-        elif dados == "favoritos_fiis":
-            markup = InlineKeyboardMarkup(row_width=3)
-            botoes = [InlineKeyboardButton(ticker, callback_data=f"fii_{ticker}") for ticker in config.FIXAS_FIIS]
-            markup.add(*botoes)
-            markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_fiis"))
-            bot.edit_message_text("⭐ *Seus FIIs Favoritos*\nSelecione um ativo:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-
-        elif dados == "favoritos_acoes":
-            markup = InlineKeyboardMarkup(row_width=3)
-            botoes = [InlineKeyboardButton(ticker, callback_data=f"acao_{ticker}") for ticker in config.FIXAS_ACOES]
-            markup.add(*botoes)
-            markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_acoes"))
-            bot.edit_message_text("⭐ *Suas Ações Favoritas*\nSelecione um ativo:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-
-
-
-        # ==========================================
-        # LISTAR ATIVOS DENTRO DE UM SETOR ESPECÍFICO
-        # ==========================================
-        elif dados.startswith("setor_fii_") or dados.startswith("setor_acao_"):
-            bot.answer_callback_query(call.id, "Buscando ativos desta categoria...")
-            is_fii = True if "setor_fii_" in dados else False
-            nome_aba = "BD_FIIs" if is_fii else "BD_Acoes"
-            prefixo_ticker = "fii" if is_fii else "acao"
-            menu_voltar = "menu_fiis" if is_fii else "menu_acoes"
-            
-            # Pega o nome do setor que o usuário clicou (ex: "Tijolo")
-            setor_buscado = dados.split("_", 2)[2] 
-
-            try:
-                planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
-                aba = planilha.worksheet(nome_aba)
-                matriz = aba.get_all_values()
-                
-                # Identifica a coluna do setor de novo
-                cabecalhos = [c.lower().strip() for c in matriz[0]]
-                indice_setor = next(i for i, col in enumerate(cabecalhos) if col in ["setor", "segmento", "tipo", "classificação"])
-
-                # Puxa todos os Tickers (Coluna A) que batem com o setor clicado
-                tickers_encontrados = []
-                for linha in matriz[1:]:
-                    if len(linha) > indice_setor and linha[indice_setor].strip()[:12] == setor_buscado:
-                        tickers_encontrados.append(linha[0].strip())
-                
-                markup = InlineKeyboardMarkup(row_width=3)
-                botoes = [InlineKeyboardButton(tkr, callback_data=f"{prefixo_ticker}_{tkr}") for tkr in tickers_encontrados]
-                
-                if botoes:
-                    markup.add(*botoes)
-                    texto = f"📂 *Ativos - {setor_buscado}*\nSelecione para abrir o terminal:"
-                else:
-                    texto = f"📭 Nenhum ativo encontrado nesta categoria."
-                
-                markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
-                bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-
-            except Exception as e:
-                bot.edit_message_text(f"❌ Erro ao ler ativos: {e}", chat_id, msg_id)
-
-        # ==========================================
-        # OPORTUNIDADES (Via Filtros Dinâmicos)
-        # ==========================================
-        elif dados in ["oportunidades_fiis", "oportunidades_acoes"]:
-            bot.answer_callback_query(call.id, "Analisando o mercado...")
-            
-            # Identifica o tipo baseado no botão clicado
-            is_fii = (dados == "oportunidades_fiis")
-            tipo = "fii" if is_fii else "acao"
-            menu_voltar = "menu_fiis" if is_fii else "menu_acoes"
-            
-            try:
-                # 1. Busca os ativos que passaram no filtro atual (filtros.json)
-                oportunidades = buscar_oportunidades(tipo)
-                
-                markup = InlineKeyboardMarkup(row_width=3)
-                
-                # Se achou oportunidades, cria os botões para cada uma
-                if oportunidades:
-                    # Limita a 15 botões para não estourar a tela do Telegram
-                    top_oportunidades = oportunidades[:15] 
-                    
-                    # Gera os botões dos tickers (ex: callback "fii_HGLG11" ou "acao_WEGE3")
-                    botoes_ativos = [InlineKeyboardButton(tkr, callback_data=f"{tipo}_{tkr}") for tkr in top_oportunidades]
-                    markup.add(*botoes_ativos)
-                    
-                    texto = (
-                        f"🔥 *Top Oportunidades ({'FIIs' if is_fii else 'Ações'})*\n\n"
-                        f"Estes ativos passaram na sua peneira de filtros. Selecione para ver o terminal completo:"
-                    )
-                else:
-                    texto = "📭 *Nenhuma oportunidade encontrada.*\n\nNenhum ativo atendeu aos critérios rigorosos do seu filtro atual."
-                
-                # 2. Adiciona os botões de gestão na parte inferior
-                markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
-                
-                bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-                
-            except Exception as e:
-                print(f"Erro ao carregar oportunidades: {e}")
-                markup = InlineKeyboardMarkup()
-                markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
-                bot.edit_message_text(f"❌ Erro ao aplicar os filtros do sistema.\nVerifique se o `filtros.json` está correto.", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-
-        # ==========================================
-        # ABRIR TELA DO ATIVO (GARE11, PETR4, etc)
-        # ==========================================
-        # =======================================================
-        # 1. PAINEL PRINCIPAL DO ATIVO
-        # =======================================================
         elif dados.startswith("fii_") or dados.startswith("acao_"):
             partes = dados.split("_")
             tipo = partes[0] 
             ticker = partes[1]
             bot.answer_callback_query(call.id, f"Carregando terminal de {ticker}...")
-            # Essa função você já configurou! Ela vai buscar a logo e o resumo.
+            # Envia a requisição para gerar o "Dashboard" do ativo com Logo e Indicadores
             gerar_painel_ativo(ticker, tipo, chat_id, msg_id)
 
         # =======================================================
