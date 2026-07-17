@@ -932,6 +932,49 @@ def callback_geral(call):
             bot.edit_message_text("🏢 *Módulo FIIs*\nSelecione uma categoria ou favorito:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # (A Lógica para "menu_acoes" e "setor_acao" segue a exata mesma estrutura descrita acima)
+        elif dados == "menu_acoes":
+            bot.answer_callback_query(call.id, "Carregando Ações...")
+            markup = InlineKeyboardMarkup(row_width=2)
+            
+            # Adicionando botões de atalho
+            markup.add(
+                InlineKeyboardButton("⭐ Minhas Favoritas", callback_data="favoritos_acoes"),
+                InlineKeyboardButton("🔥 Oportunidades", callback_data="oportunidades_acoes")
+            )
+
+            try:
+                # Conecta ao Sheets
+                planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
+                # Tenta buscar a aba
+                try:
+                    aba = planilha.worksheet("BD_Acoes")
+                except:
+                    bot.send_message(chat_id, "❌ Erro: Aba 'BD_Acoes' não encontrada na planilha.")
+                    return
+
+                matriz = aba.get_all_values()
+                if not matriz:
+                    bot.send_message(chat_id, "❌ A aba 'BD_Acoes' está vazia.")
+                    return
+
+                # Identifica cabeçalhos e encontra o setor
+                cabecalhos = [c.lower().strip() for c in matriz[0]]
+                idx = next((i for i, c in enumerate(cabecalhos) if c in ["setor", "segmento", "tipo"]), -1)
+
+                if idx != -1:
+                    setores = sorted(list(set(linha[idx].strip() for linha in matriz[1:] if linha[idx].strip())))
+                    for s in setores:
+                        markup.add(InlineKeyboardButton(f"📁 {s}", callback_data=f"setor_acao_{s[:12]}"))
+                else:
+                    bot.send_message(chat_id, "⚠️ Cabeçalho 'Setor/Segmento' não localizado na planilha.")
+
+            except Exception as e:
+                logger.error(f"Erro fatal no menu_acoes: {e}")
+                bot.send_message(chat_id, f"❌ Erro ao acessar planilha: {str(e)}")
+                return
+
+            markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
+            bot.edit_message_text("📈 *Módulo de Ações*\nSelecione um setor ou favorita:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # ==========================================
         # 🟢 ABRIR TELA DO ATIVO (Destino Final)
