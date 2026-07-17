@@ -32,6 +32,13 @@ drive_manager = GoogleDriveManager()
 engine = create_engine("sqlite:///pipeline_dados/banco_institucional.db")
 SessionDB = sessionmaker(bind=engine)
 
+# Logo abaixo de SessionDB = sessionmaker(bind=engine)
+from pipeline_dados.banco_dados import Base # Importe a sua Base declarativa
+
+# Garante que as tabelas sejam criadas se não existirem
+Base.metadata.create_all(engine)
+print("✅ Banco de dados verificado e tabelas criadas com sucesso!")
+
 print(f"DEBUG: Groq Key encontrada: {'SIM' if os.environ.get('GROQ_API_KEY') else 'NÃO'}")
 
 bot = telebot.TeleBot(config.TELEGRAM_BOT_TOKEN, threaded=False)
