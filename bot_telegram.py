@@ -23,7 +23,7 @@ from modules import module_ia
 from config import MAPA_ISCAS_MASTER, TIPOS_DOC
 from modules import module_macro
 from modules.GoogleDriveManager import GoogleDriveManager
-from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
+from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos, DadosFinanceirosAcoes
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from pipeline_dados.coletor_cvm import AcoesCVMReader
