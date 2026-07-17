@@ -13,7 +13,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import PyPDF2
 from groq import Groq
-from config import MAPA_ISCAS_MASTER
+from config import MAPA_ISCAS_MASTER, TIPOS_DOC
 
 client = Groq(api_key=config.GROQ_API_KEY)
 import os
