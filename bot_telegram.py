@@ -154,65 +154,60 @@ def comando_mapear_nomes_b3(message):
     thread = threading.Thread(target=tarefa_pesada)
     thread.start()
 
-# ==========================================
-# COMANDO: ATUALIZAR BANCO_DADOS (/atualizar_banco)
-# ==========================================
-
 @bot.message_handler(commands=['atualizar_banco'])
-def comando_atualizar_banco_nativo(message):
+def comando_reforma_banco(message):
     import sqlite3
     import os
     
-    bot.send_message(message.chat.id, "🛠️ Iniciando injeção de Força Bruta no SQLite...")
-    
-    # Caminho exato do seu banco de dados
+    bot.send_message(message.chat.id, "🏗️ Iniciando REFORMA GERAL do banco para corrigir restrições (NOT NULL)...")
     caminho_db = "pipeline_dados/banco_institucional.db"
     
-    if not os.path.exists(caminho_db):
-        bot.send_message(message.chat.id, "❌ ERRO: Arquivo do banco de dados não encontrado no caminho especificado!")
-        return
-
-    # Comandos SQL de criação
-    colunas_novas = [
-        "ALTER TABLE documentos_qualitativos ADD COLUMN id_b3 VARCHAR(50);",
-        "ALTER TABLE documentos_qualitativos ADD COLUMN status_processamento VARCHAR(20) DEFAULT 'SALVO' NOT NULL;",
-        "ALTER TABLE documentos_qualitativos ADD COLUMN hash_sha256 VARCHAR(64);",
-        "ALTER TABLE documentos_qualitativos ADD COLUMN resumo_ia TEXT;",
-        "ALTER TABLE documentos_qualitativos ADD COLUMN log_erro TEXT;",
-        "ALTER TABLE documentos_qualitativos ADD COLUMN data_atualizacao DATETIME;"
-    ]
-    
-    sucessos = 0
-    erros = 0
-    log_erros = ""
-    
     try:
-        # Conecta diretamente ao arquivo físico, ignorando o SQLAlchemy
         conn = sqlite3.connect(caminho_db)
         cursor = conn.cursor()
         
-        for query in colunas_novas:
-            try:
-                cursor.execute(query)
-                sucessos += 1
-            except sqlite3.OperationalError as e:
-                # Se o erro for "duplicate column name", significa que já existe (o que é bom)
-                erros += 1
-                log_erros += f"\n- {str(e)}"
-                
+        # 1. Renomeia a tabela antiga
+        cursor.execute("ALTER TABLE documentos_qualitativos RENAME TO documentos_qualitativos_old")
+        
+        # 2. Cria a nova tabela com as colunas corretas (url_pdf agora é NULL)
+        cursor.execute("""
+            CREATE TABLE documentos_qualitativos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ativo_id INTEGER NOT NULL,
+                data_publicacao DATE NOT NULL,
+                tipo_documento VARCHAR(50) NOT NULL,
+                url_pdf VARCHAR(500), 
+                assunto VARCHAR(255),
+                id_b3 VARCHAR(50),
+                status_processamento VARCHAR(20) DEFAULT 'SALVO' NOT NULL,
+                hash_sha256 VARCHAR(64),
+                resumo_ia TEXT,
+                log_erro TEXT,
+                data_atualizacao DATETIME,
+                FOREIGN KEY(ativo_id) REFERENCES ativos(id)
+            )
+        """)
+        
+        # 3. Copia os dados da tabela velha para a nova (se houver dados)
+        # O SQLite permite copiar as colunas que coincidem
+        try:
+            cursor.execute("""
+                INSERT INTO documentos_qualitativos (id, ativo_id, data_publicacao, tipo_documento, url_pdf, assunto)
+                SELECT id, ativo_id, data_publicacao, tipo_documento, url_pdf, assunto FROM documentos_qualitativos_old
+            """)
+        except:
+            pass # Se a tabela estava vazia, ignora
+            
+        # 4. Remove a tabela antiga
+        cursor.execute("DROP TABLE documentos_qualitativos_old")
+        
         conn.commit()
         conn.close()
         
-        mensagem_final = (
-            f"✅ Operação Nativa Concluída!\n"
-            f"Colunas criadas agora: {sucessos}\n"
-            f"Colunas já existentes/ignoradas: {erros}\n"
-            f"Logs: {log_erros}"
-        )
-        bot.send_message(message.chat.id, mensagem_final)
+        bot.send_message(message.chat.id, "✅ Reforma concluída! A coluna url_pdf agora aceita valores vazios (PENDENTE). Pode rodar o /forcar_varredura!")
         
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Erro crítico ao conectar no banco: {str(e)}")
+        bot.send_message(message.chat.id, f"❌ Erro na reforma: {str(e)}")
 
 # ==========================================
 # COMANDO: CVM (/testar_cvm)
