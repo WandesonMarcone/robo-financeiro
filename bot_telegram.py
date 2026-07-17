@@ -336,36 +336,42 @@ def comando_adicionar(message):
         bot.reply_to(message, f"❌ Erro ao adicionar ativo: {e}")
 
 # ==========================================
-# COMANDOS DE STATUS E RELATÓRIOS
+# ⚙️ COMANDOS DE MONITORAMENTO E STATUS
 # ==========================================
+
+# Comando /status: Fornece um "Raio-X" da integridade do banco de dados na nuvem
 @bot.message_handler(commands=['status'])
 def status_banco(message):
-    session = SessionDB()
+    session = SessionDB() # Abre conexão com PostgreSQL
     try:
         total_ativos = session.query(Ativo).count()
         total_docs = session.query(DocumentosQualitativos).count()
+        # Busca os últimos 5 ativos cadastrados para conferência visual
         ultimos = session.query(Ativo.ticker).order_by(Ativo.id.desc()).limit(5).all()
         lista_tickers = ", ".join([a[0] for a in ultimos])
+        # Busca a data mais recente no banco para saber quando foi a última varredura
         ultima_data = session.query(func.max(DocumentosQualitativos.data_publicacao)).scalar()
 
         resposta = (
             f"📊 **Painel de Controle do Motor de Dados**\n\n"
-            f"🏢 **Ativos monitorados (SQLite):** {total_ativos}\n"
-            f"📄 **Documentos salvos (SQLite):** {total_docs}\n"
-            f"📅 **Última atualização (SQLite):** {ultima_data}\n\n"
+            f"🏢 **Ativos monitorados:** {total_ativos}\n"
+            f"📄 **Documentos salvos:** {total_docs}\n"
+            f"📅 **Última atualização:** {ultima_data}\n\n"
             f"🚀 **Últimos ativos:**\n{lista_tickers}"
         )
         bot.reply_to(message, resposta)
     except Exception as e:
         bot.reply_to(message, f"❌ Erro ao consultar banco: {e}")
     finally:
-        session.close()
+        session.close() # Libera a conexão com o banco
 
+# Comando /relatorios: Exibe uma lista formatada dos 10 documentos mais recentes no Drive
 @bot.message_handler(commands=['relatorios', 'docs'])
 def enviar_ultimos_relatorios(message):
     bot.reply_to(message, "🔎 Buscando os últimos documentos no cofre...")
     session = SessionDB()
     try:
+        # Faz JOIN entre a tabela de Ativos e a de Documentos para exibir o nome do Fundo/Ação
         ultimos_docs = session.query(DocumentosQualitativos, Ativo)\
             .join(Ativo, DocumentosQualitativos.ativo_id == Ativo.id)\
             .order_by(DocumentosQualitativos.data_publicacao.desc())\
@@ -391,26 +397,24 @@ def enviar_ultimos_relatorios(message):
     finally:
         session.close()
 
+# Comando /reciclar: Reativa documentos que foram descartados incorretamente no passado
 @bot.message_handler(commands=['reciclar_rejeitados'])
 def comando_reciclar_rejeitados(message):
     bot.send_message(message.chat.id, "♻️ Buscando documentos rejeitados no banco...")
     session = SessionDB()
     try:
-        # Busca todos que foram rejeitados pela regra antiga
+        # Muda o status de rejeitado para pendente para uma nova tentativa de IA
         rejeitados = session.query(DocumentosQualitativos).filter(
             DocumentosQualitativos.status_processamento == 'REJEITADO_DUPLO_FATOR'
         ).all()
-        
+
         contador = 0
         for doc in rejeitados:
-            doc.status_processamento = 'PENDENTE' # Devolve para a fila!
+            doc.status_processamento = 'PENDENTE' 
             contador += 1
-            
+
         session.commit()
-        bot.send_message(message.chat.id, f"✅ {contador} documentos foram devolvidos para a fila de processamento!\n\nAgora sim, pode rodar o /forcar_varredura novamente!")
-        
-    except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Erro ao reciclar: {str(e)}")
+        bot.send_message(message.chat.id, f"✅ {contador} documentos foram devolvidos para a fila!")
     finally:
         session.close()
 
