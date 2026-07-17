@@ -405,6 +405,23 @@ def acionar_varredura_manual(message):
     thread = threading.Thread(target=tarefa_pesada_background)
     thread.start()
 
+# ----------FORÇAR CVM------------
+@bot.message_handler(commands=['forcar_cvm'])
+def rodar_cvm(message):
+    bot.send_message(message.chat.id, "⏳ Iniciando download de balanços da CVM. Isso pode demorar alguns minutos...")
+    try:
+        from coletor_cvm import AcoesCVMReader
+        session = SessionDB()
+        coletor = AcoesCVMReader(session)
+        
+        # Você pode mudar o ano aqui futuramente ou deixar dinâmico
+        coletor.atualizar_acoes(2026) 
+        
+        session.close()
+        bot.send_message(message.chat.id, "✅ Coleta CVM concluída! Balanços salvos no banco de dados.")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Erro na CVM: {str(e)}")
+
 # ==========================================
 # MOTOR DE LOGOS (Google Drive -> GitHub -> Logo.dev)
 # ==========================================
