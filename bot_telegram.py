@@ -8,6 +8,7 @@ import time
 import config
 import threading
 import pytz # Para lidar com o fuso horário do Brasil
+from sqlalchemy import text # IMPORTANTE: Adicione essa linha no topo!
 from flask import Flask, request
 from sqlalchemy import func, create_engine
 from sqlalchemy.orm import sessionmaker
