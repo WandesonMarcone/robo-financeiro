@@ -120,6 +120,32 @@ class GoogleDriveManager:
             print(f"❌ Erro ao mover arquivo no Drive: {e}")
             return None
 
+    def mover_e_renomear_arquivo(self, file_id, ticker, mes_ref, novo_nome):
+        """Arrasta o arquivo do Limbo para a pasta oficial e muda o nome do PDF"""
+        try:
+            print(f"📦 Movendo e Renomeando: {novo_nome} para {ticker}/{mes_ref}...")
+            fiis_id = self._obter_ou_criar_pasta("Fundos Imobiliários")
+            ticker_id = self._obter_ou_criar_pasta(ticker, parent_id=fiis_id)
+            mes_id = self._obter_ou_criar_pasta(mes_ref, parent_id=ticker_id)
+
+            file = self.service.files().get(fileId=file_id, fields='parents').execute()
+            previous_parents = ",".join(file.get('parents', []))
+
+            # Movemos E passamos o corpo com o novo nome
+            file_metadata = {'name': novo_nome}
+            file_movido = self.service.files().update(
+                fileId=file_id,
+                body=file_metadata,
+                addParents=mes_id,
+                removeParents=previous_parents,
+                fields='id, webViewLink'
+            ).execute()
+
+            return file_movido.get('webViewLink')
+        except Exception as e:
+            print(f"❌ Erro ao mover e renomear: {e}")
+            return None
+
     def deletar_arquivo(self, file_id):
         """Apaga sumariamente o arquivo do Google Drive"""
         try:
