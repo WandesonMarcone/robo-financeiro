@@ -33,7 +33,7 @@ class AcoesCVMReader:
         # 2. INTELIGÊNCIA DE PLANILHA: Descobre quais ações o usuário realmente tem
         try:
             # Pegando a aba exata 'BD_Acoes'
-            self.meus_tickers = obter_tickers_da_planilha(nome_aba="BD_Acoes") 
+            self.meus_tickers = obter_tickers_da_planilha(tickers)
             logger.info(f"Tickers de ações identificados na planilha: {self.meus_tickers}")
         except Exception as e:
             logger.error(f"Erro ao ler a planilha BD_Acoes. Erro: {e}")
