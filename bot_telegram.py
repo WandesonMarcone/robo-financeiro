@@ -196,22 +196,18 @@ def comando_atualizar_banco(message):
 # ==========================================
 @bot.message_handler(commands=['testar_cvm'])
 def comando_testar_cvm(message):
+    from datetime import datetime # ⬅️ A CORREÇÃO ESTÁ AQUI
     bot.send_message(message.chat.id, "⚙️ Iniciando teste manual do Coletor CVM (Ano Atual)...")
     
-    session = SessionDB() # Abre uma nova sessão para o robô trabalhar
+    session = SessionDB() 
     try:
-        # Instancia o leitor passando a sessão
         coletor = AcoesCVMReader(session)
-        
-        # Executa a atualização para o ano corrente (2026)
         coletor.atualizar_acoes(datetime.now().year)
-        
         bot.send_message(message.chat.id, "✅ Coletor CVM rodou com sucesso!")
-        
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Erro no Coletor CVM: {str(e)}")
     finally:
-        session.close() # Sempre fecha a sessão para liberar o banco de dados
+        session.close() 
 
 # ==========================================
 # COMANDO: ADICIONAR ATIVO (/adicionar)
