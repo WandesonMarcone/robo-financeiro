@@ -11,7 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 # 🎯 IMPORTANDO O MAPA MASTER EXTERNO
-from mapa_fiis import MAPA_ISCAS_MASTER
+from config import MAPA_ISCAS_MASTER
 
 # Importações para a IA e Leitura de PDF
 import PyPDF2
