@@ -45,9 +45,13 @@ def normalizar_texto(texto):
 def classificar_documento_com_ia(nome_original, texto_extraido):
     if not texto_extraido: 
         return nome_original 
-    
+
+    # Pega todos os nomes do seu novo config.py automaticamente
+    lista_opcoes = ", ".join(TIPOS_DOC.values())
+
     prompt = f"Classifique este documento FII que começa assim: {texto_extraido[:800]}\n" \
-             "Escolha ESTRITAMENTE UMA opção: Relatorio Gerencial, Fato Relevante, Informe Mensal, Demonstracoes Financeiras, Aviso aos Cotistas, Rendimentos, Outros. Responda APENAS o nome."
+             f"Escolha ESTRITAMENTE UMA destas opções: {lista_opcoes}. Responda APENAS o nome."
+
     try:
         chat = client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
