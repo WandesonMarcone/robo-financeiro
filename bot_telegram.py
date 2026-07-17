@@ -9,10 +9,12 @@ import time
 import config
 import threading
 import pytz # Para lidar com o fuso horário do Brasil
-from sqlalchemy import text # IMPORTANTE: Adicione essa linha no topo!
+from sqlalchemy import text # IMPORTANTE: Permite rodar comandos SQL brutos no banco
 from flask import Flask, request
 from sqlalchemy import func, create_engine
 from sqlalchemy.orm import sessionmaker
+
+# Importações internas dos seus próprios módulos
 from atualizador_documentos import rotina_de_atualizacao_em_massa
 from modules.utils import conectar_gspread
 from pipeline_dados import coletor_cvm
@@ -25,43 +27,49 @@ from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from pipeline_dados.coletor_cvm import AcoesCVMReader
-# Importe o SessionDB do local onde você o definiu originalmente (ex: atualizador_documentos ou o arquivo de config)
+
+# Importe o SessionDB do local onde você o definiu originalmente
 from atualizador_documentos import SessionDB  
 from datetime import datetime
 
 # ==========================================
-# CONFIGURAÇÕES INICIAIS
+# ⚙️ CONFIGURAÇÕES INICIAIS E BANCO DE DADOS
 # ==========================================
+# Instancia o gerenciador que fará a ponte com o Google Drive
 drive_manager = GoogleDriveManager()
-import os
-from sqlalchemy import create_engine
 
-# Pega o banco das variáveis do sistema 
+# Pega o link do banco de dados das variáveis de ambiente do Render (ou usa SQLite local como fallback)
 url_banco = os.environ.get('DATABASE_URL', 'sqlite:///pipeline_dados/banco_institucional.db')
 
-# Corrige o prefixo caso o Render mande postgres:// em vez de postgresql://
+# Corrige o prefixo caso o Render mande postgres:// em vez de postgresql:// (Exigência do SQLAlchemy)
 if url_banco.startswith("postgres://"):
     url_banco = url_banco.replace("postgres://", "postgresql://", 1)
 
+# Cria o 'motor' de conexão com o banco de dados
 engine = create_engine(url_banco)
 
+# Cria a fábrica de sessões (usada para abrir e fechar conversas com o banco)
 SessionDB = sessionmaker(bind=engine)
 
-# Logo abaixo de SessionDB = sessionmaker(bind=engine)
 from pipeline_dados.banco_dados import Base # Importe a sua Base declarativa
 
-# Garante que as tabelas sejam criadas se não existirem
+# Garante que as tabelas sejam criadas na nuvem se não existirem no primeiro deploy
 Base.metadata.create_all(engine)
 print("✅ Banco de dados verificado e tabelas criadas com sucesso!")
 
+# Verifica se a chave de IA está configurada corretamente no servidor
 print(f"DEBUG: Groq Key encontrada: {'SIM' if os.environ.get('GROQ_API_KEY') else 'NÃO'}")
 
+# Inicializa o robô do Telegram (threaded=False evita conflitos com o Flask no Render)
 bot = telebot.TeleBot(config.TELEGRAM_BOT_TOKEN, threaded=False)
+
+# Inicializa o servidor Web Flask (Necessário para manter o bot online no Render via Webhook)
 app = Flask(__name__)
 
 # ==========================================
-# ROTAS DO SERVIDOR WEB (WEBHOOK TELEGRAM)
+# 🌐 ROTAS DO SERVIDOR WEB (WEBHOOK TELEGRAM)
 # ==========================================
+# Esta rota recebe as mensagens do Telegram em tempo real e entrega para o bot processar
 @app.route('/' + config.TELEGRAM_BOT_TOKEN, methods=['POST'])
 def webhook_handler():
     if request.headers.get('content-type') == 'application/json':
@@ -71,10 +79,16 @@ def webhook_handler():
         return "OK", 200
     return "Erro", 403
 
+# Rota raiz de status para o Render saber que a aplicação não "morreu"
 @app.route('/')
 def index():
     return "Bot Institucional Ativo e Operante!", 200
 
+# ==========================================
+# 🛠️ COMANDOS DE MANUTENÇÃO E DEBUG DO BANCO
+# ==========================================
+
+# ⚠️ NOTA DE LEGADO: Este comando verifica colunas locais no SQLite. Não funciona para o PostgreSQL atual.
 @bot.message_handler(commands=['inspecionar_banco'])
 def comando_inspecionar(message):
     import sqlite3
@@ -85,18 +99,18 @@ def comando_inspecionar(message):
         # Pega os nomes das colunas da tabela
         cursor.execute("PRAGMA table_info(documentos_qualitativos)")
         colunas = cursor.fetchall()
-        
+
         nomes = [c[1] for c in colunas]
         bot.send_message(message.chat.id, f"🔍 Colunas encontradas no banco:\n{', '.join(nomes)}")
         conn.close()
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Erro: {str(e)}")
 
-
+# Comando cirúrgico para aumentar o limite de caracteres da coluna no PostgreSQL da nuvem
 @bot.message_handler(commands=['migrar_db'])
 def migrar_db(message):
     try:
-        # Executa o comando de alteração diretamente no PostgreSQL
+        # Executa o comando de alteração diretamente no PostgreSQL via SQLAlchemy
         with engine.connect() as conn:
             conn.execute(text("ALTER TABLE documentos_qualitativos ALTER COLUMN tipo_documento TYPE VARCHAR(255);"))
             conn.commit()
@@ -105,15 +119,14 @@ def migrar_db(message):
         bot.send_message(message.chat.id, f"❌ Erro ao migrar: {str(e)}")
 
 # ==========================================
-# COMANDO: FNET/B3  (/auditar) (/mapear_nomes)
+# 📡 COMANDOS DE SONDAGEM: FNET / B3
 # ==========================================
-import requests
-import json
 
+# Captura apenas o último documento enviado para a B3 e devolve o JSON cru para análise de estrutura
 @bot.message_handler(commands=['auditar'])
 def comando_auditoria_fnet(message):
     bot.send_message(message.chat.id, "⏳ Iniciando sondagem profunda na API da B3...")
-    
+
     url = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
@@ -126,44 +139,46 @@ def comando_auditoria_fnet(message):
     try:
         response = requests.get(url, params=params, headers=headers, timeout=10)
         dados = response.json().get('data', [])
-        
+
         if dados:
             # Transforma o JSON em texto bonito com indentação
             json_formatado = json.dumps(dados[0], indent=2, ensure_ascii=False)
-            
+
             # O Telegram tem limite de 4096 caracteres por mensagem, então cortamos se for gigante
             if len(json_formatado) > 4000:
                 json_formatado = json_formatado[:3900] + "\n... [CORTADO POR TAMANHO]"
-                
+
             resposta_telegram = f"🚨 **JSON COMPLETO (Sondagem FNET)** 🚨\n\n```json\n{json_formatado}\n```"
             bot.send_message(message.chat.id, resposta_telegram, parse_mode="Markdown")
         else:
             bot.send_message(message.chat.id, "❌ Nenhum dado retornado pela B3.")
-            
+
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Erro na auditoria: {str(e)}")
 
+# Varre todo o site da B3 para encontrar o "Nome Oficial" de todos os FIIs e salva em um arquivo de texto
 @bot.message_handler(commands=['mapear_nomes'])
 def comando_mapear_nomes_b3(message):
     import time
     import requests
     import threading # ⬅️ A CHAVE DA SOLUÇÃO (Permite rodar em segundo plano)
-    
+
     # 1. O bot responde na mesma hora, acalmando o servidor do Telegram
     bot.send_message(message.chat.id, "🕵️‍♂️ Comando recebido! Como a B3 é lenta, enviei essa tarefa para o segundo plano. Pode continuar usando o Telegram normalmente, te enviarei o arquivo TXT assim que estiver pronto.")
-    
-    # 2. Definimos a tarefa pesada (A auditoria real)
+
+    # 2. Definimos a tarefa pesada (A auditoria real que demora minutos)
     def tarefa_pesada():
         url = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'}
         nomes_unicos = set()
-        
+
         try:
+            # Paginação de 50 em 50 documentos na API da B3
             for start in range(0, 5000, 50):
                 params = {'d': '1', 's': str(start), 'l': '50', 'tipoFundo': '1'}
-                
+
                 sucesso = False
-                for tentativa in range(3):
+                for tentativa in range(3): # Tenta 3 vezes caso a B3 bloqueie a conexão
                     try:
                         res = requests.get(url, params=params, headers=headers, timeout=45)
                         res.raise_for_status() 
@@ -172,32 +187,36 @@ def comando_mapear_nomes_b3(message):
                         break 
                     except Exception as e:
                         time.sleep(2) 
-                
+
                 if not sucesso:
                     bot.send_message(message.chat.id, f"⚠️ Aviso: A B3 travou na página {start}. O arquivo será gerado com o que consegui até agora.")
                     break
-                    
+
                 if not data:
-                    break
-                    
+                    break # Fim dos dados
+
+                # Extrai o nome de cada fundo e adiciona no cofre sem repetições (Set)
                 for item in data:
                     descricao = item.get('descricaoFundo', '').upper().strip()
                     if descricao:
                         nomes_unicos.add(descricao)
-                        
-                time.sleep(1.5) 
-                
+
+                time.sleep(1.5) # Pausa para não ser banido pela B3
+
             lista_ordenada = sorted(list(nomes_unicos))
             texto_final = "\n".join(lista_ordenada)
-            
+
             caminho_arquivo = "/tmp/nomes_b3_auditoria.txt"
+            
+            # Gera o arquivo TXT físico com os resultados
             with open(caminho_arquivo, "w", encoding="utf-8") as f:
                 f.write(f"--- CATÁLOGO DE NOMES DA B3 ({len(lista_ordenada)} fundos encontrados) ---\n\n")
                 f.write(texto_final)
-                
+
+            # Envia o arquivo finalizado para o usuário no Telegram
             with open(caminho_arquivo, "rb") as f:
                 bot.send_document(message.chat.id, f, caption="🎯 Auditoria concluída em segundo plano! Aqui está a lista exata da B3.")
-                
+
         except Exception as e:
             bot.send_message(message.chat.id, f"❌ Erro crítico na thread de mapeamento: {str(e)}")
 
@@ -205,20 +224,21 @@ def comando_mapear_nomes_b3(message):
     thread = threading.Thread(target=tarefa_pesada)
     thread.start()
 
+# ⚠️ NOTA DE LEGADO: Script em SQLite para adicionar colunas. Não é mais usado no PostgreSQL.
 @bot.message_handler(commands=['atualizar_banco'])
 def comando_reforma_banco(message):
     import sqlite3
-    
+
     bot.send_message(message.chat.id, "🏗️ Iniciando REFORMA GERAL para a arquitetura FNET...")
     caminho_db = "pipeline_dados/banco_institucional.db"
-    
+
     try:
         conn = sqlite3.connect(caminho_db)
         cursor = conn.cursor()
-        
+
         # 1. Renomeia a tabela velha
         cursor.execute("ALTER TABLE documentos_qualitativos RENAME TO documentos_qualitativos_old")
-        
+
         # 2. Cria a nova tabela com TODAS as colunas novas (e url_pdf aceitando NULL)
         cursor.execute("""
             CREATE TABLE documentos_qualitativos (
@@ -237,7 +257,7 @@ def comando_reforma_banco(message):
                 FOREIGN KEY(ativo_id) REFERENCES ativos(id)
             )
         """)
-        
+
         # 3. Copia os dados que já existiam para a casa nova
         try:
             cursor.execute("""
@@ -246,42 +266,48 @@ def comando_reforma_banco(message):
             """)
         except:
             pass # Se estiver vazia, não faz mal
-            
+
         # 4. Destrói a tabela velha
         cursor.execute("DROP TABLE documentos_qualitativos_old")
-        
+
         conn.commit()
         conn.close()
-        
+
         bot.send_message(message.chat.id, "✅ Reforma Concluída com Sucesso! Todas as 12 colunas estão prontas. Por favor, reinicie o Render e rode o /forcar_varredura.")
-        
+
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Erro na reforma: {str(e)}")
 
 # ==========================================
-# COMANDO: CVM (/testar_cvm)
+# 🏢 COMANDOS CVM (AÇÕES)
 # ==========================================
+
+# Roda o raspador de dados do governo manualmente
 @bot.message_handler(commands=['testar_cvm'])
 def comando_testar_cvm(message):
     from datetime import datetime # ⬅️ A CORREÇÃO ESTÁ AQUI
     bot.send_message(message.chat.id, "⚙️ Iniciando teste manual do Coletor CVM (Ano Atual)...")
-    
+
     session = SessionDB() 
     try:
+        # Puxa o robô da CVM, envia o ano atual e manda ele buscar balanços
         coletor = AcoesCVMReader(session)
         coletor.atualizar_acoes(datetime.now().year)
         bot.send_message(message.chat.id, "✅ Coletor CVM rodou com sucesso!")
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Erro no Coletor CVM: {str(e)}")
     finally:
-        session.close() 
+        session.close() # Sempre fecha a conversa com o banco
 
 # ==========================================
-# COMANDO: ADICIONAR ATIVO (/adicionar)
+# 📊 COMANDOS DE PLANILHA DO GOOGLE
 # ==========================================
+
+# Permite adicionar um novo ativo direto na sua planilha do Drive via Telegram
 @bot.message_handler(commands=['adicionar'])
 def comando_adicionar(message):
     try:
+        # Separa o comando da palavra. Ex: ["/adicionar", "BBAS3"]
         partes = message.text.split()
         if len(partes) < 2:
             bot.reply_to(message, "⚠️ Uso correto: `/adicionar TICKER` (ex: /adicionar BBAS3)", parse_mode="Markdown")
@@ -290,13 +316,19 @@ def comando_adicionar(message):
         ticker = partes[1].strip().upper()
         bot.reply_to(message, f"A procurar {ticker} e a injetar na Planilha do Google...")
 
+        # Conecta no Google Sheets
         planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
+        
+        # Inteligência simples: Se terminar em 11 é FII, se não é Ação.
         is_fii = True if ticker.endswith('11') else False
         nome_aba = "BD_FIIs" if is_fii else "BD_Acoes"
         aba = planilha.worksheet(nome_aba)
 
+        # Encontra a última linha vazia da aba escolhida
         dados = aba.get_all_values()
         proxima_linha = len(dados) + 1
+        
+        # Insere o dado na planilha oficial
         aba.update(f'A{proxima_linha}', [[ticker]])
 
         bot.send_message(message.chat.id, f"✅ *{ticker}* adicionado com sucesso na aba `{nome_aba}`!", parse_mode="Markdown")
