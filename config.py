@@ -112,3 +112,14 @@ MAPA_ISCAS_MASTER = {
     'RBRR11': 'RBR HIGH GRADE',
     'CACR11': 'CARTESIA RECEBÍVEIS'
 }
+
+TIPOS_DOC = {
+    "0": "Relatorio Gerencial",
+    "1": "Fato Relevante",
+    "2": "Informe Mensal",
+    "3": "Aviso aos Cotistas",
+    "4": "Demonstracoes Financeiras",
+    "5": "Nova Emissao de Cotas",
+    "6": "Assembleia Geral",
+    "7": "Outros"
+}
