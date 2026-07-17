@@ -1051,55 +1051,108 @@ def callback_geral(call):
                     )
                 bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # =======================================================
-        # SUBMENU: DOCUMENTOS (Lendo do Banco/Google Drive)
-        # =======================================================
+        # ==============================================================
+        # NÍVEL 1: MENU DE MESES (Quando clica em "Documentos")
+        # ==============================================================
         elif dados.startswith("docs_"):
             partes = dados.split("_")
-            ticker, tipo = partes[1], partes[2]
+            tipo, ticker = partes[1], partes[2]
             markup = InlineKeyboardMarkup()
-
-            # 1. Abre conexão com o banco para buscar os PDFs salvos
             session = SessionDB()
-            ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
             
-            docs_encontrados = False
+            ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+            encontrou_dados = False
 
             if ativo:
-                # Busca os últimos 5 documentos deste ativo, ordenados do mais novo pro mais velho
-                documentos = session.query(DocumentosQualitativos)\
-                                    .filter(DocumentosQualitativos.ativo_id == ativo.id)\
-                                    .order_by(DocumentosQualitativos.data_publicacao.desc())\
-                                    .limit(5).all()
-
-                for doc in documentos:
-                    docs_encontrados = True
-                    # Cria um botão para cada documento usando o nome da categoria salvo pelo Drive!
-                    texto_botao = f"📄 {doc.tipo_documento}"
-                    markup.row(InlineKeyboardButton(texto_botao, url=doc.url_pdf))
+                if tipo == "fii":
+                    # Puxa todos os documentos do FII
+                    docs = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.ativo_id == ativo.id).all()
+                    if docs:
+                        encontrou_dados = True
+                        # Pega apenas os meses únicos (Ex: '2026-04') e ordena do mais novo pro mais velho
+                        meses_unicos = sorted(list(set([d.data_publicacao.strftime("%Y-%m") for d in docs if d.data_publicacao])), reverse=True)
+                        
+                        for mes in meses_unicos[:10]: # Mostra no máximo os últimos 10 meses para não poluir
+                            qtd = len([d for d in docs if d.data_publicacao and d.data_publicacao.strftime("%Y-%m") == mes])
+                            ano, mes_num = mes.split('-')
+                            # Botão do Mês
+                            markup.add(InlineKeyboardButton(f"📁 {mes_num}/{ano} ({qtd} arquivos)", callback_data=f"mes_{tipo}_{ticker}_{mes}"))
+                
+                elif tipo == "acao":
+                    from pipeline_dados.banco_dados import DadosFinanceirosAcoes
+                    # Puxa todos os balanços processados pelo módulo CVM
+                    balancos = session.query(DadosFinanceirosAcoes).filter(DadosFinanceirosAcoes.ativo_id == ativo.id).all()
+                    if balancos:
+                        encontrou_dados = True
+                        # Pega as datas de referência únicas
+                        datas_unicas = sorted(list(set([b.data_referencia.strftime("%Y-%m-%d") for b in balancos if b.data_referencia])), reverse=True)
+                        
+                        for dt in datas_unicas[:5]:
+                            ano, mes_num, dia = dt.split('-')
+                            markup.add(InlineKeyboardButton(f"📊 Balanço CVM ({mes_num}/{ano})", callback_data=f"mes_{tipo}_{ticker}_{dt}"))
 
             session.close()
 
-            # 2. Mantém o link do StatusInvest como um apoio útil
-            categoria_status = "fundos-imobiliarios" if tipo == "fii" else "acoes"
-            link_statusinvest = f"https://statusinvest.com.br/{categoria_status}/{ticker.lower()}"
-            markup.row(InlineKeyboardButton("📊 Ver no StatusInvest", url=link_statusinvest))
-            markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"{tipo}_{ticker}"))
+            # Botões padrão de fundo
+            cat_status = "fundos-imobiliarios" if tipo == "fii" else "acoes"
+            markup.row(InlineKeyboardButton("📈 Ver no StatusInvest", url=f"https://statusinvest.com.br/{cat_status}/{ticker.lower()}"))
+            markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"ativo_{tipo}_{ticker}"))
 
-            # 3. Mensagem dinâmica dependendo se achou PDFs ou não
-            if docs_encontrados:
-                texto_docs = (
-                    f"📑 **Central de Documentos: {ticker}**\n\n"
-                    f"Aqui estão os arquivos oficiais mais recentes que o robô organizou no seu *Google Drive*:"
-                )
+            if encontrou_dados:
+                txt = f"📅 **Histórico de {ticker}**\n\nEscolha o período que você deseja analisar:"
             else:
-                texto_docs = (
-                    f"📑 **Central de Documentos: {ticker}**\n\n"
-                    f"⚠️ O robô ainda não baixou nenhum PDF para este ativo no Drive.\n\n"
-                    f"Você pode consultar o portal abaixo provisoriamente:"
-                )
+                txt = f"📭 **Nenhum dado encontrado para {ticker}**\nO robô ainda não processou arquivos ou balanços para este ativo."
 
-            bot.edit_message_text(texto_docs, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=True)
+            bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        # ==============================================================
+        # NÍVEL 2: MOSTRANDO OS ARQUIVOS OU RELATÓRIO CVM
+        # ==============================================================
+        elif dados.startswith("mes_"):
+            partes = dados.split("_")
+            tipo, ticker, periodo = partes[1], partes[2], partes[3]
+            markup = InlineKeyboardMarkup()
+            session = SessionDB()
+            
+            ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+            
+            if tipo == "fii":
+                # Filtra os documentos APENAS do mês clicado (Ex: '2026-04')
+                docs = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.ativo_id == ativo.id).all()
+                docs_do_mes = [d for d in docs if d.data_publicacao and d.data_publicacao.strftime("%Y-%m") == periodo]
+                
+                ano, mes_num = periodo.split('-')
+                txt = f"📂 **Arquivos de {ticker} ({mes_num}/{ano})**\n\nEstes são os documentos salvos no Drive:"
+                
+                for doc in docs_do_mes:
+                    markup.add(InlineKeyboardButton(f"📄 {doc.tipo_documento}", url=doc.url_pdf))
+                    
+            elif tipo == "acao":
+                from pipeline_dados.banco_dados import DadosFinanceirosAcoes
+                # Busca o balanço financeiro da data exata clicada
+                balanco = session.query(DadosFinanceirosAcoes).filter(
+                    DadosFinanceirosAcoes.ativo_id == ativo.id, 
+                    DadosFinanceirosAcoes.data_referencia == periodo
+                ).first()
+                
+                ano, mes_num, dia = periodo.split('-')
+                txt = f"📊 **Relatório Financeiro: {ticker} ({mes_num}/{ano})**\n_Dados oficiais extraídos da CVM_\n\n"
+                
+                # Formata os números como moeda (R$)
+                def formata_rs(valor):
+                    return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if valor else "Não divulgado"
+                
+                txt += f"💰 **Receita:** {formata_rs(balanco.receita)}\n"
+                txt += f"💸 **Lucro Líquido:** {formata_rs(balanco.lucro_liquido)}\n"
+                txt += f"🏦 **Caixa:** {formata_rs(balanco.caixa)}\n"
+                txt += f"📉 **Passivo Total:** {formata_rs(balanco.passivo_total)}\n"
+
+            session.close()
+
+            # Botão para voltar para a lista de meses
+            markup.add(InlineKeyboardButton("🔙 Voltar aos Meses", callback_data=f"docs_{tipo}_{ticker}"))
+            
+            bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # =======================================================
         # 4. SUBMENU: ANÁLISE DE IA (Placeholder de Luxo)
