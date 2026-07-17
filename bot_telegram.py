@@ -91,63 +91,65 @@ def comando_auditoria_fnet(message):
 
 @bot.message_handler(commands=['mapear_nomes'])
 def comando_mapear_nomes_b3(message):
+    import time
+    import requests
+    import threading # ⬅️ A CHAVE DA SOLUÇÃO (Permite rodar em segundo plano)
     
-    bot.send_message(message.chat.id, "🕵️‍♂️ Iniciando auditoria profunda. A B3 costuma ser lenta, então ativei o modo de 'Espera Longa' com tentativas automáticas. Isso pode levar alguns minutos...")
+    # 1. O bot responde na mesma hora, acalmando o servidor do Telegram
+    bot.send_message(message.chat.id, "🕵️‍♂️ Comando recebido! Como a B3 é lenta, enviei essa tarefa para o segundo plano. Pode continuar usando o Telegram normalmente, te enviarei o arquivo TXT assim que estiver pronto.")
     
-    url = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'}
-    
-    nomes_unicos = set()
-    
-    try:
-        # Varre os últimos 5000 documentos da B3
-        for start in range(0, 5000, 50):
-            params = {'d': '1', 's': str(start), 'l': '50', 'tipoFundo': '1'}
-            
-            sucesso = False
-            # 🔄 SISTEMA DE RETRY (Tenta até 3 vezes se a B3 der Timeout)
-            for tentativa in range(3):
-                try:
-                    # Aumentamos o timeout para 45 segundos para lidar com a lentidão da B3
-                    res = requests.get(url, params=params, headers=headers, timeout=45)
-                    res.raise_for_status() # Verifica se deu erro HTTP 500/404
-                    data = res.json().get('data', [])
-                    sucesso = True
-                    break # Se deu certo, quebra o loop de tentativas e segue a vida
-                except Exception as e:
-                    time.sleep(2) # Espera 2 segundos antes de tentar de novo
-            
-            if not sucesso:
-                bot.send_message(message.chat.id, f"⚠️ A B3 não respondeu na página {start} após 3 tentativas. O catálogo pode estar um pouco incompleto, mas estou gerando o arquivo com o que já peguei!")
-                break
-                
-            if not data:
-                break
-                
-            for item in data:
-                descricao = item.get('descricaoFundo', '').upper().strip()
-                if descricao:
-                    nomes_unicos.add(descricao)
-                    
-            time.sleep(1.5) # Pausa amigável para não levar ban da B3
-            
-        # Pega a lista, ordena em ordem alfabética e transforma em texto
-        lista_ordenada = sorted(list(nomes_unicos))
-        texto_final = "\n".join(lista_ordenada)
+    # 2. Definimos a tarefa pesada (A auditoria real)
+    def tarefa_pesada():
+        url = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'}
+        nomes_unicos = set()
         
-        # Salva em um arquivo TXT temporário
-        caminho_arquivo = "/tmp/nomes_b3_auditoria.txt"
-        with open(caminho_arquivo, "w", encoding="utf-8") as f:
-            f.write(f"--- CATÁLOGO DE NOMES DA B3 ({len(lista_ordenada)} fundos encontrados) ---\n\n")
-            f.write(texto_final)
+        try:
+            for start in range(0, 5000, 50):
+                params = {'d': '1', 's': str(start), 'l': '50', 'tipoFundo': '1'}
+                
+                sucesso = False
+                for tentativa in range(3):
+                    try:
+                        res = requests.get(url, params=params, headers=headers, timeout=45)
+                        res.raise_for_status() 
+                        data = res.json().get('data', [])
+                        sucesso = True
+                        break 
+                    except Exception as e:
+                        time.sleep(2) 
+                
+                if not sucesso:
+                    bot.send_message(message.chat.id, f"⚠️ Aviso: A B3 travou na página {start}. O arquivo será gerado com o que consegui até agora.")
+                    break
+                    
+                if not data:
+                    break
+                    
+                for item in data:
+                    descricao = item.get('descricaoFundo', '').upper().strip()
+                    if descricao:
+                        nomes_unicos.add(descricao)
+                        
+                time.sleep(1.5) 
+                
+            lista_ordenada = sorted(list(nomes_unicos))
+            texto_final = "\n".join(lista_ordenada)
             
-        # Envia o arquivo TXT pelo Telegram
-        with open(caminho_arquivo, "rb") as f:
-            bot.send_document(message.chat.id, f, caption="🎯 Auditoria concluída! Aqui está a lista exata de como a B3 escreve o nome dos fundos.\n\nMe envie o conteúdo deste arquivo para gerarmos o Mapa de Iscas Master!")
-            
-    except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Erro crítico ao mapear: {str(e)}")
+            caminho_arquivo = "/tmp/nomes_b3_auditoria.txt"
+            with open(caminho_arquivo, "w", encoding="utf-8") as f:
+                f.write(f"--- CATÁLOGO DE NOMES DA B3 ({len(lista_ordenada)} fundos encontrados) ---\n\n")
+                f.write(texto_final)
+                
+            with open(caminho_arquivo, "rb") as f:
+                bot.send_document(message.chat.id, f, caption="🎯 Auditoria concluída em segundo plano! Aqui está a lista exata da B3.")
+                
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ Erro crítico na thread de mapeamento: {str(e)}")
 
+    # 3. Dispara a tarefa pesada em uma Thread separada (Background)
+    thread = threading.Thread(target=tarefa_pesada)
+    thread.start()
 
 # ==========================================
 # COMANDO: ADICIONAR ATIVO (/adicionar)
