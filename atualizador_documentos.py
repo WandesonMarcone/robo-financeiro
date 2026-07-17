@@ -10,6 +10,9 @@ from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+# 🎯 IMPORTANDO O MAPA MASTER EXTERNO
+from mapa_fiis import MAPA_ISCAS_MASTER
+
 # Importações para a IA e Leitura de PDF
 import PyPDF2
 from groq import Groq
@@ -19,32 +22,6 @@ client = Groq(api_key=config.GROQ_API_KEY)
 
 engine = create_engine("sqlite:///pipeline_dados/banco_institucional.db")
 SessionDB = sessionmaker(bind=engine)
-
-# ==========================================
-# 🗺️ O RADAR DE ISCAS
-# ==========================================
-MAPA_ISCAS = {
-    'XPML11': 'XP MALLS',
-    'MXRF11': 'MAXI RENDA',
-    'HGLG11': 'CGHG LOG',
-    'VISC11': 'VINCI SHOPPING CENTERS',
-    'KNCR11': 'KINEA RENDIMENTOS',
-    'GARE11': 'GUARDIAN LOG',
-    'BTLG11': 'BTG PACTUAL LOG',
-    'VILG11': 'VINCI LOG',
-    'CPSH11': 'CAPITANIA', 
-    'HGCR11': 'CSHG RECEBIVEIS',
-    'VGIR11': 'VALORA RENDA IMOBILIÁRIA',
-    'RBRY11': 'RBR PRIVATE',
-    'CLIN11': 'CLAVE',
-    'KNHF11': 'KINEA HEDGE',
-    'KNUQ11': 'KINEA UNICO',
-    'BTCI11': 'BTG PACTUAL CREDITO',
-    'RZTR11': 'RZ TR',
-    'GGRC11': 'GGR COVEPI',
-    'TRXF11': 'TRX REAL ESTATE FUNDO',
-    'CVBI11': 'VBI CRI'
-}
 
 def classificar_documento_com_ia(nome_original, texto_extraido):
     """Pergunta ao Groq qual o tipo real do documento baseado no conteúdo"""
@@ -99,7 +76,7 @@ def rotina_de_atualizacao_em_massa():
             tipo_original = doc['tipo_doc'] 
 
             for ticker in lista_de_fiis:
-                isca = normalizar_texto(MAPA_ISCAS.get(ticker, ticker))
+                isca = normalizar_texto(MAPA_ISCAS_MASTER.get(ticker, ticker))
 
                 # PASSO 1: A PENEIRA (Match inicial pelo Mapa)
                 if isca in nome_fundo_b3:
