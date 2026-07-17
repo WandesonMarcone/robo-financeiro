@@ -112,37 +112,6 @@ def debug_ativo(message):
     finally:
         session.close()
 
-
-# ⚠️ NOTA DE LEGADO: Este comando verifica colunas locais no SQLite. Não funciona para o PostgreSQL atual.
-@bot.message_handler(commands=['inspecionar_banco'])
-def comando_inspecionar(message):
-    import sqlite3
-    caminho_db = "pipeline_dados/banco_institucional.db"
-    try:
-        conn = sqlite3.connect(caminho_db)
-        cursor = conn.cursor()
-        # Pega os nomes das colunas da tabela
-        cursor.execute("PRAGMA table_info(documentos_qualitativos)")
-        colunas = cursor.fetchall()
-
-        nomes = [c[1] for c in colunas]
-        bot.send_message(message.chat.id, f"🔍 Colunas encontradas no banco:\n{', '.join(nomes)}")
-        conn.close()
-    except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Erro: {str(e)}")
-
-# Comando cirúrgico para aumentar o limite de caracteres da coluna no PostgreSQL da nuvem
-@bot.message_handler(commands=['migrar_db'])
-def migrar_db(message):
-    try:
-        # Executa o comando de alteração diretamente no PostgreSQL via SQLAlchemy
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE documentos_qualitativos ALTER COLUMN tipo_documento TYPE VARCHAR(255);"))
-            conn.commit()
-        bot.send_message(message.chat.id, "✅ Sucesso! Coluna 'tipo_documento' expandida para 255 caracteres.")
-    except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Erro ao migrar: {str(e)}")
-
 # ==========================================
 # 📡 COMANDOS DE SONDAGEM: FNET / B3
 # ==========================================
@@ -248,60 +217,6 @@ def comando_mapear_nomes_b3(message):
     # 3. Dispara a tarefa pesada em uma Thread separada (Background)
     thread = threading.Thread(target=tarefa_pesada)
     thread.start()
-
-# ⚠️ NOTA DE LEGADO: Script em SQLite para adicionar colunas. Não é mais usado no PostgreSQL.
-@bot.message_handler(commands=['atualizar_banco'])
-def comando_reforma_banco(message):
-    import sqlite3
-
-    bot.send_message(message.chat.id, "🏗️ Iniciando REFORMA GERAL para a arquitetura FNET...")
-    caminho_db = "pipeline_dados/banco_institucional.db"
-
-    try:
-        conn = sqlite3.connect(caminho_db)
-        cursor = conn.cursor()
-
-        # 1. Renomeia a tabela velha
-        cursor.execute("ALTER TABLE documentos_qualitativos RENAME TO documentos_qualitativos_old")
-
-        # 2. Cria a nova tabela com TODAS as colunas novas (e url_pdf aceitando NULL)
-        cursor.execute("""
-            CREATE TABLE documentos_qualitativos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ativo_id INTEGER NOT NULL,
-                data_publicacao DATE NOT NULL,
-                tipo_documento VARCHAR(50) NOT NULL,
-                url_pdf VARCHAR(500), 
-                assunto VARCHAR(255),
-                id_b3 VARCHAR(50),
-                status_processamento VARCHAR(20) DEFAULT 'SALVO' NOT NULL,
-                hash_sha256 VARCHAR(64),
-                resumo_ia TEXT,
-                log_erro TEXT,
-                data_atualizacao DATETIME,
-                FOREIGN KEY(ativo_id) REFERENCES ativos(id)
-            )
-        """)
-
-        # 3. Copia os dados que já existiam para a casa nova
-        try:
-            cursor.execute("""
-                INSERT INTO documentos_qualitativos (id, ativo_id, data_publicacao, tipo_documento, url_pdf, assunto)
-                SELECT id, ativo_id, data_publicacao, tipo_documento, url_pdf, assunto FROM documentos_qualitativos_old
-            """)
-        except:
-            pass # Se estiver vazia, não faz mal
-
-        # 4. Destrói a tabela velha
-        cursor.execute("DROP TABLE documentos_qualitativos_old")
-
-        conn.commit()
-        conn.close()
-
-        bot.send_message(message.chat.id, "✅ Reforma Concluída com Sucesso! Todas as 12 colunas estão prontas. Por favor, reinicie o Render e rode o /forcar_varredura.")
-
-    except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Erro na reforma: {str(e)}")
 
 # ==========================================
 # 🏢 COMANDOS CVM (AÇÕES)
@@ -1102,11 +1017,14 @@ def callback_geral(call):
         # NÍVEL 1: MENU DE MESES (Quando clica em "Documentos")
         # ==============================================================
         elif dados.startswith("docs_"):
+            # CORREÇÃO 1: Ordem exata -> docs_TICKER_TIPO
             partes = dados.split("_")
-            tipo, ticker = partes[1], partes[2]
+            ticker = partes[1]
+            tipo = partes[2]
+            
             markup = InlineKeyboardMarkup()
             session = SessionDB()
-            
+
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
             encontrou_dados = False
 
@@ -1118,13 +1036,13 @@ def callback_geral(call):
                         encontrou_dados = True
                         # Pega apenas os meses únicos (Ex: '2026-04') e ordena do mais novo pro mais velho
                         meses_unicos = sorted(list(set([d.data_publicacao.strftime("%Y-%m") for d in docs if d.data_publicacao])), reverse=True)
-                        
-                        for mes in meses_unicos[:10]: # Mostra no máximo os últimos 10 meses para não poluir
+
+                        for mes in meses_unicos[:10]:
                             qtd = len([d for d in docs if d.data_publicacao and d.data_publicacao.strftime("%Y-%m") == mes])
                             ano, mes_num = mes.split('-')
-                            # Botão do Mês
-                            markup.add(InlineKeyboardButton(f"📁 {mes_num}/{ano} ({qtd} arquivos)", callback_data=f"mes_{tipo}_{ticker}_{mes}"))
-                
+                            # CORREÇÃO 2: Botão do Mês padronizado (mes_TICKER_TIPO_PERIODO)
+                            markup.add(InlineKeyboardButton(f"📁 {mes_num}/{ano} ({qtd} arquivos)", callback_data=f"mes_{ticker}_{tipo}_{mes}"))
+
                 elif tipo == "acao":
                     from pipeline_dados.banco_dados import DadosFinanceirosAcoes
                     # Puxa todos os balanços processados pelo módulo CVM
@@ -1133,17 +1051,19 @@ def callback_geral(call):
                         encontrou_dados = True
                         # Pega as datas de referência únicas
                         datas_unicas = sorted(list(set([b.data_referencia.strftime("%Y-%m-%d") for b in balancos if b.data_referencia])), reverse=True)
-                        
+
                         for dt in datas_unicas[:5]:
                             ano, mes_num, dia = dt.split('-')
-                            markup.add(InlineKeyboardButton(f"📊 Balanço CVM ({mes_num}/{ano})", callback_data=f"mes_{tipo}_{ticker}_{dt}"))
+                            markup.add(InlineKeyboardButton(f"📊 Balanço CVM ({mes_num}/{ano})", callback_data=f"mes_{ticker}_{tipo}_{dt}"))
 
             session.close()
 
             # Botões padrão de fundo
             cat_status = "fundos-imobiliarios" if tipo == "fii" else "acoes"
             markup.row(InlineKeyboardButton("📈 Ver no StatusInvest", url=f"https://statusinvest.com.br/{cat_status}/{ticker.lower()}"))
-            markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"ativo_{tipo}_{ticker}"))
+            
+            # CORREÇÃO 3: Botão de voltar consertado (Aponta direto para fii_MXRF11 ou acao_PETR4)
+            markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"{tipo}_{ticker}"))
 
             if encontrou_dados:
                 txt = f"📅 **Histórico de {ticker}**\n\nEscolha o período que você deseja analisar:"
@@ -1156,39 +1076,40 @@ def callback_geral(call):
         # NÍVEL 2: MOSTRANDO OS ARQUIVOS OU RELATÓRIO CVM
         # ==============================================================
         elif dados.startswith("mes_"):
+            # CORREÇÃO 4: Lendo na nova ordem padronizada
             partes = dados.split("_")
-            tipo, ticker, periodo = partes[1], partes[2], partes[3]
+            ticker = partes[1]
+            tipo = partes[2]
+            periodo = partes[3]
+            
             markup = InlineKeyboardMarkup()
             session = SessionDB()
-            
+
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-            
+
             if tipo == "fii":
-                # Filtra os documentos APENAS do mês clicado (Ex: '2026-04')
                 docs = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.ativo_id == ativo.id).all()
                 docs_do_mes = [d for d in docs if d.data_publicacao and d.data_publicacao.strftime("%Y-%m") == periodo]
-                
+
                 ano, mes_num = periodo.split('-')
                 txt = f"📂 **Arquivos de {ticker} ({mes_num}/{ano})**\n\nEstes são os documentos salvos no Drive:"
-                
+
                 for doc in docs_do_mes:
                     markup.add(InlineKeyboardButton(f"📄 {doc.tipo_documento}", url=doc.url_pdf))
-                    
+
             elif tipo == "acao":
                 from pipeline_dados.banco_dados import DadosFinanceirosAcoes
-                # Busca o balanço financeiro da data exata clicada
                 balanco = session.query(DadosFinanceirosAcoes).filter(
                     DadosFinanceirosAcoes.ativo_id == ativo.id, 
                     DadosFinanceirosAcoes.data_referencia == periodo
                 ).first()
-                
+
                 ano, mes_num, dia = periodo.split('-')
                 txt = f"📊 **Relatório Financeiro: {ticker} ({mes_num}/{ano})**\n_Dados oficiais extraídos da CVM_\n\n"
-                
-                # Formata os números como moeda (R$)
+
                 def formata_rs(valor):
                     return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if valor else "Não divulgado"
-                
+
                 txt += f"💰 **Receita:** {formata_rs(balanco.receita)}\n"
                 txt += f"💸 **Lucro Líquido:** {formata_rs(balanco.lucro_liquido)}\n"
                 txt += f"🏦 **Caixa:** {formata_rs(balanco.caixa)}\n"
@@ -1196,9 +1117,9 @@ def callback_geral(call):
 
             session.close()
 
-            # Botão para voltar para a lista de meses
-            markup.add(InlineKeyboardButton("🔙 Voltar aos Meses", callback_data=f"docs_{tipo}_{ticker}"))
-            
+            # CORREÇÃO 5: O Botão de voltar consertado para retornar ao menu de meses
+            markup.add(InlineKeyboardButton("🔙 Voltar aos Meses", callback_data=f"docs_{ticker}_{tipo}"))
+
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # =======================================================
