@@ -633,18 +633,6 @@ def extrair_file_id(url):
     match = re.search(r'/d/([a-zA-Z0-9_-]+)', str(url))
     return match.group(1) if match else None
 
-# O catálogo de botões de nomes
-TIPOS_DOC = {
-    "0": "Relatorio Gerencial",
-    "1": "Fato Relevante",
-    "2": "Informe Mensal",
-    "3": "Aviso aos Cotistas",
-    "4": "Demonstracoes Financeiras",
-    "5": "Nova Emissao de Cotas",
-    "6": "Assembleia Geral"
-    "7": "Outros"
-}
-
 @bot.message_handler(commands=['revisao'])
 def comando_painel_revisao(message):
     enviar_painel_tickers(message.chat.id)
