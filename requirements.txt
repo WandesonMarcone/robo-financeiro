@@ -58,4 +58,4 @@ pdfplumber # Leitor de texto bruto para alimentar o Llama 3
 SQLAlchemy
 openpyxl
 xlrd
-dropbox==11.36.2
+psycopg2-binary
