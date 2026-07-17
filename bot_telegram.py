@@ -90,7 +90,7 @@ def index():
 
 @bot.message_handler(commands=['debug_ativo'])
 def debug_ativo(message):
-    ticker = "PETR4" # Você pode mudar o ticker aqui ou pedir via mensagem
+    ticker = "PETR4" 
     session = SessionDB()
     try:
         # 1. Verifica se o Ativo existe
@@ -99,10 +99,10 @@ def debug_ativo(message):
             bot.send_message(message.chat.id, f"❌ O ativo {ticker} nem sequer existe na tabela 'Ativos'.")
             return
         
-        # 2. Verifica se existem registros financeiros
+        # 2. Verifica se existem registros financeiros usando a classe importada corretamente
         qtd = session.query(DadosFinanceirosAcoes).filter(DadosFinanceirosAcoes.ativo_id == ativo.id).count()
         
-        # 3. Pega a última data para ver se salvou algo recente
+        # 3. Pega a última data salva
         ultima_data = session.query(func.max(DadosFinanceirosAcoes.data_referencia)).filter(DadosFinanceirosAcoes.ativo_id == ativo.id).scalar()
         
         bot.send_message(message.chat.id, f"🔍 Diagnóstico para {ticker}:\n\n✅ Ativo ID: {ativo.id}\n📊 Registros financeiros encontrados: {qtd}\n📅 Última data salva: {ultima_data}")
