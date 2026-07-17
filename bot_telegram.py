@@ -332,6 +332,29 @@ def enviar_ultimos_relatorios(message):
     finally:
         session.close()
 
+@bot.message_handler(commands=['reciclar_rejeitados'])
+def comando_reciclar_rejeitados(message):
+    bot.send_message(message.chat.id, "♻️ Buscando documentos rejeitados no banco...")
+    session = SessionDB()
+    try:
+        # Busca todos que foram rejeitados pela regra antiga
+        rejeitados = session.query(DocumentosQualitativos).filter(
+            DocumentosQualitativos.status_processamento == 'REJEITADO_DUPLO_FATOR'
+        ).all()
+        
+        contador = 0
+        for doc in rejeitados:
+            doc.status_processamento = 'PENDENTE' # Devolve para a fila!
+            contador += 1
+            
+        session.commit()
+        bot.send_message(message.chat.id, f"✅ {contador} documentos foram devolvidos para a fila de processamento!\n\nAgora sim, pode rodar o /forcar_varredura novamente!")
+        
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Erro ao reciclar: {str(e)}")
+    finally:
+        session.close()
+
 # ==========================================
 # COMANDO SECRETO PARA TESTAR A VARREDURA
 # ==========================================
