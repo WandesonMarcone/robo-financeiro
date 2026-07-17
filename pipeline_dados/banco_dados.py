@@ -63,7 +63,7 @@ class DocumentosQualitativos(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     ativo_id: Mapped[int] = mapped_column(ForeignKey('ativos.id'), nullable=False)
     data_publicacao: Mapped[date] = mapped_column(Date, nullable=False)
-    tipo_documento: Mapped[str] = mapped_column(String(50), nullable=False) # 'Relatório Gerencial', 'Fato Relevante'
+    tipo_documento: Mapped[str] = mapped_column(String(255), nullable=False) # 'Relatório Gerencial', 'Fato Relevante'
     
     # ⚠️ ALTERAÇÃO: url_pdf agora é opcional (nullable=True), pois na nova arquitetura da FNET, 
     # o documento entra como PENDENTE no banco ANTES de o upload ser feito para o Drive.
