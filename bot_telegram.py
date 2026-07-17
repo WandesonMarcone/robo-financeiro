@@ -21,6 +21,7 @@ from modules.GoogleDriveManager import GoogleDriveManager
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from coletor_cvm import funcao_principal_do_seu_coletor_cvm 
 
 # ==========================================
 # CONFIGURAÇÕES INICIAIS
@@ -150,6 +151,20 @@ def comando_mapear_nomes_b3(message):
     # 3. Dispara a tarefa pesada em uma Thread separada (Background)
     thread = threading.Thread(target=tarefa_pesada)
     thread.start()
+
+# ==========================================
+# COMANDO: CVM (/testar_cvm)
+
+@bot.message_handler(commands=['testar_cvm'])
+def comando_testar_cvm(message):
+    bot.send_message(message.chat.id, "⚙️ Iniciando teste manual do Coletor CVM...")
+    try:
+        # Substitua pelo nome real da função que roda o seu coletor_cvm
+        resultado = funcao_principal_do_seu_coletor_cvm() 
+        bot.send_message(message.chat.id, f"✅ Teste CVM concluído:\n{resultado}")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Erro no Coletor CVM: {str(e)}")
+
 
 # ==========================================
 # COMANDO: ADICIONAR ATIVO (/adicionar)
