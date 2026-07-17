@@ -188,7 +188,7 @@ def rotina_processar_pendentes():
                 doc_db.status_processamento = "AGUARDANDO_REVISAO"
                 doc_db.url_pdf = link_gerado
                 session.commit()
-                enviar_alerta_revisao_telegram(ticker, nome_limpo, link_gerado, file_id, doc_db.id)
+               # enviar_alerta_revisao_telegram(ticker, nome_limpo, link_gerado, file_id, doc_db.id)
                 print(f"🚧 {ticker} enviado para revisão manual.")
             else:
                 doc_db.status_processamento = "ERRO_DRIVE"
