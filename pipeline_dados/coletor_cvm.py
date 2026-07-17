@@ -7,20 +7,27 @@ from datetime import datetime
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+
+# Módulos do seu projeto
+import config
+from modules.utils import conectar_gspread
 from pipeline_dados.banco_dados import DadosFinanceirosAcoes, Ativo 
 
-# 1. IMPORTANDO AS VARIÁVEIS GLOBAIS DO SEU SISTEMA
+# IMPORTANDO AS VARIÁVEIS GLOBAIS DO SEU SISTEMA
 from config import MAPA_CNPJ_B3, MAPA_CONTAS_CVM 
 
 logger = logging.getLogger(__name__)
 
 def obter_tickers_da_planilha():
+    """Busca os tickers diretamente na aba BD_Acoes da sua planilha."""
     try:
+        # Agora a função tem acesso ao conectar_gspread e ao config
         planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
         aba = planilha.worksheet("BD_Acoes")
-        tickers = aba.col_values(1)[1:] 
+        tickers = aba.col_values(1)[1:]  # Pega coluna A, pulando cabeçalho
         return list(set([t.strip().upper() for t in tickers if t.strip()])) 
-    except:
+    except Exception as e:
+        logger.error(f"Erro ao conectar na planilha: {e}")
         return []
 
 class AcoesCVMReader:
@@ -29,22 +36,17 @@ class AcoesCVMReader:
     def __init__(self, db_session: Session):
         self.session = db_session
         self.base_url_itr = "https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/ITR/DADOS/itr_cia_aberta_{}.zip"
-        
-        # 2. INTELIGÊNCIA DE PLANILHA: Descobre quais ações o usuário realmente tem
-        try:
-            # Pegando a aba exata 'BD_Acoes'
-            self.meus_tickers = obter_tickers_da_planilha(tickers)
-            logger.info(f"Tickers de ações identificados na planilha: {self.meus_tickers}")
-        except Exception as e:
-            logger.error(f"Erro ao ler a planilha BD_Acoes. Erro: {e}")
-            self.meus_tickers = []
+
+        # 2. INTELIGÊNCIA DE PLANILHA
+        self.meus_tickers = obter_tickers_da_planilha() # CHAMADA CORRETA (sem argumentos)
+        logger.info(f"Tickers de ações identificados na planilha: {self.meus_tickers}")
 
         # 3. O FILTRO VIP: Mapeia apenas os CNPJs das ações que você tem na carteira
         self.cnpjs_alvo = []
         for cnpj, ticker in MAPA_CNPJ_B3.items():
             if ticker in self.meus_tickers:
                 self.cnpjs_alvo.append(cnpj)
-                
+
         logger.info(f"O robô monitorará {len(self.cnpjs_alvo)} CNPJs com base na sua planilha.")
 
     def atualizar_acoes(self, ano: int) -> None:
@@ -92,12 +94,12 @@ class AcoesCVMReader:
         registros = {}
 
         for nome_arquivo, df in dfs.items():
+            # Filtra apenas o último exercício e as contas do seu mapa
             df_filtrado = df[(df['ORDEM_EXERC'] == 'ÚLTIMO') & (df['CD_CONTA'].isin(MAPA_CONTAS_CVM.keys()))].copy()
 
             for _, row in df_filtrado.iterrows():
                 cnpj = row['CNPJ_CIA']
 
-                # 🛑 A BARREIRA INTRANSPONÍVEL: Se o CNPJ não é de uma ação da sua planilha, é bloqueado.
                 if cnpj not in self.cnpjs_alvo:
                     continue
 
