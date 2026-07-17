@@ -53,6 +53,23 @@ def webhook_handler():
 def index():
     return "Bot Institucional Ativo e Operante!", 200
 
+@bot.message_handler(commands=['inspecionar_banco'])
+def comando_inspecionar(message):
+    import sqlite3
+    caminho_db = "pipeline_dados/banco_institucional.db"
+    try:
+        conn = sqlite3.connect(caminho_db)
+        cursor = conn.cursor()
+        # Pega os nomes das colunas da tabela
+        cursor.execute("PRAGMA table_info(documentos_qualitativos)")
+        colunas = cursor.fetchall()
+        
+        nomes = [c[1] for c in colunas]
+        bot.send_message(message.chat.id, f"🔍 Colunas encontradas no banco:\n{', '.join(nomes)}")
+        conn.close()
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Erro: {str(e)}")
+
 # ==========================================
 # COMANDO: FNET/B3  (/auditar) (/mapear_nomes)
 # ==========================================
