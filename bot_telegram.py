@@ -89,6 +89,18 @@ def comando_inspecionar(message):
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Erro: {str(e)}")
 
+
+@bot.message_handler(commands=['migrar_db'])
+def migrar_db(message):
+    try:
+        # Executa o comando de alteração diretamente no PostgreSQL
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE documentos_qualitativos ALTER COLUMN tipo_documento TYPE VARCHAR(255);"))
+            conn.commit()
+        bot.send_message(message.chat.id, "✅ Sucesso! Coluna 'tipo_documento' expandida para 255 caracteres.")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Erro ao migrar: {str(e)}")
+
 # ==========================================
 # COMANDO: FNET/B3  (/auditar) (/mapear_nomes)
 # ==========================================
