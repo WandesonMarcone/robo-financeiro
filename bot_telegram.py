@@ -155,59 +155,21 @@ def comando_mapear_nomes_b3(message):
     thread.start()
 
 @bot.message_handler(commands=['atualizar_banco'])
-def comando_reforma_banco(message):
+def comando_renomear_coluna(message):
     import sqlite3
-    import os
-    
-    bot.send_message(message.chat.id, "🏗️ Iniciando REFORMA GERAL do banco para corrigir restrições (NOT NULL)...")
     caminho_db = "pipeline_dados/banco_institucional.db"
-    
     try:
         conn = sqlite3.connect(caminho_db)
         cursor = conn.cursor()
         
-        # 1. Renomeia a tabela antiga
-        cursor.execute("ALTER TABLE documentos_qualitativos RENAME TO documentos_qualitativos_old")
-        
-        # 2. Cria a nova tabela com as colunas corretas (url_pdf agora é NULL)
-        cursor.execute("""
-            CREATE TABLE documentos_qualitativos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ativo_id INTEGER NOT NULL,
-                data_publicacao DATE NOT NULL,
-                tipo_documento VARCHAR(50) NOT NULL,
-                url_pdf VARCHAR(500), 
-                assunto VARCHAR(255),
-                id_b3 VARCHAR(50),
-                status_processamento VARCHAR(20) DEFAULT 'SALVO' NOT NULL,
-                hash_sha256 VARCHAR(64),
-                resumo_ia TEXT,
-                log_erro TEXT,
-                data_atualizacao DATETIME,
-                FOREIGN KEY(ativo_id) REFERENCES ativos(id)
-            )
-        """)
-        
-        # 3. Copia os dados da tabela velha para a nova (se houver dados)
-        # O SQLite permite copiar as colunas que coincidem
-        try:
-            cursor.execute("""
-                INSERT INTO documentos_qualitativos (id, ativo_id, data_publicacao, tipo_documento, url_pdf, assunto)
-                SELECT id, ativo_id, data_publicacao, tipo_documento, url_pdf, assunto FROM documentos_qualitativos_old
-            """)
-        except:
-            pass # Se a tabela estava vazia, ignora
-            
-        # 4. Remove a tabela antiga
-        cursor.execute("DROP TABLE documentos_qualitativos_old")
+        # Renomeia a coluna errada para a certa
+        cursor.execute("ALTER TABLE documentos_qualitativos RENAME COLUMN idb3 TO id_b3")
         
         conn.commit()
         conn.close()
-        
-        bot.send_message(message.chat.id, "✅ Reforma concluída! A coluna url_pdf agora aceita valores vazios (PENDENTE). Pode rodar o /forcar_varredura!")
-        
+        bot.send_message(message.chat.id, "✅ Coluna renomeada de 'idb3' para 'id_b3' com sucesso! Rode o /forcar_varredura.")
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Erro na reforma: {str(e)}")
+        bot.send_message(message.chat.id, f"❌ Erro ao renomear: {str(e)}")
 
 # ==========================================
 # COMANDO: CVM (/testar_cvm)
