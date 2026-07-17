@@ -121,5 +121,6 @@ TIPOS_DOC = {
     "4": "Demonstracoes Financeiras",
     "5": "Nova Emissao de Cotas",
     "6": "Assembleia Geral",
-    "7": "Outros"
+    "7": "Rendimentos",
+    "8": "Outros"
 }
