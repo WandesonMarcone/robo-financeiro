@@ -21,7 +21,7 @@ from modules.GoogleDriveManager import GoogleDriveManager
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from coletor_cvm import funcao_principal_do_seu_coletor_cvm 
+from pipeline_dados.coletor_cvm import funcao_principal_do_seu_coletor_cvm 
 
 # ==========================================
 # CONFIGURAÇÕES INICIAIS
