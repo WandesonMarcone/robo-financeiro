@@ -640,7 +640,8 @@ TIPOS_DOC = {
     "3": "Aviso aos Cotistas",
     "4": "Demonstracoes Financeiras",
     "5": "Nova Emissao de Cotas",
-    "6": "Outros"
+    "6": "Assembleia Geral"
+    "7": "Outros"
 }
 
 @bot.message_handler(commands=['revisao'])
