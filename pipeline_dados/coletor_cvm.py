@@ -10,11 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from pipeline_dados.banco_dados import DadosFinanceirosAcoes, Ativo 
 
 # 1. IMPORTANDO AS VARIÁVEIS GLOBAIS DO SEU SISTEMA
-from config import MAPA_CNPJ_B3, MAPA_CONTAS_CVM
-
-# ⚠️ ATENÇÃO: Ajuste este import para o arquivo onde fica a sua função de ler o Google Sheets!
-# Exemplo: from atualizador_documentos import obter_tickers_da_planilha
-from modules.google_sheets import obter_tickers_da_planilha 
+from config import MAPA_CNPJ_B3, MAPA_CONTAS_CVM 
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +23,11 @@ class AcoesCVMReader:
         
         # 2. INTELIGÊNCIA DE PLANILHA: Descobre quais ações o usuário realmente tem
         try:
-            # Pegando a aba de ações (ajuste o nome da aba se na sua planilha for diferente)
-            self.meus_tickers = obter_tickers_da_planilha(nome_aba="Acoes") 
+            # Pegando a aba exata 'BD_Acoes'
+            self.meus_tickers = obter_tickers_da_planilha(nome_aba="BD_Acoes") 
             logger.info(f"Tickers de ações identificados na planilha: {self.meus_tickers}")
         except Exception as e:
-            logger.error(f"Erro ao ler a planilha. O robô não processará nenhuma ação. Erro: {e}")
+            logger.error(f"Erro ao ler a planilha BD_Acoes. Erro: {e}")
             self.meus_tickers = []
 
         # 3. O FILTRO VIP: Mapeia apenas os CNPJs das ações que você tem na carteira
