@@ -976,6 +976,50 @@ def callback_geral(call):
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
             bot.edit_message_text("📈 *Módulo de Ações*\nSelecione um setor ou favorita:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
+# ==========================================
+        # OPORTUNIDADES (Via Filtros Dinâmicos)
+        # ==========================================
+        elif dados in ["oportunidades_fiis", "oportunidades_acoes"]:
+            bot.answer_callback_query(call.id, "Analisando o mercado...")
+
+            # Identifica o tipo baseado no botão clicado
+            is_fii = (dados == "oportunidades_fiis")
+            tipo = "fii" if is_fii else "acao"
+            menu_voltar = "menu_fiis" if is_fii else "menu_acoes"
+
+            try:
+                # 1. Busca os ativos que passaram no filtro atual (filtros.json)
+                oportunidades = buscar_oportunidades(tipo)
+
+                markup = InlineKeyboardMarkup(row_width=3)
+
+                # Se achou oportunidades, cria os botões para cada uma
+                if oportunidades:
+                    # Limita a 15 botões para não estourar a tela do Telegram
+                    top_oportunidades = oportunidades[:15] 
+
+                    # Gera os botões dos tickers (ex: callback "fii_HGLG11" ou "acao_WEGE3")
+                    botoes_ativos = [InlineKeyboardButton(tkr, callback_data=f"{tipo}_{tkr}") for tkr in top_oportunidades]
+                    markup.add(*botoes_ativos)
+
+                    texto = (
+                        f"🔥 *Top Oportunidades ({'FIIs' if is_fii else 'Ações'})*\n\n"
+                        f"Estes ativos passaram na sua peneira de filtros. Selecione para ver o terminal completo:"
+                    )
+                else:
+                    texto = "📭 *Nenhuma oportunidade encontrada.*\n\nNenhum ativo atendeu aos critérios rigorosos do seu filtro atual."
+
+                # 2. Adiciona os botões de gestão na parte inferior
+                markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
+
+                bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+            except Exception as e:
+                print(f"Erro ao carregar oportunidades: {e}")
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
+                bot.edit_message_text(f"❌ Erro ao aplicar os filtros do sistema.\nVerifique se o `filtros.json` está correto.", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
         # ==========================================
         # 🟢 ABRIR TELA DO ATIVO (Destino Final)
         # ==========================================
