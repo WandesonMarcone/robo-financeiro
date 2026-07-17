@@ -21,7 +21,9 @@ from modules.GoogleDriveManager import GoogleDriveManager
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from pipeline_dados.coletor_cvm import funcao_principal_do_seu_coletor_cvm 
+from pipeline_dados.coletor_cvm import AcoesCVMReader
+# Importe o SessionDB do local onde você o definiu originalmente (ex: atualizador_documentos ou o arquivo de config)
+from atualizador_documentos import SessionDB  
 
 # ==========================================
 # CONFIGURAÇÕES INICIAIS
@@ -157,14 +159,22 @@ def comando_mapear_nomes_b3(message):
 
 @bot.message_handler(commands=['testar_cvm'])
 def comando_testar_cvm(message):
-    bot.send_message(message.chat.id, "⚙️ Iniciando teste manual do Coletor CVM...")
+    bot.send_message(message.chat.id, "⚙️ Iniciando teste manual do Coletor CVM (Ano Atual)...")
+    
+    session = SessionDB() # Abre uma nova sessão para o robô trabalhar
     try:
-        # Substitua pelo nome real da função que roda o seu coletor_cvm
-        resultado = funcao_principal_do_seu_coletor_cvm() 
-        bot.send_message(message.chat.id, f"✅ Teste CVM concluído:\n{resultado}")
+        # Instancia o leitor passando a sessão
+        coletor = AcoesCVMReader(session)
+        
+        # Executa a atualização para o ano corrente (2026)
+        coletor.atualizar_acoes(datetime.now().year)
+        
+        bot.send_message(message.chat.id, "✅ Coletor CVM rodou com sucesso!")
+        
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Erro no Coletor CVM: {str(e)}")
-
+    finally:
+        session.close() # Sempre fecha a sessão para liberar o banco de dados
 
 # ==========================================
 # COMANDO: ADICIONAR ATIVO (/adicionar)
