@@ -14,6 +14,15 @@ from config import MAPA_CNPJ_B3, MAPA_CONTAS_CVM
 
 logger = logging.getLogger(__name__)
 
+def obter_tickers_da_planilha():
+    try:
+        planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
+        aba = planilha.worksheet("BD_Acoes")
+        tickers = aba.col_values(1)[1:] 
+        return list(set([t.strip().upper() for t in tickers if t.strip()])) 
+    except:
+        return []
+
 class AcoesCVMReader:
     """Motor de captura de dados contábeis de Ações conectado ao Google Sheets."""
 
