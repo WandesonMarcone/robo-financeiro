@@ -27,6 +27,7 @@ from apscheduler.triggers.cron import CronTrigger
 from pipeline_dados.coletor_cvm import AcoesCVMReader
 # Importe o SessionDB do local onde você o definiu originalmente (ex: atualizador_documentos ou o arquivo de config)
 from atualizador_documentos import SessionDB  
+from datetime import datetime
 
 # ==========================================
 # CONFIGURAÇÕES INICIAIS
