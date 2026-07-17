@@ -1,5 +1,7 @@
 import os
 import time
+import json
+import requests
 import unicodedata
 from datetime import datetime, timedelta
 import config
@@ -30,7 +32,6 @@ def normalizar_texto(texto):
     return ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
 
 def classificar_documento_com_ia(nome_original, texto_extraido):
-    # Se o PDF for uma imagem (vazio), ignora a IA e usa o nome original da B3
     if not texto_extraido: 
         return nome_original 
     
@@ -43,18 +44,49 @@ def classificar_documento_com_ia(nome_original, texto_extraido):
         )
         return chat.choices[0].message.content.strip()
     except Exception as e:
-        # Se o Groq der Rate Limit, usamos o nome original da B3 em vez de "Documento_FII"
         return nome_original 
 
+def enviar_alerta_revisao_telegram(ticker, nome_doc, link_pdf, file_id, db_id):
+    """Envia a mensagem interativa com botões para o seu Telegram"""
+    chat_id = os.environ.get('TELEGRAM_CHAT_ID') # Precisaremos adicionar isso no Render!
+    if not chat_id:
+        print("⚠️ TELEGRAM_CHAT_ID não configurado. Alerta não enviado.")
+        return
+
+    url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
+    
+    # Callback data limite é 64 bytes. Ex: rev_C_12_1abc123456789...
+    teclado = {
+        "inline_keyboard": [
+            [{"text": f"✅ Confirmar como {ticker}", "callback_data": f"rev_C_{db_id}_{file_id}"}],
+            [{"text": "🗑️ Apagar / Lixo", "callback_data": f"rev_A_{db_id}_{file_id}"}]
+        ]
+    }
+    
+    mensagem = (
+        f"🚨 **Novo documento suspeito!**\n\n"
+        f"A B3 diz que é do **{ticker}**, mas o robô não conseguiu confirmar no texto (pode ser imagem/scan).\n"
+        f"📄 **Tipo:** {nome_doc}\n\n"
+        f"🔗 [Clique aqui para abrir o PDF]({link_pdf})\n\n"
+        f"O que eu faço?"
+    )
+    
+    payload = {
+        "chat_id": chat_id,
+        "text": mensagem,
+        "parse_mode": "Markdown",
+        "reply_markup": json.dumps(teclado)
+    }
+    requests.post(url, data=payload)
+
 # ==========================================
-# CAMADA 1: COLETA (Rápida e sem travar)
+# CAMADA 1: COLETA
 # ==========================================
 def rotina_de_coleta_b3():
     b3 = FnetDownloader()
     lista_de_fiis = obter_tickers_da_planilha()
     session = SessionDB()
 
-    # Ajustado para os últimos 85 dias
     data_busca = (datetime.now() - timedelta(days=85)).strftime("%d/%m/%Y")
     todos_documentos = b3.capturar_tudo(data_busca)
 
@@ -66,7 +98,6 @@ def rotina_de_coleta_b3():
         for ticker in lista_de_fiis:
             isca = normalizar_texto(MAPA_ISCAS_MASTER.get(ticker, ticker))
             if isca in nome_fundo_b3:
-                # Verifica se já temos ESSE id_b3 no banco
                 existe = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.id_b3 == id_doc).first()
                 if not existe:
                     ativo_db = session.query(Ativo).filter(Ativo.ticker == ticker).first()
@@ -75,13 +106,12 @@ def rotina_de_coleta_b3():
                         session.add(ativo_db)
                         session.commit()
 
-                    # 🚀 A MÁQUINA DE ESTADOS COMEÇA AQUI
                     novo_doc = DocumentosQualitativos(
                         ativo_id=ativo_db.id,
                         id_b3=id_doc,
                         data_publicacao=datetime.now(),
-                        tipo_documento=doc['tipo_doc'], # Tipo bruto da B3
-                        assunto=doc['data_ref'], # Usando provisoriamente para guardar a data de ref
+                        tipo_documento=doc['tipo_doc'], 
+                        assunto=doc['data_ref'], 
                         status_processamento="PENDENTE"
                     )
                     session.add(novo_doc)
@@ -92,22 +122,20 @@ def rotina_de_coleta_b3():
     return novos
 
 # ==========================================
-# CAMADA 2 E 3: PROCESSAMENTO, VALIDAÇÃO E DRIVE
+# CAMADA 2 E 3: PROCESSAMENTO E REVISÃO
 # ==========================================
 def rotina_processar_pendentes():
     b3 = FnetDownloader()
     drive_manager = GoogleDriveManager()
     session = SessionDB()
 
-    # Busca apenas quem está PENDENTE no banco
     pendentes = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento == "PENDENTE").all()
-
     print(f"⚙️ Processando {len(pendentes)} documentos na fila...")
 
     for doc_db in pendentes:
         ticker = doc_db.ativo.ticker
         id_doc = doc_db.id_b3
-        data_ref = doc_db.assunto # Resgatando a data de ref
+        data_ref = doc_db.assunto 
 
         print(f"🔄 Processando fila: {ticker} (ID {id_doc})...")
 
@@ -120,54 +148,62 @@ def rotina_processar_pendentes():
         temp_filename = f"/tmp/{ticker}_{id_doc}.pdf"
         with open(temp_filename, "wb") as f: f.write(pdf_bytes)
 
-        # EXTRAÇÃO DE TEXTO PARA A IA
         texto_pdf = ""
         try:
             reader = PyPDF2.PdfReader(temp_filename)
             if len(reader.pages) > 0: 
                 texto_pdf = reader.pages[0].extract_text() or ""
-        except: 
-            pass
+        except: pass
 
-        # 🎯 INTELIGÊNCIA ARTIFICIAL (Camada 4)
         nome_ia = classificar_documento_com_ia(doc_db.tipo_documento, texto_pdf)
         nome_limpo = "".join([c for c in str(nome_ia).title() if c.isalnum() or c in (' ', '_', '-')]).strip()
 
-        # 🔥 Correção do BUG do nome vazio:
         if len(nome_limpo) < 3: 
-            # Se ainda assim o nome for inválido, apela para o nome bruto que a B3 enviou
             nome_limpo = "".join([c for c in str(doc_db.tipo_documento).title() if c.isalnum() or c in (' ', '_', '-')]).strip()
             if len(nome_limpo) < 3:
                 nome_limpo = "Documento_FII"
 
-        # UPLOAD
         partes_data = data_ref.split('-')
         mes_pasta = f"{partes_data[2]}-{partes_data[1]}" if len(partes_data) == 3 else datetime.now().strftime("%Y-%m")
 
-        link_gerado = drive_manager.upload_pdf_organizado(
-            caminho_arquivo=temp_filename,
-            nome_arquivo=f"{nome_limpo}_{data_ref}_{id_doc}.pdf",
-            ticker=ticker,
-            mes_ref=mes_pasta 
-        )
-
-        if link_gerado:
-            doc_db.url_pdf = link_gerado
-            doc_db.tipo_documento = nome_limpo
-            doc_db.status_processamento = "SALVO_DRIVE"
-            print(f"✅ Sucesso: {ticker} -> {nome_limpo}")
+        # ⚖️ A DECISÃO: DIRETO PRO DRIVE OU LIMBO DE REVISÃO?
+        if not texto_pdf.strip() or ticker.upper() not in texto_pdf.upper():
+            # 🚧 Suspeito: Manda pra pasta REVISÃO
+            file_id, link_gerado = drive_manager.upload_pdf_revisao(
+                caminho_arquivo=temp_filename,
+                nome_arquivo=f"REVISAR_{ticker}_{nome_limpo}_{data_ref}.pdf"
+            )
+            if file_id:
+                doc_db.status_processamento = "AGUARDANDO_REVISAO"
+                doc_db.url_pdf = link_gerado
+                session.commit()
+                enviar_alerta_revisao_telegram(ticker, nome_limpo, link_gerado, file_id, doc_db.id)
+                print(f"🚧 {ticker} enviado para revisão manual.")
+            else:
+                doc_db.status_processamento = "ERRO_DRIVE"
         else:
-            doc_db.status_processamento = "ERRO_DRIVE"
+            # ✅ Seguro: Manda direto pra pasta oficial
+            link_gerado = drive_manager.upload_pdf_organizado(
+                caminho_arquivo=temp_filename,
+                nome_arquivo=f"{nome_limpo}_{data_ref}_{id_doc}.pdf",
+                ticker=ticker,
+                mes_ref=mes_pasta 
+            )
+            if link_gerado:
+                doc_db.url_pdf = link_gerado
+                doc_db.tipo_documento = nome_limpo
+                doc_db.status_processamento = "SALVO_DRIVE"
+                print(f"✅ Sucesso: {ticker} -> {nome_limpo}")
+            else:
+                doc_db.status_processamento = "ERRO_DRIVE"
 
         session.commit()
         if os.path.exists(temp_filename): os.remove(temp_filename)
-
-        # ⏳ PAUSA ESTRATÉGICA DE 6 SEGUNDOS: Protege contra o bloqueio da IA e da B3
+        
         time.sleep(6) 
 
     session.close()
 
-# ORQUESTRADOR PRINCIPAL
 def rotina_de_atualizacao_em_massa():
     novos_encontrados = rotina_de_coleta_b3()
     rotina_processar_pendentes()
