@@ -4,6 +4,7 @@ import io
 import json
 import requests
 import os
+import re
 import time
 import config
 import threading
@@ -624,61 +625,158 @@ def buscar_oportunidades(tipo):
         return []
 
 # ==========================================
-# PAINEL DE APROVAÇÃO MANUAL (HUMAN-IN-THE-LOOP)
+# PAINEL CENTRAL DE REVISÃO (O "APP")
 # ==========================================
-@bot.callback_query_handler(func=lambda call: call.data.startswith('rev_'))
-def processar_botao_revisao(call):
-    # O call.data chega assim: rev_C_15_1abc123456789...
-    partes = call.data.split('_', 3)
-    acao = partes[1]    # 'C' (Confirmar) ou 'A' (Apagar)
-    doc_id = partes[2]  # ID do documento no banco
-    file_id = partes[3] # ID do arquivo no Google Drive
-    
-    bot.answer_callback_query(call.id, "Processando sua ordem no Drive...")
-    
+def extrair_file_id(url):
+    """Pega o ID do Drive de dentro do link gerado"""
+    match = re.search(r'/d/([a-zA-Z0-9_-]+)', str(url))
+    return match.group(1) if match else None
+
+# O catálogo de botões de nomes
+TIPOS_DOC = {
+    "0": "Relatorio Gerencial",
+    "1": "Fato Relevante",
+    "2": "Informe Mensal",
+    "3": "Aviso aos Cotistas",
+    "4": "Demonstracoes Financeiras",
+    "5": "Nova Emissao de Cotas",
+    "6": "Outros"
+}
+
+@bot.message_handler(commands=['revisao'])
+def comando_painel_revisao(message):
+    enviar_painel_tickers(message.chat.id)
+
+def enviar_painel_tickers(chat_id, message_id=None):
     session = SessionDB()
+    pendentes = session.query(DocumentosQualitativos).filter_by(status_processamento="AGUARDANDO_REVISAO").all()
+    
+    if not pendentes:
+        msg = "🎉 Excelente! A sua mesa está limpa. Não há documentos aguardando revisão."
+        if message_id: bot.edit_message_text(msg, chat_id, message_id)
+        else: bot.send_message(chat_id, msg)
+        session.close()
+        return
+
+    # Agrupa por Fundo
+    tickers = sorted(list(set([doc.ativo.ticker for doc in pendentes])))
+    markup = InlineKeyboardMarkup()
+    
+    for t in tickers:
+        qtd = len([d for d in pendentes if d.ativo.ticker == t])
+        markup.add(InlineKeyboardButton(text=f"📁 {t} ({qtd} docs)", callback_data=f"rev_t_{t}"))
+    
+    msg = "⚠️ **Central de Revisão**\n\nEstes FIIs possuem documentos suspeitos ou em formato de imagem. Selecione um para analisar:"
+    if message_id:
+        bot.edit_message_text(msg, chat_id, message_id, reply_markup=markup, parse_mode="Markdown")
+    else:
+        bot.send_message(chat_id, msg, reply_markup=markup, parse_mode="Markdown")
+    session.close()
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('rev_'))
+def processar_revisao(call):
+    partes = call.data.split('_')
+    acao = partes[1]
+    session = SessionDB()
+    
     try:
-        doc_db = session.query(DocumentosQualitativos).get(doc_id)
-        if not doc_db:
-            bot.edit_message_text("❌ Este documento não existe mais no banco de dados.", call.message.chat.id, call.message.message_id)
-            return
+        if acao == 'start':
+            enviar_painel_tickers(call.message.chat.id, call.message.message_id)
+
+        # 1. MOSTRA OS DOCUMENTOS DO FII ESCOLHIDO
+        elif acao == 't':
+            ticker = partes[2]
+            pendentes = session.query(DocumentosQualitativos).join(Ativo).filter(
+                Ativo.ticker == ticker, 
+                DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
+            ).all()
             
-        ticker = doc_db.ativo.ticker
-        
-        # Reconstrói a pasta do mês (ex: 2026-04) a partir da data_ref salva no assunto
-        mes_ref = datetime.now().strftime("%Y-%m")
-        if doc_db.assunto and '-' in doc_db.assunto:
-            partes_data = doc_db.assunto.split('-')
-            if len(partes_data) == 3:
-                mes_ref = f"{partes_data[2]}-{partes_data[1]}"
-                
-        if acao == 'C':
-            # 1. Move o arquivo lá no Google Drive
-            novo_link = drive_manager.mover_arquivo(file_id, ticker, mes_ref)
+            markup = InlineKeyboardMarkup()
+            for doc in pendentes:
+                # Ex: 📄 24-04-2026 (Nome Genérico)
+                btn_text = f"📄 {doc.assunto} | ID: {doc.id_b3}"
+                markup.add(InlineKeyboardButton(text=btn_text, callback_data=f"rev_d_{doc.id}"))
+            markup.add(InlineKeyboardButton(text="🔙 Voltar aos FIIs", callback_data="rev_start"))
+            
+            bot.edit_message_text(f"📑 **Análise: {ticker}**\n\nQual documento você quer olhar?", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+
+        # 2. MOSTRA OS DETALHES DE UM DOCUMENTO (LINK E BOTÕES)
+        elif acao == 'd':
+            doc_id = partes[2]
+            doc = session.query(DocumentosQualitativos).get(doc_id)
+            
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton(text="🔗 Visualizar PDF (Google Drive)", url=doc.url_pdf))
+            markup.add(
+                InlineKeyboardButton(text="✅ Classificar e Salvar", callback_data=f"rev_app_{doc.id}"),
+                InlineKeyboardButton(text="🗑️ Jogar no Lixo", callback_data=f"rev_del_{doc.id}")
+            )
+            markup.add(InlineKeyboardButton(text="🔙 Voltar", callback_data=f"rev_t_{doc.ativo.ticker}"))
+            
+            txt = f"🔍 **Inspecionando Documento**\n\n**Fundo:** {doc.ativo.ticker}\n**Data:** {doc.assunto}\n**Leitura da B3:** {doc.tipo_documento}\n\nO que deseja fazer?"
+            bot.edit_message_text(txt, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+
+        # 3. O USUÁRIO APERTOU "SALVAR" -> MOSTRAR O MENU DE NOMES
+        elif acao == 'app':
+            doc_id = partes[2]
+            doc = session.query(DocumentosQualitativos).get(doc_id)
+            
+            markup = InlineKeyboardMarkup()
+            for id_tipo, nome_tipo in TIPOS_DOC.items():
+                markup.add(InlineKeyboardButton(text=f"📂 {nome_tipo}", callback_data=f"rev_typ_{doc.id}_{id_tipo}"))
+            markup.add(InlineKeyboardButton(text="🔙 Cancelar", callback_data=f"rev_d_{doc.id}"))
+            
+            bot.edit_message_text(f"**Renomear Arquivo**\n\nO que é este documento do `{doc.ativo.ticker}` na verdade?", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+
+        # 4. A MÁGICA: APLICA O NOME, MOVE A PASTA E SALVA O BANCO
+        elif acao == 'typ':
+            doc_id = partes[2]
+            tipo_id = partes[3]
+            tipo_nome_limpo = TIPOS_DOC[tipo_id]
+            
+            bot.answer_callback_query(call.id, "Organizando no Drive...")
+            
+            doc = session.query(DocumentosQualitativos).get(doc_id)
+            file_id = extrair_file_id(doc.url_pdf)
+            
+            mes_ref = datetime.now().strftime("%Y-%m")
+            if doc.assunto and '-' in doc.assunto:
+                p = doc.assunto.split('-')
+                if len(p) == 3: mes_ref = f"{p[2]}-{p[1]}"
+            
+            # Monta o nome perfeito: Relatorio Gerencial_24-04-2026_12345.pdf
+            novo_nome_pdf = f"{tipo_nome_limpo}_{doc.assunto}_{doc.id_b3}.pdf"
+            
+            novo_link = drive_manager.mover_e_renomear_arquivo(file_id, doc.ativo.ticker, mes_ref, novo_nome_pdf)
+            
             if novo_link:
-                # 2. Atualiza o banco
-                doc_db.status_processamento = "SALVO_DRIVE"
-                doc_db.url_pdf = novo_link
+                doc.status_processamento = "SALVO_DRIVE"
+                doc.tipo_documento = tipo_nome_limpo
+                doc.url_pdf = novo_link
                 session.commit()
-                # 3. Muda a mensagem do Telegram
-                bot.edit_message_text(f"✅ **Aprovado!**\nO arquivo foi movido para a pasta oficial do `{ticker}`.", call.message.chat.id, call.message.message_id, parse_mode="Markdown")
-            else:
-                bot.edit_message_text("❌ Falha ao mover arquivo no Drive. Verifique os logs.", call.message.chat.id, call.message.message_id)
                 
-        elif acao == 'A':
-            # 1. Deleta do Google Drive
-            sucesso = drive_manager.deletar_arquivo(file_id)
-            if sucesso:
-                # 2. Atualiza o banco
-                doc_db.status_processamento = "REJEITADO_MANUAL"
-                session.commit()
-                # 3. Muda a mensagem do Telegram
-                bot.edit_message_text(f"🗑️ **Lixeira!**\nO arquivo suspeito do `{ticker}` foi apagado do Drive e do sistema.", call.message.chat.id, call.message.message_id, parse_mode="Markdown")
+                m = InlineKeyboardMarkup().add(InlineKeyboardButton(text="🔙 Voltar ao Painel", callback_data="rev_start"))
+                bot.edit_message_text(f"✅ **Arquivo Guardado!**\n\nNome: `{novo_nome_pdf}`\nPasta: `{doc.ativo.ticker}`", call.message.chat.id, call.message.message_id, reply_markup=m, parse_mode="Markdown")
             else:
-                bot.edit_message_text("❌ Falha ao apagar arquivo no Drive. Verifique os logs.", call.message.chat.id, call.message.message_id)
+                bot.answer_callback_query(call.id, "❌ Erro ao mover no Drive!")
+                
+        # 5. O USUÁRIO APERTOU APAGAR
+        elif acao == 'del':
+            doc_id = partes[2]
+            bot.answer_callback_query(call.id, "Apagando do Drive...")
+            doc = session.query(DocumentosQualitativos).get(doc_id)
+            file_id = extrair_file_id(doc.url_pdf)
+            
+            if drive_manager.deletar_arquivo(file_id):
+                doc.status_processamento = "REJEITADO_MANUAL"
+                session.commit()
+                m = InlineKeyboardMarkup().add(InlineKeyboardButton(text="🔙 Voltar ao Painel", callback_data="rev_start"))
+                bot.edit_message_text(f"🗑️ Documento apagado com sucesso.", call.message.chat.id, call.message.message_id, reply_markup=m)
+            else:
+                bot.answer_callback_query(call.id, "❌ Erro ao apagar no Drive!")
                 
     except Exception as e:
-        print(f"Erro na revisão manual: {e}")
+        print(f"Erro no painel de revisão: {e}")
     finally:
         session.close()
 
