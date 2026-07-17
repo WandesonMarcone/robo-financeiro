@@ -159,13 +159,20 @@ def comando_mapear_nomes_b3(message):
 # ==========================================
 
 @bot.message_handler(commands=['atualizar_banco'])
-def comando_atualizar_banco(message):
-    bot.send_message(message.chat.id, "⚙️ Iniciando injeção de SQL para atualizar a estrutura do Banco de Dados...")
+def comando_atualizar_banco_nativo(message):
+    import sqlite3
+    import os
     
-    from sqlalchemy import text
-    from atualizador_documentos import engine # Puxa o motor do banco que já configuramos
+    bot.send_message(message.chat.id, "🛠️ Iniciando injeção de Força Bruta no SQLite...")
     
-    # Comandos crus de SQL para adicionar as colunas que faltam na tabela velha
+    # Caminho exato do seu banco de dados
+    caminho_db = "pipeline_dados/banco_institucional.db"
+    
+    if not os.path.exists(caminho_db):
+        bot.send_message(message.chat.id, "❌ ERRO: Arquivo do banco de dados não encontrado no caminho especificado!")
+        return
+
+    # Comandos SQL de criação
     colunas_novas = [
         "ALTER TABLE documentos_qualitativos ADD COLUMN id_b3 VARCHAR(50);",
         "ALTER TABLE documentos_qualitativos ADD COLUMN status_processamento VARCHAR(20) DEFAULT 'SALVO' NOT NULL;",
@@ -177,19 +184,35 @@ def comando_atualizar_banco(message):
     
     sucessos = 0
     erros = 0
+    log_erros = ""
     
-    # Conecta direto no banco de dados e força a criação das colunas
-    with engine.begin() as conn:
+    try:
+        # Conecta diretamente ao arquivo físico, ignorando o SQLAlchemy
+        conn = sqlite3.connect(caminho_db)
+        cursor = conn.cursor()
+        
         for query in colunas_novas:
             try:
-                conn.execute(text(query))
+                cursor.execute(query)
                 sucessos += 1
-            except Exception as e:
-                # Se der erro (ex: a coluna já existir), ele ignora e segue
+            except sqlite3.OperationalError as e:
+                # Se o erro for "duplicate column name", significa que já existe (o que é bom)
                 erros += 1
-                pass
+                log_erros += f"\n- {str(e)}"
                 
-    bot.send_message(message.chat.id, f"✅ Atualização do banco concluída!\nColunas criadas: {sucessos}\nColunas já existentes ignoradas: {erros}\n\nO SQLite está pronto para a nova arquitetura. Pode rodar o /forcar_varredura novamente!")
+        conn.commit()
+        conn.close()
+        
+        mensagem_final = (
+            f"✅ Operação Nativa Concluída!\n"
+            f"Colunas criadas agora: {sucessos}\n"
+            f"Colunas já existentes/ignoradas: {erros}\n"
+            f"Logs: {log_erros}"
+        )
+        bot.send_message(message.chat.id, mensagem_final)
+        
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Erro crítico ao conectar no banco: {str(e)}")
 
 # ==========================================
 # COMANDO: CVM (/testar_cvm)
