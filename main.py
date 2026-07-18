@@ -65,13 +65,16 @@ scheduler.add_job(varredura_diaria, CronTrigger(day_of_week='mon-fri', hour=8, m
 scheduler.start()
 
 # ==========================================
-# 🚀 INICIALIZAÇÃO
+# 🚀 INICIALIZAÇÃO DO WEBHOOK (CORRIGIDO)
 # ==========================================
-bot.remove_webhook()
+# Mudamos de 'bot.remove_webhook()' para carregar do loader explicitamente:
+from bot.loader import bot as tele_bot
+
+tele_bot.remove_webhook()
 time.sleep(1)
 
 nova_url_render = "https://robo-fii-v2.onrender.com/" + config.TELEGRAM_BOT_TOKEN
-bot.set_webhook(url=nova_url_render)
+tele_bot.set_webhook(url=nova_url_render)
 print(f"✅ Webhook configurado com sucesso para: {nova_url_render[:35]}...")
 
 if __name__ == "__main__":
