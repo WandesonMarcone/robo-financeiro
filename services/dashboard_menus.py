@@ -6,7 +6,6 @@ from modules.GoogleDriveManager import GoogleDriveManager
 
 # Instancia o gerenciador de arquivos uma vez
 drive_manager = GoogleDriveManager()
-
 def converter_numero(valor_string):
     """Limpa textos como 'R$ 1.050,50' ou '8,5%' da planilha e transforma em número puro"""
     try:
