@@ -1,0 +1,20 @@
+meu_robo_financeiro/
+│
+├── main.py                 # (NOVO) Apenas liga o Servidor Flask, o Webhook e o Agendador.
+├── config.py               # Senhas, Dicionários (MAPA_CNPJ_B3) e Constantes.
+│
+├── bot/                    # 🤖 CAMADA DE INTERFACE (Telegram)
+│   ├── __init__.py
+│   ├── comandos.py         # Arquivo só para /start, /status, /forcar_cvm, etc.
+│   └── menus_callbacks.py  # Arquivo só para a lógica do callback_geral (botões).
+│
+├── services/               # 🧠 CAMADA DE LÓGICA DE NEGÓCIO
+│   ├── __init__.py
+│   ├── orquestrador.py     # Guarda a varredura_diaria() e tarefas pesadas.
+│   ├── planilhas.py        # Faz a ponte com o Google Sheets (com Cache!).
+│   └── drive_manager.py    # Move, renomeia e deleta no Google Drive.
+│
+└── pipeline_dados/         # 🗄️ CAMADA DE DADOS E COLETORES
+    ├── banco_dados.py      # Suas tabelas (SQLAlchemy).
+    ├── coletor_cvm.py      # O motor de baixar balanços.
+    └── coletor_fnet.py     # O motor de baixar relatórios de FIIs.
