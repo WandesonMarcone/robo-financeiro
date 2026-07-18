@@ -6,8 +6,9 @@ from modules.GoogleDriveManager import GoogleDriveManager
 
 # Instancia o gerenciador de arquivos uma vez
 drive_manager = GoogleDriveManager()
+
 def converter_numero(valor_string):
-    """Limpa textos como 'R$ 1.050,50' ou '8,5%' da planilha e transforma em número puro"""
+    """Limpa textos da planilha e transforma em número puro"""
     try:
         texto = str(valor_string).replace('R$', '').replace('%', '').strip()
         if not texto or texto == '-': return 0.0
@@ -19,25 +20,22 @@ def converter_numero(valor_string):
         return 0.0
 
 def buscar_oportunidades(tipo):
-    """Vasculha a planilha usando regras fixas hardcoded"""
+    """Vasculha a planilha usando o Cache Rápido para não travar o bot"""
     is_fii = (tipo == 'fii')
     nome_aba = "BD_FIIs" if is_fii else "BD_Acoes"
 
-    # 🚨 REGRAS FIXAS DEFINIDAS AQUI 🚨
     FILTROS_FIXOS = {
         "fii": {"pvp_min": 0.50, "pvp_max": 1.15, "dy_min": 0.08},
         "acao": {"pl_min": 2.0, "pl_max": 15.0, "pvp_min": 0.50, "pvp_max": 2.50, "dy_min": 0.06, "roe_min": 0.10}
     }
-
     filtro_atual = FILTROS_FIXOS[tipo]
 
     try:
-        planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
-        aba = planilha.worksheet(nome_aba)
-        matriz = aba.get_all_values()
+        # Puxa os dados instantaneamente do Cache
+        matriz = buscar_dados_planilha_com_cache(nome_aba)
+        if not matriz: return []
 
         oportunidades = []
-
         for linha in matriz[1:]:
             try:
                 ticker = linha[0].strip()
@@ -46,7 +44,6 @@ def buscar_oportunidades(tipo):
                 if is_fii:
                     pvp = converter_numero(linha[5])
                     dy = converter_numero(linha[6])
-
                     dy_min = filtro_atual['dy_min']
                     if dy_min < 1 and dy >= 1: dy_min *= 100 
 
@@ -58,19 +55,16 @@ def buscar_oportunidades(tipo):
                     pvp = converter_numero(linha[6])
                     roe = converter_numero(linha[19])
 
-                    dy_min = filtro_atual['dy_min']
+                    dy_min, roe_min = filtro_atual['dy_min'], filtro_atual['roe_min']
                     if dy_min < 1 and dy >= 1: dy_min *= 100
-                    roe_min = filtro_atual['roe_min']
                     if roe_min < 1 and roe >= 1: roe_min *= 100
 
                     if (filtro_atual['pl_min'] <= pl <= filtro_atual['pl_max']) and \
                        (filtro_atual['pvp_min'] <= pvp <= filtro_atual['pvp_max']) and \
                        (dy >= dy_min) and (roe >= roe_min):
                         oportunidades.append(ticker)
-
             except IndexError:
                 pass 
-
         return oportunidades
     except Exception as e:
         print(f"Erro no filtro de oportunidades: {e}")
@@ -82,27 +76,18 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
     icone = "🏢 Fundo" if is_fii else "📈 Ação"
     voltar_cmd = "menu_fiis" if is_fii else "menu_acoes"
 
-    # 1. Puxar as Logos e Dados Reais da Planilha
+    url_logo = obter_link_logo(ticker, tipo, drive_manager)
+    indicadores = buscar_ativo_na_planilha(ticker, is_fii)
 
-    url_logo = obter_link_logo(ticker, tipo, driver_manager)
-    indicadores = buscar_dados_planilha(ticker, is_fii)
-    # Tratamento de erro caso o ativo não esteja na planilha
     if not indicadores:
         msg_erro = f"❌ Erro: Não encontrei dados para **{ticker}** na planilha."
-        if message_id:
-            bot.edit_message_text(msg_erro, chat_id, message_id, parse_mode="Markdown")
-        else:
-            bot.send_message(chat_id, msg_erro, parse_mode="Markdown")
+        if message_id: bot.edit_message_text(msg_erro, chat_id, message_id, parse_mode="Markdown")
+        else: bot.send_message(chat_id, msg_erro, parse_mode="Markdown")
         return
 
-    # 2. Resumo da IA (Placeholder - futuramente puxar de module_ia)
-
-    resumo_ia = f"Ativo monitorado do setor {indicadores.get('setor', 'Geral')}. Focado na geração de valor no mercado brasileiro."
-
-    # 3. Montar a tela exata da sua arquitetura
-
+    resumo_ia = f"Ativo monitorado do setor {indicadores.get('setor', 'Geral')}."
     link_invisivel = f"[\u200c]({url_logo})" if url_logo else ""
-    # Formatação condicional baseada no tipo de ativo
+
     if is_fii:
         texto = (
             f"{link_invisivel}{icone}: **{ticker}**\n"
@@ -122,19 +107,13 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
             f"📈 **ROE:** {indicadores.get('roe', 'N/A')}"
         )
 
-    # 4. Criar os Botões (Submenus)
-
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
-        InlineKeyboardButton("📎 Dados Importantes", callback_data=f"dados_{ticker}_{tipo}"),
-        InlineKeyboardButton("📑 Documentos", callback_data=f"docs_{ticker}_{tipo}")
+        InlineKeyboardButton("📎 Dados", callback_data=f"dados_{ticker}_{tipo}"),
+        InlineKeyboardButton("📑 Docs", callback_data=f"docs_{ticker}_{tipo}")
     )
-    markup.add(InlineKeyboardButton("⚠️ Análise de IA", callback_data=f"ia_{ticker}_{tipo}"))
-    markup.add(InlineKeyboardButton(f"🔙 Voltar aos {icone.split()[1]}s", callback_data=voltar_cmd))
+    markup.add(InlineKeyboardButton("⚠️ Análise IA", callback_data=f"ia_{ticker}_{tipo}"))
+    markup.add(InlineKeyboardButton(f"🔙 Voltar", callback_data=voltar_cmd))
 
-    # 5. Enviar ou Editar
-
-    if message_id:
-        bot.edit_message_text(texto, chat_id, message_id, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=False)
-    else:
-        bot.send_message(chat_id, texto, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=False)
+    if message_id: bot.edit_message_text(texto, chat_id, message_id, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=False)
+    else: bot.send_message(chat_id, texto, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=False)
