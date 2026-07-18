@@ -284,9 +284,9 @@ def callback_geral(call):
     except Exception as e:
         print(f"Erro no callback geral: {e}")
 
-            # ==========================================
+# ==========================================
 # ----- BOTÃO TIPO/SETOR FIIS -----
-            # ==========================================
+# ==========================================
 @bot.callback_query_handler(func=lambda call: call.data.startswith('tipo_fii_'))
 def callback_selecionar_segmento(call):
     """Lê a planilha, quebra as barras e cria os botões de segmentos únicos"""
@@ -363,9 +363,9 @@ def callback_listar_ativos_fii(call):
     texto = f"📂 *Ativos no segmento: {nome_setor}*\n\nSelecione um ativo para analisar o painel profundo:"
     bot.edit_message_text(texto, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
-            # ==========================================
+# ==========================================
 # ----- BOTÃO TIPO/SETOR AÇÕES -----
-            # ==========================================
+# ==========================================
 @bot.callback_query_handler(func=lambda call: call.data.startswith('setor_acao_'))
 def callback_listar_ativos_acao(call):
     """Lê a aba BD_Acoes e lista as empresas que pertencem ao setor clicado"""
@@ -391,3 +391,39 @@ def callback_listar_ativos_acao(call):
     
     texto = f"📂 *Ações no setor: {nome_setor}*\n\nSelecione um ativo para analisar:"
     bot.edit_message_text(texto, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+
+# ==========================================
+# ----- BOTÃO MENU AJUDA -----
+# ==========================================
+@bot.callback_query_handler(func=lambda call: call.data == 'ajuda_roadmap')
+def callback_ajuda_roadmap(call):
+    texto = (
+        "🗺️ *Roadmap de Desenvolvimento*\n\n"
+        "✅ *Concluído:* Scraper FIIs, Cache, Menu Hierárquico.\n\n"
+        "🚧 *Próximos Passos (Backlog):*\n"
+        "1. *Hash SHA256:* Garantir integridade máxima contra duplicidade.\n"
+        "2. *Validação Pós-Download:* Verificar PDF corrompido antes de salvar.\n"
+        "3. *IA Analítica (Groq):* Ler PDFs para detectar riscos e vacância.\n"
+        "4. *Retry Complexo:* Lógica de 3 tentativas com *backoff* de 15min.\n"
+        "5. *CVM Ações:* Integrar download e backup dos PDFs originais no Google Drive.\n"
+    )
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_ajuda"))
+    bot.edit_message_text(texto, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+
+@bot.callback_query_handler(func=lambda call: call.data == 'ajuda_comandos')
+def callback_ajuda_comandos(call):
+    """Lista detalhada de todos os comandos do sistema"""
+    texto_comandos = (
+        "📖 *Guia de Comandos*\n\n"
+        "🔹 */status* - Verifica a saúde do banco de dados.\n"
+        "🔹 */relatorios* - Acesso direto aos últimos PDFs de Fatos Relevantes.\n"
+        "🔹 */adicionar [TICKER]* - Adiciona um ativo manualmente ao seu monitoramento.\n"
+        "🔹 */analisar [TICKER]* - Força uma análise profunda do ativo via IA.\n\n"
+        "Dica: Utilize os menus dinâmicos para navegar pelos setores sem precisar digitar comandos."
+    )
+    
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🔙 Voltar à Ajuda", callback_data="menu_ajuda"))
+    
+    bot.edit_message_text(texto_comandos, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
