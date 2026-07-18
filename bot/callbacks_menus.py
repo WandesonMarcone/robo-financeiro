@@ -113,28 +113,28 @@ def callback_geral(call):
     # 2. OPORTUNIDADES
         elif dados in ["oportunidades_fiis", "oportunidades_acoes"]:
             bot.answer_callback_query(call.id, "Analisando o mercado...")
-        is_fii = (dados == "oportunidades_fiis")
-        tipo = "fii" if is_fii else "acao"
-        menu_voltar = "menu_fiis" if is_fii else "menu_acoes"
+            is_fii = (dados == "oportunidades_fiis")
+            tipo = "fii" if is_fii else "acao"
+            menu_voltar = "menu_fiis" if is_fii else "menu_acoes"
 
-        try:
-            oportunidades = buscar_oportunidades(tipo)
-            markup = InlineKeyboardMarkup(row_width=3)
+            try:
+                oportunidades = buscar_oportunidades(tipo)
+                markup = InlineKeyboardMarkup(row_width=3)
             
-            if oportunidades:
-                top_oportunidades = oportunidades[:15] 
-                botoes_ativos = [InlineKeyboardButton(tkr, callback_data=f"{tipo}_{tkr}") for tkr in top_oportunidades]
-                markup.add(*botoes_ativos)
-                texto = f"🔥 *Top Oportunidades ({'FIIs' if is_fii else 'Ações'})*\n\nEstes ativos passaram na sua peneira."
-            else:
-                texto = "📭 *Nenhuma oportunidade encontrada.*"
+                if oportunidades:
+                    top_oportunidades = oportunidades[:15] 
+                    botoes_ativos = [InlineKeyboardButton(tkr, callback_data=f"{tipo}_{tkr}") for tkr in top_oportunidades]
+                    markup.add(*botoes_ativos)
+                    texto = f"🔥 *Top Oportunidades ({'FIIs' if is_fii else 'Ações'})*\n\nEstes ativos passaram na sua peneira."
+                else:
+                    texto = "📭 *Nenhuma oportunidade encontrada.*"
 
-            markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
-            bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-        except Exception as e:
-            print(f"Erro ao carregar oportunidades: {e}")
-            markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
-            bot.edit_message_text("❌ Erro ao aplicar os filtros.", chat_id, msg_id, reply_markup=markup)
+                markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
+                bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            except Exception as e:
+                print(f"Erro ao carregar oportunidades: {e}")
+                markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
+                bot.edit_message_text("❌ Erro ao aplicar os filtros.", chat_id, msg_id, reply_markup=markup)
 
         elif dados.startswith("fii_") or dados.startswith("acao_"):
             partes = dados.split("_")
