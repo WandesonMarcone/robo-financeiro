@@ -1,6 +1,6 @@
 import config
-import telebot
 from datetime import datetime
+from bot.loader import bot
 from atualizador_documentos import rotina_de_atualizacao_em_massa, SessionDB
 from pipeline_dados.coletor_cvm import AcoesCVMReader
 
