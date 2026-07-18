@@ -82,7 +82,9 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
     is_fii = (tipo == 'fii')
     icone = "🏢 Fundo" if is_fii else "📈 Ação"
     voltar_cmd = "menu_fiis" if is_fii else "menu_acoes"
+
     # 1. Puxar as Logos e Dados Reais da Planilha
+
     url_logo = obter_link_logo(ticker, tipo, driver_manager)
     indicadores = buscar_dados_planilha(ticker, is_fii)
     # Tratamento de erro caso o ativo não esteja na planilha
@@ -93,10 +95,13 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
         else:
             bot.send_message(chat_id, msg_erro, parse_mode="Markdown")
         return
+
     # 2. Resumo da IA (Placeholder - futuramente puxar de module_ia)
+
     resumo_ia = f"Ativo monitorado do setor {indicadores.get('setor', 'Geral')}. Focado na geração de valor no mercado brasileiro."
+
     # 3. Montar a tela exata da sua arquitetura
-    # O [\u200c] é o link invisível para renderizar a logo no topo
+
     link_invisivel = f"[\u200c]({url_logo})" if url_logo else ""
     # Formatação condicional baseada no tipo de ativo
     if is_fii:
@@ -117,7 +122,9 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
             f"📊 **P/L:** {indicadores.get('pl', 'N/A')} | ⚖️ **P/VP:** {indicadores.get('pvp', 'N/A')}\n"
             f"📈 **ROE:** {indicadores.get('roe', 'N/A')}"
         )
+
     # 4. Criar os Botões (Submenus)
+
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
         InlineKeyboardButton("📎 Dados Importantes", callback_data=f"dados_{ticker}_{tipo}"),
@@ -125,7 +132,9 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
     )
     markup.add(InlineKeyboardButton("⚠️ Análise de IA", callback_data=f"ia_{ticker}_{tipo}"))
     markup.add(InlineKeyboardButton(f"🔙 Voltar aos {icone.split()[1]}s", callback_data=voltar_cmd))
+
     # 5. Enviar ou Editar
+
     if message_id:
         bot.edit_message_text(texto, chat_id, message_id, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=False)
     else:
