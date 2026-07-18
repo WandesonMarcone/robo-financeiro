@@ -113,6 +113,8 @@ def callback_geral(call):
             markup = InlineKeyboardMarkup(row_width=3)
 
         # --- FAVORITOS ---            
+        elif dados in ["favoritos_fiis", "favoritos_acoes"]:
+            bot.answer_callback_query(call.id, "Buscando seus favoritos...")
             if favs:
                 botoes = [InlineKeyboardButton(tkr, callback_data=f"{tipo}_{tkr}") for tkr in favs]
                 markup.add(*botoes)
