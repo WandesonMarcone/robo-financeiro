@@ -117,3 +117,71 @@ def comando_reciclar_rejeitados(message):
         bot.send_message(message.chat.id, f"✅ {contador} documentos foram devolvidos para a fila!")
     finally:
         session.close()
+
+# Varre todo o site da B3 para encontrar o "Nome Oficial" de todos os FIIs e salva em um arquivo de texto
+@bot.message_handler(commands=['mapear_nomes'])
+def comando_mapear_nomes_b3(message):
+    import time
+    import requests
+    import threading # ⬅️ A CHAVE DA SOLUÇÃO (Permite rodar em segundo plano)
+
+    # 1. O bot responde na mesma hora, acalmando o servidor do Telegram
+    bot.send_message(message.chat.id, "🕵️‍♂️ Comando recebido! Como a B3 é lenta, enviei essa tarefa para o segundo plano. Pode continuar usando o Telegram normalmente, te enviarei o arquivo TXT assim que estiver pronto.")
+
+    # 2. Definimos a tarefa pesada (A auditoria real que demora minutos)
+    def tarefa_pesada():
+        url = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'}
+        nomes_unicos = set()
+
+        try:
+            # Paginação de 50 em 50 documentos na API da B3
+            for start in range(0, 5000, 50):
+                params = {'d': '1', 's': str(start), 'l': '50', 'tipoFundo': '1'}
+
+                sucesso = False
+                for tentativa in range(3): # Tenta 3 vezes caso a B3 bloqueie a conexão
+                    try:
+                        res = requests.get(url, params=params, headers=headers, timeout=45)
+                        res.raise_for_status() 
+                        data = res.json().get('data', [])
+                        sucesso = True
+                        break 
+                    except Exception as e:
+                        time.sleep(2) 
+
+                if not sucesso:
+                    bot.send_message(message.chat.id, f"⚠️ Aviso: A B3 travou na página {start}. O arquivo será gerado com o que consegui até agora.")
+                    break
+
+                if not data:
+                    break # Fim dos dados
+
+                # Extrai o nome de cada fundo e adiciona no cofre sem repetições (Set)
+                for item in data:
+                    descricao = item.get('descricaoFundo', '').upper().strip()
+                    if descricao:
+                        nomes_unicos.add(descricao)
+
+                time.sleep(1.5) # Pausa para não ser banido pela B3
+
+            lista_ordenada = sorted(list(nomes_unicos))
+            texto_final = "\n".join(lista_ordenada)
+
+            caminho_arquivo = "/tmp/nomes_b3_auditoria.txt"
+
+            # Gera o arquivo TXT físico com os resultados
+            with open(caminho_arquivo, "w", encoding="utf-8") as f:
+                f.write(f"--- CATÁLOGO DE NOMES DA B3 ({len(lista_ordenada)} fundos encontrados) ---\n\n")
+                f.write(texto_final)
+
+            # Envia o arquivo finalizado para o usuário no Telegram
+            with open(caminho_arquivo, "rb") as f:
+                bot.send_document(message.chat.id, f, caption="🎯 Auditoria concluída em segundo plano! Aqui está a lista exata da B3.")
+
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ Erro crítico na thread de mapeamento: {str(e)}")
+
+    # 3. Dispara a tarefa pesada em uma Thread separada (Background)
+    thread = threading.Thread(target=tarefa_pesada)
+    thread.start()
