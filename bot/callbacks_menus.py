@@ -68,7 +68,7 @@ def callback_geral(call):
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
             bot.edit_message_text("🏢 *Módulo FIIs - Selecione o Tipo:*", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- MENUS DINÂMICOS (Ações) ---
+        # --- MÓDULO AÇÕES ---
         elif dados == "menu_acoes":
             bot.answer_callback_query(call.id, "Carregando Ações...")
             markup = InlineKeyboardMarkup(row_width=2)
@@ -78,36 +78,20 @@ def callback_geral(call):
             )
 
             try:
-                # CORREÇÃO: Lê a planilha usando o Cache de memória
                 matriz = buscar_dados_planilha_com_cache("BD_Acoes")
-                if not matriz:
-                    bot.send_message(chat_id, "❌ A aba 'BD_Acoes' está vazia ou inacessível.")
-                    return
-
-                cabecalhos = [c.lower().strip() for c in matriz[0]]
-                idx = next((i for i, c in enumerate(cabecalhos) if c in ["setor", "segmento", "tipo"]), -1)
-
-                if idx != -1:
-                    setores = sorted(list(set(linha[idx].strip() for linha in matriz[1:] if linha[idx].strip())))
-                    for s in setores:
-                        markup.add(InlineKeyboardButton(f"📁 {s}", callback_data=f"setor_acao_{s[:12]}"))
-                else:
-                    bot.send_message(chat_id, "⚠️ Cabeçalho 'Setor/Segmento' não localizado na planilha.")
-
+                if matriz:
+                    # Assumindo que o Setor fica na Coluna C (índice 2). 
+                    # Se for outra coluna, basta mudar o linha[2] para o número correto!
+                    setores_acoes = sorted(list(set(linha[2].strip() for linha in matriz[1:] if linha[2].strip())))
+                    
+                    for s in setores_acoes:
+                        # Criando o botão com o nome completo do setor (sem o [:12])
+                        markup.add(InlineKeyboardButton(f"📁 {s}", callback_data=f"setor_acao_{s}"))
             except Exception as e:
-                logger.error(f"Erro fatal no menu_acoes: {e}")
-                bot.send_message(chat_id, f"❌ Erro ao acessar planilha: {str(e)}")
-                return
+                print(f"Erro ao ler setores de ações: {e}")
 
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
-            bot.edit_message_text("📈 *Módulo de Ações*\nSelecione um setor ou favorita:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-
-            is_fii = (dados == "favoritos_fiis")
-            tipo = "fii" if is_fii else "acao"
-            menu_voltar = "menu_fiis" if is_fii else "menu_acoes"
-
-            favs = buscar_favoritos(tipo)
-            markup = InlineKeyboardMarkup(row_width=3)
+            bot.edit_message_text("📈 *Módulo de Ações*\nSelecione um Setor ou Favorita:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # --- FAVORITOS ---            
         elif dados in ["favoritos_fiis", "favoritos_acoes"]:
@@ -307,7 +291,9 @@ def callback_geral(call):
     except Exception as e:
         print(f"Erro no callback geral: {e}")
 
+            # ==========================================
 # ----- BOTÃO TIPO/SETOR FIIS -----
+            # ==========================================
 @bot.callback_query_handler(func=lambda call: call.data.startswith('tipo_fii_'))
 def callback_selecionar_segmento(call):
     """Lê a planilha, quebra as barras e cria os botões de segmentos únicos"""
@@ -383,4 +369,33 @@ def callback_listar_ativos_fii(call):
     markup.add(InlineKeyboardButton("🔙 Voltar aos Tipos", callback_data="menu_fiis"))
     
     texto = f"📂 *Ativos no segmento: {nome_setor}*\n\nSelecione um ativo para analisar o painel profundo:"
+    bot.edit_message_text(texto, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+
+            # ==========================================
+# ----- BOTÃO TIPO/SETOR FIIS -----
+            # ==========================================
+@bot.callback_query_handler(func=lambda call: call.data.startswith('setor_acao_'))
+def callback_listar_ativos_acao(call):
+    """Lê a aba BD_Acoes e lista as empresas que pertencem ao setor clicado"""
+    nome_setor = "_".join(call.data.split('_')[2:])
+    bot.answer_callback_query(call.id, f"Buscando ações de {nome_setor}...")
+    
+    matriz = buscar_dados_planilha_com_cache("BD_Acoes")
+    markup = InlineKeyboardMarkup(row_width=3) # 3 botões por linha para ações fica legal
+    botoes_ativos = []
+
+    for linha in matriz[1:]:
+        ticker = linha[0].strip()
+        # Lê a coluna de setor da ação (Assumindo Coluna C -> índice 2)
+        setor_da_linha = linha[2].strip() 
+        
+        if setor_da_linha == nome_setor:
+            # Adiciona o botão da ação na lista
+            botoes_ativos.append(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"acao_{ticker}"))
+            
+    # Injeta todos os botões no markup de uma vez
+    markup.add(*botoes_ativos)
+    markup.add(InlineKeyboardButton("🔙 Voltar aos Setores", callback_data="menu_acoes"))
+    
+    texto = f"📂 *Ações no setor: {nome_setor}*\n\nSelecione um ativo para analisar:"
     bot.edit_message_text(texto, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
