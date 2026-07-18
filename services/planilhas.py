@@ -47,13 +47,24 @@ def buscar_ativo_na_planilha(ticker, is_fii):
             
             # Mapeamento de colunas (Mantendo a lógica original)
             if is_fii:
-                return {
-                    "tipo": row[1], "setor": row[2], "preco": row[3],
-                    "pvp": row[5], "dy": row[6], "vpa": row[14]
-                }
+            return {
+                "tipo": row[1],    # Coluna B
+                "setor": row[2],   # Coluna C
+                "preco": row[3],   # Coluna D
+                "pvp": row[5],     # Coluna F
+                "dy": row[6],      # Coluna G
+                "vpa": row[14],    # Coluna N
+                "raw": row         # Guarda a linha toda caso precise de detalhes
+            }
             else:
-                return {
-                    "setor": row[1], "preco": row[2], "dy": row[3],
-                    "pl": row[5], "pvp": row[6], "roe": row[19]
-                }
+            return {
+                "setor": row[1],   # Coluna B
+                "preco": row[2],   # Coluna C
+                "dy": row[3],      # Coluna D
+                "pl": row[5],      # Coluna F
+                "pvp": row[6],     # Coluna G
+                "roe": row[19],    # Coluna T
+                "raw": row         # Guarda a linha toda
+            }
     return None
+
