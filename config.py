@@ -19,10 +19,7 @@ FIXAS_ACOES = ["PETR4", "VALE3", "WEGE3", "ITUB4"]
 
 # --- 🚨 REGRAS FIXAS DEFINIDAS AQUI 🚨 ---
 
-    FILTROS_FIXOS = {
-        "fii": {"pvp_min": 0.50, "pvp_max": 1.15, "dy_min": 0.08},
-        "acao": {"pl_min": 2.0, "pl_max": 15.0, "pvp_min": 0.50, "pvp_max": 2.50, "dy_min": 0.06, "roe_min": 0.10}
-    }
+FILTROS_FIXOS = {"fii": {"pvp_min": 0.50, "pvp_max": 1.15, "dy_min": 0.08},"acao": {"pl_min": 2.0, "pl_max": 15.0, "pvp_min": 0.50, "pvp_max": 2.50, "dy_min": 0.06, "roe_min": 0.10}}
 
 # ==========================================
 # 🗺️ MAPA DE ISCAS MASTER (CATÁLOGO B3)
