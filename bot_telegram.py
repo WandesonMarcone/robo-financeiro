@@ -94,35 +94,6 @@ def webhook_handler():
 def index():
     return "Bot Institucional Ativo e Operante!", 200
 
-# ==========================================
-# 🛠️ COMANDOS DE MANUTENÇÃO E DEBUG DO BANCO
-# ==========================================
-
-@bot.message_handler(commands=['debug_ativo'])
-def debug_ativo(message):
-    ticker = "PETR4" 
-    session = SessionDB()
-    try:
-        # 1. Verifica se o Ativo existe
-        ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-        if not ativo:
-            bot.send_message(message.chat.id, f"❌ O ativo {ticker} nem sequer existe na tabela 'Ativos'.")
-            return
-        
-        # 2. Verifica se existem registros financeiros usando a classe importada corretamente
-        qtd = session.query(DadosFinanceirosAcoes).filter(DadosFinanceirosAcoes.ativo_id == ativo.id).count()
-        
-        # 3. Pega a última data salva
-        ultima_data = session.query(func.max(DadosFinanceirosAcoes.data_referencia)).filter(DadosFinanceirosAcoes.ativo_id == ativo.id).scalar()
-        
-        bot.send_message(message.chat.id, f"🔍 Diagnóstico para {ticker}:\n\n✅ Ativo ID: {ativo.id}\n📊 Registros financeiros encontrados: {qtd}\n📅 Última data salva: {ultima_data}")
-        
-    except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Erro no debug: {e}")
-    finally:
-        session.close()
-
-
 
 # ==========================================
 # ROTINA DIÁRIA AUTOMÁTICA (O Despertador Mestre de Documentos)
