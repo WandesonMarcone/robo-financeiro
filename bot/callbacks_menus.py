@@ -306,3 +306,19 @@ def callback_geral(call):
             
     except Exception as e:
         print(f"Erro no callback geral: {e}")
+
+# ----- BOTÃO TIPO/SETOR FIIS -----
+@bot.callback_query_handler(func=lambda call: call.data.startswith('tipo_fii_'))
+def callback_selecionar_segmento(call):
+    tipo_selecionado = call.data.split('_')[2]
+    
+    matriz = buscar_dados_planilha_com_cache("BD_FIIs")
+    # Filtra apenas os segmentos que pertencem a esse tipo
+    segmentos = sorted(list(set(linha[2].strip() for linha in matriz[1:] if linha[1].strip() == tipo_selecionado)))
+    
+    markup = InlineKeyboardMarkup(row_width=1)
+    for seg in segmentos:
+        markup.add(InlineKeyboardButton(f"📂 {seg}", callback_data=f"setor_fii_{seg}"))
+    
+    markup.add(InlineKeyboardButton("🔙 Voltar aos FIIs", callback_data="menu_fiis"))
+    bot.edit_message_text(f"🏢 *Tipo {tipo_selecionado} - Segmentos:*", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
