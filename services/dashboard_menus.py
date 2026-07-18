@@ -76,3 +76,57 @@ def buscar_oportunidades(tipo):
     except Exception as e:
         print(f"Erro no filtro de oportunidades: {e}")
         return []
+
+def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
+    """Gera a mensagem principal com os botões interativos e dados em tempo real"""
+    is_fii = (tipo == 'fii')
+    icone = "🏢 Fundo" if is_fii else "📈 Ação"
+    voltar_cmd = "menu_fiis" if is_fii else "menu_acoes"
+    # 1. Puxar as Logos e Dados Reais da Planilha
+    url_logo = obter_link_logo(ticker, tipo, driver_manager)
+    indicadores = buscar_dados_planilha(ticker, is_fii)
+    # Tratamento de erro caso o ativo não esteja na planilha
+    if not indicadores:
+        msg_erro = f"❌ Erro: Não encontrei dados para **{ticker}** na planilha."
+        if message_id:
+            bot.edit_message_text(msg_erro, chat_id, message_id, parse_mode="Markdown")
+        else:
+            bot.send_message(chat_id, msg_erro, parse_mode="Markdown")
+        return
+    # 2. Resumo da IA (Placeholder - futuramente puxar de module_ia)
+    resumo_ia = f"Ativo monitorado do setor {indicadores.get('setor', 'Geral')}. Focado na geração de valor no mercado brasileiro."
+    # 3. Montar a tela exata da sua arquitetura
+    # O [\u200c] é o link invisível para renderizar a logo no topo
+    link_invisivel = f"[\u200c]({url_logo})" if url_logo else ""
+    # Formatação condicional baseada no tipo de ativo
+    if is_fii:
+        texto = (
+            f"{link_invisivel}{icone}: **{ticker}**\n"
+            f"📝 **Resumo:** _{resumo_ia}_\n\n"
+            f"💰 **Preço:** R$ {indicadores.get('preco', 'N/A')}\n"
+            f"💸 **Dividend Yield:** {indicadores.get('dy', 'N/A')}\n"
+            f"⚖️ **P/VP:** {indicadores.get('pvp', 'N/A')}\n"
+            f"💵 **VPA:** {indicadores.get('vpa', 'N/A')}"
+        )
+    else:
+        texto = (
+            f"{link_invisivel}{icone}: **{ticker}**\n"
+            f"📝 **Resumo:** _{resumo_ia}_\n\n"
+            f"💰 **Preço:** R$ {indicadores.get('preco', 'N/A')}\n"
+            f"💸 **Dividend Yield:** {indicadores.get('dy', 'N/A')}\n"
+            f"📊 **P/L:** {indicadores.get('pl', 'N/A')} | ⚖️ **P/VP:** {indicadores.get('pvp', 'N/A')}\n"
+            f"📈 **ROE:** {indicadores.get('roe', 'N/A')}"
+        )
+    # 4. Criar os Botões (Submenus)
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("📎 Dados Importantes", callback_data=f"dados_{ticker}_{tipo}"),
+        InlineKeyboardButton("📑 Documentos", callback_data=f"docs_{ticker}_{tipo}")
+    )
+    markup.add(InlineKeyboardButton("⚠️ Análise de IA", callback_data=f"ia_{ticker}_{tipo}"))
+    markup.add(InlineKeyboardButton(f"🔙 Voltar aos {icone.split()[1]}s", callback_data=voltar_cmd))
+    # 5. Enviar ou Editar
+    if message_id:
+        bot.edit_message_text(texto, chat_id, message_id, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=False)
+    else:
+        bot.send_message(chat_id, texto, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=False)
