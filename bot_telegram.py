@@ -485,7 +485,7 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
 
     # 1. Puxar as Logos e Dados Reais da Planilha
     url_logo = obter_link_logo(ticker, tipo)
-    indicadores = _buscar_dados_planilha(ticker, is_fii)
+    indicadores = buscar_dados_planilha(ticker, is_fii)
 
     # Tratamento de erro caso o ativo não esteja na planilha
     if not indicadores:
