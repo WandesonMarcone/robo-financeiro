@@ -139,59 +139,103 @@ MAPA_CONTAS_CVM = {
 
 # Dicionário Tradutor (CNPJ para Ticker da B3)
 MAPA_CNPJ_B3 = {
-    # Bancos e Financeiros
-    '00.000.000/0001-91': 'BBAS3',  
-    '60.872.504/0001-23': 'ITUB4',  
-    '60.746.948/0001-12': 'BBDC4',  
-    '90.400.888/0001-42': 'SANB11', 
-    '09.346.601/0001-25': 'B3SA3',  
-    '00.360.305/0001-04': 'BBSE3',  
+    # ==========================================
+    # 🏦 Bancos, Seguros e Financeiros
+    # ==========================================
+    '00.000.000/0001-91': 'BBAS3',   # Banco do Brasil
+    '60.872.504/0001-23': 'ITUB4',   # Itaú Unibanco
+    '60.746.948/0001-12': 'BBDC4',   # Banco Bradesco
+    '90.400.888/0001-42': 'SANB11',  # Banco Santander Brasil
+    '30.306.294/0001-45': 'BPAC11',  # BTG Pactual (NOVA)
+    '09.346.601/0001-25': 'B3SA3',   # B3 S.A. (Bolsa de Valores)
+    '17.344.597/0001-94': 'BBSE3',   # BB Seguridade
+    '22.180.207/0001-72': 'CXSE3',   # Caixa Seguridade (NOVA)
 
-    # Petróleo, Gás e Mineração
-    '33.000.167/0001-01': 'PETR4',  
-    '33.592.510/0001-54': 'VALE3',  
-    '06.082.980/0001-03': 'PRIO3',  
-    '01.838.723/0001-27': 'BRKM5',  
-    '02.351.877/0001-52': 'CSNA3',  
-    '60.940.145/0001-14': 'GGBR4',  
+    # ==========================================
+    # 🛢️ Petróleo, Gás e Mineração
+    # ==========================================
+    '33.000.167/0001-01': 'PETR4',   # Petrobras
+    '33.592.510/0001-54': 'VALE3',   # Vale
+    '06.082.980/0001-03': 'PRIO3',   # PetroRio (PRIO)
+    '42.150.391/0001-70': 'BRKM5',   # Braskem
+    '33.042.730/0001-04': 'CSNA3',   # CSN (Siderúrgica Nacional)
+    '33.611.500/0001-19': 'GGBR4',   # Gerdau
 
-    # Energia e Utilidades Públicas
-    '00.001.180/0001-26': 'ELET3',  
-    '84.683.601/0001-74': 'WEGE3',  
-    '02.932.971/0001-15': 'EGIE3',  
-    '01.206.065/0001-46': 'SBSP3',  
-    '06.981.180/0001-16': 'CMIG4',  
-    '39.381.153/0001-08': 'CPLE6',  
-    '03.256.096/0001-40': 'ENEV3',  
+    # ==========================================
+    # ⚡ Energia, Água e Utilidades (Saneamento)
+    # ==========================================
+    '00.001.180/0001-26': 'ELET3',   # Eletrobras
+    '84.683.601/0001-74': 'WEGE3',   # WEG (Motores e Equipamentos)
+    '02.932.971/0001-15': 'EGIE3',   # Engie Brasil
+    '17.155.730/0001-64': 'CMIG4',   # Cemig
+    '76.483.817/0001-20': 'CPLE6',   # Copel
+    '11.505.564/0001-91': 'ENEV3',   # Eneva
+    '03.220.438/0001-73': 'EQTL3',   # Equatorial Energia (NOVA)
+    '07.859.971/0001-30': 'TAEE11',  # Taesa (Transmissão de Energia) (NOVA)
+    '43.776.517/0001-80': 'SBSP3',   # Sabesp (Saneamento SP)
+    '17.281.106/0001-03': 'CSMG3',   # Copasa (Saneamento MG) (NOVA)
+    '76.484.013/0001-45': 'SAPR11',  # Sanepar (Saneamento PR) (NOVA)
 
-    # Varejo e Consumo
-    '47.960.950/0001-21': 'MGLU3',  
-    '07.526.557/0001-00': 'ABEV3',  
-    '00.001.180/0001-26': 'LREN3',  
-    '16.670.085/0001-55': 'RENT3',  
-    '06.164.253/0001-87': 'CRFB3',  
-    '08.582.208/0001-08': 'NTCO3',  
-    '47.508.411/0001-56': 'PCAR3',  
-    '33.014.556/0001-96': 'ASAI3',  
+    # ==========================================
+    # 🛍️ Varejo, Consumo e Bebidas
+    # ==========================================
+    '47.960.950/0001-21': 'MGLU3',   # Magazine Luiza
+    '07.526.557/0001-00': 'ABEV3',   # Ambev
+    '92.754.738/0001-62': 'LREN3',   # Lojas Renner
+    '16.670.085/0001-55': 'RENT3',   # Localiza (Aluguel de Carros)
+    '06.164.253/0001-87': 'CRFB3',   # Carrefour Brasil
+    '32.785.497/0001-97': 'NTCO3',   # Natura & Co
+    '47.508.411/0001-56': 'PCAR3',   # Grupo Pão de Açúcar (GPA)
+    '06.057.223/0001-71': 'ASAI3',   # Assaí Atacadista
+    '18.328.118/0001-09': 'PETZ3',   # Petz (Varejo Pet) (NOVA)
 
-    # Carnes e Proteínas
-    '02.916.265/0001-60': 'JBSS3',  
-    '01.838.723/0001-27': 'BEEF3',  
-    '01.017.595/0001-38': 'MRFG3',  
+    # ==========================================
+    # 🥩 Carnes, Proteínas e Agronegócio
+    # ==========================================
+    '02.916.265/0001-60': 'JBSS3',   # JBS
+    '43.339.004/0001-42': 'BEEF3',   # Minerva Foods
+    '01.017.595/0001-38': 'MRFG3',   # Marfrig
+    '89.113.800/0001-28': 'SLCE3',   # SLC Agrícola (NOVA)
+    '33.453.598/0001-23': 'RAIZ4',   # Raízen (Açúcar, Álcool e Combustíveis) (NOVA)
 
-    # Papel, Celulose e Indústria
-    '16.404.287/0001-55': 'SUZB3',  
-    '89.637.490/0001-45': 'KLBN11', 
-    '02.497.801/0001-24': 'EMBR3',  
-    '50.282.735/0001-83': 'VIVA3',  
+    # ==========================================
+    # 🏗️ Construção Civil e Shopping Centers
+    # ==========================================
+    '73.178.600/0001-18': 'CYRE3',   # Cyrela (NOVA)
+    '08.343.492/0001-20': 'MRVE3',   # MRV Engenharia (NOVA)
+    '02.356.282/0001-04': 'EZTC3',   # EZTEC (NOVA)
+    '07.816.890/0001-53': 'MULT3',   # Multiplan (Shoppings) (NOVA)
+    '51.218.147/0001-93': 'IGTI11',  # Iguatemi (Shoppings) (NOVA)
+    '31.628.739/0001-04': 'ALOS3',   # Allos / ex-Aliansce Sonae (Shoppings) (NOVA)
 
-    # Saúde e Educação
-    '43.181.368/0001-22': 'RADL3',  
-    '60.933.603/0001-78': 'HAPV3',  
-    '02.800.026/0001-40': 'YDUQ3',  
+    # ==========================================
+    # ✈️ Transportes e Logística
+    # ==========================================
+    '02.846.056/0001-97': 'CCRO3',   # CCR (Concessões Rodoviárias) (NOVA)
+    '02.387.241/0001-60': 'RAIL3',   # Rumo Logística (Ferrovias) (NOVA)
+    '09.305.994/0001-29': 'AZUL4',   # Azul Linhas Aéreas (NOVA)
 
-    # Telecom e Tecnologia
-    '02.558.157/0001-62': 'VIVT3',  
-    '02.421.421/0001-11': 'TIMS3',  
-    '01.246.689/0001-36': 'TOTS3'   
+    # ==========================================
+    # 🏭 Papel, Celulose e Indústria
+    # ==========================================
+    '16.404.287/0001-55': 'SUZB3',   # Suzano Papel e Celulose
+    '89.637.490/0001-45': 'KLBN11',  # Klabin
+    '07.689.002/0001-89': 'EMBR3',   # Embraer (Aeronáutica)
+    '50.282.735/0001-83': 'VIVA3',   # Vivara (Joalheria/Indústria)
+
+    # ==========================================
+    # 🏥 Saúde e Educação
+    # ==========================================
+    '61.585.865/0001-51': 'RADL3',   # Raia Drogasil (RD Saúde)
+    '61.590.030/0001-56': 'HAPV3',   # Hapvida 
+    '08.807.432/0001-10': 'YDUQ3',   # Yduqs (Estácio/Educação)
+    '60.840.055/0001-31': 'FLRY3',   # Grupo Fleury (Medicina Diagnóstica) (NOVA)
+    '06.047.087/0001-39': 'RDOR3',   # Rede D'Or São Luiz (Hospitais) (NOVA)
+
+    # ==========================================
+    # 💻 Telecom e Tecnologia
+    # ==========================================
+    '02.558.157/0001-62': 'VIVT3',   # Telefônica Brasil (Vivo)
+    '02.421.421/0001-11': 'TIMS3',   # TIM Brasil
+    '53.113.791/0001-22': 'TOTS3'    # Totvs (Softwares)
 }
