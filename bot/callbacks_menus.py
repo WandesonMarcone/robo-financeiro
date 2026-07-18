@@ -310,15 +310,77 @@ def callback_geral(call):
 # ----- BOTÃO TIPO/SETOR FIIS -----
 @bot.callback_query_handler(func=lambda call: call.data.startswith('tipo_fii_'))
 def callback_selecionar_segmento(call):
+    """Lê a planilha, quebra as barras e cria os botões de segmentos únicos"""
     tipo_selecionado = call.data.split('_')[2]
-    
     matriz = buscar_dados_planilha_com_cache("BD_FIIs")
-    # Filtra apenas os segmentos que pertencem a esse tipo
-    segmentos = sorted(list(set(linha[2].strip() for linha in matriz[1:] if linha[1].strip() == tipo_selecionado)))
+    
+    segmentos_unicos = set()
+    
+    for linha in matriz[1:]:
+        tipo_fundo = linha[1].strip()
+        if tipo_fundo == tipo_selecionado:
+            # A MÁGICA DA LIMPEZA: Corta pela '/' e limpa os espaços invisíveis
+            segmentos_brutos = linha[2].split('/')
+            for seg in segmentos_brutos:
+                seg_limpo = seg.strip()
+                if seg_limpo: # Só adiciona se não for vazio
+                    segmentos_unicos.add(seg_limpo)
+    
+    segmentos_ordenados = sorted(list(segmentos_unicos))
     
     markup = InlineKeyboardMarkup(row_width=1)
-    for seg in segmentos:
+    for seg in segmentos_ordenados:
         markup.add(InlineKeyboardButton(f"📂 {seg}", callback_data=f"setor_fii_{seg}"))
     
     markup.add(InlineKeyboardButton("🔙 Voltar aos FIIs", callback_data="menu_fiis"))
-    bot.edit_message_text(f"🏢 *Tipo {tipo_selecionado} - Segmentos:*", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+    bot.edit_message_text(f"🏢 *Tipo {tipo_selecionado} - Segmentos:*\n\nSelecione um segmento para ver os ativos:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('setor_fii_'))
+def callback_listar_ativos_fii(call):
+    """Lista os FIIs do segmento e adiciona os marcadores visuais avançados"""
+    nome_setor = "_".join(call.data.split('_')[2:])
+    bot.answer_callback_query(call.id, f"Buscando ativos de {nome_setor}...")
+    
+    matriz = buscar_dados_planilha_com_cache("BD_FIIs")
+    markup = InlineKeyboardMarkup(row_width=2)
+    botoes_ativos = []
+
+    for linha in matriz[1:]:
+        ticker = linha[0].strip()
+        tipo_fundo = linha[1].strip()
+        # Corta a barra e limpa espaços novamente para comparar corretamente
+        segmentos_do_fundo = [s.strip() for s in linha[2].split('/')]
+        
+        # Verifica se a pasta clicada está dentro dos segmentos deste fundo
+        if nome_setor in segmentos_do_fundo:
+            
+            # ==========================================
+            # 🧠 LÓGICA DO AVISO VISUAL (ASTERISCO)
+            # ==========================================
+            texto_botao = ticker
+            
+            # CENÁRIO 1: Fundo com múltiplos segmentos (Ex: GARE11)
+            if len(segmentos_do_fundo) > 1:
+                # Futuro: Aqui você puxará a % raspada ou da coluna da planilha
+                # Ex: porcentagem = linha[10] 
+                texto_botao = f"{ticker} (*Misto/Múltiplo)"
+                # porcentagem = linha[10].strip() # Extrai o valor real da planilha
+                # texto_botao = f"{ticker} (*{porcentagem}% {nome_setor})"
+                
+            # CENÁRIO 2: Fundo de Papel (CRI)
+            elif tipo_fundo.upper() == "PAPEL":
+                # Futuro: Puxar IPCA/CDI da planilha. Ex: ipca = linha[11], cdi = linha[12]
+                texto_botao = f"{ticker} (*Indexadores)"
+                # porcentagem = linha[10].strip() # Extrai o valor real da planilha
+                # texto_botao = f"{ticker} (*{porcentagem}% {nome_setor})"
+
+                
+            # Cria o botão com a formatação decidida
+            botoes_ativos.append(InlineKeyboardButton(texto_botao, callback_data=f"fii_{ticker}"))
+            
+    # Adiciona todos os ativos na tela (2 por linha por causa do row_width=2)
+    markup.add(*botoes_ativos)
+    markup.add(InlineKeyboardButton("🔙 Voltar aos Tipos", callback_data="menu_fiis"))
+    
+    texto = f"📂 *Ativos no segmento: {nome_setor}*\n\nSelecione um ativo para analisar o painel profundo:"
+    bot.edit_message_text(texto, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
