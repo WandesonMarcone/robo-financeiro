@@ -73,8 +73,6 @@ scheduler.start()
 # ==========================================
 # 🚀 INICIALIZAÇÃO DO WEBHOOK (CORRIGIDO)
 # ==========================================
-# Mudamos de 'bot.remove_webhook()' para carregar do loader explicitamente:
-from bot.loader import bot as tele_bot
 
 tele_bot.remove_webhook()
 time.sleep(1)
