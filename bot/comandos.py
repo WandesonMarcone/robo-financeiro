@@ -3,6 +3,42 @@ from bot.loader import bot
 from atualizador_documentos import SessionDB 
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 
+@bot.message_handler(commands=['forcar_varredura'])
+def acionar_varredura_manual(message):
+    # 1. Responde instantaneamente para o Telegram e pro Render não darem Timeout
+    bot.reply_to(message, "⚙️ *Iniciando varredura na B3 em segundo plano...*\nIsso pode levar alguns minutos. Pode continuar usando o bot normalmente, eu te aviso quando terminar!", parse_mode="Markdown")
+    
+    # 2. Cria a função pesada isolada
+    def tarefa_pesada_background():
+        try:
+            from atualizador_documentos import rotina_de_atualizacao_em_massa
+            relatorios_baixados = rotina_de_atualizacao_em_massa()
+            
+            # Quando terminar, envia uma nova mensagem avisando
+            bot.send_message(message.chat.id, f"✅ *Varredura Concluída!*\n\n📥 Documentos inéditos salvos no Drive: **{relatorios_baixados}**", parse_mode="Markdown")
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ *Erro na varredura:* {e}", parse_mode="Markdown")
+
+    # 3. Dá a ordem para o Python rodar isso em uma trilha separada (Thread)
+    thread = threading.Thread(target=tarefa_pesada_background)
+    thread.start()
+
+# ----------FORÇAR CVM------------
+@bot.message_handler(commands=['forcar_cvm'])
+def rodar_cvm(message):
+    bot.send_message(message.chat.id, "⏳ Iniciando download de balanços da CVM. Isso pode demorar alguns minutos...")
+    try:
+        from coletor_cvm import AcoesCVMReader
+        session = SessionDB()
+        coletor = AcoesCVMReader(session)
+        
+        # Você pode mudar o ano aqui futuramente ou deixar dinâmico
+        coletor.atualizar_acoes(2026) 
+        
+        session.close()
+        bot.send_message(message.chat.id, "✅ Coleta CVM concluída! Balanços salvos no banco de dados.")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Erro na CVM: {str(e)}")
 # Comando /status: Fornece um "Raio-X" da integridade do banco de dados na nuvem
 @bot.message_handler(commands=['status'])
 def status_banco(message):
