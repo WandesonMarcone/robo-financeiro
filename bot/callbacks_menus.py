@@ -135,3 +135,188 @@ def callback_geral(call):
             print(f"Erro ao carregar oportunidades: {e}")
             markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
             bot.edit_message_text("❌ Erro ao aplicar os filtros.", chat_id, msg_id, reply_markup=markup)
+
+        elif dados.startswith("fii_") or dados.startswith("acao_"):
+            partes = dados.split("_")
+            tipo = partes[0] 
+            ticker = partes[1]
+            bot.answer_callback_query(call.id, f"Carregando terminal de {ticker}...")
+            # Envia a requisição para gerar o "Dashboard" do ativo com Logo e Indicadores
+            gerar_painel_ativo(ticker, tipo, chat_id, msg_id)
+
+        # =======================================================
+        # 2. SUBMENU: DADOS COMPLETOS (Puxa da sua Planilha)
+        # =======================================================
+        elif dados.startswith("dados_"):
+            bot.answer_callback_query(call.id, "Buscando indicadores...")
+            partes = dados.split("_")
+            ticker, tipo = partes[1], partes[2]
+            is_fii = (tipo == "fii")
+            
+            # Puxa os dados reais da sua função recém-criada
+            indicadores = buscar_dados_planilha(ticker, is_fii)
+            
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"{tipo}_{ticker}"))
+            
+            if not indicadores:
+                bot.edit_message_text(f"❌ Não encontrei os dados detalhados de **{ticker}** na planilha.", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            else:
+                # Monta um relatório robusto baseado no tipo do ativo
+                if is_fii:
+                    texto = (
+                        f"📎 **Dados Completos: {ticker}**\n\n"
+                        f"🏢 **Setor:** {indicadores.get('setor', 'N/A')}\n"
+                        f"💰 **Preço:** R$ {indicadores.get('preco', 'N/A')}\n"
+                        f"⚖️ **P/VP:** {indicadores.get('pvp', 'N/A')}\n"
+                        f"💸 **DY (12m):** {indicadores.get('dy', 'N/A')}\n"
+                        f"💵 **Valor Patrimonial (VPA):** {indicadores.get('vpa', 'N/A')}\n\n"
+                        f"_(Você pode mapear mais colunas lá no dicionário da função buscar_dados_planilha)_"
+                    )
+                else:
+                    texto = (
+                        f"📎 **Dados Completos: {ticker}**\n\n"
+                        f"📈 **Setor:** {indicadores.get('setor', 'N/A')}\n"
+                        f"💰 **Preço:** R$ {indicadores.get('preco', 'N/A')}\n"
+                        f"📊 **P/L:** {indicadores.get('pl', 'N/A')}\n"
+                        f"⚖️ **P/VP:** {indicadores.get('pvp', 'N/A')}\n"
+                        f"💸 **DY (12m):** {indicadores.get('dy', 'N/A')}\n"
+                        f"🚀 **ROE:** {indicadores.get('roe', 'N/A')}\n\n"
+                        f"_(Você pode mapear mais colunas lá no dicionário da função buscar_dados_planilha)_"
+                    )
+                bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        # ==============================================================
+        # NÍVEL 1: MENU DE MESES (Quando clica em "Documentos")
+        # ==============================================================
+        elif dados.startswith("docs_"):
+            # CORREÇÃO 1: Ordem exata -> docs_TICKER_TIPO
+            partes = dados.split("_")
+            ticker = partes[1]
+            tipo = partes[2]
+            
+            markup = InlineKeyboardMarkup()
+            session = SessionDB()
+
+            ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+            encontrou_dados = False
+
+            if ativo:
+                if tipo == "fii":
+                    # Puxa todos os documentos do FII
+                    docs = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.ativo_id == ativo.id).all()
+                    if docs:
+                        encontrou_dados = True
+                        # Pega apenas os meses únicos (Ex: '2026-04') e ordena do mais novo pro mais velho
+                        meses_unicos = sorted(list(set([d.data_publicacao.strftime("%Y-%m") for d in docs if d.data_publicacao])), reverse=True)
+
+                        for mes in meses_unicos[:10]:
+                            qtd = len([d for d in docs if d.data_publicacao and d.data_publicacao.strftime("%Y-%m") == mes])
+                            ano, mes_num = mes.split('-')
+                            # CORREÇÃO 2: Botão do Mês padronizado (mes_TICKER_TIPO_PERIODO)
+                            markup.add(InlineKeyboardButton(f"📁 {mes_num}/{ano} ({qtd} arquivos)", callback_data=f"mes_{ticker}_{tipo}_{mes}"))
+
+                elif tipo == "acao":
+                    from pipeline_dados.banco_dados import DadosFinanceirosAcoes
+                    # Puxa todos os balanços processados pelo módulo CVM
+                    balancos = session.query(DadosFinanceirosAcoes).filter(DadosFinanceirosAcoes.ativo_id == ativo.id).all()
+                    if balancos:
+                        encontrou_dados = True
+                        # Pega as datas de referência únicas
+                        datas_unicas = sorted(list(set([b.data_referencia.strftime("%Y-%m-%d") for b in balancos if b.data_referencia])), reverse=True)
+
+                        for dt in datas_unicas[:5]:
+                            ano, mes_num, dia = dt.split('-')
+                            markup.add(InlineKeyboardButton(f"📊 Balanço CVM ({mes_num}/{ano})", callback_data=f"mes_{ticker}_{tipo}_{dt}"))
+
+            session.close()
+
+            # Botões padrão de fundo
+            cat_status = "fundos-imobiliarios" if tipo == "fii" else "acoes"
+            markup.row(InlineKeyboardButton("📈 Ver no StatusInvest", url=f"https://statusinvest.com.br/{cat_status}/{ticker.lower()}"))
+            
+            # CORREÇÃO 3: Botão de voltar consertado (Aponta direto para fii_MXRF11 ou acao_PETR4)
+            markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"{tipo}_{ticker}"))
+
+            if encontrou_dados:
+                txt = f"📅 **Histórico de {ticker}**\n\nEscolha o período que você deseja analisar:"
+            else:
+                txt = f"📭 **Nenhum dado encontrado para {ticker}**\nO robô ainda não processou arquivos ou balanços para este ativo."
+
+            bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        # ==============================================================
+        # NÍVEL 2: MOSTRANDO OS ARQUIVOS OU RELATÓRIO CVM
+        # ==============================================================
+        elif dados.startswith("mes_"):
+            # CORREÇÃO 4: Lendo na nova ordem padronizada
+            partes = dados.split("_")
+            ticker = partes[1]
+            tipo = partes[2]
+            periodo = partes[3]
+            
+            markup = InlineKeyboardMarkup()
+            session = SessionDB()
+
+            ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+
+            if tipo == "fii":
+                docs = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.ativo_id == ativo.id).all()
+                docs_do_mes = [d for d in docs if d.data_publicacao and d.data_publicacao.strftime("%Y-%m") == periodo]
+
+                ano, mes_num = periodo.split('-')
+                txt = f"📂 **Arquivos de {ticker} ({mes_num}/{ano})**\n\nEstes são os documentos salvos no Drive:"
+
+                for doc in docs_do_mes:
+                    markup.add(InlineKeyboardButton(f"📄 {doc.tipo_documento}", url=doc.url_pdf))
+
+            elif tipo == "acao":
+                from pipeline_dados.banco_dados import DadosFinanceirosAcoes
+                balanco = session.query(DadosFinanceirosAcoes).filter(
+                    DadosFinanceirosAcoes.ativo_id == ativo.id, 
+                    DadosFinanceirosAcoes.data_referencia == periodo
+                ).first()
+
+                ano, mes_num, dia = periodo.split('-')
+                txt = f"📊 **Relatório Financeiro: {ticker} ({mes_num}/{ano})**\n_Dados oficiais extraídos da CVM_\n\n"
+
+                def formata_rs(valor):
+                    return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if valor else "Não divulgado"
+
+                txt += f"💰 **Receita:** {formata_rs(balanco.receita)}\n"
+                txt += f"💸 **Lucro Líquido:** {formata_rs(balanco.lucro_liquido)}\n"
+                txt += f"🏦 **Caixa:** {formata_rs(balanco.caixa)}\n"
+                txt += f"📉 **Passivo Total:** {formata_rs(balanco.passivo_total)}\n"
+
+            session.close()
+
+            # CORREÇÃO 5: O Botão de voltar consertado para retornar ao menu de meses
+            markup.add(InlineKeyboardButton("🔙 Voltar aos Meses", callback_data=f"docs_{ticker}_{tipo}"))
+
+            bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        # =======================================================
+        # 4. SUBMENU: ANÁLISE DE IA (Placeholder de Luxo)
+        # =======================================================
+        elif dados.startswith("ia_"):
+            bot.answer_callback_query(call.id, "Gerando análise avançada...")
+            partes = dados.split("_")
+            ticker, tipo = partes[1], partes[2]
+            
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"{tipo}_{ticker}"))
+            
+            # Um aviso profissional até você conectar a API do Gemini/OpenAI
+            texto_ia = (
+                f"⚠️ **Análise de Inteligência Artificial: {ticker}**\n\n"
+                f"🤖 _Módulo IA em Fase de Treinamento._\n\n"
+                f"Em breve, o bot fará o cruzamento autônomo de:\n"
+                f"🔹 Histórico de Dividendos vs Inflação\n"
+                f"🔹 Vacância e Qualidade Física dos Imóveis\n"
+                f"🔹 Notícias recentes e fatos relevantes\n"
+                f"🔹 Risco de Alavancagem da Dívida\n\n"
+                f"*(Aguardando integração final)*"
+            )
+            bot.edit_message_text(texto_ia, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+    except Exception as e:
+        print(f"Erro no callback: {e}")
