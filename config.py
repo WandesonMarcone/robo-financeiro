@@ -16,6 +16,11 @@ DATABASE_URL = os.environ.get("DATABASE_URL") # CONFIG BASE DE DADOS
 
 FIXAS_FIIS = ["GARE11", "MXRF11", "VISC11", "HGLG11", "XPML11"]
 FIXAS_ACOES = ["PETR4", "VALE3", "WEGE3", "ITUB4"]
+# Dicionário de Favoritos que o bot irá consultar
+FAVORITOS = {
+    "fii": FIXAS_FIIS,
+    "acao": FIXAS_ACOES
+}
 
 # --- 🚨 REGRAS FIXAS DEFINIDAS AQUI 🚨 ---
 
