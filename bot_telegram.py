@@ -945,7 +945,7 @@ def callback_geral(call):
             is_fii = (tipo == "fii")
             
             # Puxa os dados reais da sua função recém-criada
-            indicadores = _buscar_dados_planilha(ticker, is_fii)
+            indicadores = buscar_dados_planilha(ticker, is_fii)
             
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"{tipo}_{ticker}"))
@@ -962,7 +962,7 @@ def callback_geral(call):
                         f"⚖️ **P/VP:** {indicadores.get('pvp', 'N/A')}\n"
                         f"💸 **DY (12m):** {indicadores.get('dy', 'N/A')}\n"
                         f"💵 **Valor Patrimonial (VPA):** {indicadores.get('vpa', 'N/A')}\n\n"
-                        f"_(Você pode mapear mais colunas lá no dicionário da função _buscar_dados_planilha)_"
+                        f"_(Você pode mapear mais colunas lá no dicionário da função buscar_dados_planilha)_"
                     )
                 else:
                     texto = (
@@ -973,7 +973,7 @@ def callback_geral(call):
                         f"⚖️ **P/VP:** {indicadores.get('pvp', 'N/A')}\n"
                         f"💸 **DY (12m):** {indicadores.get('dy', 'N/A')}\n"
                         f"🚀 **ROE:** {indicadores.get('roe', 'N/A')}\n\n"
-                        f"_(Você pode mapear mais colunas lá no dicionário da função _buscar_dados_planilha)_"
+                        f"_(Você pode mapear mais colunas lá no dicionário da função buscar_dados_planilha)_"
                     )
                 bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
