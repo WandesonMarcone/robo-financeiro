@@ -177,9 +177,9 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
         # Filtragem Blindada (Ajuste dos requisitos de segurança para liquidez)
         df_cacador = df[
             (df['P/VP'] >= 0.85) &
-            (df['P/VP'] <= 1.05) &
-            (df['Dividend Yield'] >= 0.08) &
-            (df['Liquidez'] >= 3000000) &  # <--- Aumentado para 3 milhões de liquidez mínima
+            (df['P/VP'] <= 1.01) &
+            (df['Dividend Yield'] >= 0.095) &
+            (df['Liquidez'] >= 5000000) &  # <--- Aumentado para 5 milhões de liquidez mínima
             (df['Vacância Média'] <= 0.10)                 
         ]
         oportunidades_gerais = df_cacador.sort_values(by='Dividend Yield', ascending=False).index.tolist()
