@@ -476,46 +476,6 @@ def obter_link_logo(ticker, tipo):
 # ==========================================
 # O NOVO MOTOR DE DASHBOARD (Arquitetura)
 # ==========================================
-def _buscar_dados_planilha(ticker, is_fii):
-    """Busca dados reais na planilha e retorna um dicionário limpo"""
-    try:
-        planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
-        nome_aba = "BD_FIIs" if is_fii else "BD_Acoes"
-        aba = planilha.worksheet(nome_aba)
-        
-        # Procura a célula na Coluna A (Ticker)
-        cell = aba.find(ticker)
-        if not cell: return None
-        
-        # Pega a linha inteira da planilha
-        row = aba.row_values(cell.row)
-        
-        if is_fii:
-            # Mapeamento para FIIs (Baseado na sua lista de 16 colunas)
-            return {
-                "tipo": row[1],    # Coluna B
-                "setor": row[2],   # Coluna C
-                "preco": row[3],   # Coluna D
-                "pvp": row[5],     # Coluna F
-                "dy": row[6],      # Coluna G
-                "vpa": row[14],    # Coluna N
-                "raw": row         # Guarda a linha toda caso precise de detalhes
-            }
-        else:
-            # Mapeamento para Ações (Baseado na sua lista de 32 colunas)
-            # Obs: row[0] é o ticker, então o índice na planilha é (lista + 1)
-            return {
-                "setor": row[1],   # Coluna B
-                "preco": row[2],   # Coluna C
-                "dy": row[3],      # Coluna D
-                "pl": row[5],      # Coluna F
-                "pvp": row[6],     # Coluna G
-                "roe": row[19],    # Coluna T
-                "raw": row         # Guarda a linha toda
-            }
-    except Exception as e:
-        print(f"Erro ao buscar na planilha: {e}")
-        return None
 
 def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
     """Gera a mensagem principal com os botões interativos e dados em tempo real"""
