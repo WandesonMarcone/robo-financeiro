@@ -111,7 +111,7 @@ def callback_geral(call):
             bot.edit_message_text("📈 *Módulo de Ações*\nSelecione um setor ou favorita:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
     # 2. OPORTUNIDADES
-    elif dados in ["oportunidades_fiis", "oportunidades_acoes"]:
+        elif dados in ["oportunidades_fiis", "oportunidades_acoes"]:
         bot.answer_callback_query(call.id, "Analisando o mercado...")
         is_fii = (dados == "oportunidades_fiis")
         tipo = "fii" if is_fii else "acao"
