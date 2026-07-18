@@ -14,9 +14,12 @@ from flask import Flask, request
 from sqlalchemy import func, create_engine
 from sqlalchemy.orm import sessionmaker
 
+
 from services.planilhas import buscar_dados_planilha_com_cache
 from services.orquestrador import varredura_diaria
 from services.planilhas import buscar_ativo_na_planilha
+from services.logo_service import obter_link_logo
+
 
 # Importações internas dos seus próprios módulos
 from atualizador_documentos import rotina_de_atualizacao_em_massa
@@ -403,77 +406,6 @@ def rodar_cvm(message):
         bot.send_message(message.chat.id, f"❌ Erro na CVM: {str(e)}")
 
 # ==========================================
-# MOTOR DE LOGOS (Google Drive -> GitHub -> Logo.dev)
-# ==========================================
-def obter_link_logo(ticker, tipo):
-    """
-    Tenta buscar a logo em cascata:
-    1. Drive (Cache local nas pastas Logos > Fiis / Ações)
-    2. GitHub (Repositório do Wandeson)
-    3. Logo.dev (API Premium)
-    """
-    try:
-        nome_arquivo = f"{ticker.upper()}.png"
-        
-        # Define os nomes para criação de pastas e busca na web
-        pasta_tipo_nome = "Fiis" if tipo == "fii" else "Ações"
-        pasta_github = "fiis" if tipo == "fii" else "acoes"
-
-        # 1. CRIA OU ENCONTRA A ESTRUTURA DE PASTAS NO DRIVE
-        # O robô garante que a pasta "Logos" e a subpasta (Fiis/Ações) existam
-        id_pasta_logos = drive_manager._obter_ou_criar_pasta("Logos")
-        id_pasta_final = drive_manager._obter_ou_criar_pasta(pasta_tipo_nome, parent_id=id_pasta_logos)
-
-        # 2. VERIFICA SE A LOGO JÁ ESTÁ NO DRIVE (Seu Banco de Imagens Pessoal)
-        query = f"name='{nome_arquivo}' and '{id_pasta_final}' in parents and trashed=false"
-        resultados = drive_manager.service.files().list(q=query, fields="files(id, webViewLink)").execute().get('files', [])
-
-        if resultados:
-            print(f"✅ Logo de {ticker} já existe no Drive! Carregando direto da nuvem...")
-            link = resultados[0].get('webViewLink', '')
-            return link.replace("view?usp=drivesdk", "uc?export=view") if link else ""
-
-        print(f"🔍 Logo de {ticker} não encontrada no Drive. Buscando na web...")
-
-        # 3. SE NÃO EXISTIR, BAIXA DO GITHUB
-        github_url = f"https://raw.githubusercontent.com/WandesonMarcone/icones-bolsabr/main/{pasta_github}/{ticker.upper()}.png"
-        resp = requests.get(github_url, timeout=10)
-
-        # 4. SE O GITHUB FALHAR, TENTA NA API LOGO.DEV
-        if resp.status_code != 200:
-            logo_dev_token = os.environ.get("LOGO_DEV_TOKEN")
-            if logo_dev_token:
-                logo_dev_url = f"https://img.logo.dev/ticker:{ticker.upper()}.SA?token={logo_dev_token}"
-                resp = requests.get(logo_dev_url, timeout=10)
-
-        # 5. SALVA A IMAGEM DEFINITIVAMENTE NO SEU GOOGLE DRIVE
-        if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', '').lower():
-            # Importação necessária para enviar bytes de imagem para o Drive
-            from googleapiclient.http import MediaIoBaseUpload
-            import io
-
-            file_metadata = {
-                'name': nome_arquivo,
-                'parents': [id_pasta_final]
-            }
-            media = MediaIoBaseUpload(io.BytesIO(resp.content), mimetype='image/png', resumable=True)
-
-            arquivo_salvo = drive_manager.service.files().create(
-                body=file_metadata,
-                media_body=media,
-                fields='id, webViewLink'
-            ).execute()
-
-            print(f"📥 Sucesso! Nova logo de {ticker} guardada na pasta Logos > {pasta_tipo_nome}.")
-            link = arquivo_salvo.get('webViewLink', '')
-            return link.replace("view?usp=drivesdk", "uc?export=view") if link else ""
-
-    except Exception as e:
-        print(f"❌ Erro ao processar logo de {ticker}: {e}")
-
-    return ""
-
-# ==========================================
 # O NOVO MOTOR DE DASHBOARD (Arquitetura)
 # ==========================================
 
@@ -484,7 +416,7 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
     voltar_cmd = "menu_fiis" if is_fii else "menu_acoes"
 
     # 1. Puxar as Logos e Dados Reais da Planilha
-    url_logo = obter_link_logo(ticker, tipo)
+    url_logo = obter_link_logo(ticker, tipo, driver_manager)
     indicadores = buscar_dados_planilha(ticker, is_fii)
 
     # Tratamento de erro caso o ativo não esteja na planilha
