@@ -45,7 +45,7 @@ def callback_geral(call):
             )
             bot.edit_message_text(texto_ajuda, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- MENUS DINÂMICOS (FIIs) ---
+        # --- MÓDULO FIIs HIERÁRQUICO ---
         elif dados == "menu_fiis":
             bot.answer_callback_query(call.id, "Carregando FIIs...")
             markup = InlineKeyboardMarkup(row_width=2)
@@ -55,21 +55,18 @@ def callback_geral(call):
             )
 
             try:
-                # CORREÇÃO: Lê a planilha usando o Cache de memória (Alta velocidade)
+                # Busca os dados via cache conforme estruturado no seu sistema[span_1](start_span)[span_1](end_span)
                 matriz = buscar_dados_planilha_com_cache("BD_FIIs")
                 if matriz:
-                    cabecalhos = [c.lower().strip() for c in matriz[0]]
-                    idx = next((i for i, c in enumerate(cabecalhos) if c in ["setor", "segmento", "tipo"]), -1)
-
-                    if idx != -1:
-                        setores = sorted(list(set(linha[idx].strip() for linha in matriz[1:] if linha[idx].strip())))
-                        for s in setores:
-                            markup.add(InlineKeyboardButton(f"📁 {s}", callback_data=f"setor_fii_{s[:12]}"))
+                    # Assumindo: 0:Ticker, 1:Tipo (Tijolo/Papel/Híbrido), 2:Segmento
+                    tipos = sorted(list(set(linha[1].strip() for linha in matriz[1:] if linha[1].strip())))
+                    for t in tipos:
+                        markup.add(InlineKeyboardButton(f"🏢 {t}", callback_data=f"tipo_fii_{t}"))
             except Exception as e:
-                print(f"Erro ao ler setores: {e}")
+                print(f"Erro ao listar tipos: {e}")
 
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
-            bot.edit_message_text("🏢 *Módulo FIIs*\nSelecione uma categoria ou favorito:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            bot.edit_message_text("🏢 *Módulo FIIs - Selecione o Tipo:*", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # --- MENUS DINÂMICOS (Ações) ---
         elif dados == "menu_acoes":
