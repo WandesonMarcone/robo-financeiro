@@ -16,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 
 from services.planilhas import buscar_dados_planilha_com_cache
 from services.orquestrador import varredura_diaria
+from services.planilhas import buscar_ativo_na_planilha
 
 # Importações internas dos seus próprios módulos
 from atualizador_documentos import rotina_de_atualizacao_em_massa
