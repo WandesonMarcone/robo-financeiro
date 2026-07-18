@@ -6,6 +6,7 @@ from flask import Flask, request
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import create_engine
+from bot.loader import bot as tele_bot
 
 # 1. Configurações Globais
 import config
@@ -47,9 +48,13 @@ def webhook_handler():
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
         update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
+        
+        # CORREÇÃO: Usamos tele_bot para processar as mensagens, e não a pasta 'bot'
+        tele_bot.process_new_updates([update])
+        
         return "OK", 200
     return "Erro", 403
+
 
 @app.route('/')
 def index():
