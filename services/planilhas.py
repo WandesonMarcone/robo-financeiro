@@ -30,3 +30,30 @@ def buscar_dados_planilha_com_cache(nome_aba):
     
     return matriz
   
+def buscar_ativo_na_planilha(ticker, is_fii):
+    """
+    Substitui a antiga _buscar_dados_planilha.
+    Busca o ativo no cache da planilha e retorna o dicionário com os dados.
+    """
+    nome_aba = "BD_FIIs" if is_fii else "BD_Acoes"
+    matriz = buscar_dados_planilha_com_cache(nome_aba)
+    
+    if not matriz:
+        return None
+
+    # Procura a linha do ticker na matriz carregada (a primeira coluna é o ticker)
+    for row in matriz[1:]:  # Pula o cabeçalho
+        if row[0].strip().upper() == ticker.upper():
+            
+            # Mapeamento de colunas (Mantendo a lógica original)
+            if is_fii:
+                return {
+                    "tipo": row[1], "setor": row[2], "preco": row[3],
+                    "pvp": row[5], "dy": row[6], "vpa": row[14]
+                }
+            else:
+                return {
+                    "setor": row[1], "preco": row[2], "dy": row[3],
+                    "pl": row[5], "pvp": row[6], "roe": row[19]
+                }
+    return None
