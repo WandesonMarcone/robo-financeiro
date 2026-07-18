@@ -1,4 +1,5 @@
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import config
 from bot.loader import bot
 from services.planilhas import buscar_dados_planilha_com_cache, buscar_ativo_na_planilha
 from services.logo_service import obter_link_logo
@@ -6,6 +7,28 @@ from modules.GoogleDriveManager import GoogleDriveManager
 
 # Instancia o gerenciador de arquivos uma vez
 drive_manager = GoogleDriveManager()
+
+def buscar_favoritos(tipo):
+    """Filtra os ativos da planilha que estão na lista de config.FAVORITOS"""
+    is_fii = (tipo == 'fii')
+    nome_aba = "BD_FIIs" if is_fii else "BD_Acoes"
+    # Acessa a lista configurada no seu arquivo config.py
+    lista_favs = config.FAVORITOS.get(tipo, [])
+
+    try:
+        matriz = buscar_dados_planilha_com_cache(nome_aba)
+        if not matriz: return []
+
+        favoritos_encontrados = []
+        for linha in matriz[1:]:
+            ticker = linha[0].strip().upper()
+            if ticker in lista_favs:
+                favoritos_encontrados.append(ticker)
+        
+        return favoritos_encontrados
+    except Exception as e:
+        print(f"Erro ao buscar favoritos: {e}")
+        return []
 
 def converter_numero(valor_string):
     """Limpa textos da planilha e transforma em número puro"""
