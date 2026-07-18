@@ -112,7 +112,7 @@ def callback_geral(call):
 
     # 2. OPORTUNIDADES
         elif dados in ["oportunidades_fiis", "oportunidades_acoes"]:
-        bot.answer_callback_query(call.id, "Analisando o mercado...")
+            bot.answer_callback_query(call.id, "Analisando o mercado...")
         is_fii = (dados == "oportunidades_fiis")
         tipo = "fii" if is_fii else "acao"
         menu_voltar = "menu_fiis" if is_fii else "menu_acoes"
