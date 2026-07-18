@@ -7,7 +7,7 @@ from datetime import datetime
 import pytz
 import config
 from modules.utils import formatar, precisa_atualizar, get_request_with_retry
-
+from bs4 import BeautifulSoup
 
 def classificar_fii_e_emoji(setor):
     """
@@ -25,26 +25,92 @@ def classificar_fii_e_emoji(setor):
 
 def buscar_dados_profundos_fii(ticker):
     """
-    Consome o endpoint AJAX do StatusInvest para pegar dados reais de portfólio.
+    Consome a página do StatusInvest com BeautifulSoup para extrair Vacância, 
+    Imóveis e Dependência de Inquilinos em tempo real.
     """
     try:
-        # Endpoint estruturado para detalhes do fundo
         url = f"https://statusinvest.com.br/fii/{ticker.lower()}"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        resp = requests.get(url, headers=headers)
         
-        # Aqui entra a lógica de BeautifulSoup para extrair:
-        # 1. Contagem real de imóveis
-        # 2. Vacância física real
-        # 3. Lista de inquilinos (geralmente em tabelas div#portifolio)
-        
-        # RETORNO ESPERADO:
-        return {
-            "imoveis_reais": 12, # Exemplo extraído
-            "vacancia_real": 0.041,
-            "principais_inquilinos": "Magalu 20%, Renner 15%"
+        # O StatusInvest bloqueia robôs sem User-Agent. Precisamos "fingir" ser um navegador humano.
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
-    except:
+        resp = requests.get(url, headers=headers, timeout=10)
+
+        # Se a página não existir ou o acesso for bloqueado
+        if resp.status_code != 200:
+            return None
+
+        # Carrega o HTML da página
+        soup = BeautifulSoup(resp.text, 'html.parser')
+
+        # Valores padrão (caso o fundo seja de papel e não tenha imóveis, por exemplo)
+        vacancia_real = 0.0
+        imoveis_reais = 0
+        principais_inquilinos = "Não informado / Não aplicável"
+
+        # ==========================================
+        # 1 e 2. VACÂNCIA E IMÓVEIS (Cards do Topo)
+        # ==========================================
+        # O StatusInvest guarda essas métricas em cards com a classe 'info'
+        cards_info = soup.find_all('div', class_='info')
+        
+        for card in cards_info:
+            titulo_tag = card.find('h3', class_='title')
+            valor_tag = card.find('strong', class_='value')
+            
+            if titulo_tag and valor_tag:
+                titulo = titulo_tag.text.strip().lower()
+                valor = valor_tag.text.strip()
+
+                # Busca pela Vacância Física
+                if 'vacância' in titulo:
+                    valor_limpo = valor.replace('%', '').replace(',', '.').strip()
+                    if valor_limpo and valor_limpo != '-':
+                        vacancia_real = float(valor_limpo) / 100
+                
+                # Busca pelo Nº de Imóveis ou Ativos (Ex: GARE11 e XPML11)
+                elif 'imóveis' in titulo or 'ativos' in titulo:
+                    if valor != '-':
+                        try:
+                            imoveis_reais = int(valor)
+                        except ValueError:
+                            pass
+
+        # ==========================================
+        # 3. LISTA DE INQUILINOS (Tabela de Portfólio)
+        # ==========================================
+        # Vamos vasculhar as tabelas da página procurando a coluna "Inquilino"
+        tabelas = soup.find_all('table')
+        
+        for tabela in tabelas:
+            header = tabela.find('thead')
+            # Verifica se é a tabela correta
+            if header and 'inquilino' in header.text.lower():
+                linhas = tabela.find('tbody').find_all('tr')
+                lista_inquilinos = []
+                
+                # Pegamos apenas os Top 3 maiores inquilinos para o texto não ficar gigante
+                for linha in linhas[:3]:
+                    colunas = linha.find_all('td')
+                    if len(colunas) >= 2:
+                        nome_inquilino = colunas[0].text.strip()
+                        # No StatusInvest, a % de receita ou área costuma ser a última coluna
+                        porcentagem = colunas[-1].text.strip() 
+                        lista_inquilinos.append(f"{nome_inquilino} ({porcentagem})")
+                
+                if lista_inquilinos:
+                    principais_inquilinos = ", ".join(lista_inquilinos)
+                break # Achou a tabela, não precisa continuar procurando
+
+        return {
+            "imoveis_reais": imoveis_reais,
+            "vacancia_real": vacancia_real,
+            "principais_inquilinos": principais_inquilinos
+        }
+
+    except Exception as e:
+        print(f"Erro ao raspar dados profundos de {ticker}: {e}")
         return None
 
 def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
