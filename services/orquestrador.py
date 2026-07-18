@@ -4,8 +4,6 @@ from bot.loader import bot
 from atualizador_documentos import rotina_de_atualizacao_em_massa, SessionDB
 from pipeline_dados.coletor_cvm import AcoesCVMReader
 
-bot = telebot.TeleBot(config.TELEGRAM_BOT_TOKEN)
-
 def varredura_diaria():
     """Rotina automatizada de coleta de dados."""
     bot.send_message(config.TELEGRAM_CHAT_ID, "⚙️ *Bom dia! Iniciando a varredura automática...*", parse_mode="Markdown")
