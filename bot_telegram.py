@@ -14,6 +14,9 @@ from flask import Flask, request
 from sqlalchemy import func, create_engine
 from sqlalchemy.orm import sessionmaker
 
+from services.planilhas import buscar_dados_planilha_com_cache
+from services.orquestrador import varredura_diaria
+
 # Importações internas dos seus próprios módulos
 from atualizador_documentos import rotina_de_atualizacao_em_massa
 from modules.utils import conectar_gspread
