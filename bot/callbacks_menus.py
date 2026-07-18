@@ -29,21 +29,14 @@ def callback_geral(call):
             bot.edit_message_text("🤖 *Terminal Institucional* 🤖\nSelecione o módulo de análise abaixo:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         elif dados == "menu_ajuda":
-            markup = InlineKeyboardMarkup()
-            markup.row(InlineKeyboardButton("⚠️ Histórico de Logs", callback_data="ver_logs"))
-            markup.row(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
-            texto_ajuda = (
-                "ℹ️ *Painel de Ajuda / Sobre*\n\n"
-                "O robô monitora e processa dados da CVM e B3.\n\n"
-                "📌 *Comandos Rápidos:*\n"
-                "`/status` - Saúde do BD PostgreSQL\n"
-                "`/relatorios` - Últimos PDFs\n"
-                "`/adicionar TICKER` - Insere ativos\n\n"
-                "📊 *Nova Arquitetura:*\n"
-                "- Resumo IA, Indicadores (P/L, P/VP, DY)\n"
-                "- Submenus de Documentos e Análise IA."
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(
+                InlineKeyboardButton("🧠 Entenda os Comandos", callback_data="ajuda_comandos"),
+                InlineKeyboardButton("🚀 Roadmap de Desenvolvimento", callback_data="ajuda_roadmap"),
+                InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu")
             )
-            bot.edit_message_text(texto_ajuda, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            texto = "ℹ️ *Painel de Ajuda*\n\nProjeto iniciado em Setembro/2025. O sistema está em fase de evolução para um ecossistema completo de análise de ativos."
+            bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # --- MÓDULO FIIs HIERÁRQUICO ---
         elif dados == "menu_fiis":
@@ -340,9 +333,8 @@ def callback_listar_ativos_fii(call):
         # Verifica se a pasta clicada está dentro dos segmentos deste fundo
         if nome_setor in segmentos_do_fundo:
             
-            # ==========================================
             # 🧠 LÓGICA DO AVISO VISUAL (ASTERISCO)
-            # ==========================================
+
             texto_botao = ticker
             
             # CENÁRIO 1: Fundo com múltiplos segmentos (Ex: GARE11)
@@ -372,7 +364,7 @@ def callback_listar_ativos_fii(call):
     bot.edit_message_text(texto, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
             # ==========================================
-# ----- BOTÃO TIPO/SETOR FIIS -----
+# ----- BOTÃO TIPO/SETOR AÇÕES -----
             # ==========================================
 @bot.callback_query_handler(func=lambda call: call.data.startswith('setor_acao_'))
 def callback_listar_ativos_acao(call):
