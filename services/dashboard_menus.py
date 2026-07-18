@@ -1,3 +1,11 @@
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from bot.loader import bot
+from services.planilhas import buscar_dados_planilha_com_cache, buscar_ativo_na_planilha
+from services.logo_service import obter_link_logo
+from modules.GoogleDriveManager import GoogleDriveManager
+
+# Instancia o gerenciador de arquivos uma vez
+drive_manager = GoogleDriveManager()
 
 def converter_numero(valor_string):
     """Limpa textos como 'R$ 1.050,50' ou '8,5%' da planilha e transforma em número puro"""
