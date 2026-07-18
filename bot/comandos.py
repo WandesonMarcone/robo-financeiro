@@ -3,17 +3,81 @@ from bot.loader import bot
 from atualizador_documentos import SessionDB 
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 
+# ==========================================
+# 📊 COMANDOS DE PLANILHA DO GOOGLE
+# ==========================================
+
+# Permite adicionar um novo ativo direto na sua planilha do Drive via Telegram
+@bot.message_handler(commands=['adicionar'])
+def comando_adicionar(message):
+    try:
+        # Separa o comando da palavra. Ex: ["/adicionar", "BBAS3"]
+        partes = message.text.split()
+        if len(partes) < 2:
+            bot.reply_to(message, "⚠️ Uso correto: `/adicionar TICKER` (ex: /adicionar BBAS3)", parse_mode="Markdown")
+            return
+
+        ticker = partes[1].strip().upper()
+        bot.reply_to(message, f"A procurar {ticker} e a injetar na Planilha do Google...")
+
+        # Conecta no Google Sheets
+        planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
+
+        # Inteligência simples: Se terminar em 11 é FII, se não é Ação.
+        is_fii = True if ticker.endswith('11') else False
+        nome_aba = "BD_FIIs" if is_fii else "BD_Acoes"
+        aba = planilha.worksheet(nome_aba)
+
+        # Encontra a última linha vazia da aba escolhida
+        dados = aba.get_all_values()
+        proxima_linha = len(dados) + 1
+
+        # Insere o dado na planilha oficial
+        aba.update(f'A{proxima_linha}', [[ticker]])
+
+        bot.send_message(message.chat.id, f"✅ *{ticker}* adicionado com sucesso na aba `{nome_aba}`!", parse_mode="Markdown")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Erro ao adicionar ativo: {e}")
+
+# ==========================================
+# ⚙️ COMANDOS DE MONITORAMENTO E STATUS
+# ==========================================
+
+# Comando /reciclar: Reativa documentos que foram descartados incorretamente no passado
+@bot.message_handler(commands=['reciclar_rejeitados'])
+def comando_reciclar_rejeitados(message):
+    bot.send_message(message.chat.id, "♻️ Buscando documentos rejeitados no banco...")
+    session = SessionDB()
+    try:
+        # Muda o status de rejeitado para pendente para uma nova tentativa de IA
+        rejeitados = session.query(DocumentosQualitativos).filter(
+            DocumentosQualitativos.status_processamento == 'REJEITADO_DUPLO_FATOR'
+        ).all()
+
+        contador = 0
+        for doc in rejeitados:
+            doc.status_processamento = 'PENDENTE' 
+            contador += 1
+
+        session.commit()
+        bot.send_message(message.chat.id, f"✅ {contador} documentos foram devolvidos para a fila!")
+    finally:
+        session.close()
+
+# ==========================================
+# COMANDO SECRETO PARA TESTAR A VARREDURA
+# ==========================================
 @bot.message_handler(commands=['forcar_varredura'])
 def acionar_varredura_manual(message):
     # 1. Responde instantaneamente para o Telegram e pro Render não darem Timeout
     bot.reply_to(message, "⚙️ *Iniciando varredura na B3 em segundo plano...*\nIsso pode levar alguns minutos. Pode continuar usando o bot normalmente, eu te aviso quando terminar!", parse_mode="Markdown")
-    
+
     # 2. Cria a função pesada isolada
     def tarefa_pesada_background():
         try:
             from atualizador_documentos import rotina_de_atualizacao_em_massa
             relatorios_baixados = rotina_de_atualizacao_em_massa()
-            
+
             # Quando terminar, envia uma nova mensagem avisando
             bot.send_message(message.chat.id, f"✅ *Varredura Concluída!*\n\n📥 Documentos inéditos salvos no Drive: **{relatorios_baixados}**", parse_mode="Markdown")
         except Exception as e:
@@ -31,71 +95,14 @@ def rodar_cvm(message):
         from coletor_cvm import AcoesCVMReader
         session = SessionDB()
         coletor = AcoesCVMReader(session)
-        
+
         # Você pode mudar o ano aqui futuramente ou deixar dinâmico
         coletor.atualizar_acoes(2026) 
-        
+
         session.close()
         bot.send_message(message.chat.id, "✅ Coleta CVM concluída! Balanços salvos no banco de dados.")
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Erro na CVM: {str(e)}")
-# Comando /status: Fornece um "Raio-X" da integridade do banco de dados na nuvem
-@bot.message_handler(commands=['status'])
-def status_banco(message):
-    session = SessionDB() # Abre conexão com PostgreSQL
-    try:
-        total_ativos = session.query(Ativo).count()
-        total_docs = session.query(DocumentosQualitativos).count()
-        # Busca os últimos 5 ativos cadastrados para conferência visual
-        ultimos = session.query(Ativo.ticker).order_by(Ativo.id.desc()).limit(5).all()
-        lista_tickers = ", ".join([a[0] for a in ultimos])
-        # Busca a data mais recente no banco para saber quando foi a última varredura
-        ultima_data = session.query(func.max(DocumentosQualitativos.data_publicacao)).scalar()
-
-        resposta = (
-            f"📊 **Painel de Controle do Motor de Dados**\n\n"
-            f"🏢 **Ativos monitorados:** {total_ativos}\n"
-            f"📄 **Documentos salvos:** {total_docs}\n"
-            f"📅 **Última atualização:** {ultima_data}\n\n"
-            f"🚀 **Últimos ativos:**\n{lista_tickers}"
-        )
-        bot.reply_to(message, resposta)
-    except Exception as e:
-        bot.reply_to(message, f"❌ Erro ao consultar banco: {e}")
-    finally:
-        session.close() # Libera a conexão com o banco
-
-# Comando /relatorios: Exibe uma lista formatada dos 10 documentos mais recentes no Drive
-@bot.message_handler(commands=['relatorios', 'docs'])
-def enviar_ultimos_relatorios(message):
-    bot.reply_to(message, "🔎 Buscando os últimos documentos no cofre...")
-    session = SessionDB()
-    try:
-        # Faz JOIN entre a tabela de Ativos e a de Documentos para exibir o nome do Fundo/Ação
-        ultimos_docs = session.query(DocumentosQualitativos, Ativo)\
-            .join(Ativo, DocumentosQualitativos.ativo_id == Ativo.id)\
-            .order_by(DocumentosQualitativos.data_publicacao.desc())\
-            .limit(10).all()
-
-        if not ultimos_docs:
-            bot.send_message(message.chat.id, "📭 Nenhum documento encontrado no banco ainda.")
-            return
-
-        resposta = "📄 **Últimos Relatórios Capturados:**\n\n"
-        for doc, ativo in ultimos_docs:
-            data_formatada = doc.data_publicacao.strftime('%d/%m/%Y')
-            resposta += f"🏢 **{ativo.ticker}** - {data_formatada}\n"
-            resposta += f"🏷️ Tipo: {doc.tipo_documento}\n"
-            if doc.assunto and doc.assunto.strip():
-                resposta += f"📌 Assunto: {doc.assunto}\n"
-            resposta += f"🔗 [Acessar PDF]({doc.url_pdf})\n"
-            resposta += "➖➖➖➖➖➖➖➖➖➖\n"
-
-        bot.send_message(message.chat.id, resposta, parse_mode='Markdown', disable_web_page_preview=True)
-    except Exception as e:
-        bot.send_message(message.chat.id, "❌ Ops! Deu um erro ao tentar ler o banco de dados.")
-    finally:
-        session.close()
 
 # Comando /reciclar: Reativa documentos que foram descartados incorretamente no passado
 @bot.message_handler(commands=['reciclar_rejeitados'])
