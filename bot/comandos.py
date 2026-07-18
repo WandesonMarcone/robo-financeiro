@@ -8,6 +8,19 @@ from bot.loader import bot
 from atualizador_documentos import SessionDB 
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 
+# ==========================================
+# 🧭 MENUS DE NAVEGAÇÃO E INTERFACE (UI)
+# ==========================================
+# Ponto de partida do Bot
+@bot.message_handler(commands=['menu', 'start'])
+def enviar_menu(message):
+    markup = InlineKeyboardMarkup()
+    markup.row(InlineKeyboardButton("🏢 FIIs (Imobiliários)", callback_data="menu_fiis"),
+               InlineKeyboardButton("📈 Ações (Empresas)", callback_data="menu_acoes"))
+    markup.row(InlineKeyboardButton("🌍 Visão Macro & Notícias", callback_data="menu_macro"))
+    markup.row(InlineKeyboardButton("ℹ️ Ajuda / Sobre", callback_data="menu_ajuda"))
+    bot.send_message(message.chat.id, "🤖 *Terminal Institucional* 🤖\nSelecione o módulo de análise abaixo:", reply_markup=markup, parse_mode="Markdown")
+
 # Comando /status: Fornece um "Raio-X" da integridade do banco de dados na nuvem
 @bot.message_handler(commands=['status'])
 def status_banco(message):
