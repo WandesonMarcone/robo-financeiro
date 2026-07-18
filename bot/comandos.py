@@ -1,3 +1,8 @@
+# FUNÇÃO (/ADICIONAR)
+from bot.loader import bot
+from modules.utils import conectar_gspread
+import config
+
 from sqlalchemy import func
 from bot.loader import bot
 from atualizador_documentos import SessionDB 
