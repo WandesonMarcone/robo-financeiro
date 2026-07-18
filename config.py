@@ -4,34 +4,30 @@ import os
 SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1U8h3Hw2yBOmCbvBskP9zHyVVJf_3OkXtAopcFSebLvs/edit?usp=drivesdk' 
 JSON_KEY = 'credenciais.json' 
 
-# --- CONFIGURAÇÕES DE NOTIFICAÇÃO (TELEGRAM) ---
-# 🔒 O Token é secreto e puxado direto do cofre do Render.
+# --- CONFIGURAÇÕES ---
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") 
 TELEGRAM_CHAT_ID = "8867098987"
-
-# --- CONFIGURAÇÕES DA IA (GROQ) ---
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-
-# --- CONFIGURAÇÕES DA BASE DE DADOS (GROQ) ---
-DATABASE_URL = os.environ.get("DATABASE_URL")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY") # CONFIG IA(GROQ)
+DATABASE_URL = os.environ.get("DATABASE_URL") # CONFIG BASE DE DADOS
 
 # ==========================================
 # PREFERÊNCIAS DO MENU: ⭐ MEUS FAVORITOS
 # ==========================================
-# Aqui ficam APENAS os ativos que você quer fixos no menu de favoritos 
-# para acesso em 1 clique (sem precisar navegar pelas pastas de setores).
 
 FIXAS_FIIS = ["GARE11", "MXRF11", "VISC11", "HGLG11", "XPML11"]
 FIXAS_ACOES = ["PETR4", "VALE3", "WEGE3", "ITUB4"]
 
+# --- 🚨 REGRAS FIXAS DEFINIDAS AQUI 🚨 ---
+
+    FILTROS_FIXOS = {
+        "fii": {"pvp_min": 0.50, "pvp_max": 1.15, "dy_min": 0.08},
+        "acao": {"pl_min": 2.0, "pl_max": 15.0, "pvp_min": 0.50, "pvp_max": 2.50, "dy_min": 0.06, "roe_min": 0.10}
+    }
+
 # ==========================================
 # 🗺️ MAPA DE ISCAS MASTER (CATÁLOGO B3)
 # ==========================================
-# Este dicionário contém os FIIs do mercado. O robô só usará as iscas 
-# cujas chaves (Tickers) estiverem presentes na sua planilha Google Sheets.
-
 MAPA_ISCAS_MASTER = {
-    # --- OS SEUS FIIS ATUAIS (Mapeados diretamente do seu TXT) ---
     'XPML11': 'XP MALLS',
     'MXRF11': 'MAXI RENDA',
     'HGLG11': 'CGHG LOG', # Mantido histórico, B3 as vezes usa CSHG
