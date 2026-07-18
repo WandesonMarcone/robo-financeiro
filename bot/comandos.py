@@ -104,27 +104,6 @@ def rodar_cvm(message):
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Erro na CVM: {str(e)}")
 
-# Comando /reciclar: Reativa documentos que foram descartados incorretamente no passado
-@bot.message_handler(commands=['reciclar_rejeitados'])
-def comando_reciclar_rejeitados(message):
-    bot.send_message(message.chat.id, "♻️ Buscando documentos rejeitados no banco...")
-    session = SessionDB()
-    try:
-        # Muda o status de rejeitado para pendente para uma nova tentativa de IA
-        rejeitados = session.query(DocumentosQualitativos).filter(
-            DocumentosQualitativos.status_processamento == 'REJEITADO_DUPLO_FATOR'
-        ).all()
-
-        contador = 0
-        for doc in rejeitados:
-            doc.status_processamento = 'PENDENTE' 
-            contador += 1
-
-        session.commit()
-        bot.send_message(message.chat.id, f"✅ {contador} documentos foram devolvidos para a fila!")
-    finally:
-        session.close()
-
 # Varre todo o site da B3 para encontrar o "Nome Oficial" de todos os FIIs e salva em um arquivo de texto
 @bot.message_handler(commands=['mapear_nomes'])
 def comando_mapear_nomes_b3(message):
