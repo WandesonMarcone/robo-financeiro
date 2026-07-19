@@ -18,6 +18,7 @@ from bot.loader import bot
 import bot.comandos
 import bot.callbacks_revisao
 import bot.callbacks_menus
+import bot.handlers 
 
 # 4. Serviços (Orquestrador)
 from services.orquestrador import varredura_diaria
