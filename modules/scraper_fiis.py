@@ -223,13 +223,29 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             media_div_mensal = (preco * dy) / 12
             lucro_12m = valor_mercado * dy 
 
+            # =========================================================================
+            # 🗺️ MAPEAMENTO COMPLETO (Agora com 18 Colunas: Distribuição de A até R)
+            # =========================================================================
             row_update_completo = [
-                ticker, tipo, setor, preco, numero_cotas, pvp, dy, 
-                vacancia, qtd_imoveis, inquilinos_planilha, 
-                "Pendente de IA", "Pendente de IA", liquidez, 
-                valor_mercado, vpa, lucro_12m, media_div_mensal, f"{agora_sp} OK"
-            ]
-
+                ticker,                 # 00 | Coluna A: Ticker do Fundo
+                tipo,                   # 01 | Coluna B: Tipo de FII (Ex: Tijolo, Papel)
+                setor,                  # 02 | Coluna C: Segmento Específico
+                preco,                  # 03 | Coluna D: Cotação Atualizada
+                numero_cotas,           # 04 | Coluna E: Quantidade Total de Cotas
+                pvp,                    # 05 | Coluna F: P/VP
+                dy,                     # 06 | Coluna G: Dividend Yield
+                vacancia,               # 07 | Coluna H: Vacância Física/Financeira Média
+                qtd_imoveis,            # 08 | Coluna I: Quantidade Física de Imóveis
+                inquilinos_planilha,     # 09 | Coluna J: LISTA DE INQUILINOS (Nova Coluna!)
+                "Pendente de IA",       # 10 | Coluna K: WALT 
+                "Pendente de IA",       # 11 | Coluna L: Alavancagem / Dívida
+                liquidez,               # 12 | Coluna M: Liquidez Média Diária Negociada
+                valor_mercado,          # 13 | Coluna N: Patrimônio Líquido Total
+                vpa,                    # 14 | Coluna O: Valor Patrimonial Justo da Cota
+                lucro_12m,              # 15 | Coluna P: Montante de Lucro Distribuído (12M)
+                media_div_mensal,       # 16 | Coluna Q: Projeção de Dividendo Mensal
+                f"{agora_sp} OK"       # 17 | Coluna R: Carimbo de Conclusão da Carga
+                ]
             row_update_parcial = row_update_completo[1:] 
 
             if ticker in tickers_planilha:
