@@ -1,6 +1,7 @@
 import io
 import random
 import requests
+import json
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
