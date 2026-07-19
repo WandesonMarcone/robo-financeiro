@@ -236,12 +236,24 @@ def callback_geral(call):
         # --- FAVORITOS ---            
         elif dados in ["favoritos_fiis", "favoritos_acoes"]:
             bot.answer_callback_query(call.id, "Buscando seus favoritos...")
+            
+            # Identifica contexto baseada nos dados do callback
+            is_fii = (dados == "favoritos_fiis")
+            tipo = "fii" if is_fii else "acao"
+            menu_voltar = "menu_fiis" if is_fii else "menu_acoes"
+
+            # Busca a lista já pronta do seu config via a função que criamos
+            favs = buscar_favoritos(tipo)
+            
+            markup = InlineKeyboardMarkup(row_width=3)
+            
             if favs:
+                # Cria os botões para cada ticker favorito
                 botoes = [InlineKeyboardButton(tkr, callback_data=f"{tipo}_{tkr}") for tkr in favs]
                 markup.add(*botoes)
                 texto = f"⭐ *Seus Ativos Favoritos ({'FIIs' if is_fii else 'Ações'})*\n\nSelecione um para acessar o painel:"
             else:
-                texto = "📭 *Nenhum favorito encontrado.* \nVerifique se o seu config.py contém a lista `FAVORITOS` preenchida."
+                texto = "📭 *Nenhum favorito encontrado.* \nVerifique se o seu config.py contém as listas `FIXAS_FIIS` ou `FIXAS_ACOES` preenchidas."
 
             markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
             bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
