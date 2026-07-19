@@ -270,6 +270,8 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             else:
                 relatorio_atualizados.append(f"{emoji} *{ticker}* ({tipo})\n   R$ {preco_velho:.2f} ➔ R$ {preco:.2f} {icone_variacao}\n   P/VP: {pvp:.2f} | DY: {dy*100:.1f}%{txt_vacancia}")
 
+            print(f"   ✅ [LOG GITHUB] FII {ticker} integrado à memória de atualização com sucesso.")
+
         except Exception as e:
             try:
                 aba_logs = planilha.worksheet("BD_Logs")
