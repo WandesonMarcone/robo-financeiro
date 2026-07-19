@@ -9,6 +9,27 @@ import config
 from modules.utils import formatar, precisa_atualizar, get_request_with_retry
 from bs4 import BeautifulSoup
 
+def buscar_dados_json_statusinvest(ticker):
+    """
+    Consome a API interna do StatusInvest. 
+    Este JSON é a fonte oficial dos dados que alimentam os gráficos.
+    """
+    # Esta URL é o endpoint da API que o gráfico de portfólio consulta
+    url_api = f"https://statusinvest.com.br/fii/portfolio-segment-chart?ticker={ticker.lower()}"
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'X-Requested-With': 'XMLHttpRequest' # Importante: identifica a requisição como API
+    }
+    
+    try:
+        response = requests.get(url_api, headers=headers, timeout=10)
+        if response.status_code == 200:
+            return response.json() # Retorna o objeto puro
+    except Exception as e:
+        print(f"Erro ao capturar JSON de {ticker}: {e}")
+    return None
+
 def classificar_fii_e_emoji(setor):
     """
     Classifica automaticamente o FII baseado no setor.
