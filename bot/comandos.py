@@ -161,7 +161,8 @@ def acionar_varredura_manual(message):
                 bot.send_message(message.chat.id, "✅ *Varredura concluída!* Nenhuma atualização necessária.", parse_mode="Markdown")
             
         except Exception as e:
-            bot.send_message(message.chat.id, f"❌ *Erro na varredura:* {e}", parse_mode="Markdown")
+            # Sem formatação Markdown para evitar o Erro 400 do Telegram
+            bot.send_message(message.chat.id, f"❌ Erro na varredura: {str(e)[:200]}") 
 
     thread = threading.Thread(target=tarefa_pesada_background)
     thread.start()
