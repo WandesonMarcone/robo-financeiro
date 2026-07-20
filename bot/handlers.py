@@ -96,16 +96,22 @@ def callback_listar_ativos_fii(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('setor_acao_'))
 def callback_listar_ativos_acao(call):
     """Lê a aba BD_Acoes e lista as empresas que pertencem ao setor clicado"""
-    nome_setor = "_".join(call.data.split('_')[2:])
+    
+    # CORREÇÃO: Extração segura do setor (idêntica à lógica que corrigimos para os FIIs)
+    nome_setor = call.data.replace('setor_acao_', '').strip()
+    
     bot.answer_callback_query(call.id, f"Buscando ações de {nome_setor}...")
 
     matriz = buscar_dados_planilha_com_cache("BD_Acoes")
-    markup = InlineKeyboardMarkup(row_width=3) # 3 botões por linha para ações fica legal
+    markup = InlineKeyboardMarkup(row_width=3) 
     botoes_ativos = []
 
     for linha in matriz[1:]:
+        # SEGURANÇA: Verifica se a linha tem colunas suficientes
+        if len(linha) < 2: continue
+            
         ticker = linha[0].strip()
-        # Lê a coluna de setor da ação (Assumindo Coluna C -> índice 2)
+        # Lê a coluna de setor (Ajustado para índice 1, como você mencionou no código)
         setor_da_linha = linha[1].strip() 
 
         if setor_da_linha == nome_setor:
