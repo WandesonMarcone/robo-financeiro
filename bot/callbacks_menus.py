@@ -41,7 +41,7 @@ def callback_geral(call):
             texto = "ℹ️ *Painel de Ajuda*\n\nProjeto iniciado em Setembro/2025. O sistema está em fase de evolução para um ecossistema completo de análise de ativos."
             bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- MÓDULO FIIs HIERÁRQUICO ---
+        # --- MÓDULO FIIs HIERÁRQUICO DINÂMICO ---
         elif dados == "menu_fiis":
             bot.answer_callback_query(call.id, "Carregando FIIs...")
             markup = InlineKeyboardMarkup(row_width=2)
@@ -51,15 +51,23 @@ def callback_geral(call):
             )
 
             try:
-                # Busca os dados via cache conforme estruturado no seu sistema[span_1](start_span)[span_1](end_span)
                 matriz = buscar_dados_planilha_com_cache("BD_FIIs")
                 if matriz:
-                    # Assumindo: 0:Ticker, 1:Tipo (Tijolo/Papel/Híbrido), 2:Segmento
-                    tipos = sorted(list(set(linha[1].strip() for linha in matriz[1:] if linha[1].strip())))
-                    for t in tipos:
+                    # LÓGICA DINÂMICA:
+                    # 1. Pega a coluna 1 (Tipo) de todas as linhas
+                    # 2. .strip() para limpar espaços em branco
+                    # 3. set() para remover duplicatas
+                    # 4. sorted() para deixar em ordem alfabética
+                    tipos_unicos = sorted(list(set(
+                        linha[1].strip() for linha in matriz[1:] 
+                        if len(linha) > 1 and linha[1].strip()
+                    )))
+
+                    # Cria um botão para cada tipo encontrado
+                    for t in tipos_unicos:
                         markup.add(InlineKeyboardButton(f"🏢 {t}", callback_data=f"tipo_fii_{t}"))
             except Exception as e:
-                print(f"Erro ao listar tipos: {e}")
+                print(f"Erro ao listar tipos dinâmicos: {e}")
 
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
             bot.edit_message_text("🏢 *Módulo FIIs - Selecione o Tipo:*", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
