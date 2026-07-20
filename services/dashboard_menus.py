@@ -4,6 +4,7 @@ from bot.loader import bot
 from services.planilhas import buscar_dados_planilha_com_cache, buscar_ativo_na_planilha
 from services.logo_service import obter_link_logo
 from modules.GoogleDriveManager import GoogleDriveManager
+from database.models import SessionDB, DocumentosQualitativos, Ativo # Garanta que os imports estejam aqui
 
 # Instancia o gerenciador de arquivos uma vez
 drive_manager = GoogleDriveManager()
@@ -94,7 +95,6 @@ def buscar_oportunidades(tipo):
         return []
 
 def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
-    """Gera a mensagem principal com os botões interativos e dados em tempo real"""
     is_fii = (tipo == 'fii')
     icone = "🏢 Fundo" if is_fii else "📈 Ação"
     voltar_cmd = "menu_fiis" if is_fii else "menu_acoes"
@@ -108,35 +108,46 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
         else: bot.send_message(chat_id, msg_erro, parse_mode="Markdown")
         return
 
-    resumo_ia = f"Ativo monitorado do setor {indicadores.get('setor', 'Geral')}."
+    # --- MELHORIA DA IA: Resumo Dinâmico ---
+    # Aqui você pode chamar uma função que consulta o banco ou uma mini lógica de resumo
+    resumo_ia = f"Ativo do setor {indicadores.get('setor', 'Geral')}. Rentabilidade atual: {indicadores.get('dy', 'N/A')}."
+    
+    # --- FIX LOGO: O Telegram só exibe links diretos de imagem (.png, .jpg) ---
+    # Se url_logo for um link de pasta do Drive, o Telegram NÃO vai mostrar.
+    # O link precisa ser um link direto da imagem.
     link_invisivel = f"[\u200c]({url_logo})" if url_logo else ""
 
-    if is_fii:
-        texto = (
-            f"{link_invisivel}{icone}: **{ticker}**\n"
-            f"📝 **Resumo:** _{resumo_ia}_\n\n"
-            f"💰 **Preço:** R$ {indicadores.get('preco', 'N/A')}\n"
-            f"💸 **Dividend Yield:** {indicadores.get('dy', 'N/A')}\n"
-            f"⚖️ **P/VP:** {indicadores.get('pvp', 'N/A')}\n"
-            f"💵 **VPA:** {indicadores.get('vpa', 'N/A')}"
-        )
-    else:
-        texto = (
-            f"{link_invisivel}{icone}: **{ticker}**\n"
-            f"📝 **Resumo:** _{resumo_ia}_\n\n"
-            f"💰 **Preço:** R$ {indicadores.get('preco', 'N/A')}\n"
-            f"💸 **Dividend Yield:** {indicadores.get('dy', 'N/A')}\n"
-            f"📊 **P/L:** {indicadores.get('pl', 'N/A')} | ⚖️ **P/VP:** {indicadores.get('pvp', 'N/A')}\n"
-            f"📈 **ROE:** {indicadores.get('roe', 'N/A')}"
-        )
+    texto = (
+        f"{link_invisivel}{icone}: **{ticker}**\n"
+        f"📝 **Resumo:** _{resumo_ia}_\n\n"
+        f"💰 **Preço:** R$ {indicadores.get('preco', 'N/A')}\n"
+        f"💸 **Dividend Yield:** {indicadores.get('dy', 'N/A')}\n"
+        f"⚖️ **P/VP:** {indicadores.get('pvp', 'N/A')}\n"
+        f"💵 **VPA/PL:** {indicadores.get('vpa', indicadores.get('pl', 'N/A'))}"
+    )
 
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
         InlineKeyboardButton("📎 Dados", callback_data=f"dados_{ticker}_{tipo}"),
         InlineKeyboardButton("📑 Docs", callback_data=f"docs_{ticker}_{tipo}")
     )
+    
+    # --- NOVA LÓGICA DE REVISÃO (Dinâmica) ---
+    if is_fii:
+        session = SessionDB()
+        pendentes = session.query(DocumentosQualitativos).join(Ativo).filter(
+            Ativo.ticker == ticker, 
+            DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
+        ).count()
+        session.close()
+
+        if pendentes > 0:
+            markup.add(InlineKeyboardButton(f"⚠️ {pendentes} Doc(s) para Revisão", callback_data=f"rev_t_{ticker}"))
+
     markup.add(InlineKeyboardButton("⚠️ Análise IA", callback_data=f"ia_{ticker}_{tipo}"))
     markup.add(InlineKeyboardButton(f"🔙 Voltar", callback_data=voltar_cmd))
 
-    if message_id: bot.edit_message_text(texto, chat_id, message_id, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=False)
-    else: bot.send_message(chat_id, texto, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=False)
+    if message_id: 
+        bot.edit_message_text(texto, chat_id, message_id, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=False)
+    else: 
+        bot.send_message(chat_id, texto, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=False)
