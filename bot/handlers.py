@@ -108,7 +108,7 @@ def callback_listar_ativos_acao(call):
 
     for linha in matriz[1:]:
         # SEGURANÇA: Verifica se a linha tem colunas suficientes
-        if len(linha) < 2: continue
+        if len(linha) < 1: continue
             
         ticker = linha[0].strip()
         # Lê a coluna de setor (Ajustado para índice 1, como você mencionou no código)
