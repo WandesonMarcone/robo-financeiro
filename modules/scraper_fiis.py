@@ -166,7 +166,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             except: precos_antigos[t] = 0.0
             mapa_atualizacao[t] = row[15] if len(row) > 15 else "" 
 
-    cat_fixas = tickers_planilha # [f for f in config.FIXAS_FIIS if f in tickers_planilha and precisa_atualizar(f, mapa_atualizacao, agora_dt, sp_tz)]
+    cat_fixas = [f for f in config.FIXAS_FIIS if f in tickers_planilha and precisa_atualizar(f, mapa_atualizacao, agora_dt, sp_tz)]
 
     if not df.empty:
         df_cacador = df[
@@ -181,7 +181,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     precisam_urgente = [t for t in tickers_planilha if t not in usadas and precisa_atualizar(t, mapa_atualizacao, agora_dt, sp_tz)]
     cat_desatualizadas = random.sample(precisam_urgente, 2) if len(precisam_urgente) >= 2 else precisam_urgente
 
-    fila_total = cat_fixas + novatos_garimpados + cat_desatualizadas
+    fila_total = (cat_fixas + novatos_garimpados + cat_desatualizadas)[:5]
     if not fila_total: return [], "", aba_fiis
 
     batch_updates = []
