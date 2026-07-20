@@ -133,6 +133,7 @@ def buscar_dados_profundos_fii(ticker):
 
 def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     print("🏢 [1/5] Iniciando varredura com motor JSON ativado...")
+    print(f"DEBUG: Tamanho da fila para varredura: {len(fila_total)}")
     aba_fiis = planilha.worksheet("BD_FIIs")
 
     try:
