@@ -133,9 +133,13 @@ def buscar_dados_profundos_fii(ticker):
 
 def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     print("🏢 [1/5] Iniciando varredura com motor JSON ativado...")
-    print(f"DEBUG: Tamanho da fila para varredura: {len(fila_total)}")
     aba_fiis = planilha.worksheet("BD_FIIs")
 
+    # 1. INICIALIZAÇÃO BLINDADA (Evita o UnboundLocalError)
+    fila_total = []
+    oportunidades_gerais = []
+    novatos_garimpados = []
+    
     try:
         url = "https://www.fundamentus.com.br/fii_resultado.php"
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -148,8 +152,6 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     except Exception as e:
         df = pd.DataFrame()
 
-    oportunidades_gerais = []
-    novatos_garimpados = []
     dados_planilha = aba_fiis.get_all_values()
     tickers_planilha = []
     mapa_atualizacao = {}
@@ -169,9 +171,6 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
 
     cat_fixas = [f for f in config.FIXAS_FIIS if f in tickers_planilha and precisa_atualizar(f, mapa_atualizacao, agora_dt, sp_tz)]
 
-    fila_total = [] 
-    
-    # Lógica de preenchimento
     if not df.empty:
         df_cacador = df[
             (df['P/VP'] >= 0.85) & (df['P/VP'] <= 1.01) &
@@ -185,13 +184,12 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     precisam_urgente = [t for t in tickers_planilha if t not in usadas and precisa_atualizar(t, mapa_atualizacao, agora_dt, sp_tz)]
     cat_desatualizadas = random.sample(precisam_urgente, 2) if len(precisam_urgente) >= 2 else precisam_urgente
 
-    # Agora a variável SEMPRE existe
+    # 2. DEFINIÇÃO DA FILA ANTES DE QUALQUER PRINT
     fila_total = cat_fixas + novatos_garimpados + cat_desatualizadas
-    
-    # Print seguro:
     print(f"DEBUG: Tamanho da fila para varredura: {len(fila_total)}")
     
-    if not fila_total: return [], "Nenhuma atualização necessária.", aba_fiis
+    if not fila_total: 
+        return [], "", aba_fiis
 
     batch_updates = []
     relatorio_fixas = []
@@ -218,16 +216,13 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             liquidez = formatar(f.get('Liquidez', 0))
             valor_mercado = formatar(f.get('Valor de Mercado', 0))
             
-            # 🧠 INVERSÃO LÓGICA: Busca os dados reais PRIMEIRO
+            # API JSON
             dados_profundos = buscar_dados_profundos_fii(ticker)
-            
-            # Assume os dados verdadeiros ou faz fallback para Fundamentus
             setor = dados_profundos["segmento_real"] if dados_profundos["segmento_real"] else f.get('Segmento', 'N/D')
             vacancia = dados_profundos["vacancia_real"] if dados_profundos["vacancia_real"] > 0 else formatar(f.get('Vacância Média', 0))
             qtd_imoveis = dados_profundos["imoveis_reais"] if dados_profundos["imoveis_reais"] > 0 else formatar(f.get('Qtd de imóveis', 0))
             inquilinos_planilha = dados_profundos["principais_inquilinos"]
 
-            # AGORA SIM classifica o fundo (O JSON impede que os fundos virem todos Tijolo)
             tipo, emoji = classificar_fii_e_emoji(setor, ticker)
 
             vpa = (preco / pvp) if pvp > 0 else 0
@@ -248,7 +243,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
                 dy,                     # 06 | Coluna G: Dividend Yield
                 vacancia,               # 07 | Coluna H: Vacância Física/Financeira Média
                 qtd_imoveis,            # 08 | Coluna I: Quantidade Física de Imóveis
-                inquilinos_planilha,     # 09 | Coluna J: LISTA DE INQUILINOS (Nova Coluna!)
+                inquilinos_planilha,     # 09 | Coluna J: LISTA DE INQUILINOS
                 "Pendente de IA",       # 10 | Coluna K: WALT 
                 "Pendente de IA",       # 11 | Coluna L: Alavancagem / Dívida
                 liquidez,               # 12 | Coluna M: Liquidez Média Diária Negociada
@@ -257,7 +252,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
                 lucro_12m,              # 15 | Coluna P: Montante de Lucro Distribuído (12M)
                 media_div_mensal,       # 16 | Coluna Q: Projeção de Dividendo Mensal
                 f"{agora_sp} OK"       # 17 | Coluna R: Carimbo de Conclusão da Carga
-                ]
+            ]
 
             row_update_parcial = row_update_completo[1:] 
 
