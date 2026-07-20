@@ -185,29 +185,33 @@ def callback_geral(call):
                     )
                 bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- NÍVEL 1: MENU DE MESES (Docs) ---
+         # --- NÍVEL 1: MENU DE TIPOS DINÂMICOS (FIIs) ---
         elif dados.startswith("docs_"):
             partes = dados.split("_")
             ticker = partes[1]
-            tipo = partes[2]
-            
-            markup = InlineKeyboardMarkup()
+            tipo_ativo = partes[2] # "fii" ou "acao"
+
+            markup = InlineKeyboardMarkup(row_width=1)
             session = SessionDB()
 
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-            encontrou_dados = False
+            
+            if ativo and tipo_ativo == "fii":
+                # Busca apenas os tipos de documentos que realmente existem e já estão no Drive
+                tipos_existentes = session.query(DocumentosQualitativos.tipo_documento).filter(
+                    DocumentosQualitativos.ativo_id == ativo.id,
+                    DocumentosQualitativos.status_processamento == "SALVO_DRIVE"
+                ).distinct().all()
 
-            if ativo:
-                if tipo == "fii":
-                    docs = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.ativo_id == ativo.id).all()
-                    if docs:
-                        encontrou_dados = True
-                        meses_unicos = sorted(list(set([d.data_publicacao.strftime("%Y-%m") for d in docs if d.data_publicacao])), reverse=True)
-
-                        for mes in meses_unicos[:10]:
-                            qtd = len([d for d in docs if d.data_publicacao and d.data_publicacao.strftime("%Y-%m") == mes])
-                            ano, mes_num = mes.split('-')
-                            markup.add(InlineKeyboardButton(f"📁 {mes_num}/{ano} ({qtd} arquivos)", callback_data=f"mes_{ticker}_{tipo}_{mes}"))
+                if tipos_existentes:
+                    for (tipo_doc,) in tipos_existentes:
+                        # Define um emoji bonitinho dependendo do tipo
+                        emoji = "📊" if "Gerencial" in tipo_doc else "🚨" if "Fato" in tipo_doc else "📄"
+                        markup.add(InlineKeyboardButton(f"{emoji} {tipo_doc}", callback_data=f"doctipo_{ticker}_{tipo_doc}"))
+                    
+                    txt = f"📂 **Gaveta de Documentos: {ticker}**\n\nO que você deseja acessar?"
+                else:
+                    txt = f"📭 **A gaveta de {ticker} está vazia!**\nNenhum documento processado ainda."
 
                 elif tipo == "acao":
                     balancos = session.query(DadosFinanceirosAcoes).filter(DadosFinanceirosAcoes.ativo_id == ativo.id).all()
@@ -220,9 +224,6 @@ def callback_geral(call):
                             markup.add(InlineKeyboardButton(f"📊 Balanço CVM ({mes_num}/{ano})", callback_data=f"mes_{ticker}_{tipo}_{dt}"))
 
             session.close()
-
-            cat_status = "fundos-imobiliarios" if tipo == "fii" else "acoes"
-            markup.row(InlineKeyboardButton("📈 Ver no StatusInvest", url=f"https://statusinvest.com.br/{cat_status}/{ticker.lower()}"))
             markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"{tipo}_{ticker}"))
 
             if encontrou_dados:
@@ -230,9 +231,72 @@ def callback_geral(call):
             else:
                 txt = f"📭 **Nenhum dado encontrado para {ticker}**\nO robô ainda não processou arquivos ou balanços para este ativo."
 
+            session.close()
+            markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"{tipo_ativo}_{ticker}"))
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- NÍVEL 2: MOSTRANDO OS ARQUIVOS OU RELATÓRIO CVM ---
+        # --- NÍVEL 2: MENU DE MESES (Baseado no Tipo Escolhido) ---
+        elif dados.startswith("doctipo_"):
+            partes = dados.split("_")
+            ticker = partes[1]
+            tipo_doc = partes[2]
+
+            markup = InlineKeyboardMarkup(row_width=2)
+            session = SessionDB()
+
+            ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+            docs = session.query(DocumentosQualitativos).filter(
+                DocumentosQualitativos.ativo_id == ativo.id,
+                DocumentosQualitativos.tipo_documento == tipo_doc,
+                DocumentosQualitativos.status_processamento == "SALVO_DRIVE"
+            ).order_by(DocumentosQualitativos.data_publicacao.desc()).all()
+
+            if docs:
+                # Agrupa por mês/ano dinamicamente
+                meses_unicos = []
+                for d in docs:
+                    if d.data_publicacao:
+                        mes_str = d.data_publicacao.strftime("%Y-%m")
+                        if mes_str not in meses_unicos:
+                            meses_unicos.append(mes_str)
+
+                for mes in meses_unicos[:10]: # Mostra os 10 meses mais recentes
+                    ano, mes_num = mes.split('-')
+                    markup.add(InlineKeyboardButton(f"📅 {mes_num}/{ano}", callback_data=f"docmes_{ticker}_{tipo_doc}_{mes}"))
+
+            session.close()
+            markup.add(InlineKeyboardButton("🔙 Voltar aos Tipos", callback_data=f"docs_{ticker}_fii"))
+            bot.edit_message_text(f"📅 **{tipo_doc} - {ticker}**\n\nSelecione o período:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        # --- NÍVEL 3: MOSTRANDO OS ARQUIVOS FINAIS (PDF) ---
+        elif dados.startswith("docmes_"):
+            partes = dados.split("_")
+            ticker = partes[1]
+            tipo_doc = partes[2]
+            periodo = partes[3]
+
+            markup = InlineKeyboardMarkup(row_width=1)
+            session = SessionDB()
+
+            ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+            docs = session.query(DocumentosQualitativos).filter(
+                DocumentosQualitativos.ativo_id == ativo.id,
+                DocumentosQualitativos.tipo_documento == tipo_doc
+            ).all()
+
+            docs_do_mes = [d for d in docs if d.data_publicacao and d.data_publicacao.strftime("%Y-%m") == periodo]
+
+            ano, mes_num = periodo.split('-')
+            txt = f"📂 **{tipo_doc}: {ticker} ({mes_num}/{ano})**\n\nEstes são os documentos salvos no Drive:"
+
+            for doc in docs_do_mes:
+                markup.add(InlineKeyboardButton(f"🔗 Abrir PDF ({doc.assunto})", url=doc.url_pdf))
+
+            session.close()
+            markup.add(InlineKeyboardButton("🔙 Voltar aos Meses", callback_data=f"doctipo_{ticker}_{tipo_doc}"))
+            bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        # --- NÍVEL 2: MOSTRANDO OS RELATÓRIO CVM ---
         elif dados.startswith("mes_"):
             partes = dados.split("_")
             ticker = partes[1]
@@ -243,13 +307,6 @@ def callback_geral(call):
             session = SessionDB()
 
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-
-            if tipo == "fii":
-                docs = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.ativo_id == ativo.id).all()
-                docs_do_mes = [d for d in docs if d.data_publicacao and d.data_publicacao.strftime("%Y-%m") == periodo]
-
-                ano, mes_num = periodo.split('-')
-                txt = f"📂 **Arquivos de {ticker} ({mes_num}/{ano})**\n\nEstes são os documentos salvos no Drive:"
 
                 for doc in docs_do_mes:
                     markup.add(InlineKeyboardButton(f"📄 {doc.tipo_documento}", url=doc.url_pdf))
