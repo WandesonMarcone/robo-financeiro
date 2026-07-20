@@ -8,7 +8,7 @@ CACHE_PLANILHA = {
     "BD_Acoes": {"dados": None, "timestamp": 0}
 }
 
-TEMPO_CACHE_SEGUNDOS = 300 # 5 minutos
+TEMPO_CACHE_SEGUNDOS = 1 # 300 = 5 minutos
 
 def buscar_dados_planilha_com_cache(nome_aba):
     """Retorna os dados da planilha via cache para não sobrecarregar a API"""
