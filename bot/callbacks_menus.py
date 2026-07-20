@@ -213,12 +213,12 @@ def callback_geral(call):
                     txt = f"📭 **A gaveta de {ticker} está vazia!**\nNenhum documento processado ainda."
 
             elif tipo == "acao":
-                    balancos = session.query(DadosFinanceirosAcoes).filter(DadosFinanceirosAcoes.ativo_id == ativo.id).all()
-                    if balancos:
-                        encontrou_dados = True
-                        datas_unicas = sorted(list(set([b.data_referencia.strftime("%Y-%m-%d") for b in balancos if b.data_referencia])), reverse=True)
+                balancos = session.query(DadosFinanceirosAcoes).filter(DadosFinanceirosAcoes.ativo_id == ativo.id).all()
+                if balancos:
+                    encontrou_dados = True
+                    datas_unicas = sorted(list(set([b.data_referencia.strftime("%Y-%m-%d") for b in balancos if b.data_referencia])), reverse=True)
 
-                        for dt in datas_unicas[:5]:
+                     for dt in datas_unicas[:5]:
                             ano, mes_num, dia = dt.split('-')
                             markup.add(InlineKeyboardButton(f"📊 Balanço CVM ({mes_num}/{ano})", callback_data=f"mes_{ticker}_{tipo}_{dt}"))
 
