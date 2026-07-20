@@ -195,7 +195,6 @@ def callback_geral(call):
             session = SessionDB()
 
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-            
             if ativo and tipo_ativo == "fii":
                 # Busca apenas os tipos de documentos que realmente existem e já estão no Drive
                 tipos_existentes = session.query(DocumentosQualitativos.tipo_documento).filter(
@@ -213,7 +212,7 @@ def callback_geral(call):
                 else:
                     txt = f"📭 **A gaveta de {ticker} está vazia!**\nNenhum documento processado ainda."
 
-                elif tipo == "acao":
+            elif tipo == "acao":
                     balancos = session.query(DadosFinanceirosAcoes).filter(DadosFinanceirosAcoes.ativo_id == ativo.id).all()
                     if balancos:
                         encontrou_dados = True
