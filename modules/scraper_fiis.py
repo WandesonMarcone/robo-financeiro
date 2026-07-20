@@ -166,7 +166,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             except: precos_antigos[t] = 0.0
             mapa_atualizacao[t] = row[15] if len(row) > 15 else "" 
 
-    cat_fixas = [f for f in config.FIXAS_FIIS if f in tickers_planilha and precisa_atualizar(f, mapa_atualizacao, agora_dt, sp_tz)]
+    cat_fixas = tickers_planilha # [f for f in config.FIXAS_FIIS if f in tickers_planilha and precisa_atualizar(f, mapa_atualizacao, agora_dt, sp_tz)]
 
     if not df.empty:
         df_cacador = df[
