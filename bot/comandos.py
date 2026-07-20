@@ -11,8 +11,6 @@ from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from modules.utils import conectar_gspread
 
 from modules.scraper_fiis import rodar_garimpo_fiis # <--- Importe o arquivo que corrigimos
-import gspread # Exemplo: você precisará da instância da planilha aqui
-# (Assumindo que você já tem o 'config' e a 'planilha' configurados)
 
 # ==========================================
 # 🧭 MENUS DE NAVEGAÇÃO E INTERFACE (UI)
