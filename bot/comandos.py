@@ -127,7 +127,7 @@ def comando_reciclar_rejeitados(message):
 
 @bot.message_handler(commands=['forcar_varredura'])
 def acionar_varredura_manual(message):
-    bot.reply_to(message, "⚙️ *Iniciando varredura completa (FIIs + Documentos)...*\nIsso pode levar alguns minutos.", parse_mode="Markdown")
+    bot.reply_to(message, "⚙️ *Iniciando varredura completa (FIIs + Documentos)...*\nIsso pode levar alguns minutos. Aguarde o aviso de conclusão!", parse_mode="Markdown")
 
     def tarefa_pesada_background():
         try:
@@ -135,19 +135,32 @@ def acionar_varredura_manual(message):
             from atualizador_documentos import rotina_de_atualizacao_em_massa
             relatorios_baixados = rotina_de_atualizacao_em_massa()
             
-            # 2. Rotina de FIIs (Preços/JSON/Setores)
+            # 2. Rotina de FIIs (Motor JSON)
             from datetime import datetime
             import pytz
+            from modules.utils import conectar_gspread
+            from services.planilhas import CACHE_PLANILHA
+            
             sp_tz = pytz.timezone('America/Sao_Paulo')
             agora = datetime.now(sp_tz)
             
-            # Usando a instância de planilha que você já configurou em 'config.planilha'
-            batch_updates, msg_out, aba_fiis = rodar_garimpo_fiis(config.planilha, agora, agora.strftime("%H:%M"), sp_tz)
+            # Conexão dinâmica para evitar erros de atributo
+            client = conectar_gspread()
+            planilha = client.open_by_url(config.SPREADSHEET_URL)
+            
+            # Executa a varredura com o motor novo
+            batch_updates, msg_out, aba_fiis = rodar_garimpo_fiis(planilha, agora, agora.strftime("%H:%M"), sp_tz)
             
             if batch_updates:
-                config.planilha.batch_update(batch_updates)
+                planilha.batch_update(batch_updates)
                 
-            bot.send_message(message.chat.id, f"✅ *Varredura Concluída!*\n\n📥 Docs salvos: **{relatorios_baixados}**\n\n{msg_out}", parse_mode="Markdown")
+                # Limpa o cache para forçar o bot a ler os novos dados imediatamente
+                CACHE_PLANILHA["BD_FIIs"]["dados"] = None
+                CACHE_PLANILHA["BD_FIIs"]["timestamp"] = 0
+                
+                bot.send_message(message.chat.id, f"✅ *Varredura Concluída e Cache Atualizado!*\n\n📥 Docs salvos: **{relatorios_baixados}**\n\n{msg_out}", parse_mode="Markdown")
+            else:
+                bot.send_message(message.chat.id, "✅ *Varredura concluída!* Nenhuma atualização necessária.", parse_mode="Markdown")
             
         except Exception as e:
             bot.send_message(message.chat.id, f"❌ *Erro na varredura:* {e}", parse_mode="Markdown")
