@@ -4,7 +4,7 @@ from bot.loader import bot
 from services.planilhas import buscar_dados_planilha_com_cache, buscar_ativo_na_planilha
 from services.logo_service import obter_link_logo
 from modules.GoogleDriveManager import GoogleDriveManager
-from database.models import SessionDB, DocumentosQualitativos, Ativo # Garanta que os imports estejam aqui
+from models import SessionDB, DocumentosQualitativos, Ativo # Garanta que os imports estejam aqui
 
 # Instancia o gerenciador de arquivos uma vez
 drive_manager = GoogleDriveManager()
