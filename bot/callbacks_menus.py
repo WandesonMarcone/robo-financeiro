@@ -1,5 +1,6 @@
 import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from bot import handlears
 
 from bot.loader import bot
 from config import SPREADSHEET_URL
