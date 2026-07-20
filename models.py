@@ -21,6 +21,8 @@ class DocumentosQualitativos(Base):
     url_pdf = Column(String)
     resumo_ia = Column(Text)
 
+    status_processamento = Column(String) 
+
 # Configurando a Sessão para o bot interagir com o SQLite
 engine = create_engine(DB_PATH)
 SessionDB = sessionmaker(bind=engine)
