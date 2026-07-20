@@ -95,6 +95,7 @@ def buscar_oportunidades(tipo):
         return []
 
 def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
+    """Gera a mensagem principal com os botões interativos e dados em tempo real"""
     is_fii = (tipo == 'fii')
     icone = "🏢 Fundo" if is_fii else "📈 Ação"
     voltar_cmd = "menu_fiis" if is_fii else "menu_acoes"
@@ -108,31 +109,33 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
         else: bot.send_message(chat_id, msg_erro, parse_mode="Markdown")
         return
 
-    # --- MELHORIA DA IA: Resumo Dinâmico ---
-    # Aqui você pode chamar uma função que consulta o banco ou uma mini lógica de resumo
-    resumo_ia = f"Ativo do setor {indicadores.get('setor', 'Geral')}. Rentabilidade atual: {indicadores.get('dy', 'N/A')}."
-    
-    # --- FIX LOGO: O Telegram só exibe links diretos de imagem (.png, .jpg) ---
-    # Se url_logo for um link de pasta do Drive, o Telegram NÃO vai mostrar.
-    # O link precisa ser um link direto da imagem.
+    # IA básica (pode evoluir futuramente para consultas mais profundas)
+    resumo_ia = f"Ativo monitorado do setor {indicadores.get('setor', 'Geral')}."
     link_invisivel = f"[\u200c]({url_logo})" if url_logo else ""
 
+    # Formatação do texto
     texto = (
         f"{link_invisivel}{icone}: **{ticker}**\n"
         f"📝 **Resumo:** _{resumo_ia}_\n\n"
         f"💰 **Preço:** R$ {indicadores.get('preco', 'N/A')}\n"
         f"💸 **Dividend Yield:** {indicadores.get('dy', 'N/A')}\n"
-        f"⚖️ **P/VP:** {indicadores.get('pvp', 'N/A')}\n"
-        f"💵 **VPA/PL:** {indicadores.get('vpa', indicadores.get('pl', 'N/A'))}"
     )
+    
+    if is_fii:
+        texto += f"⚖️ **P/VP:** {indicadores.get('pvp', 'N/A')}\n💵 **VPA:** {indicadores.get('vpa', 'N/A')}"
+    else:
+        texto += f"📊 **P/L:** {indicadores.get('pl', 'N/A')} | ⚖️ **P/VP:** {indicadores.get('pvp', 'N/A')}\n📈 **ROE:** {indicadores.get('roe', 'N/A')}"
 
+    # Construção do Menu Interativo
     markup = InlineKeyboardMarkup(row_width=2)
+    
+    # Botões Principais
     markup.add(
         InlineKeyboardButton("📎 Dados", callback_data=f"dados_{ticker}_{tipo}"),
         InlineKeyboardButton("📑 Docs", callback_data=f"docs_{ticker}_{tipo}")
     )
     
-    # --- NOVA LÓGICA DE REVISÃO (Dinâmica) ---
+    # Injeção Dinâmica da Revisão (Apenas se for FII e houver pendência)
     if is_fii:
         session = SessionDB()
         pendentes = session.query(DocumentosQualitativos).join(Ativo).filter(
@@ -144,6 +147,7 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
         if pendentes > 0:
             markup.add(InlineKeyboardButton(f"⚠️ {pendentes} Doc(s) para Revisão", callback_data=f"rev_t_{ticker}"))
 
+    # Botões de Ação Final
     markup.add(InlineKeyboardButton("⚠️ Análise IA", callback_data=f"ia_{ticker}_{tipo}"))
     markup.add(InlineKeyboardButton(f"🔙 Voltar", callback_data=voltar_cmd))
 
