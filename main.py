@@ -16,9 +16,9 @@ from bot.loader import bot
 
 # 3. Registrando os Comandos e Menus (Essencial para o bot "ouvir" o Telegram)
 import bot.comandos
+import bot.handlers
 import bot.callbacks_revisao
 import bot.callbacks_menus
-import bot.handlers 
 
 # 4. Serviços (Orquestrador)
 from services.orquestrador import varredura_diaria
