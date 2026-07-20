@@ -136,16 +136,21 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
     )
     
     # Injeção Dinâmica da Revisão (Apenas se for FII e houver pendência)
+    # Injeção Dinâmica da Revisão (Blindada para não travar o painel)
     if is_fii:
-        session = SessionDB()
-        pendentes = session.query(DocumentosQualitativos).join(Ativo).filter(
-            Ativo.ticker == ticker, 
-            DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
-        ).count()
-        session.close()
+        try:
+            session = SessionDB()
+            pendentes = session.query(DocumentosQualitativos).join(Ativo).filter(
+                Ativo.ticker == ticker, 
+                DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
+            ).count()
+            session.close()
 
-        if pendentes > 0:
-            markup.add(InlineKeyboardButton(f"⚠️ {pendentes} Doc(s) para Revisão", callback_data=f"rev_t_{ticker}"))
+            if pendentes > 0:
+                markup.add(InlineKeyboardButton(f"⚠️ {pendentes} Doc(s) para Revisão", callback_data=f"rev_t_{ticker}"))
+        except Exception as e:
+            print(f"DEBUG: Revisão temporariamente indisponível: {e}")
+            # Se falhar, não faz nada, apenas ignora o botão, mas o painel abre!
 
     # Botões de Ação Final
     markup.add(InlineKeyboardButton("⚠️ Análise IA", callback_data=f"ia_{ticker}_{tipo}"))
