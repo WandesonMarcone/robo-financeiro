@@ -98,7 +98,7 @@ def callback_listar_ativos_acao(call):
     for linha in matriz[1:]:
         ticker = linha[0].strip()
         # Lê a coluna de setor da ação (Assumindo Coluna C -> índice 2)
-        setor_da_linha = linha[2].strip() 
+        setor_da_linha = linha[1].strip() 
 
         if setor_da_linha == nome_setor:
             # Adiciona o botão da ação na lista
