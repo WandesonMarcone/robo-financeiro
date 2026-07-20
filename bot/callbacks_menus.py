@@ -78,7 +78,7 @@ def callback_geral(call):
                 if matriz:
                     # Assumindo que o Setor fica na Coluna C (índice 2). 
                     # Se for outra coluna, basta mudar o linha[2] para o número correto!
-                    setores_acoes = sorted(list(set(linha[1].strip() for linha in matriz[0:] if linha[1].strip())))
+                    setores_acoes = sorted(list(set(linha[1].strip() for linha in matriz[1:] if linha[1].strip())))
                     
                     for s in setores_acoes:
                         # Criando o botão com o nome completo do setor (sem o [:12])
