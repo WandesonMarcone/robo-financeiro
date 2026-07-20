@@ -1,3 +1,30 @@
+import sqlite3
+import os
+
+def garantir_banco_atualizado():
+    # Caminho do seu banco
+    db_path = "pipeline_dados/banco_institucional.db"
+    
+    # Se o banco existe, verificamos a coluna
+    if os.path.exists(db_path):
+        try:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            # Tenta adicionar a coluna. Se ela já existir, o SQLite ignora o erro silenciosamente
+            cursor.execute("ALTER TABLE documentos_qualitativos ADD COLUMN status_processamento VARCHAR")
+            conn.commit()
+            conn.close()
+            print("✅ Banco atualizado com sucesso na inicialização!")
+        except Exception as e:
+            # Se der erro (provavelmente porque a coluna já existe), apenas continuamos
+            print(f"ℹ️ Verificação do banco concluída.")
+
+# CHAME ESSA FUNÇÃO ANTES DE INICIAR O BOT
+garantir_banco_atualizado()
+
+# ... resto do seu código (bot.polling, etc) ...
+
+
 import os
 import time
 import pytz
