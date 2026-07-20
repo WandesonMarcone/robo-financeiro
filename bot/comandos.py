@@ -10,6 +10,10 @@ from atualizador_documentos import SessionDB
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from modules.utils import conectar_gspread
 
+from scraper_fiis import rodar_garimpo_fiis # <--- Importe o arquivo que corrigimos
+import gspread # Exemplo: você precisará da instância da planilha aqui
+# (Assumindo que você já tem o 'config' e a 'planilha' configurados)
+
 # ==========================================
 # 🧭 MENUS DE NAVEGAÇÃO E INTERFACE (UI)
 # ==========================================
@@ -123,13 +127,28 @@ def comando_reciclar_rejeitados(message):
 
 @bot.message_handler(commands=['forcar_varredura'])
 def acionar_varredura_manual(message):
-    bot.reply_to(message, "⚙️ *Iniciando varredura na B3 em segundo plano...*\nIsso pode levar alguns minutos. Pode continuar usando o bot normalmente, eu te aviso quando terminar!", parse_mode="Markdown")
+    bot.reply_to(message, "⚙️ *Iniciando varredura completa (FIIs + Documentos)...*\nIsso pode levar alguns minutos.", parse_mode="Markdown")
 
     def tarefa_pesada_background():
         try:
+            # 1. Rotina de Documentos (PDFs/CVM)
             from atualizador_documentos import rotina_de_atualizacao_em_massa
             relatorios_baixados = rotina_de_atualizacao_em_massa()
-            bot.send_message(message.chat.id, f"✅ *Varredura Concluída!*\n\n📥 Documentos inéditos salvos no Drive: **{relatorios_baixados}**", parse_mode="Markdown")
+            
+            # 2. Rotina de FIIs (Preços/JSON/Setores)
+            from datetime import datetime
+            import pytz
+            sp_tz = pytz.timezone('America/Sao_Paulo')
+            agora = datetime.now(sp_tz)
+            
+            # Usando a instância de planilha que você já configurou em 'config.planilha'
+            batch_updates, msg_out, aba_fiis = rodar_garimpo_fiis(config.planilha, agora, agora.strftime("%H:%M"), sp_tz)
+            
+            if batch_updates:
+                config.planilha.batch_update(batch_updates)
+                
+            bot.send_message(message.chat.id, f"✅ *Varredura Concluída!*\n\n📥 Docs salvos: **{relatorios_baixados}**\n\n{msg_out}", parse_mode="Markdown")
+            
         except Exception as e:
             bot.send_message(message.chat.id, f"❌ *Erro na varredura:* {e}", parse_mode="Markdown")
 
