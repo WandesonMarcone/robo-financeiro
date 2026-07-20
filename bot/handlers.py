@@ -36,7 +36,10 @@ def callback_selecionar_segmento(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('setor_fii_'))
 def callback_listar_ativos_fii(call):
     """Lista os FIIs do segmento e adiciona os marcadores visuais avançados"""
-    nome_setor = "_".join(call.data.split('_')[2:])
+    
+    # CORREÇÃO: Extração segura do nome do setor, garantindo que espaços (como "Renda Urbana") não quebrem a string
+    nome_setor = call.data.replace('setor_fii_', '').strip()
+    
     bot.answer_callback_query(call.id, f"Buscando ativos de {nome_setor}...")
 
     matriz = buscar_dados_planilha_com_cache("BD_FIIs")
@@ -44,8 +47,13 @@ def callback_listar_ativos_fii(call):
     botoes_ativos = []
 
     for linha in matriz[1:]:
+        # TRAVA DE SEGURANÇA: Se a linha estiver vazia, o bot pula para a próxima sem travar
+        if len(linha) < 3:
+            continue
+            
         ticker = linha[0].strip()
         tipo_fundo = linha[1].strip()
+        
         # Corta a barra e limpa espaços novamente para comparar corretamente
         segmentos_do_fundo = [s.strip() for s in linha[2].split('/')]
 
