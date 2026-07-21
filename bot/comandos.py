@@ -133,7 +133,7 @@ def acionar_varredura_manual(message):
             from atualizador_documentos import rotina_de_atualizacao_em_massa
             relatorios_baixados = rotina_de_atualizacao_em_massa()
             
-            # 2. Rotina de FIIs (Motor JSON)
+            # 2. Rotina de FIIs (Motor JSON para a Planilha)
             from datetime import datetime
             import pytz
             from modules.utils import conectar_gspread
@@ -142,26 +142,32 @@ def acionar_varredura_manual(message):
             sp_tz = pytz.timezone('America/Sao_Paulo')
             agora = datetime.now(sp_tz)
             
-            # Conexão dinâmica para evitar erros de atributo
             client = conectar_gspread()
             planilha = client.open_by_url(config.SPREADSHEET_URL)
             
-            # Executa a varredura com o motor novo
             batch_updates, msg_out, aba_fiis = rodar_garimpo_fiis(planilha, agora, agora.strftime("%H:%M"), sp_tz)
             
+            # --- CORREÇÃO DA LÓGICA DE AVISO ---
             if batch_updates:
                 planilha.batch_update(batch_updates)
                 
-                # Limpa o cache para forçar o bot a ler os novos dados imediatamente
+                # Limpa o cache da planilha
                 CACHE_PLANILHA["BD_FIIs"]["dados"] = None
                 CACHE_PLANILHA["BD_FIIs"]["timestamp"] = 0
                 
-                bot.send_message(message.chat.id, f"✅ *Varredura Concluída e Cache Atualizado!*\n\n📥 Docs salvos: **{relatorios_baixados}**\n\n{msg_out}", parse_mode="Markdown")
+                msg_planilha = f"\n\n{msg_out}"
             else:
-                bot.send_message(message.chat.id, "✅ *Varredura concluída!* Nenhuma atualização necessária.", parse_mode="Markdown")
+                msg_planilha = "\n\n📊 *Planilha:* Nenhuma atualização de cotação necessária agora."
+
+            # O bot agora SEMPRE avisa quantos relatórios baixou
+            resposta_final = (
+                f"✅ *Varredura Concluída!*\n\n"
+                f"📥 **Docs processados (B3):** {relatorios_baixados}"
+                f"{msg_planilha}"
+            )
+            bot.send_message(message.chat.id, resposta_final, parse_mode="Markdown")
             
         except Exception as e:
-            # Sem formatação Markdown para evitar o Erro 400 do Telegram
             bot.send_message(message.chat.id, f"❌ Erro na varredura: {str(e)[:200]}") 
 
     thread = threading.Thread(target=tarefa_pesada_background)
