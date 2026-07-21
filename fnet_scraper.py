@@ -38,7 +38,7 @@ class FnetDownloader:
         documentos_gerais = []
 
         # Limite reduzido para 2000 por categoria. Seguro e não dá ban na B3.
-        for start in range(0, 2000, 50):
+        for start in range(0, 5000, 50):
             params = {
                 'd': '1', 's': str(start), 'l': '50', 
                 'tipoFundo': '1', 
