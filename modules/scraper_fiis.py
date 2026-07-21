@@ -167,7 +167,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
                     precos_antigos[t] = float(raw_val) if raw_val else 0.0
                 else: precos_antigos[t] = 0.0
             except: precos_antigos[t] = 0.0
-            mapa_atualizacao[t] = row[15] if len(row) > 15 else "" 
+            mapa_atualizacao[t] = row[17] if len(row) > 17 else "" 
 
     cat_fixas = [f for f in config.FIXAS_FIIS if f in tickers_planilha and precisa_atualizar(f, mapa_atualizacao, agora_dt, sp_tz)]
 
@@ -251,7 +251,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
                 vpa,                    # 14 | Coluna O: Valor Patrimonial Justo da Cota
                 lucro_12m,              # 15 | Coluna P: Montante de Lucro Distribuído (12M)
                 media_div_mensal,       # 16 | Coluna Q: Projeção de Dividendo Mensal
-                f"{agora_sp} OK"       # 17 | Coluna R: Carimbo de Conclusão da Carga
+                f"{agora_sp}"             # 17 | Coluna R: Carimbo de Conclusão da Carga
             ]
 
             row_update_parcial = row_update_completo[1:] 
