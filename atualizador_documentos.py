@@ -16,8 +16,6 @@ from groq import Groq
 from config import MAPA_ISCAS_MASTER, TIPOS_DOC
 
 client = Groq(api_key=config.GROQ_API_KEY)
-import os
-from sqlalchemy import create_engine
 
 # Pega o banco das variáveis do sistema 
 url_banco = os.environ.get('DATABASE_URL', 'sqlite:///pipeline_dados/banco_institucional.db')
@@ -27,7 +25,6 @@ if url_banco.startswith("postgres://"):
     url_banco = url_banco.replace("postgres://", "postgresql://", 1)
 
 engine = create_engine(url_banco)
-
 SessionDB = sessionmaker(bind=engine)
 
 def obter_tickers_da_planilha():
@@ -42,14 +39,18 @@ def obter_tickers_da_planilha():
 def normalizar_texto(texto):
     return ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
 
+# ==========================================
+# 🚨 TRAVA 1: CLASSIFICAÇÃO COM IA PROTEGIDA
+# ==========================================
 def classificar_documento_com_ia(nome_original, texto_extraido):
-    if not texto_extraido: 
+    # Proteção: Se for None, vazio ou apenas espaços em branco, ignora a IA e devolve o nome original
+    if not texto_extraido or not texto_extraido.strip(): 
         return nome_original 
 
-    # Pega todos os nomes do seu novo config.py automaticamente
     lista_opcoes = ", ".join(TIPOS_DOC.values())
+    texto_limpo = texto_extraido.strip()[:800]
 
-    prompt = f"Classifique este documento FII que começa assim: {texto_extraido[:800]}\n" \
+    prompt = f"Classifique este documento FII que começa assim: {texto_limpo}\n" \
              f"Escolha ESTRITAMENTE UMA destas opções: {lista_opcoes}. Responda APENAS o nome."
 
     try:
@@ -57,27 +58,30 @@ def classificar_documento_com_ia(nome_original, texto_extraido):
             messages=[{"role": "user", "content": prompt}],
             model="llama3-8b-8192"
         )
-        return chat.choices[0].message.content.strip()
+        resposta = chat.choices[0].message.content
+        if resposta and resposta.strip():
+            return resposta.strip()
+        return nome_original
     except Exception as e:
+        print(f"⚠️ Erro ao consultar IA para classificação: {e}")
         return nome_original 
 
 def enviar_alerta_revisao_telegram(ticker, nome_doc, link_pdf, file_id, db_id):
     """Envia a mensagem interativa com botões para o seu Telegram"""
-    chat_id = os.environ.get('TELEGRAM_CHAT_ID') # Precisaremos adicionar isso no Render!
+    chat_id = os.environ.get('TELEGRAM_CHAT_ID') 
     if not chat_id:
         print("⚠️ TELEGRAM_CHAT_ID não configurado. Alerta não enviado.")
         return
 
     url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
-    
-    # Callback data limite é 64 bytes. Ex: rev_C_12_1abc123456789...
+
     teclado = {
         "inline_keyboard": [
             [{"text": f"✅ Confirmar como {ticker}", "callback_data": f"rev_C_{db_id}_{file_id}"}],
             [{"text": "🗑️ Apagar / Lixo", "callback_data": f"rev_A_{db_id}_{file_id}"}]
         ]
     }
-    
+
     mensagem = (
         f"🚨 **Novo documento suspeito!**\n\n"
         f"A B3 diz que é do **{ticker}**, mas o robô não conseguiu confirmar no texto (pode ser imagem/scan).\n"
@@ -85,14 +89,17 @@ def enviar_alerta_revisao_telegram(ticker, nome_doc, link_pdf, file_id, db_id):
         f"🔗 [Clique aqui para abrir o PDF]({link_pdf})\n\n"
         f"O que eu faço?"
     )
-    
+
     payload = {
         "chat_id": chat_id,
         "text": mensagem,
         "parse_mode": "Markdown",
         "reply_markup": json.dumps(teclado)
     }
-    requests.post(url, data=payload)
+    try:
+        requests.post(url, data=payload)
+    except Exception as e:
+        print(f"⚠️ Erro ao enviar alerta Telegram: {e}")
 
 # ==========================================
 # CAMADA 1: COLETA
@@ -170,6 +177,9 @@ def rotina_processar_pendentes():
                 texto_pdf = reader.pages[0].extract_text() or ""
         except: pass
 
+        # 🚨 TRAVA 2: LIMPEZA DE ESPAÇOS EM BRANCO
+        texto_pdf = texto_pdf.strip()
+
         nome_ia = classificar_documento_com_ia(doc_db.tipo_documento, texto_pdf)
         nome_limpo = "".join([c for c in str(nome_ia).title() if c.isalnum() or c in (' ', '_', '-')]).strip()
 
@@ -181,8 +191,8 @@ def rotina_processar_pendentes():
         partes_data = data_ref.split('-')
         mes_pasta = f"{partes_data[2]}-{partes_data[1]}" if len(partes_data) == 3 else datetime.now().strftime("%Y-%m")
 
-        # ⚖️ A DECISÃO: DIRETO PRO DRIVE OU LIMBO DE REVISÃO?
-        if not texto_pdf.strip() or ticker.upper() not in texto_pdf.upper():
+        # ⚖️ DECISÃO: DIRETO PRO DRIVE OU LIMBO DE REVISÃO?
+        if not texto_pdf or ticker.upper() not in texto_pdf.upper():
             # 🚧 Suspeito: Manda pra pasta REVISÃO
             file_id, link_gerado = drive_manager.upload_pdf_revisao(
                 caminho_arquivo=temp_filename,
@@ -192,7 +202,6 @@ def rotina_processar_pendentes():
                 doc_db.status_processamento = "AGUARDANDO_REVISAO"
                 doc_db.url_pdf = link_gerado
                 session.commit()
-               # enviar_alerta_revisao_telegram(ticker, nome_limpo, link_gerado, file_id, doc_db.id)
                 print(f"🚧 {ticker} enviado para revisão manual.")
             else:
                 doc_db.status_processamento = "ERRO_DRIVE"
@@ -214,7 +223,7 @@ def rotina_processar_pendentes():
 
         session.commit()
         if os.path.exists(temp_filename): os.remove(temp_filename)
-        
+
         time.sleep(6) 
 
     session.close()
