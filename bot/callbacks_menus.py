@@ -148,69 +148,58 @@ def callback_geral(call):
                 markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
                 bot.edit_message_text("❌ Erro ao aplicar os filtros.", chat_id, msg_id, reply_markup=markup)
 
-        # --- ABRIR ATIVO (Dashboard) ---
-        elif dados.startswith("fii_") or dados.startswith("acao_"):
+        # ==========================================
+        # --- ROTA DE RETORNO AO PAINEL DO ATIVO ---
+        # ==========================================
+        elif dados.startswith("painel_"):
             partes = dados.split("_")
-            tipo = partes[0] 
             ticker = partes[1]
-            bot.answer_callback_query(call.id, f"Carregando terminal de {ticker}...")
-            gerar_painel_ativo(ticker, tipo, chat_id, msg_id)
+            tipo_ativo = partes[2] # "fii" ou "acao"
+            gerar_painel_ativo(ticker, tipo_ativo, chat_id, msg_id)
 
         # ==========================================
-        # --- NÍVEL 1: DADOS (Balanços e Indicadores) ---
+        # --- NÍVEL 1: DADOS (Indicadores e Balanços) ---
         # ==========================================
         elif dados.startswith("dados_"):
             partes = dados.split("_")
             ticker = partes[1]
-            tipo_ativo = partes[2] # "fii" ou "acao"
+            tipo_ativo = partes[2]
 
             markup = InlineKeyboardMarkup(row_width=1)
             session = SessionDB()
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-            txt = ""
 
-            if ativo:
-                # --- LÓGICA DE DADOS PARA AÇÕES (Balanços) ---
-                if tipo_ativo == "acao":
-                    balancos = session.query(DadosFinanceirosAcoes).filter(DadosFinanceirosAcoes.ativo_id == ativo.id).all()
-                    if balancos:
-                        datas_unicas = sorted(list(set([b.data_referencia.strftime("%Y-%m-%d") for b in balancos if b.data_referencia])), reverse=True)
-
-                        for dt in datas_unicas[:5]:
-                            ano, mes_num, dia = dt.split('-')
-                            markup.add(InlineKeyboardButton(f"📊 Balanço CVM ({mes_num}/{ano})", callback_data=f"mes_{ticker}_{tipo_ativo}_{dt}"))
-
-                        txt = f"📈 **Dados Financeiros: {ticker}**\n\nEscolha o balanço que você deseja analisar:"
-                    else:
-                        txt = f"📭 **Nenhum balanço CVM encontrado para {ticker}.**"
-                
-                # --- LÓGICA DE DADOS PARA FIIs (Futuro) ---
-                elif tipo_ativo == "fii":
-                    txt = f"📊 **Dados de {ticker}**\n\nAqui entrarão indicadores aprofundados extraídos da sua planilha futuramente."
+            if ativo and tipo_ativo == "acao":
+                balancos = session.query(DadosFinanceirosAcoes).filter(DadosFinanceirosAcoes.ativo_id == ativo.id).all()
+                if balancos:
+                    datas_unicas = sorted(list(set([b.data_referencia.strftime("%Y-%m-%d") for b in balancos if b.data_referencia])), reverse=True)
+                    for dt in datas_unicas[:5]:
+                        ano, mes_num, dia = dt.split('-')
+                        markup.add(InlineKeyboardButton(f"📊 Balanço CVM ({mes_num}/{ano})", callback_data=f"mes_{ticker}_{tipo_ativo}_{dt}"))
+                    txt = f"📈 **Dados Financeiros: {ticker}**\n\nEscolha o balanço que deseja analisar:"
+                else:
+                    txt = f"📭 **Nenhum balanço CVM encontrado para {ticker}.**"
             else:
-                txt = "❌ Ativo não encontrado no sistema."
+                txt = f"📊 **Dados de {ticker}**\n\nIndicadores detalhados e atualizados conforme planilha."
 
-            # Voltar para o painel principal
-            markup.add(InlineKeyboardButton(f"🔙 Voltar para o Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
+            markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
             session.close()
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # ==========================================
-        # --- NÍVEL 1: DOCUMENTOS (Apenas PDFs do Drive) ---
+        # --- NÍVEL 1: DOCUMENTOS (PDFs do Drive) ---
         # ==========================================
         elif dados.startswith("docs_"):
             partes = dados.split("_")
             ticker = partes[1]
-            tipo_ativo = partes[2]  
+            tipo_ativo = partes[2] 
 
             markup = InlineKeyboardMarkup(row_width=1)
             session = SessionDB()
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-            txt = ""
 
             if ativo:
-                # Agora a lógica procura PDFs tanto para FII quanto para Ações!
-                # Quando sua varredura baixar PDFs de Ações, eles aparecerão aqui magicamente.
+                # Consulta quais tipos de documentos estão salvos na pasta do Drive deste ativo
                 tipos_existentes = session.query(DocumentosQualitativos.tipo_documento).filter(
                     DocumentosQualitativos.ativo_id == ativo.id,
                     DocumentosQualitativos.status_processamento == "SALVO_DRIVE"
@@ -220,30 +209,31 @@ def callback_geral(call):
                     for (tipo_doc,) in tipos_existentes:
                         emoji = "📊" if "Gerencial" in tipo_doc else "🚨" if "Fato" in tipo_doc else "📄"
                         markup.add(InlineKeyboardButton(f"{emoji} {tipo_doc}", callback_data=f"doctipo_{ticker}_{tipo_doc}"))
-                    txt = f"📂 **Gaveta de Documentos: {ticker}**\n\nO que você deseja acessar?"
+                    txt = f"📂 **Gaveta de Documentos: {ticker}**\n\nSelecione o documento que deseja visualizar:"
                 else:
-                    txt = f"📭 **A gaveta de {ticker} está vazia!**\n_O robô ainda não processou PDFs para este ativo._"
+                    # 🔴 AVISO SOLICITADO QUANDO A PASTA DO DRIVE ESTÁ VAZIA
+                    txt = f"📭 **Não tem nenhum documento deste fundo.**"
             else:
-                txt = "❌ Ativo não encontrado no sistema."
+                txt = f"❌ Ativo **{ticker}** não encontrado no sistema."
 
-            markup.add(InlineKeyboardButton(f"🔙 Voltar para o Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
-            session.close() 
+            # Voltar limpo e direto para o painel principal do ativo
+            markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
+            session.close()
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # ==========================================
-        # --- NÍVEL 2: MENU DE MESES (PDFs) ---
+        # --- NÍVEL 2: SELEÇÃO DE MESES (FIIs) ---
         # ==========================================
         elif dados.startswith("doctipo_"):
             partes = dados.split("_")
             ticker = partes[1]
             tipo_doc = partes[2]
-            # Descobrir o tipo do ativo consultando o banco
+
             session = SessionDB()
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-            tipo_ativo = ativo.tipo if ativo else "fii" 
+            tipo_ativo = ativo.tipo.lower() if (ativo and ativo.tipo) else "fii"
 
             markup = InlineKeyboardMarkup(row_width=2)
-            txt = "" 
 
             docs = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.ativo_id == ativo.id,
@@ -265,59 +255,41 @@ def callback_geral(call):
 
                 txt = f"📅 **{tipo_doc} - {ticker}**\n\nSelecione o período:"
             else:
-                txt = f"⚠️ Nenhum documento de {tipo_doc} encontrado."
+                txt = f"📭 **Não tem nenhum documento deste fundo.**"
 
             markup.add(InlineKeyboardButton("🔙 Voltar aos Tipos", callback_data=f"docs_{ticker}_{tipo_ativo}"))
             session.close()
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # ==========================================
-        # --- NÍVEL 3: MOSTRANDO OS ARQUIVOS (PDF) ---
+        # --- NÍVEL 3: EXIBIÇÃO DOS PDFS DO DRIVE ---
         # ==========================================
         elif dados.startswith("docmes_"):
-            # O SEU CÓDIGO AQUI ESTÁ PERFEITO E PODE CONTINUAR EXATAMENTE IGUAL
-            # ... (Mantenha o seu código docmes_ atual) ...
-            pass # Substitua este pass pelo seu bloco docmes_
-
-        # ==========================================
-        # --- NÍVEL 2 (DADOS): DETALHE DO BALANÇO (Ações) ---
-        # ==========================================
-        elif dados.startswith("mes_"):
             partes = dados.split("_")
             ticker = partes[1]
-            tipo = partes[2] # 'acao'
+            tipo_doc = partes[2]
             periodo = partes[3]
 
-            markup = InlineKeyboardMarkup()
+            markup = InlineKeyboardMarkup(row_width=1)
             session = SessionDB()
+
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-            txt = ""
+            docs = session.query(DocumentosQualitativos).filter(
+                DocumentosQualitativos.ativo_id == ativo.id,
+                DocumentosQualitativos.tipo_documento == tipo_doc,
+                DocumentosQualitativos.status_processamento == "SALVO_DRIVE"
+            ).all()
 
-            if tipo == "acao":
-                balanco = session.query(DadosFinanceirosAcoes).filter(
-                    DadosFinanceirosAcoes.ativo_id == ativo.id, 
-                    DadosFinanceirosAcoes.data_referencia == periodo
-                ).first()
+            docs_do_mes = [d for d in docs if d.data_publicacao and d.data_publicacao.strftime("%Y-%m") == periodo]
 
-                if balanco:
-                    ano, mes_num, dia = periodo.split('-')
-                    def formata_rs(valor):
-                        return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if valor else "Não divulgado"
+            ano, mes_num = periodo.split('-')
+            txt = f"📂 **{tipo_doc}: {ticker} ({mes_num}/{ano})**\n\nLinks diretos salvos no Google Drive:"
 
-                    txt = (
-                        f"📊 **Relatório Financeiro: {ticker}**\n"
-                        f"📅 **Referência:** {mes_num}/{ano}\n"
-                        f"_Dados oficiais extraídos da CVM_\n\n"
-                        f"💰 **Receita:** {formata_rs(balanco.receita)}\n"
-                        f"💸 **Lucro Líquido:** {formata_rs(balanco.lucro_liquido)}\n"
-                        f"🏦 **Caixa:** {formata_rs(balanco.caixa)}\n"
-                        f"📉 **Passivo Total:** {formata_rs(balanco.passivo_total)}"
-                    )
-                else:
-                    txt = f"⚠️ **Ops!** Dados financeiros não encontrados para {ticker} ({periodo})."
+            for doc in docs_do_mes:
+                nome_link = doc.assunto if doc.assunto else "Abrir PDF"
+                markup.add(InlineKeyboardButton(f"🔗 {nome_link}", url=doc.url_pdf))
 
-            # 🔴 CORREÇÃO IMPORTANTE: Agora ele volta para "dados_" e não mais para "docs_"
-            markup.add(InlineKeyboardButton("🔙 Voltar aos Meses", callback_data=f"dados_{ticker}_{tipo}"))
+            markup.add(InlineKeyboardButton("🔙 Voltar aos Meses", callback_data=f"doctipo_{ticker}_{tipo_doc}"))
             session.close()
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
