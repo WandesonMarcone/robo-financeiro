@@ -138,7 +138,7 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
                 lpa_yf,                                   # 28 | AD: LPA
                 formatar(yf_info.get('trailingPegRatio', 0)),# 29 | AE: PEG Ratio
                 formatar(yf_info.get('marketCap', 0)),    # 30 | AF: Valor Mercado
-                f"{agora_sp} OK"                          # 31 | AG: Carimbo Atualização
+                f"{agora_sp}"                             # 31 | AG: Carimbo Atualização
             ]
             
             if ticker in cat_novatas: batch_updates.append({'range': f'A{linha_idx}:AG{linha_idx}', 'values': [[ticker] + row_base]})
