@@ -56,7 +56,7 @@ def classificar_documento_com_ia(nome_original, texto_extraido):
     try:
         chat = client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
-            model="llama3-8b-8192"
+            model="llama-3.3-70b-versatile"
         )
         resposta = chat.choices[0].message.content
         if resposta and resposta.strip():
