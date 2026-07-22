@@ -362,6 +362,8 @@ def callback_geral(call):
         # ==========================================
         elif dados.startswith("doctipo_"):
             # O split(_, 2) garante que não quebre mesmo se a categoria tiver espaços ou hífens
+            bot.answer_callback_query(call.id, "Vasculhando documentos...")
+            
             partes = dados.split("_", 2)
             ticker = partes[1]
             tipo_doc = partes[2]
