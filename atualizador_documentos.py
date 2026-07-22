@@ -112,7 +112,7 @@ def rotina_de_coleta_b3():
     lista_de_fiis = obter_tickers_da_planilha()
     session = SessionDB()
 
-    data_busca = (datetime.now() - timedelta(days=150)).strftime("%d/%m/%Y")
+    data_busca = (datetime.now() - timedelta(days=160)).strftime("%d/%m/%Y")
     todos_documentos = b3.capturar_tudo(data_busca)
 
     novos = 0
