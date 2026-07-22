@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import re
 import requests
 import unicodedata
 from datetime import datetime, timedelta
@@ -43,15 +44,15 @@ def normalizar_texto(texto):
 # 🚨 TRAVA 1: CLASSIFICAÇÃO COM IA PROTEGIDA
 # ==========================================
 def classificar_documento_com_ia(nome_original, texto_extraido):
-    # Proteção: Se for None, vazio ou apenas espaços em branco, ignora a IA e devolve o nome original
     if not texto_extraido or not texto_extraido.strip(): 
         return nome_original 
 
-    lista_opcoes = ", ".join(TIPOS_DOC.values())
-    texto_limpo = texto_extraido.strip()[:800]
+    # 🛡️ LIMPEZA PROFUNDA: Remove caracteres nulos, invisíveis e que quebram o JSON
+    texto_limpo = re.sub(r'[^\x20-\x7E\u00A0-\u00FF]', ' ', texto_extraido).strip()
+    texto_limpo = texto_limpo[:800] # Pega só o começo limpo
 
-    prompt = f"Classifique este documento FII que começa assim: {texto_limpo}\n" \
-             f"Escolha ESTRITAMENTE UMA destas opções: {lista_opcoes}. Responda APENAS o nome."
+    lista_opcoes = ", ".join(TIPOS_DOC.values())
+    prompt = f"Classifique este documento FII que começa assim: {texto_limpo}\nEscolha ESTRITAMENTE UMA destas opções: {lista_opcoes}. Responda APENAS o nome."
 
     try:
         chat = client.chat.completions.create(
@@ -59,12 +60,10 @@ def classificar_documento_com_ia(nome_original, texto_extraido):
             model="llama-3.3-70b-versatile"
         )
         resposta = chat.choices[0].message.content
-        if resposta and resposta.strip():
-            return resposta.strip()
-        return nome_original
+        return resposta.strip() if resposta and resposta.strip() else nome_original
     except Exception as e:
-        print(f"⚠️ Erro ao consultar IA para classificação: {e}")
-        return nome_original 
+        print(f"⚠️ Erro ao consultar IA: {e}")
+        return nome_original # Se a IA falhar, não quebra a varredura, apenas usa o nome padrão! 
 
 def enviar_alerta_revisao_telegram(ticker, nome_doc, link_pdf, file_id, db_id):
     """Envia a mensagem interativa com botões para o seu Telegram"""
