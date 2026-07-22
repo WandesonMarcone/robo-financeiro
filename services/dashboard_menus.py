@@ -118,15 +118,18 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
             link_invisivel = f"[\u200c]({link_direto})"
     indicadores = buscar_ativo_na_planilha(ticker, is_fii)
 
+    indicadores = buscar_ativo_na_planilha(ticker, is_fii)
+
     if not indicadores:
         msg_erro = f"❌ Erro: Não encontrei dados para **{ticker}** na planilha."
         if message_id: bot.edit_message_text(msg_erro, chat_id, message_id, parse_mode="Markdown")
         else: bot.send_message(chat_id, msg_erro, parse_mode="Markdown")
         return
 
-    # IA básica (pode evoluir futuramente para consultas mais profundas)
+    # IA básica
     resumo_ia = f"Ativo monitorado do setor {indicadores.get('setor', 'Geral')}."
-    link_invisivel = f"[\u200c]({url_logo})" if url_logo else ""
+    
+    # ⚠️ ATENÇÃO: A linha antiga que quebrava a logo foi APAGADA daqui! ⚠️
 
     # Formatação do texto
     texto = (
@@ -144,14 +147,11 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
     # Construção do Menu Interativo
     markup = InlineKeyboardMarkup(row_width=2)
     
-    # Botões Principais
     markup.add(
         InlineKeyboardButton("📎 Dados", callback_data=f"dados_{ticker}_{tipo}"),
         InlineKeyboardButton("📑 Docs", callback_data=f"docs_{ticker}_{tipo}")
     )
     
-    # Injeção Dinâmica da Revisão (Apenas se for FII e houver pendência)
-    # Injeção Dinâmica da Revisão (Blindada para não travar o painel)
     if is_fii:
         try:
             session = SessionDB()
@@ -162,10 +162,10 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
             session.close()
 
             if pendentes > 0:
-                markup.add(InlineKeyboardButton(f"⚠️ {pendentes} Doc(s) para Revisão", callback_data=f"rev_t__{ticker}_{tipo_ativo}"))
+                # ⚠️ CORRIGIDO: Removido o tipo_ativo que quebrava o botão!
+                markup.add(InlineKeyboardButton(f"⚠️ {pendentes} Doc(s) para Revisão", callback_data=f"rev_t_{ticker}"))
         except Exception as e:
             print(f"DEBUG: Revisão temporariamente indisponível: {e}")
-            # Se falhar, não faz nada, apenas ignora o botão, mas o painel abre!
 
     # Botões de Ação Final
     markup.add(InlineKeyboardButton("⚠️ Análise IA", callback_data=f"ia_{ticker}_{tipo}"))
