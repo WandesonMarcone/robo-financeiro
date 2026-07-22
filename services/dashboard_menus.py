@@ -102,6 +102,20 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
     voltar_cmd = "menu_fiis" if is_fii else "menu_acoes"
 
     url_logo = obter_link_logo(ticker, tipo, drive_manager)
+    link_invisivel = ""
+    
+    if url_logo:
+        # Pega o ID do arquivo do Google Drive e converte para link direto de imagem
+        if "id=" in url_logo:
+            file_id = url_logo.split("id=")[1]
+        elif "/d/" in url_logo:
+            file_id = url_logo.split("/d/")[1].split("/")[0]
+        else:
+            file_id = None
+            
+        if file_id:
+            link_direto = f"https://drive.google.com/uc?export=view&id={file_id}"
+            link_invisivel = f"[\u200c]({link_direto})"
     indicadores = buscar_ativo_na_planilha(ticker, is_fii)
 
     if not indicadores:
