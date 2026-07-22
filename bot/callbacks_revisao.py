@@ -145,12 +145,16 @@ def processar_revisao(call):
             doc = session.query(DocumentosQualitativos).get(doc_id)
             file_id = extrair_file_id(doc.url_pdf)
 
+            # 🔴 CORREÇÃO DA DATA FEIA NAS PASTAS
             mes_ref = datetime.now().strftime("%Y-%m")
             if doc.assunto and '-' in doc.assunto:
-                p = doc.assunto.split('-')
+                assunto_limpo = doc.assunto.split(" ")[0] # Pega só o "18-05-2026", jogando o "10:00" fora
+                p = assunto_limpo.split('-')
                 if len(p) == 3: mes_ref = f"{p[2]}-{p[1]}"
 
-            novo_nome_pdf = f"{tipo_nome_limpo}_{doc.assunto}_{doc.id_b3}.pdf"
+            # 🔴 CORREÇÃO NO NOME DO PDF (Limpa a hora do título do arquivo)
+            assunto_limpo_pdf = doc.assunto.split(" ")[0] if doc.assunto else "Doc"
+            novo_nome_pdf = f"{tipo_nome_limpo}_{assunto_limpo_pdf}_{doc.id_b3}.pdf"
 
             novo_link = drive_manager.mover_e_renomear_arquivo(file_id, doc.ativo.ticker, mes_ref, novo_nome_pdf)
 
@@ -160,12 +164,12 @@ def processar_revisao(call):
                 doc.url_pdf = novo_link
                 session.commit()
 
-                # Pega o ticker do ativo atual
-                ticker_atual = doc.ativo.ticker
+                # 👇 Definido corretamente como 'ticker' para não dar erro nos botões!
+                ticker = doc.ativo.ticker
 
                 # Conta quantos documentos AINDA restam pendentes para ESTE fundo específico
                 pendentes_restantes = session.query(DocumentosQualitativos).join(Ativo).filter(
-                    Ativo.ticker == ticker_atual, 
+                    Ativo.ticker == ticker, 
                     DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
                 ).count()
 
@@ -177,7 +181,7 @@ def processar_revisao(call):
                         InlineKeyboardButton(text=f"👉 Continuar Revisando ({ticker})", callback_data=f"rev_ticker_{ticker}"),
                         InlineKeyboardButton(text="🔙 Voltar à Central de Revisão", callback_data="rev_start")
                     )
-                    
+
                     texto_resposta = (
                         f"✅ **Arquivo Guardado com Sucesso!**\n\n"
                         f"📁 **Ticker:** `{ticker}`\n"
@@ -185,13 +189,12 @@ def processar_revisao(call):
                         f"⚠️ _Ainda restam {pendentes_restantes} documento(s) para revisar neste fundo._"
                     )
                 else:
-                    # 🎯 AQUI ENTRA A SUA REGRA PERSONALIZADA!
                     # Se acabaram os documentos deste fundo, mostra os dois botões de escolha:
                     markup.add(
                         InlineKeyboardButton(text=f"🏢 Ir para o Painel do {ticker}", callback_data=f"painel_{ticker}_fii"),
                         InlineKeyboardButton(text="🔙 Voltar para a Central de Revisão", callback_data="rev_start")
                     )
-                    
+
                     texto_resposta = (
                         f"🎉 **Fila do {ticker} Concluída!**\n\n"
                         f"Não há mais nenhum documento pendente de revisão para este fundo.\n\n"
