@@ -162,7 +162,7 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
             session.close()
 
             if pendentes > 0:
-                markup.add(InlineKeyboardButton(f"⚠️ {pendentes} Doc(s) para Revisão", callback_data=f"rev_t_{ticker}"))
+                markup.add(InlineKeyboardButton(f"⚠️ {pendentes} Doc(s) para Revisão", callback_data=f"rev_t__{ticker}_{tipo_ativo}"))
         except Exception as e:
             print(f"DEBUG: Revisão temporariamente indisponível: {e}")
             # Se falhar, não faz nada, apenas ignora o botão, mas o painel abre!
