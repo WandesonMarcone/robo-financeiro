@@ -436,7 +436,7 @@ def callback_geral(call):
             ticker, tipo = partes[1], partes[2]
             
             markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"{tipo}_{ticker}"))
+            markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"{ticker}_{tipo}"))
             
             texto_ia = (
                 f"⚠️ **Análise de Inteligência Artificial: {ticker}**\n\n"
