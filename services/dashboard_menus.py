@@ -161,3 +161,40 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
         bot.edit_message_text(texto, chat_id, message_id, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=False)
     else: 
         bot.send_message(chat_id, texto, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=False)
+
+# Adicione esta função no seu services/dashboard_menus.py
+
+def filtrar_ativos_por_setor(tipo, setor_clicado):
+    """
+    Filtra os ativos da planilha pelo setor exato.
+    Usa o Cache Rápido para não travar o bot.
+    """
+    is_fii = (tipo == 'fii')
+    nome_aba = "BD_FIIs" if is_fii else "BD_Acoes"
+    resultados = []
+    
+    try:
+        # Puxa os dados instantaneamente do Cache
+        matriz = buscar_dados_planilha_com_cache(nome_aba)
+        if not matriz: return []
+
+        setor_alvo = setor_clicado.strip().lower()
+
+        for linha in matriz[1:]: 
+            try:
+                ticker = linha[0].strip().upper()
+                
+                # No BD_FIIs o setor está na coluna C (índice 2). No BD_Acoes está na coluna B (índice 1).
+                indice_setor = 2 if is_fii else 1
+                setor_planilha = linha[indice_setor].strip().lower() 
+                
+                # REGRA: Combinação Exata ou Final da Frase (Impede misturar Híbrido com Logístico)
+                if setor_planilha == setor_alvo or setor_planilha.endswith(f"- {setor_alvo}") or setor_planilha.endswith(f" {setor_alvo}"):
+                    resultados.append(ticker)
+            except IndexError:
+                continue 
+                
+        return resultados
+    except Exception as e:
+        print(f"Erro no filtro de setor: {e}")
+        return []
