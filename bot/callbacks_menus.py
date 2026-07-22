@@ -7,7 +7,7 @@ from atualizador_documentos import SessionDB
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos, DadosFinanceirosAcoes
 
 # Imports dos nossos serviços inteligentes
-from services.dashboard_menus import buscar_oportunidades, gerar_painel_ativo, buscar_favoritos
+from services.dashboard_menus import buscar_oportunidades, gerar_painel_ativo, buscar_favoritos, filtrar_ativos_por_setor
 from services.planilhas import buscar_dados_planilha_com_cache, buscar_ativo_na_planilha
 
 logger = logging.getLogger(__name__)
