@@ -44,12 +44,16 @@ def normalizar_texto(texto):
 # 🚨 TRAVA 1: CLASSIFICAÇÃO COM IA PROTEGIDA
 # ==========================================
 def classificar_documento_com_ia(nome_original, texto_extraido):
-    if not texto_extraido or not texto_extraido.strip(): 
+    if not texto_extraido: 
         return nome_original 
 
-    # 🛡️ LIMPEZA PROFUNDA: Remove caracteres nulos, invisíveis e que quebram o JSON
-    texto_limpo = re.sub(r'[^\x20-\x7E\u00A0-\u00FF]', ' ', texto_extraido).strip()
-    texto_limpo = texto_limpo[:800] # Pega só o começo limpo
+    # 🛡️ HIGIENIZADOR: Remove caracteres invisíveis que dão Erro 400 na Groq
+    texto_limpo = re.sub(r'[^\x20-\x7E\u00A0-\u00FF]', ' ', str(texto_extraido)).strip()
+    texto_limpo = texto_limpo[:800] 
+
+    # Se após limpar, não sobrar nenhuma palavra, cancela a IA com segurança
+    if not texto_limpo: 
+        return nome_original
 
     lista_opcoes = ", ".join(TIPOS_DOC.values())
     prompt = f"Classifique este documento FII que começa assim: {texto_limpo}\nEscolha ESTRITAMENTE UMA destas opções: {lista_opcoes}. Responda APENAS o nome."
@@ -62,8 +66,8 @@ def classificar_documento_com_ia(nome_original, texto_extraido):
         resposta = chat.choices[0].message.content
         return resposta.strip() if resposta and resposta.strip() else nome_original
     except Exception as e:
-        print(f"⚠️ Erro ao consultar IA: {e}")
-        return nome_original # Se a IA falhar, não quebra a varredura, apenas usa o nome padrão! 
+        print(f"⚠️ Erro ao consultar IA para classificação: {e}")
+        return nome_original 
 
 def enviar_alerta_revisao_telegram(ticker, nome_doc, link_pdf, file_id, db_id):
     """Envia a mensagem interativa com botões para o seu Telegram"""
