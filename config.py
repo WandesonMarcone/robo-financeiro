@@ -120,7 +120,7 @@ TIPOS_DOC = {
     "5": "Nova Emissao de Cotas",
     "6": "Assembleia Geral",
     "7": "Rendimentos",
-    "8": "Apresentação Trimestral De Resultados"
+    "8": "Apresentação Trimestral De Resultados",
     "9": "Outros"
 }
 
