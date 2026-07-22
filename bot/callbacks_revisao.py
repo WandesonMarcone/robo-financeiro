@@ -76,7 +76,7 @@ def processar_revisao(call):
                 
             # O botão de voltar TEM que ficar fora do loop, e usar apenas a variável 'ticker'
             markup.add(
-                 InlineKeyboardButton(text=f"🏢 Ir para o Painel do {ticker_atual}", callback_data=f"painel_{ticker}_fii"),
+                 InlineKeyboardButton(text=f"🏢 Ir para o Painel do {ticker}", callback_data=f"painel_{ticker}_fii"),
                  InlineKeyboardButton(text="🔙 Voltar para a Central de Revisão", callback_data="rev_start")
             )
 
@@ -149,13 +149,13 @@ def processar_revisao(call):
                 if pendentes_restantes > 0:
                     # Se ainda tem documentos para este fundo, oferece o botão de continuar nele
                     markup.add(
-                        InlineKeyboardButton(text=f"👉 Continuar Revisando ({ticker_atual})", callback_data=f"rev_ticker_{ticker_atual}"),
+                        InlineKeyboardButton(text=f"👉 Continuar Revisando ({ticker})", callback_data=f"rev_ticker_{ticker}"),
                         InlineKeyboardButton(text="🔙 Voltar à Central de Revisão", callback_data="rev_start")
                     )
                     
                     texto_resposta = (
                         f"✅ **Arquivo Guardado com Sucesso!**\n\n"
-                        f"📁 **Ticker:** `{ticker_atual}`\n"
+                        f"📁 **Ticker:** `{ticker}`\n"
                         f"📑 **Tipo:** `{tipo_nome_limpo}`\n\n"
                         f"⚠️ _Ainda restam {pendentes_restantes} documento(s) para revisar neste fundo._"
                     )
@@ -163,12 +163,12 @@ def processar_revisao(call):
                     # 🎯 AQUI ENTRA A SUA REGRA PERSONALIZADA!
                     # Se acabaram os documentos deste fundo, mostra os dois botões de escolha:
                     markup.add(
-                        InlineKeyboardButton(text=f"🏢 Ir para o Painel do {ticker_atual}", callback_data=f"painel_{ticker_atual}_fii"),
+                        InlineKeyboardButton(text=f"🏢 Ir para o Painel do {ticker}", callback_data=f"painel_{ticker}_fii"),
                         InlineKeyboardButton(text="🔙 Voltar para a Central de Revisão", callback_data="rev_start")
                     )
                     
                     texto_resposta = (
-                        f"🎉 **Fila do {ticker_atual} Concluída!**\n\n"
+                        f"🎉 **Fila do {ticker} Concluída!**\n\n"
                         f"Não há mais nenhum documento pendente de revisão para este fundo.\n\n"
                         f"O que você deseja fazer agora?"
                     )
@@ -187,7 +187,7 @@ def processar_revisao(call):
             if drive_manager.deletar_arquivo(file_id):
                 doc.status_processamento = "REJEITADO_MANUAL"
                 session.commit()
-                m = InlineKeyboardMarkup().add(InlineKeyboardButton(text="🔙 Voltar ao Painel", callback_data="rev_start"))
+                m = InlineKeyboardMarkup().add(InlineKeyboardButton(text="🔙 Voltar ao Painel", callback_data="rev_t{ticker}"))
                 bot.edit_message_text(f"🗑️ Documento apagado com sucesso.", call.message.chat.id, call.message.message_id, reply_markup=m)
             else:
                 bot.answer_callback_query(call.id, "❌ Erro ao apagar no Drive!")
