@@ -310,7 +310,7 @@ def callback_geral(call):
                 # O código já é dinâmico: só puxa o que existe salvo no banco para este fundo!
                 tipos_existentes = session.query(DocumentosQualitativos.tipo_documento).filter(
                     DocumentosQualitativos.ativo_id == ativo.id,
-                    DocumentosQualitativos.status_processamento == "SALVO_DRIVE"
+                    DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")
                 ).distinct().all()
 
                 if tipos_existentes:
