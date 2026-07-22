@@ -73,7 +73,10 @@ def processar_revisao(call):
             for doc in pendentes:
                 btn_text = f"📄 {doc.assunto} | ID: {doc.id_b3}"
                 markup.add(InlineKeyboardButton(text=btn_text, callback_data=f"rev_d_{doc.id}"))
-            markup.add(InlineKeyboardButton(text="🔙 Voltar aos FIIs", callback_data="rev_start"))
+                    markup.add(
+                        InlineKeyboardButton(text=f"👉 Continuar Revisando ({ticker_atual})", callback_data=f"rev_ticker_{ticker_atual}"),
+                        InlineKeyboardButton(text="🔙 Voltar à Central de Revisão", callback_data="rev_start")
+                    ))
 
             bot.edit_message_text(f"📑 **Análise: {ticker}**\n\nQual documento você quer olhar?", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
