@@ -89,7 +89,6 @@ def processar_revisao(call):
             doc = session.query(DocumentosQualitativos).get(doc_id)
 
             markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton(text="🔗 Visualizar PDF (Google Drive)", url=doc.url_pdf))
             markup.add(
                 InlineKeyboardButton(text="✅ Classificar e Salvar", callback_data=f"rev_app_{doc.id}"),
                 InlineKeyboardButton(text="🗑️ Jogar no Lixo", callback_data=f"rev_del_{doc.id}")
