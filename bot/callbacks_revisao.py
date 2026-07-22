@@ -131,8 +131,45 @@ def processar_revisao(call):
                 doc.url_pdf = novo_link
                 session.commit()
 
-                m = InlineKeyboardMarkup().add(InlineKeyboardButton(text="🔙 Voltar ao Painel", callback_data="rev_start"))
-                bot.edit_message_text(f"✅ **Arquivo Guardado!**\n\nNome: `{novo_nome_pdf}`\nPasta: `{doc.ativo.ticker}`", call.message.chat.id, call.message.message_id, reply_markup=m, parse_mode="Markdown")
+                # Pega o ticker do ativo atual
+                ticker_atual = doc.ativo.ticker
+
+                # Conta quantos documentos AINDA restam pendentes para ESTE fundo específico
+                pendentes_restantes = session.query(DocumentosQualitativos).join(Ativo).filter(
+                    Ativo.ticker == ticker_atual, 
+                    DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
+                ).count()
+
+                markup = InlineKeyboardMarkup(row_width=1)
+
+                if pendentes_restantes > 0:
+                    # Se ainda tem documentos para este fundo, oferece o botão de continuar nele
+                    markup.add(
+                        InlineKeyboardButton(text=f"👉 Continuar Revisando ({ticker_atual})", callback_data=f"rev_ticker_{ticker_atual}"),
+                        InlineKeyboardButton(text="🔙 Voltar à Central de Revisão", callback_data="rev_start")
+                    )
+                    
+                    texto_resposta = (
+                        f"✅ **Arquivo Guardado com Sucesso!**\n\n"
+                        f"📁 **Ticker:** `{ticker_atual}`\n"
+                        f"📑 **Tipo:** `{tipo_nome_limpo}`\n\n"
+                        f"⚠️ _Ainda restam {pendentes_restantes} documento(s) para revisar neste fundo._"
+                    )
+                else:
+                    # 🎯 AQUI ENTRA A SUA REGRA PERSONALIZADA!
+                    # Se acabaram os documentos deste fundo, mostra os dois botões de escolha:
+                    markup.add(
+                        InlineKeyboardButton(text=f"🏢 Ir para o Painel do {ticker_atual}", callback_data=f"painel_{ticker_atual}_fii"),
+                        InlineKeyboardButton(text="🔙 Voltar para a Central de Revisão", callback_data="rev_start")
+                    )
+                    
+                    texto_resposta = (
+                        f"🎉 **Fila do {ticker_atual} Concluída!**\n\n"
+                        f"Não há mais nenhum documento pendente de revisão para este fundo.\n\n"
+                        f"O que você deseja fazer agora?"
+                    )
+
+                bot.edit_message_text(texto_resposta, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
             else:
                 bot.answer_callback_query(call.id, "❌ Erro ao mover no Drive!")
 
