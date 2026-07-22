@@ -374,7 +374,7 @@ def callback_geral(call):
             docs = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.ativo_id == ativo.id,
                 DocumentosQualitativos.tipo_documento == tipo_doc,
-                DocumentosQualitativos.status_processamento == "SALVO_DRIVE"
+                DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")
             ).order_by(DocumentosQualitativos.data_publicacao.desc()).all()
 
             if docs:
@@ -413,7 +413,7 @@ def callback_geral(call):
             docs = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.ativo_id == ativo.id,
                 DocumentosQualitativos.tipo_documento == tipo_doc,
-                DocumentosQualitativos.status_processamento == "SALVO_DRIVE"
+                DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")
             ).all()
 
             docs_do_mes = [d for d in docs if d.data_publicacao and d.data_publicacao.strftime("%Y-%m") == periodo]
