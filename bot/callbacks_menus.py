@@ -225,6 +225,26 @@ def callback_geral(call):
             gerar_painel_ativo(ticker, tipo_ativo, chat_id, msg_id)
 
         # ==========================================
+        # --- ATALHO: DO PAINEL PARA A REVISÃO ---
+        # ==========================================
+        elif call.data.startswith("rev_t_"):
+            ticker = call.data.replace("rev_t_", "")
+            bot.answer_callback_query(call.id, f"Abrindo pendências de {ticker}...")
+            
+            # Como a lógica completa de exibir os botões de revisão está na sua rota da Central,
+            # nós criamos uma ponte que avisa o usuário e cria um botão direto pra lá!
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("⚖️ Ir para a Central de Revisão", callback_data="rev_start"))
+            markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_fii"))
+            
+            txt = (
+                f"⚠️ **Auditoria Necessária: {ticker}**\n\n"
+                f"Este fundo possui documentos escaneados ou suspeitos que a IA não conseguiu ler perfeitamente.\n\n"
+                f"Por favor, acesse a **Central de Revisão** para categorizá-los e enviá-los ao seu Google Drive."
+            )
+            bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        # ==========================================
         # --- NÍVEL 1: DADOS (Indicadores e Balanços) ---
         # ==========================================
         elif dados.startswith("dados_"):
