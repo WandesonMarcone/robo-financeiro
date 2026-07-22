@@ -116,7 +116,6 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
         if file_id:
             link_direto = f"https://drive.google.com/uc?export=view&id={file_id}"
             link_invisivel = f"[\u200c]({link_direto})"
-    indicadores = buscar_ativo_na_planilha(ticker, is_fii)
 
     indicadores = buscar_ativo_na_planilha(ticker, is_fii)
 
