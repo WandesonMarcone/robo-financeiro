@@ -53,53 +53,67 @@ def callback_geral(call):
             try:
                 matriz = buscar_dados_planilha_com_cache("BD_FIIs")
                 if matriz:
-                    # Cria os botões com o Setor Exato (Coluna C)
-                    tipos_unicos = sorted(list(set(
-                        linha[2].strip() for linha in matriz[1:] 
-                        if len(linha) > 2 and linha[2].strip()
-                    )))
+                    # Extrai as macro categorias (ex: se for "Tijolo - Logístico", pega "Tijolo")
+                    macro_categorias = set()
+                    for linha in matriz[1:]:
+                        if len(linha) > 2 and linha[2].strip():
+                            setor_completo = linha[2].strip()
+                            # Separa pelo hífen se houver (ex: "Tijolo - Logístico" vira "Tijolo")
+                            macro = setor_completo.split("-")[0].strip()
+                            macro_categorias.add(macro)
 
-                    # Cria um botão para cada tipo encontrado
-                    for t in tipos_unicos:
-                        markup.add(InlineKeyboardButton(f"🏢 {t}", callback_data=f"tipo_fii_{t}"))
+                    for macro in sorted(list(macro_categorias)):
+                        markup.add(InlineKeyboardButton(f"🏢 {macro}", callback_data=f"macro_fii_{macro}"))
             except Exception as e:
-                print(f"Erro ao listar tipos dinâmicos: {e}")
+                print(f"Erro ao listar macro categorias: {e}")
 
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
-            bot.edit_message_text("🏢 *Módulo FIIs - Selecione o Tipo:*", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            bot.edit_message_text("🏢 *Módulo FIIs - Selecione a Categoria:*", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # =======================================================
-        # ⬇️ O NOVO CÓDIGO ENTRA EXATAMENTE AQUI ⬇️
-        # =======================================================
-        
-        elif call.data.startswith("tipo_fii_") or call.data.startswith("setor_fii_"):
-            # 1. Identifica se o botão veio do 'tipo' ou 'setor' e extrai o nome limpo
-            prefixo = "tipo_fii_" if call.data.startswith("tipo_fii_") else "setor_fii_"
-            setor_escolhido = call.data.replace(prefixo, "").replace("_", " ") 
-            
-            bot.answer_callback_query(call.id, f"Buscando {setor_escolhido}...")
-            
-            # 2. Chama o "cérebro" lá do dashboard_menus.py
-            from services.dashboard_menus import filtrar_ativos_por_setor
-            lista_de_tickers = filtrar_ativos_por_setor('fii', setor_escolhido)
-            
-            markup = InlineKeyboardMarkup(row_width=3) # row_width=3 deixa a lista de ativos mais compacta e bonita
-            
-            # 3. Tratativa caso o setor não tenha nenhum ativo
-            if not lista_de_tickers:
+        # --- SEGUNDA CAMADA: SUB-SETORES OU ATIVOS DA MACRO ---
+        elif call.data.startswith("macro_fii_"):
+            macro_escolhida = call.data.replace("macro_fii_", "").strip()
+            bot.answer_callback_query(call.id, f"Abrindo {macro_escolhida}...")
+
+            try:
+                matriz = buscar_dados_planilha_com_cache("BD_FIIs")
+                markup = InlineKeyboardMarkup(row_width=2)
+                sub_setores = set()
+
+                for linha in matriz[1:]:
+                    if len(linha) > 2 and linha[2].strip():
+                        setor_completo = linha[2].strip()
+                        if setor_completo.startswith(macro_escolhida):
+                            sub_setores.add(setor_completo)
+
+                # Se houver sub-setores (ex: Tijolo - Logístico, Tijolo - Shopping)
+                if len(sub_setores) > 1:
+                    for sub in sorted(list(sub_setores)):
+                        markup.add(InlineKeyboardButton(f"📁 {sub}", callback_data=f"subsetor_fii_{sub}"))
+                else:
+                    # Se for categoria direta (ex: Papel), lista direto os tickers
+                    tickers = [linha[0].strip().upper() for linha in matriz[1:] if len(linha) > 2 and linha[2].strip().startswith(macro_escolhida)]
+                    for tkr in sorted(tickers):
+                        markup.add(InlineKeyboardButton(f"🏢 {tkr}", callback_data=f"painel_{tkr}_fii"))
+
                 markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_fiis"))
-                bot.edit_message_text(f"📭 Nenhum ativo encontrado com a classificação **{setor_escolhido.title()}**.", 
-                                      chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-                return
+                bot.edit_message_text(f"📂 **Categoria:** {macro_escolhida}\nSelecione o segmento:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            except Exception as e:
+                print(f"Erro ao abrir macro: {e}")
 
-            # 4. Cria um botão interativo para cada ticker listado
+        elif call.data.startswith("subsetor_fii_"):
+            subsetor_escolhido = call.data.replace("subsetor_fii_", "").strip()
+            bot.answer_callback_query(call.id, f"Buscando {subsetor_escolhido}...")
+            
+            from services.dashboard_menus import filtrar_ativos_por_setor
+            lista_de_tickers = filtrar_ativos_por_setor('fii', subsetor_escolhido)
+
+            markup = InlineKeyboardMarkup(row_width=3)
             for ticker in lista_de_tickers:
                 markup.add(InlineKeyboardButton(f"🏢 {ticker}", callback_data=f"painel_{ticker}_fii"))
-                
-            markup.add(InlineKeyboardButton("🔙 Voltar aos Tipos", callback_data="menu_fiis"))
-            
-            bot.edit_message_text(f"📂 **Categoria:** {setor_escolhido.title()}\n\nEscolha um ativo para analisar:", 
-                                  chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+            markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_fiis"))
+            bot.edit_message_text(f"📂 **Segmento:** {subsetor_escolhido}\nEscolha o ativo:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # --- MÓDULO AÇÕES ---
         elif dados == "menu_acoes":
@@ -113,18 +127,29 @@ def callback_geral(call):
             try:
                 matriz = buscar_dados_planilha_com_cache("BD_Acoes")
                 if matriz:
-                    # Assumindo que o Setor fica na Coluna C (índice 2). 
-                    # Se for outra coluna, basta mudar o linha[2] para o número correto!
-                    setores_acoes = sorted(list(set(linha[1].strip() for linha in matriz[1:] if linha[1].strip())))
-                    
+                    setores_acoes = sorted(list(set(linha[1].strip() for linha in matriz[1:] if len(linha) > 1 and linha[1].strip())))
+
                     for s in setores_acoes:
-                        # Criando o botão com o nome completo do setor (sem o [:12])
                         markup.add(InlineKeyboardButton(f"📁 {s}", callback_data=f"setor_acao_{s}"))
             except Exception as e:
                 print(f"Erro ao ler setores de ações: {e}")
 
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
             bot.edit_message_text("📈 *Módulo de Ações*\nSelecione um Setor ou Favorita:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        elif call.data.startswith("setor_acao_"):
+            setor_acao = call.data.replace("setor_acao_", "").strip()
+            bot.answer_callback_query(call.id, f"Buscando {setor_acao}...")
+
+            from services.dashboard_menus import filtrar_ativos_por_setor
+            lista_de_tickers = filtrar_ativos_por_setor('acao', setor_acao)
+
+            markup = InlineKeyboardMarkup(row_width=3)
+            for ticker in lista_de_tickers:
+                markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
+
+            markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_acoes"))
+            bot.edit_message_text(f"📂 **Setor:** {setor_acao}\nEscolha a ação:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # --- FAVORITOS ---            
         elif dados in ["favoritos_fiis", "favoritos_acoes"]:
