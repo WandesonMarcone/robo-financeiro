@@ -361,7 +361,8 @@ def callback_geral(call):
         # --- NÍVEL 2: SELEÇÃO DE MESES (FIIs) ---
         # ==========================================
         elif dados.startswith("doctipo_"):
-            partes = dados.split("_")
+            # O split(_, 2) garante que não quebre mesmo se a categoria tiver espaços ou hífens
+            partes = dados.split("_", 2)
             ticker = partes[1]
             tipo_doc = partes[2]
 
@@ -371,27 +372,40 @@ def callback_geral(call):
 
             markup = InlineKeyboardMarkup(row_width=2)
 
+            # 🔴 CORREÇÃO 1: Filtro .ilike aplicado aqui também!
             docs = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.ativo_id == ativo.id,
                 DocumentosQualitativos.tipo_documento == tipo_doc,
                 DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")
-            ).order_by(DocumentosQualitativos.data_publicacao.desc()).all()
+            ).all()
 
             if docs:
                 meses_unicos = []
                 for d in docs:
+                    # 🔴 CORREÇÃO 2: Se não houver data formal salva, evita que o documento desapareça
                     if d.data_publicacao:
                         mes_str = d.data_publicacao.strftime("%Y-%m")
-                        if mes_str not in meses_unicos:
-                            meses_unicos.append(mes_str)
+                    else:
+                        mes_str = "0000-00" # Fallback de segurança para 'Sem Data'
+                    
+                    if mes_str not in meses_unicos:
+                        meses_unicos.append(mes_str)
+                
+                # Ordena os meses do mais novo para o mais antigo
+                meses_unicos.sort(reverse=True)
 
                 for mes in meses_unicos[:10]:
-                    ano, mes_num = mes.split('-')
-                    markup.add(InlineKeyboardButton(f"📅 {mes_num}/{ano}", callback_data=f"docmes_{ticker}_{tipo_doc}_{mes}"))
+                    if mes == "0000-00":
+                        nome_btn = "📅 Diversos (Sem Data)"
+                    else:
+                        ano, mes_num = mes.split('-')
+                        nome_btn = f"📅 {mes_num}/{ano}"
+                        
+                    markup.add(InlineKeyboardButton(nome_btn, callback_data=f"docmes_{ticker}_{tipo_doc}_{mes}"))
 
                 txt = f"📅 **{tipo_doc} - {ticker}**\n\nSelecione o período:"
             else:
-                txt = f"📭 **Não tem nenhum documento deste fundo.**"
+                txt = f"📭 **Opa! Houve uma falha ao abrir a gaveta.**"
 
             markup.add(InlineKeyboardButton("🔙 Voltar aos Tipos", callback_data=f"docs_{ticker}_{tipo_ativo}"))
             session.close()
@@ -401,7 +415,8 @@ def callback_geral(call):
         # --- NÍVEL 3: EXIBIÇÃO DOS PDFS DO DRIVE ---
         # ==========================================
         elif dados.startswith("docmes_"):
-            partes = dados.split("_")
+            # split(_, 3) divide perfeitamente as 4 variáveis do callback
+            partes = dados.split("_", 3)
             ticker = partes[1]
             tipo_doc = partes[2]
             periodo = partes[3]
@@ -410,20 +425,36 @@ def callback_geral(call):
             session = SessionDB()
 
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+            
+            # 🔴 CORREÇÃO 1: Filtro .ilike aplicado aqui também!
             docs = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.ativo_id == ativo.id,
                 DocumentosQualitativos.tipo_documento == tipo_doc,
                 DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")
             ).all()
 
-            docs_do_mes = [d for d in docs if d.data_publicacao and d.data_publicacao.strftime("%Y-%m") == periodo]
+            docs_do_mes = []
+            for d in docs:
+                # Combina perfeitamente a data ou o fallback 'Sem Data'
+                if d.data_publicacao and d.data_publicacao.strftime("%Y-%m") == periodo:
+                    docs_do_mes.append(d)
+                elif not d.data_publicacao and periodo == "0000-00":
+                    docs_do_mes.append(d)
 
-            ano, mes_num = periodo.split('-')
-            txt = f"📂 **{tipo_doc}: {ticker} ({mes_num}/{ano})**\n\nLinks diretos salvos no Google Drive:"
+            if periodo == "0000-00":
+                txt = f"📂 **{tipo_doc}: {ticker}**\n\nLinks diretos salvos no Google Drive:"
+            else:
+                ano, mes_num = periodo.split('-')
+                txt = f"📂 **{tipo_doc}: {ticker} ({mes_num}/{ano})**\n\nLinks diretos salvos no Google Drive:"
 
             for doc in docs_do_mes:
-                nome_link = doc.assunto if doc.assunto else "Abrir PDF"
-                markup.add(InlineKeyboardButton(f"🔗 {nome_link}", url=doc.url_pdf))
+                # Embeleza o nome tirando a hora desnecessária
+                nome_limpo = doc.assunto.split(" ")[0].replace("-", "/") if doc.assunto else "Abrir PDF"
+                
+                # Trava de segurança para link quebrado não travar o painel
+                url = doc.url_pdf if (doc.url_pdf and str(doc.url_pdf).startswith("http")) else "https://drive.google.com"
+                
+                markup.add(InlineKeyboardButton(f"🔗 {nome_limpo}", url=url))
 
             markup.add(InlineKeyboardButton("🔙 Voltar aos Meses", callback_data=f"doctipo_{ticker}_{tipo_doc}"))
             session.close()
