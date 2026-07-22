@@ -75,7 +75,6 @@ def processar_revisao(call):
                 markup.add(InlineKeyboardButton(text=btn_text, callback_data=f"rev_d_{doc.id}"))
                 
             # O botão de voltar TEM que ficar fora do loop, e usar apenas a variável 'ticker'
-            markup.add(InlineKeyboardButton(text="🔙 Voltar à Central de Revisão", callback_data="rev_start"))
             markup.add(
                  InlineKeyboardButton(text=f"🏢 Ir para o Painel do {ticker_atual}", callback_data=f"painel_{ticker_atual}_fii"),
                  InlineKeyboardButton(text="🔙 Voltar para a Central de Revisão", callback_data="rev_start")
