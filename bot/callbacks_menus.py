@@ -53,11 +53,6 @@ def callback_geral(call):
             try:
                 matriz = buscar_dados_planilha_com_cache("BD_FIIs")
                 if matriz:
-                    # LÓGICA DINÂMICA:
-                    # 1. Pega a coluna 1 (Tipo) de todas as linhas
-                    # 2. .strip() para limpar espaços em branco
-                    # 3. set() para remover duplicatas
-                    # 4. sorted() para deixar em ordem alfabética
                     tipos_unicos = sorted(list(set(
                         linha[1].strip() for linha in matriz[1:] 
                         if len(linha) > 1 and linha[1].strip()
@@ -71,6 +66,39 @@ def callback_geral(call):
 
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
             bot.edit_message_text("🏢 *Módulo FIIs - Selecione o Tipo:*", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        # =======================================================
+        # ⬇️ O NOVO CÓDIGO ENTRA EXATAMENTE AQUI ⬇️
+        # =======================================================
+        
+        elif call.data.startswith("tipo_fii_") or call.data.startswith("setor_fii_"):
+            # 1. Identifica se o botão veio do 'tipo' ou 'setor' e extrai o nome limpo
+            prefixo = "tipo_fii_" if call.data.startswith("tipo_fii_") else "setor_fii_"
+            setor_escolhido = call.data.replace(prefixo, "").replace("_", " ") 
+            
+            bot.answer_callback_query(call.id, f"Buscando {setor_escolhido}...")
+            
+            # 2. Chama o "cérebro" lá do dashboard_menus.py
+            from services.dashboard_menus import filtrar_ativos_por_setor
+            lista_de_tickers = filtrar_ativos_por_setor('fii', setor_escolhido)
+            
+            markup = InlineKeyboardMarkup(row_width=3) # row_width=3 deixa a lista de ativos mais compacta e bonita
+            
+            # 3. Tratativa caso o setor não tenha nenhum ativo
+            if not lista_de_tickers:
+                markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_fiis"))
+                bot.edit_message_text(f"📭 Nenhum ativo encontrado com a classificação **{setor_escolhido.title()}**.", 
+                                      chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+                return
+
+            # 4. Cria um botão interativo para cada ticker listado
+            for ticker in lista_de_tickers:
+                markup.add(InlineKeyboardButton(f"🏢 {ticker}", callback_data=f"painel_fii_{ticker}"))
+                
+            markup.add(InlineKeyboardButton("🔙 Voltar aos Tipos", callback_data="menu_fiis"))
+            
+            bot.edit_message_text(f"📂 **Categoria:** {setor_escolhido.title()}\n\nEscolha um ativo para analisar:", 
+                                  chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # --- MÓDULO AÇÕES ---
         elif dados == "menu_acoes":
