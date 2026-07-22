@@ -76,7 +76,7 @@ def processar_revisao(call):
                 markup.add(
                         InlineKeyboardButton(text=f"👉 Voltar Para ({ticker_atual})", callback_data=f"rev_ticker_{ticker_atual}"),
                         InlineKeyboardButton(text="🔙 Voltar à Central de Revisão", callback_data="rev_start")
-                ))
+                )
 
             bot.edit_message_text(f"📑 **Análise: {ticker}**\n\nQual documento você quer olhar?", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
