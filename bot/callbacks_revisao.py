@@ -76,6 +76,10 @@ def processar_revisao(call):
                 
             # O botão de voltar TEM que ficar fora do loop, e usar apenas a variável 'ticker'
             markup.add(InlineKeyboardButton(text="🔙 Voltar à Central de Revisão", callback_data="rev_start"))
+            markup.add(
+                 InlineKeyboardButton(text=f"🏢 Ir para o Painel do {ticker_atual}", callback_data=f"painel_{ticker_atual}_fii"),
+                 InlineKeyboardButton(text="🔙 Voltar para a Central de Revisão", callback_data="rev_start")
+            )
 
             bot.edit_message_text(f"📑 **Análise: {ticker}**\n\nQual documento você quer olhar?", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
