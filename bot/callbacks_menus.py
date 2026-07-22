@@ -252,10 +252,48 @@ def callback_geral(call):
             markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
             session.close()
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+        # ==========================================
+        # --- NÍVEL 2: EXIBIR BALANÇO DE AÇÃO ---
+        # ==========================================
+        elif dados.startswith("mes_"):
+            partes = dados.split("_")
+            ticker = partes[1]
+            tipo_ativo = partes[2]
+            data_ref = partes[3]
 
-        # ==========================================
-        # --- NÍVEL 1: DOCUMENTOS (PDFs do Drive) ---
-        # ==========================================
+            bot.answer_callback_query(call.id, "Gerando relatório financeiro...")
+
+            session = SessionDB()
+            ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+            
+            if ativo:
+                balanco = session.query(DadosFinanceirosAcoes).filter(
+                    DadosFinanceirosAcoes.ativo_id == ativo.id,
+                    DadosFinanceirosAcoes.data_referencia == data_ref
+                ).first()
+                
+                if balanco:
+                    txt = (
+                        f"📊 **Balanço CVM: {ticker}**\n"
+                        f"📅 **Trimestre:** {data_ref}\n\n"
+                        f"💰 **Receita Líquida:** R$ {balanco.receita_liquida or 'Não informado'}\n"
+                        f"💵 **Lucro Líquido:** R$ {balanco.lucro_liquido or 'Não informado'}\n"
+                        f"🏦 **Patrimônio Líquido:** R$ {balanco.patrimonio_liquido or 'Não informado'}\n"
+                        f"📉 **Margem Líquida:** {balanco.margem_liquida or 'N/A'}%\n"
+                        f"⚙️ **EBITDA:** R$ {balanco.ebitda or 'Não informado'}"
+                    )
+                else:
+                    txt = f"📭 Nenhum dado detalhado encontrado para o período {data_ref}."
+            else:
+                txt = f"❌ Ativo **{ticker}** não encontrado no banco de dados."
+                
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("🔙 Voltar aos Balanços", callback_data=f"dados_{ticker}_{tipo_ativo}"))
+            markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
+            
+            session.close()
+            bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
         # ==========================================
         # --- NÍVEL 1: DOCUMENTOS (PDFs do Drive) ---
         # ==========================================
