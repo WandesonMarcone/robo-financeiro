@@ -256,6 +256,9 @@ def callback_geral(call):
         # ==========================================
         # --- NÍVEL 1: DOCUMENTOS (PDFs do Drive) ---
         # ==========================================
+        # ==========================================
+        # --- NÍVEL 1: DOCUMENTOS (PDFs do Drive) ---
+        # ==========================================
         elif dados.startswith("docs_"):
             partes = dados.split("_")
             ticker = partes[1]
@@ -266,7 +269,7 @@ def callback_geral(call):
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
 
             if ativo:
-                # Consulta quais tipos de documentos estão salvos na pasta do Drive deste ativo
+                # O código já é dinâmico: só puxa o que existe salvo no banco para este fundo!
                 tipos_existentes = session.query(DocumentosQualitativos.tipo_documento).filter(
                     DocumentosQualitativos.ativo_id == ativo.id,
                     DocumentosQualitativos.status_processamento == "SALVO_DRIVE"
@@ -274,16 +277,24 @@ def callback_geral(call):
 
                 if tipos_existentes:
                     for (tipo_doc,) in tipos_existentes:
-                        emoji = "📊" if "Gerencial" in tipo_doc else "🚨" if "Fato" in tipo_doc else "📄"
+                        # 🎨 MOTOR DE EMOJIS DINÂMICO
+                        t_low = tipo_doc.lower()
+                        if "gerencial" in t_low: emoji = "📊"
+                        elif "fato" in t_low: emoji = "🚨"
+                        elif "aviso" in t_low or "provento" in t_low: emoji = "💰"
+                        elif "assembleia" in t_low or "vota" in t_low: emoji = "🗳️"
+                        elif "trimestral" in t_low or "informe" in t_low: emoji = "📑"
+                        elif "comunicado" in t_low: emoji = "📢"
+                        else: emoji = "📄" # Padrão para "Outros"
+                        
                         markup.add(InlineKeyboardButton(f"{emoji} {tipo_doc}", callback_data=f"doctipo_{ticker}_{tipo_doc}"))
-                    txt = f"📂 **Gaveta de Documentos: {ticker}**\n\nSelecione o documento que deseja visualizar:"
+                    
+                    txt = f"📂 **Gaveta de Documentos: {ticker}**\n\nSelecione a categoria que deseja visualizar:"
                 else:
-                    # 🔴 AVISO SOLICITADO QUANDO A PASTA DO DRIVE ESTÁ VAZIA
-                    txt = f"📭 **Não tem nenhum documento deste fundo.**"
+                    txt = f"📭 **Ainda não há documentos processados para o fundo {ticker}.**"
             else:
-                txt = f"❌ Ativo **{ticker}** não encontrado no sistema."
+                txt = f"❌ Ativo **{ticker}** não encontrado no banco de dados."
 
-            # Voltar limpo e direto para o painel principal do ativo
             markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
             session.close()
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
