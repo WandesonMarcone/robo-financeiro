@@ -63,7 +63,7 @@ def processar_revisao(call):
 
         # AÇÃO: Mostrar lista de documentos suspeitos de um fundo específico
         elif acao == 't':
-            ticker = partes[2]
+            ticker = partes[2] 
             pendentes = session.query(DocumentosQualitativos).join(Ativo).filter(
                 Ativo.ticker == ticker, 
                 DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
@@ -71,16 +71,19 @@ def processar_revisao(call):
 
             markup = InlineKeyboardMarkup()
             for doc in pendentes:
-                btn_text = f"📄 {doc.assunto} | ID: {doc.id_b3}"
-                markup.add(InlineKeyboardButton(text=btn_text, callback_data=f"rev_d_{doc.id}"))
+                # 🎨 Lógica de embelezamento: Corta a hora (10:00) e troca - por /
+                data_limpa = doc.assunto.split(" ")[0].replace("-", "/") if doc.assunto else "Data N/A"
                 
-            # O botão de voltar TEM que ficar fora do loop, e usar apenas a variável 'ticker'
+                # Deixa o texto do botão limpo e profissional
+                btn_text = f"📅 {data_limpa} (Cód: {doc.id_b3})"
+                markup.add(InlineKeyboardButton(text=btn_text, callback_data=f"rev_d_{doc.id}"))
+
             markup.add(
                  InlineKeyboardButton(text=f"🏢 Ir para o Painel do {ticker}", callback_data=f"painel_{ticker}_fii"),
-                 InlineKeyboardButton(text="🔙 Voltar para a Central de Revisão", callback_data="rev_start")
+                 InlineKeyboardButton(text="🔙 Voltar à Central", callback_data="rev_start")
             )
 
-            bot.edit_message_text(f"📑 **Análise: {ticker}**\n\nQual documento você quer olhar?", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+            bot.edit_message_text(f"📑 **Análise: {ticker}**\n\nSelecione o documento para inspecionar:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
         # AÇÃO: Abrir as opções (Visualizar, Salvar, Apagar) de um documento específico
         elif acao == 'd':
@@ -88,13 +91,35 @@ def processar_revisao(call):
             doc = session.query(DocumentosQualitativos).get(doc_id)
 
             markup = InlineKeyboardMarkup()
-            markup.add(
-                InlineKeyboardButton(text="✅ Classificar e Salvar", callback_data=f"rev_app_{doc.id}"),
-                InlineKeyboardButton(text="🗑️ Jogar no Lixo", callback_data=f"rev_del_{doc.id}")
+            
+            # 🛡️ Trava de Segurança do Telegram: Só cria o botão se o link existir e for válido!
+            if doc.url_pdf and doc.url_pdf.startswith("http"):
+                markup.add(InlineKeyboardButton(text="🔗 Abrir PDF no Drive", url=doc.url_pdf))
+            
+            # Usamos row() em vez de add() para os botões ficarem lado a lado (mais bonito)
+            markup.row(
+                InlineKeyboardButton(text="✅ Classificar", callback_data=f"rev_app_{doc.id}"),
+                InlineKeyboardButton(text="🗑️ Apagar", callback_data=f"rev_del_{doc.id}")
             )
             markup.add(InlineKeyboardButton(text="🔙 Voltar", callback_data=f"rev_t_{doc.ativo.ticker}"))
 
-            txt = f"🔍 **Inspecionando Documento**\n\n**Fundo:** {doc.ativo.ticker}\n**Data:** {doc.assunto}\n**Leitura da B3:** {doc.tipo_documento}\n\nO que deseja fazer?"
+            # 🎨 Embelezamento do texto do painel
+            data_limpa = doc.assunto.split(" ")[0].replace("-", "/") if doc.assunto else "Desconhecida"
+            tipo_leitura = doc.tipo_documento if doc.tipo_documento else "Não identificado"
+
+            txt = (
+                f"🔍 **Inspecionando Documento**\n\n"
+                f"🏢 **Fundo:** `{doc.ativo.ticker}`\n"
+                f"📅 **Data:** `{data_limpa}`\n"
+                f"🤖 **Leitura Inicial:** `{tipo_leitura}`\n\n"
+            )
+            
+            # Se o link estiver quebrado no banco de dados, o bot te avisa em vez de esconder o botão!
+            if not (doc.url_pdf and doc.url_pdf.startswith("http")):
+                txt += "⚠️ *O link do Google Drive para este documento está ausente ou corrompido.*\n\n"
+                
+            txt += "O que deseja fazer?"
+            
             bot.edit_message_text(txt, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
         # AÇÃO: Usuário decidiu salvar, abre o catálogo de tipos de documento
