@@ -53,9 +53,10 @@ def callback_geral(call):
             try:
                 matriz = buscar_dados_planilha_com_cache("BD_FIIs")
                 if matriz:
+                    # Cria os botões com o Setor Exato (Coluna C)
                     tipos_unicos = sorted(list(set(
-                        linha[1].strip() for linha in matriz[1:] 
-                        if len(linha) > 1 and linha[1].strip()
+                        linha[2].strip() for linha in matriz[1:] 
+                        if len(linha) > 2 and linha[2].strip()
                     )))
 
                     # Cria um botão para cada tipo encontrado
@@ -93,7 +94,7 @@ def callback_geral(call):
 
             # 4. Cria um botão interativo para cada ticker listado
             for ticker in lista_de_tickers:
-                markup.add(InlineKeyboardButton(f"🏢 {ticker}", callback_data=f"painel_fii_{ticker}"))
+                markup.add(InlineKeyboardButton(f"🏢 {ticker}", callback_data=f"painel_{ticker}_fii"))
                 
             markup.add(InlineKeyboardButton("🔙 Voltar aos Tipos", callback_data="menu_fiis"))
             
@@ -141,7 +142,7 @@ def callback_geral(call):
             
             if favs:
                 # Cria os botões para cada ticker favorito
-                botoes = [InlineKeyboardButton(tkr, callback_data=f"{tipo}_{tkr}") for tkr in favs]
+                botoes = [InlineKeyboardButton(tkr, callback_data=f"painel_{tkr}_{tipo}") for tkr in favs]
                 markup.add(*botoes)
                 texto = f"⭐ *Seus Ativos Favoritos ({'FIIs' if is_fii else 'Ações'})*\n\nSelecione um para acessar o painel:"
             else:
@@ -163,7 +164,7 @@ def callback_geral(call):
             
                 if oportunidades:
                     top_oportunidades = oportunidades[:15] 
-                    botoes_ativos = [InlineKeyboardButton(tkr, callback_data=f"{tipo}_{tkr}") for tkr in top_oportunidades]
+                    botoes_ativos = [InlineKeyboardButton(tkr, callback_data=f"painel_{tkr}_{tipo}") for tkr in top_oportunidades]
                     markup.add(*botoes_ativos)
                     texto = f"🔥 *Top Oportunidades ({'FIIs' if is_fii else 'Ações'})*\n\nEstes ativos passaram na sua peneira."
                 else:
