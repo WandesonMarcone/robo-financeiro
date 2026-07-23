@@ -360,8 +360,8 @@ def callback_geral(call):
                     txt = f"📂 **Gaveta de Documentos: {ticker}**\n\nSelecione a categoria que deseja visualizar:"
                 else:
                     txt = f"📭 **Ainda não há documentos processados para o fundo {ticker}.**"
-            else:
-                txt = f"❌ Ativo **{ticker}** não encontrado no banco de dados."
+                else:
+                    txt = f"❌ Ativo **{ticker}** não encontrado no banco de dados."
 
             markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
             session.close()
