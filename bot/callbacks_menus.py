@@ -337,7 +337,6 @@ def callback_geral(call):
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
 
             if ativo:
-                # O código já é dinâmico: só puxa o que existe salvo no banco para este fundo!
                 tipos_existentes = session.query(DocumentosQualitativos.tipo_documento).filter(
                     DocumentosQualitativos.ativo_id == ativo.id,
                     DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")
@@ -359,9 +358,11 @@ def callback_geral(call):
                     
                     txt = f"📂 **Gaveta de Documentos: {ticker}**\n\nSelecione a categoria que deseja visualizar:"
                 else:
-                    txt = f"📭 **Ainda não há documentos processados para o fundo {ticker}.**"
-                else:
-                    txt = f"❌ Ativo **{ticker}** não encontrado no banco de dados."
+                    # 🔴 TEXTO INTELIGENTE (Sem erro de sintaxe)
+                    termo = "o fundo" if tipo_ativo == "fii" else "a empresa"
+                    txt = f"📭 **Ainda não há documentos processados para {termo} {ticker}.**"
+            else:
+                txt = f"❌ Ativo **{ticker}** não encontrado no banco de dados."
 
             markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
             session.close()
