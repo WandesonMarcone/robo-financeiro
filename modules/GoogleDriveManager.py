@@ -121,29 +121,35 @@ class GoogleDriveManager:
             return None
 
     def mover_e_renomear_arquivo(self, file_id, ticker, mes_ref, novo_nome):
-        """Arrasta o arquivo do Limbo para a pasta oficial e muda o nome do PDF"""
         try:
-            print(f"📦 Movendo e Renomeando: {novo_nome} para {ticker}/{mes_ref}...")
-            fiis_id = self._obter_ou_criar_pasta("Fundos Imobiliários")
-            ticker_id = self._obter_ou_criar_pasta(ticker, parent_id=fiis_id)
-            mes_id = self._obter_ou_criar_pasta(mes_ref, parent_id=ticker_id)
+            # 1. Pega o ID da pasta do Fundo (Ex: GARE11) e cria se não existir
+            pasta_ticker_id = self._obter_ou_criar_pasta(ticker, self.root_folder_id)
+            # 2. Pega o ID da subpasta do Mês (Ex: 2026-05) e cria se não existir
+            pasta_mes_id = self._obter_ou_criar_pasta(mes_ref, pasta_ticker_id)
 
-            file = self.service.files().get(fileId=file_id, fields='parents').execute()
-            previous_parents = ",".join(file.get('parents', []))
+            # 🔴 O SEGREDO ESTÁ AQUI: Descobrir em qual pasta ele está agora (A pasta de Revisão)
+            arquivo_atual = self.service.files().get(fileId=file_id, fields='parents').execute()
+            pastas_antigas = ",".join(arquivo_atual.get('parents', []))
 
-            # Movemos E passamos o corpo com o novo nome
-            file_metadata = {'name': novo_nome}
-            file_movido = self.service.files().update(
+            # 3. Atualiza o arquivo movendo para a nova e DELETANDO da antiga!
+            self.service.files().update(
                 fileId=file_id,
-                body=file_metadata,
-                addParents=mes_id,
-                removeParents=previous_parents,
-                fields='id, webViewLink'
+                addParents=pasta_mes_id,          # Adiciona na pasta do Fundo
+                removeParents=pastas_antigas,     # 🗑️ Remove da pasta de Revisão!
+                fields='id, parents'
             ).execute()
 
-            return file_movido.get('webViewLink')
+            # 4. Renomeia o arquivo
+            arquivo_renomeado = self.service.files().update(
+                fileId=file_id,
+                body={'name': novo_nome},
+                fields='webViewLink'
+            ).execute()
+
+            return arquivo_renomeado.get('webViewLink')
+
         except Exception as e:
-            print(f"❌ Erro ao mover e renomear: {e}")
+            print(f"❌ Erro ao mover e renomear no Drive: {e}")
             return None
 
     def deletar_arquivo(self, file_id):
