@@ -311,7 +311,7 @@ def callback_geral(call):
                     termo = "o fundo" if tipo_ativo == "fii" else "a empresa"
                     txt = f"📭 **Ainda não há documentos processados para {termo} {ticker}.**"
                 else:
-                txt = f"❌ Ativo **{ticker}** não encontrado no banco de dados."
+                    txt = f"❌ Ativo **{ticker}** não encontrado no banco de dados."
                     
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("🔙 Voltar aos Balanços", callback_data=f"dados_{ticker}_{tipo_ativo}"))
