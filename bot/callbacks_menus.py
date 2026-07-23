@@ -361,9 +361,7 @@ def callback_geral(call):
         # --- NÍVEL 2: SELEÇÃO DE MESES (FIIs) ---
         # ==========================================
         elif dados.startswith("doctipo_"):
-            # 🔴 Destrava o botão instantaneamente
             bot.answer_callback_query(call.id, "Vasculhando documentos...")
-            
             partes = dados.split("_", 2)
             ticker = partes[1]
             tipo_doc = partes[2]
@@ -371,7 +369,6 @@ def callback_geral(call):
             session = SessionDB()
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
             
-            # 🔴 CORREÇÃO DO ERRO 'TipoAtivo': Extrai o texto do Enum com segurança
             tipo_ativo = "fii"
             if ativo and hasattr(ativo, 'tipo') and ativo.tipo:
                 if hasattr(ativo.tipo, 'value'):
@@ -381,7 +378,6 @@ def callback_geral(call):
 
             markup = InlineKeyboardMarkup(row_width=2)
 
-            # Filtro .ilike aplicado para buscar documentos validados
             docs = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.ativo_id == ativo.id,
                 DocumentosQualitativos.tipo_documento == tipo_doc,
@@ -391,16 +387,18 @@ def callback_geral(call):
             if docs:
                 meses_unicos = []
                 for d in docs:
-                    # Fallback de segurança para 'Sem Data'
-                    if d.data_publicacao:
+                    # 🔴 CORREÇÃO DA DATA: Puxa o mês real direto do nome do arquivo!
+                    mes_str = "0000-00"
+                    if d.assunto and '-' in d.assunto:
+                        p = d.assunto.split(" ")[0].split("-") # Extrai [13, 05, 2026]
+                        if len(p) == 3:
+                            mes_str = f"{p[2]}-{p[1]}" # Transforma em 2026-05
+                    elif d.data_publicacao:
                         mes_str = d.data_publicacao.strftime("%Y-%m")
-                    else:
-                        mes_str = "0000-00" 
                     
                     if mes_str not in meses_unicos:
                         meses_unicos.append(mes_str)
                 
-                # Ordena os meses do mais novo para o mais antigo
                 meses_unicos.sort(reverse=True)
 
                 for mes in meses_unicos[:10]:
@@ -421,10 +419,9 @@ def callback_geral(call):
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # ==========================================
-        # --- NÍVEL 3: EXIBIÇÃO DOS PDFS DO DRIVE ---
+        # --- NÍVEL 3: EXIBIÇÃO DOS PDFS E RESUMO ---
         # ==========================================
         elif dados.startswith("docmes_"):
-            # split(_, 3) divide perfeitamente as 4 variáveis do callback
             partes = dados.split("_", 3)
             ticker = partes[1]
             tipo_doc = partes[2]
@@ -435,7 +432,6 @@ def callback_geral(call):
 
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
             
-            # 🔴 CORREÇÃO 1: Filtro .ilike aplicado aqui também!
             docs = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.ativo_id == ativo.id,
                 DocumentosQualitativos.tipo_documento == tipo_doc,
@@ -444,26 +440,37 @@ def callback_geral(call):
 
             docs_do_mes = []
             for d in docs:
-                # Combina perfeitamente a data ou o fallback 'Sem Data'
-                if d.data_publicacao and d.data_publicacao.strftime("%Y-%m") == periodo:
-                    docs_do_mes.append(d)
-                elif not d.data_publicacao and periodo == "0000-00":
+                # 🔴 Alinhando a busca com a nova regra de data real
+                mes_str = "0000-00"
+                if d.assunto and '-' in d.assunto:
+                    p = d.assunto.split(" ")[0].split("-")
+                    if len(p) == 3: mes_str = f"{p[2]}-{p[1]}"
+                elif d.data_publicacao:
+                    mes_str = d.data_publicacao.strftime("%Y-%m")
+                    
+                if mes_str == periodo:
                     docs_do_mes.append(d)
 
             if periodo == "0000-00":
-                txt = f"📂 **{tipo_doc}: {ticker}**\n\nLinks diretos salvos no Google Drive:"
+                txt = f"📂 **{tipo_doc}: {ticker}**\n\n"
             else:
                 ano, mes_num = periodo.split('-')
-                txt = f"📂 **{tipo_doc}: {ticker} ({mes_num}/{ano})**\n\nLinks diretos salvos no Google Drive:"
+                txt = f"📂 **{tipo_doc}: {ticker} ({mes_num}/{ano})**\n\n"
 
+            # 🔴 ADIÇÃO DO RESUMO (UX Melhorada)
             for doc in docs_do_mes:
-                # Embeleza o nome tirando a hora desnecessária
-                nome_limpo = doc.assunto.split(" ")[0].replace("-", "/") if doc.assunto else "Abrir PDF"
+                data_limpa = doc.assunto.split(" ")[0].replace("-", "/") if doc.assunto else "Data N/A"
                 
-                # Trava de segurança para link quebrado não travar o painel
+                # Se o seu banco tiver uma coluna "resumo", ele usa. Senão, mostra o Assunto completo da B3
+                resumo_texto = getattr(doc, 'resumo', None)
+                if not resumo_texto:
+                    resumo_texto = doc.assunto if doc.assunto else "Detalhes não informados."
+
+                txt += f"📄 **Data:** `{data_limpa}`\n"
+                txt += f"📝 **Resumo:** _{resumo_texto}_\n\n"
+                
                 url = doc.url_pdf if (doc.url_pdf and str(doc.url_pdf).startswith("http")) else "https://drive.google.com"
-                
-                markup.add(InlineKeyboardButton(f"🔗 {nome_limpo}", url=url))
+                markup.add(InlineKeyboardButton(f"🔗 Abrir PDF ({data_limpa})", url=url))
 
             markup.add(InlineKeyboardButton("🔙 Voltar aos Meses", callback_data=f"doctipo_{ticker}_{tipo_doc}"))
             session.close()
