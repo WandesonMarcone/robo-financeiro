@@ -310,7 +310,7 @@ def callback_geral(call):
                     # 🔴 CORREÇÃO DO TEXTO: Ele agora sabe diferenciar Ação de FII
                     termo = "o fundo" if tipo_ativo == "fii" else "a empresa"
                     txt = f"📭 **Ainda não há documentos processados para {termo} {ticker}.**"
-            else:
+                else:
                 txt = f"❌ Ativo **{ticker}** não encontrado no banco de dados."
                     
                 markup = InlineKeyboardMarkup()
