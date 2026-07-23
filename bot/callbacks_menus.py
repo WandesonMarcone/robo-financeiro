@@ -488,23 +488,41 @@ def callback_geral(call):
 
         # --- ANÁLISE DE IA ---
         elif dados.startswith("ia_"):
-            bot.answer_callback_query(call.id, "Gerando análise avançada...")
+            bot.answer_callback_query(call.id, "Iniciando motor de IA...")
             partes = dados.split("_")
             ticker, tipo = partes[1], partes[2]
-            
+
             markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"painel_{ticker}_{tipo_ativo}"))
+            # 🔴 CORREÇÃO: A variável aqui é {tipo} e não {tipo_ativo}
+            markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"painel_{ticker}_{tipo}"))
+
+            # 🎨 APRIMORAMENTO GERAL: Texto dinâmico que se adapta ao tipo do ativo!
+            termo = "deste Fundo Imobiliário" if tipo == "fii" else "desta Empresa"
             
             texto_ia = (
-                f"⚠️ **Análise de Inteligência Artificial: {ticker}**\n\n"
-                f"🤖 _Módulo IA em Fase de Treinamento._\n\n"
-                f"Em breve, o bot fará o cruzamento autônomo de:\n"
-                f"🔹 Histórico de Dividendos vs Inflação\n"
-                f"🔹 Vacância e Qualidade Física dos Imóveis\n"
-                f"🔹 Notícias recentes e fatos relevantes\n"
-                f"🔹 Risco de Alavancagem da Dívida\n\n"
-                f"*(Aguardando integração final)*"
+                f"🧠 **Central de Inteligência Artificial**\n"
+                f"🎯 **Ativo:** `{ticker}`\n\n"
+                f"⚠️ _Módulo em Fase de Treinamento (Beta)_\n\n"
+                f"Em breve, nosso motor autônomo cruzará milhares de dados {termo} para entregar:\n\n"
             )
+            
+            if tipo == "fii":
+                texto_ia += (
+                    f"🏢 **Análise de Portfólio:** Qualidade dos imóveis e risco de vacância.\n"
+                    f"💸 **Sustentabilidade:** Projeção de dividendos e risco de corte.\n"
+                    f"⚖️ **Alavancagem:** Análise do nível de endividamento do fundo.\n"
+                    f"📰 **Sentimento de Mercado:** Leitura térmica de Fatos Relevantes."
+                )
+            else:
+                texto_ia += (
+                    f"📈 **Valuation Avançado:** Preço Justo projetado via Fluxo de Caixa (DCF).\n"
+                    f"⚙️ **Eficiência Operacional:** Evolução de Margens e ROE vs Concorrentes.\n"
+                    f"💰 **Política de Proventos:** Histórico de Payout e programa de recompra.\n"
+                    f"📰 **Macroeconomia:** Impacto do ciclo de juros e inflação no balanço."
+                )
+                
+            texto_ia += "\n\n*(Aguardando integração final com a rede neural)*"
+
             bot.edit_message_text(texto_ia, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
             
     except Exception as e:
