@@ -159,7 +159,7 @@ def callback_geral(call):
 
             markup = InlineKeyboardMarkup(row_width=3)
             for ticker in lista_de_tickers:
-                markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
+                markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{tkr}_acao"))
 
             markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_acoes"))
             bot.edit_message_text(f"📂 **Setor:** {setor_acao}\nEscolha a ação:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
