@@ -97,25 +97,31 @@ def buscar_oportunidades(tipo):
 
 def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
     """Gera a mensagem principal com os botões interativos e dados em tempo real"""
+    
+    # 🔴 CORREÇÃO 1: Importando e iniciando o Drive Manager para o botão não morrer!
+    from modules.GoogleDriveManager import GoogleDriveManager
+    drive_manager = GoogleDriveManager()
+    
     is_fii = (tipo == 'fii')
     icone = "🏢 Fundo" if is_fii else "📈 Ação"
     voltar_cmd = "menu_fiis" if is_fii else "menu_acoes"
 
     url_logo = obter_link_logo(ticker, tipo, drive_manager)
     link_invisivel = ""
-    
+
     if url_logo:
-        # Pega o ID do arquivo do Google Drive e converte para link direto de imagem
         if "id=" in url_logo:
             file_id = url_logo.split("id=")[1]
         elif "/d/" in url_logo:
             file_id = url_logo.split("/d/")[1].split("/")[0]
         else:
             file_id = None
-            
+
         if file_id:
-            link_direto = f"https://drive.google.com/uc?export=view&id={file_id}"
-            link_invisivel = f"[\u200c]({link_direto})"
+            # 🔴 CORREÇÃO 2: Usando a API de Thumbnail do Google para forçar a imagem no Telegram!
+            link_direto = f"https://drive.google.com/thumbnail?id={file_id}&sz=w800"
+            # \u200e é o caractere invisível oficial que força o Telegram a gerar o preview
+            link_invisivel = f"[\u200e]({link_direto})"
 
     indicadores = buscar_ativo_na_planilha(ticker, is_fii)
 
@@ -125,34 +131,31 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
         else: bot.send_message(chat_id, msg_erro, parse_mode="Markdown")
         return
 
-    # IA básica
     resumo_ia = f"Ativo monitorado do setor {indicadores.get('setor', 'Geral')}."
-    
-    # ⚠️ ATENÇÃO: A linha antiga que quebrava a logo foi APAGADA daqui! ⚠️
 
-    # Formatação do texto
     texto = (
         f"{link_invisivel}{icone}: **{ticker}**\n"
         f"📝 **Resumo:** _{resumo_ia}_\n\n"
         f"💰 **Preço:** R$ {indicadores.get('preco', 'N/A')}\n"
         f"💸 **Dividend Yield:** {indicadores.get('dy', 'N/A')}\n"
     )
-    
+
     if is_fii:
         texto += f"⚖️ **P/VP:** {indicadores.get('pvp', 'N/A')}\n💵 **VPA:** {indicadores.get('vpa', 'N/A')}"
     else:
         texto += f"📊 **P/L:** {indicadores.get('pl', 'N/A')} | ⚖️ **P/VP:** {indicadores.get('pvp', 'N/A')}\n📈 **ROE:** {indicadores.get('roe', 'N/A')}"
 
-    # Construção do Menu Interativo
     markup = InlineKeyboardMarkup(row_width=2)
-    
+
     markup.add(
         InlineKeyboardButton("📎 Dados", callback_data=f"dados_{ticker}_{tipo}"),
         InlineKeyboardButton("📑 Docs", callback_data=f"docs_{ticker}_{tipo}")
     )
-    
+
     if is_fii:
         try:
+            from atualizador_documentos import SessionDB
+            from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
             session = SessionDB()
             pendentes = session.query(DocumentosQualitativos).join(Ativo).filter(
                 Ativo.ticker == ticker, 
@@ -161,12 +164,10 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
             session.close()
 
             if pendentes > 0:
-                # ⚠️ CORRIGIDO: Removido o tipo_ativo que quebrava o botão!
                 markup.add(InlineKeyboardButton(f"⚠️ {pendentes} Doc(s) para Revisão", callback_data=f"rev_t_{ticker}"))
         except Exception as e:
             print(f"DEBUG: Revisão temporariamente indisponível: {e}")
 
-    # Botões de Ação Final
     markup.add(InlineKeyboardButton("⚠️ Análise IA", callback_data=f"ia_{ticker}_{tipo}"))
     markup.add(InlineKeyboardButton(f"🔙 Voltar", callback_data=voltar_cmd))
 
@@ -174,8 +175,6 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
         bot.edit_message_text(texto, chat_id, message_id, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=False)
     else: 
         bot.send_message(chat_id, texto, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=False)
-
-# Adicione esta função no seu services/dashboard_menus.py
 
 def filtrar_ativos_por_setor(tipo, setor_clicado):
     """
