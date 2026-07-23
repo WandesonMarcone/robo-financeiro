@@ -306,10 +306,12 @@ def callback_geral(call):
                             f"📉 **Margem Líquida:** {balanco.margem_liquida or 'N/A'}%\n"
                             f"⚙️ **EBITDA:** R$ {balanco.ebitda or 'N/A'}"
                         )
-                    else:
-                        txt = f"📭 Os dados detalhados para o período {data_ref} estão sendo processados pela B3."
                 else:
-                    txt = f"❌ Ativo **{ticker}** não encontrado."
+                    # 🔴 CORREÇÃO DO TEXTO: Ele agora sabe diferenciar Ação de FII
+                    termo = "o fundo" if tipo_ativo == "fii" else "a empresa"
+                    txt = f"📭 **Ainda não há documentos processados para {termo} {ticker}.**"
+            else:
+                txt = f"❌ Ativo **{ticker}** não encontrado no banco de dados."
                     
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("🔙 Voltar aos Balanços", callback_data=f"dados_{ticker}_{tipo_ativo}"))
