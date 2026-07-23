@@ -98,30 +98,18 @@ def buscar_oportunidades(tipo):
 def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
     """Gera a mensagem principal com os botões interativos e dados em tempo real"""
     
-    # 🔴 CORREÇÃO 1: Importando e iniciando o Drive Manager para o botão não morrer!
-    from modules.GoogleDriveManager import GoogleDriveManager
-    drive_manager = GoogleDriveManager()
-    
     is_fii = (tipo == 'fii')
     icone = "🏢 Fundo" if is_fii else "📈 Ação"
     voltar_cmd = "menu_fiis" if is_fii else "menu_acoes"
 
-    url_logo = obter_link_logo(ticker, tipo, drive_manager)
+    # Puxa o link direto gerado pelo seu código (GitHub ou Logo.dev)
+    url_logo = obter_link_logo(ticker, tipo)
     link_invisivel = ""
 
+    # Como o link já é uma URL direta de imagem, nós injetamos direto no Telegram!
     if url_logo:
-        if "id=" in url_logo:
-            file_id = url_logo.split("id=")[1]
-        elif "/d/" in url_logo:
-            file_id = url_logo.split("/d/")[1].split("/")[0]
-        else:
-            file_id = None
-
-        if file_id:
-            # 🔴 CORREÇÃO 2: Usando a API de Thumbnail do Google para forçar a imagem no Telegram!
-            link_direto = f"https://drive.google.com/thumbnail?id={file_id}&sz=w800"
-            # \u200e é o caractere invisível oficial que força o Telegram a gerar o preview
-            link_invisivel = f"[\u200e]({link_direto})"
+        # \u200e é o caractere invisível que força o Telegram a ler a imagem
+        link_invisivel = f"[\u200e]({url_logo})"
 
     indicadores = buscar_ativo_na_planilha(ticker, is_fii)
 
@@ -171,6 +159,7 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
     markup.add(InlineKeyboardButton("⚠️ Análise IA", callback_data=f"ia_{ticker}_{tipo}"))
     markup.add(InlineKeyboardButton(f"🔙 Voltar", callback_data=voltar_cmd))
 
+    # O disable_web_page_preview=False é quem permite que a imagem invisível apareça no topo!
     if message_id: 
         bot.edit_message_text(texto, chat_id, message_id, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=False)
     else: 
