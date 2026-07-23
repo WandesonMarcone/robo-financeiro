@@ -150,19 +150,36 @@ def callback_geral(call):
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
             bot.edit_message_text("📈 *Módulo de Ações*\nSelecione um Setor ou Favorita:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        elif call.data.startswith("setor_acao_"):
-            setor_acao = call.data.replace("setor_acao_", "").strip()
+        # --- FILTRO DE SETOR DAS AÇÕES ---
+        elif dados.startswith("setor_acao_"):
+            setor_acao = dados.replace("setor_acao_", "").strip()
             bot.answer_callback_query(call.id, f"Buscando {setor_acao}...")
 
-            from services.dashboard_menus import filtrar_ativos_por_setor
-            lista_de_tickers = filtrar_ativos_por_setor('acao', setor_acao)
+            try:
+                # 🔴 CORREÇÃO: Lendo e filtrando direto da matriz (Planilha) para não ter erro de texto!
+                matriz = buscar_dados_planilha_com_cache("BD_Acoes")
+                
+                # Procura a empresa na Coluna A (índice 0) onde o Setor na Coluna B (índice 1) seja igual ao botão clicado
+                tickers = [
+                    linha[0].strip().upper() for linha in matriz[1:]
+                    if len(linha) > 1 and linha[1].strip().lower() == setor_acao.lower()
+                ]
 
-            markup = InlineKeyboardMarkup(row_width=3)
-            for ticker in lista_de_tickers:
-                markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{tkr}_acao"))
+                markup = InlineKeyboardMarkup(row_width=3)
+                if tickers:
+                    for ticker in sorted(list(set(tickers))):
+                        markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
+                    
+                    texto_resposta = f"📂 **Setor:** {setor_acao}\nEscolha a ação:"
+                else:
+                    texto_resposta = f"📭 Nenhum ativo encontrado no setor **{setor_acao}**."
 
-            markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_acoes"))
-            bot.edit_message_text(f"📂 **Setor:** {setor_acao}\nEscolha a ação:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+                markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_acoes"))
+                bot.edit_message_text(texto_resposta, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+                
+            except Exception as e:
+                print(f"Erro ao listar setor das ações: {e}")
+                bot.answer_callback_query(call.id, "❌ Erro ao buscar ativos do setor.")
 
         # --- FAVORITOS ---            
         elif dados in ["favoritos_fiis", "favoritos_acoes"]:
@@ -277,7 +294,7 @@ def callback_geral(call):
             session.close()
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # ==========================================
+         # ==========================================
         # --- NÍVEL 2: EXIBIR BALANÇO DE AÇÃO ---
         # ==========================================
         elif dados.startswith("mes_"):
@@ -285,14 +302,13 @@ def callback_geral(call):
             partes = dados.split("_", 3)
             ticker = partes[1]
             tipo_ativo = partes[2]
-            data_ref = partes[3] # Ex: "2026-03-31"
+            data_ref = partes[3]
 
             session = SessionDB()
             try:
                 ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
 
                 if ativo:
-                    # Garantindo que a data seja lida corretamente pelo banco de dados
                     from datetime import datetime
                     data_formatada = datetime.strptime(data_ref, "%Y-%m-%d").date()
 
@@ -302,20 +318,25 @@ def callback_geral(call):
                     ).first()
 
                     if balanco:
+                        # 🔴 BLINDAGEM MÁXIMA: Tenta pegar as variáveis. Se o nome estiver diferente no BD, exibe N/A sem travar!
+                        receita = getattr(balanco, 'receita_liquida', getattr(balanco, 'receita', 'N/A'))
+                        lucro = getattr(balanco, 'lucro_liquido', getattr(balanco, 'lucro', 'N/A'))
+                        patrimonio = getattr(balanco, 'patrimonio_liquido', getattr(balanco, 'patrimonio', 'N/A'))
+                        margem = getattr(balanco, 'margem_liquida', getattr(balanco, 'margem', 'N/A'))
+                        ebitda_val = getattr(balanco, 'ebitda', 'N/A')
+
                         txt = (
                             f"📊 **Balanço CVM: {ticker}**\n"
                             f"📅 **Fechamento:** {data_ref.replace('-', '/')}\n\n"
-                            f"💰 **Receita Líquida:** R$ {balanco.receita_liquida or 'N/A'}\n"
-                            f"💵 **Lucro Líquido:** R$ {balanco.lucro_liquido or 'N/A'}\n"
-                            f"🏦 **Patrimônio Líquido:** R$ {balanco.patrimonio_liquido or 'N/A'}\n"
-                            f"📉 **Margem Líquida:** {balanco.margem_liquida or 'N/A'}%\n"
-                            f"⚙️ **EBITDA:** R$ {balanco.ebitda or 'N/A'}"
+                            f"💰 **Receita:** R$ {receita}\n"
+                            f"💵 **Lucro:** R$ {lucro}\n"
+                            f"🏦 **Patrimônio:** R$ {patrimonio}\n"
+                            f"📉 **Margem:** {margem}%\n"
+                            f"⚙️ **EBITDA:** R$ {ebitda_val}"
                         )
                     else:
-                        # O Else correto para quando não encontra o balanço do mês
                         txt = f"📭 Os dados detalhados para o período {data_ref} estão sendo processados pela B3."
                 else:
-                    # O Else correto para quando não encontra o Ativo
                     txt = f"❌ Ativo **{ticker}** não encontrado no banco de dados."
 
                 markup = InlineKeyboardMarkup()
