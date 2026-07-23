@@ -221,7 +221,7 @@ def callback_geral(call):
         elif dados.startswith("painel_"):
             partes = dados.split("_")
             ticker = partes[1]
-            tipo_ativo = partes[2] # "fii" ou "acao"
+            tipo_ativo = partes[2] # "fii" ou "acao" 
             gerar_painel_ativo(ticker, tipo_ativo, chat_id, msg_id)
 
         # ==========================================
@@ -476,7 +476,7 @@ def callback_geral(call):
             ticker, tipo = partes[1], partes[2]
             
             markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"{ticker}_{tipo}"))
+            markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"painel_{ticker}_{tipo_ativo}"))
             
             texto_ia = (
                 f"⚠️ **Análise de Inteligência Artificial: {ticker}**\n\n"
