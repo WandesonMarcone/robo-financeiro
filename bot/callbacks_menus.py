@@ -276,43 +276,51 @@ def callback_geral(call):
         # --- NÍVEL 2: EXIBIR BALANÇO DE AÇÃO ---
         # ==========================================
         elif dados.startswith("mes_"):
-            partes = dados.split("_")
+            bot.answer_callback_query(call.id, "Buscando balanço...")
+            partes = dados.split("_", 3)
             ticker = partes[1]
             tipo_ativo = partes[2]
-            data_ref = partes[3]
-
-            bot.answer_callback_query(call.id, "Gerando relatório financeiro...")
+            data_ref = partes[3] # Ex: "2026-03-31"
 
             session = SessionDB()
-            ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-            
-            if ativo:
-                balanco = session.query(DadosFinanceirosAcoes).filter(
-                    DadosFinanceirosAcoes.ativo_id == ativo.id,
-                    DadosFinanceirosAcoes.data_referencia == data_ref
-                ).first()
+            try:
+                ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
                 
-                if balanco:
-                    txt = (
-                        f"📊 **Balanço CVM: {ticker}**\n"
-                        f"📅 **Trimestre:** {data_ref}\n\n"
-                        f"💰 **Receita Líquida:** R$ {balanco.receita_liquida or 'Não informado'}\n"
-                        f"💵 **Lucro Líquido:** R$ {balanco.lucro_liquido or 'Não informado'}\n"
-                        f"🏦 **Patrimônio Líquido:** R$ {balanco.patrimonio_liquido or 'Não informado'}\n"
-                        f"📉 **Margem Líquida:** {balanco.margem_liquida or 'N/A'}%\n"
-                        f"⚙️ **EBITDA:** R$ {balanco.ebitda or 'Não informado'}"
-                    )
+                if ativo:
+                    # Garantindo que a data seja lida corretamente pelo banco de dados
+                    from datetime import datetime
+                    data_formatada = datetime.strptime(data_ref, "%Y-%m-%d").date()
+
+                    balanco = session.query(DadosFinanceirosAcoes).filter(
+                        DadosFinanceirosAcoes.ativo_id == ativo.id,
+                        DadosFinanceirosAcoes.data_referencia == data_formatada
+                    ).first()
+                    
+                    if balanco:
+                        txt = (
+                            f"📊 **Balanço CVM: {ticker}**\n"
+                            f"📅 **Fechamento:** {data_ref.replace('-', '/')}\n\n"
+                            f"💰 **Receita Líquida:** R$ {balanco.receita_liquida or 'N/A'}\n"
+                            f"💵 **Lucro Líquido:** R$ {balanco.lucro_liquido or 'N/A'}\n"
+                            f"🏦 **Patrimônio Líquido:** R$ {balanco.patrimonio_liquido or 'N/A'}\n"
+                            f"📉 **Margem Líquida:** {balanco.margem_liquida or 'N/A'}%\n"
+                            f"⚙️ **EBITDA:** R$ {balanco.ebitda or 'N/A'}"
+                        )
+                    else:
+                        txt = f"📭 Os dados detalhados para o período {data_ref} estão sendo processados pela B3."
                 else:
-                    txt = f"📭 Nenhum dado detalhado encontrado para o período {data_ref}."
-            else:
-                txt = f"❌ Ativo **{ticker}** não encontrado no banco de dados."
+                    txt = f"❌ Ativo **{ticker}** não encontrado."
+                    
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("🔙 Voltar aos Balanços", callback_data=f"dados_{ticker}_{tipo_ativo}"))
+                markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
                 
-            markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("🔙 Voltar aos Balanços", callback_data=f"dados_{ticker}_{tipo_ativo}"))
-            markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
-            
-            session.close()
-            bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+                bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            except Exception as e:
+                print(f"Erro ao buscar balanço da ação: {e}")
+                bot.answer_callback_query(call.id, "❌ Erro ao abrir balanço!")
+            finally:
+                session.close()
 
         # ==========================================
         # --- NÍVEL 1: DOCUMENTOS (PDFs do Drive) ---
