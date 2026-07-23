@@ -361,7 +361,7 @@ def callback_geral(call):
         # --- NÍVEL 2: SELEÇÃO DE MESES (FIIs) ---
         # ==========================================
         elif dados.startswith("doctipo_"):
-            # O split(_, 2) garante que não quebre mesmo se a categoria tiver espaços ou hífens
+            # 🔴 Destrava o botão instantaneamente
             bot.answer_callback_query(call.id, "Vasculhando documentos...")
             
             partes = dados.split("_", 2)
@@ -370,11 +370,18 @@ def callback_geral(call):
 
             session = SessionDB()
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-            tipo_ativo = ativo.tipo.lower() if (ativo and ativo.tipo) else "fii"
+            
+            # 🔴 CORREÇÃO DO ERRO 'TipoAtivo': Extrai o texto do Enum com segurança
+            tipo_ativo = "fii"
+            if ativo and hasattr(ativo, 'tipo') and ativo.tipo:
+                if hasattr(ativo.tipo, 'value'):
+                    tipo_ativo = str(ativo.tipo.value).lower()
+                else:
+                    tipo_ativo = str(ativo.tipo).lower()
 
             markup = InlineKeyboardMarkup(row_width=2)
 
-            # 🔴 CORREÇÃO 1: Filtro .ilike aplicado aqui também!
+            # Filtro .ilike aplicado para buscar documentos validados
             docs = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.ativo_id == ativo.id,
                 DocumentosQualitativos.tipo_documento == tipo_doc,
@@ -384,11 +391,11 @@ def callback_geral(call):
             if docs:
                 meses_unicos = []
                 for d in docs:
-                    # 🔴 CORREÇÃO 2: Se não houver data formal salva, evita que o documento desapareça
+                    # Fallback de segurança para 'Sem Data'
                     if d.data_publicacao:
                         mes_str = d.data_publicacao.strftime("%Y-%m")
                     else:
-                        mes_str = "0000-00" # Fallback de segurança para 'Sem Data'
+                        mes_str = "0000-00" 
                     
                     if mes_str not in meses_unicos:
                         meses_unicos.append(mes_str)
