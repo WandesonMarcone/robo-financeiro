@@ -361,7 +361,7 @@ def callback_geral(call):
                     # 🔴 TEXTO INTELIGENTE (Sem erro de sintaxe)
                     termo = "o fundo" if tipo_ativo == "fii" else "a empresa"
                     txt = f"📭 **Ainda não há documentos processados para {termo} {ticker}.**"
-            else:
+             else:
                 txt = f"❌ Ativo **{ticker}** não encontrado no banco de dados."
 
             markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
