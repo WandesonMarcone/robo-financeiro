@@ -121,7 +121,8 @@ TIPOS_DOC = {
     "6": "Assembleia Geral",
     "7": "Rendimentos",
     "8": "Apresentação Trimestral De Resultados",
-    "9": "Outros"
+    "9": "Proposta Emissão de Cotas",
+    "10": "Outros"
 }
 
 # ==========================================
