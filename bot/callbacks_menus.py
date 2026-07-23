@@ -256,22 +256,27 @@ def callback_geral(call):
             session = SessionDB()
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
 
-            if ativo and tipo_ativo == "acao":
-                balancos = session.query(DadosFinanceirosAcoes).filter(DadosFinanceirosAcoes.ativo_id == ativo.id).all()
-                if balancos:
-                    datas_unicas = sorted(list(set([b.data_referencia.strftime("%Y-%m-%d") for b in balancos if b.data_referencia])), reverse=True)
-                    for dt in datas_unicas[:5]:
-                        ano, mes_num, dia = dt.split('-')
-                        markup.add(InlineKeyboardButton(f"📊 Balanço CVM ({mes_num}/{ano})", callback_data=f"mes_{ticker}_{tipo_ativo}_{dt}"))
-                    txt = f"📈 **Dados Financeiros: {ticker}**\n\nEscolha o balanço que deseja analisar:"
+            if tipo_ativo == "acao":
+                txt = f"📈 **Dados Financeiros: {ticker}**\n\n"
+                if ativo:
+                    balancos = session.query(DadosFinanceirosAcoes).filter(DadosFinanceirosAcoes.ativo_id == ativo.id).all()
+                    if balancos:
+                        datas_unicas = sorted(list(set([b.data_referencia.strftime("%Y-%m-%d") for b in balancos if b.data_referencia])), reverse=True)
+                        for dt in datas_unicas[:5]:
+                            ano, mes_num, dia = dt.split('-')
+                            markup.add(InlineKeyboardButton(f"📊 Balanço CVM ({mes_num}/{ano})", callback_data=f"mes_{ticker}_{tipo_ativo}_{dt}"))
+                        txt += "Escolha o balanço detalhado que deseja analisar:"
+                    else:
+                        txt += "📭 _Os balanços detalhados (CVM) ainda não foram processados pela B3 para esta empresa._\n\n*(Você pode acompanhar os indicadores principais no painel anterior)*"
                 else:
-                    txt = f"📭 **Nenhum balanço CVM encontrado para {ticker}.**"
+                    txt += "📭 _Ativo não encontrado no banco de dados local._"
             else:
                 txt = f"📊 **Dados de {ticker}**\n\nIndicadores detalhados e atualizados conforme planilha."
 
             markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
             session.close()
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
         # ==========================================
         # --- NÍVEL 2: EXIBIR BALANÇO DE AÇÃO ---
         # ==========================================
