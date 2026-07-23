@@ -175,17 +175,31 @@ def acionar_varredura_manual(message):
 
 @bot.message_handler(commands=['forcar_cvm'])
 def rodar_cvm(message):
-    bot.send_message(message.chat.id, "⏳ Iniciando download de balanços da CVM. Isso pode demorar alguns minutos...")
-    try:
-        # CORREÇÃO: Caminho exato de importação
-        from pipeline_dados.coletor_cvm import AcoesCVMReader
-        session = SessionDB()
-        coletor = AcoesCVMReader(session)
-        coletor.atualizar_acoes(2026) 
-        session.close()
-        bot.send_message(message.chat.id, "✅ Coleta CVM concluída! Balanços salvos no banco de dados.")
-    except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Erro na CVM: {str(e)}")
+    bot.send_message(message.chat.id, "⏳ *Iniciando motor CVM...*\nBaixando e processando milhares de balanços em segundo plano. Isso pode levar alguns minutos!", parse_mode="Markdown")
+    
+    def tarefa_cvm_background():
+        try:
+            from pipeline_dados.coletor_cvm import AcoesCVMReader
+            from datetime import datetime
+            
+            # Pega o ano atual automaticamente
+            ano_atual = datetime.now().year
+            
+            session = SessionDB()
+            coletor = AcoesCVMReader(session)
+            
+            # Executa a coleta pesada
+            coletor.atualizar_acoes(ano_atual) 
+            session.close()
+            
+            bot.send_message(message.chat.id, f"✅ *Coleta CVM ({ano_atual}) Concluída!*\nTodos os balanços foram salvos no banco de dados.", parse_mode="Markdown")
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ Erro na CVM: {str(e)}")
+            
+    # Inicia a tarefa em segundo plano (não congela o bot!)
+    import threading
+    thread_cvm = threading.Thread(target=tarefa_cvm_background)
+    thread_cvm.start()
 
 @bot.message_handler(commands=['mapear_nomes'])
 def comando_mapear_nomes_b3(message):
