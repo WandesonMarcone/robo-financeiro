@@ -157,7 +157,7 @@ def callback_geral(call):
 
             try:
                 matriz = buscar_dados_planilha_com_cache("BD_Acoes")
-                
+
                 # 🔴 VASSOURA DIGITAL: O "filter(str.isalnum)" arranca espaços e caracteres invisíveis do ticker!
                 tickers = []
                 for linha in matriz[1:]:
@@ -168,16 +168,17 @@ def callback_geral(call):
 
                 markup = InlineKeyboardMarkup(row_width=3)
                 if tickers:
+                    # 🔴 CORREÇÃO: Usando 'ticker' em todos os lugares para não dar curto-circuito
                     for ticker in sorted(list(set(tickers))):
-                        markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{tkr}_acao"))
-                    
+                        markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
+
                     texto_resposta = f"📂 **Setor:** {setor_acao}\nEscolha a ação:"
                 else:
                     texto_resposta = f"📭 Nenhum ativo encontrado no setor **{setor_acao}**."
 
                 markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_acoes"))
                 bot.edit_message_text(texto_resposta, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-                
+
             except Exception as e:
                 print(f"Erro ao listar setor das ações: {e}")
                 bot.answer_callback_query(call.id, "❌ Erro ao buscar ativos do setor.")
