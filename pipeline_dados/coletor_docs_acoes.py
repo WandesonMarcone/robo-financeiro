@@ -17,8 +17,10 @@ class RelatoriosAcoesCVM:
 
     def baixar_dados_ipe(self, ano):
         """Faz o download direto do banco de dados oficial do Governo Federal"""
-        url = f"https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/IPE/DADOS/cia_aberta_ipe_{ano}.csv"
-        print(f"📡 CVM: Baixando documentos de Ações do ano {ano}...")
+        
+        # 🔴 CORREÇÃO CVM: O arquivo verdadeiro é entregue em formato ZIP compactado!
+        url = f"https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/IPE/DADOS/ipe_cia_aberta_{ano}.zip"
+        print(f"📡 CVM: Baixando arquivo ZIP de documentos do ano {ano}...")
         
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=40)
@@ -26,7 +28,9 @@ class RelatoriosAcoesCVM:
         if response.status_code != 200:
             raise Exception(f"Falha ao conectar com a CVM. Status: {response.status_code}")
             
-        return pd.read_csv(io.StringIO(response.text), sep=';', encoding='latin1')
+        # O Pandas é tão inteligente que descompacta o ZIP nativamente na memória e lê o CSV de dentro dele!
+        import io
+        return pd.read_csv(io.BytesIO(response.content), compression='zip', sep=';', encoding='latin1')
 
     def vasculhar_documentos(self, ano):
         # 1. Pega as Ações cadastradas no seu banco de dados
