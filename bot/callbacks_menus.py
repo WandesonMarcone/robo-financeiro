@@ -156,14 +156,15 @@ def callback_geral(call):
             bot.answer_callback_query(call.id, f"Buscando {setor_acao}...")
 
             try:
-                # 🔴 CORREÇÃO: Lendo e filtrando direto da matriz (Planilha) para não ter erro de texto!
                 matriz = buscar_dados_planilha_com_cache("BD_Acoes")
                 
-                # Procura a empresa na Coluna A (índice 0) onde o Setor na Coluna B (índice 1) seja igual ao botão clicado
-                tickers = [
-                    linha[0].strip().upper() for linha in matriz[1:]
-                    if len(linha) > 1 and linha[1].strip().lower() == setor_acao.lower()
-                ]
+                # 🔴 VASSOURA DIGITAL: O "filter(str.isalnum)" arranca espaços e caracteres invisíveis do ticker!
+                tickers = []
+                for linha in matriz[1:]:
+                    if len(linha) > 1 and linha[1].strip().lower() == setor_acao.lower():
+                        t_limpo = "".join(filter(str.isalnum, linha[0])).upper()
+                        if t_limpo: 
+                            tickers.append(t_limpo)
 
                 markup = InlineKeyboardMarkup(row_width=3)
                 if tickers:
