@@ -157,18 +157,20 @@ def callback_geral(call):
 
             try:
                 matriz = buscar_dados_planilha_com_cache("BD_Acoes")
-
-                # 🔴 VASSOURA DIGITAL: O "filter(str.isalnum)" arranca espaços e caracteres invisíveis do ticker!
                 tickers = []
-                for linha in matriz[1:]:
-                    if len(linha) > 1 and linha[1].strip().lower() == setor_acao.lower():
-                        t_limpo = "".join(filter(str.isalnum, linha[0])).upper()
-                        if t_limpo: 
-                            tickers.append(t_limpo)
+
+                # 🔴 PROTEÇÃO EXTRA: O robô só executa a varredura se a matriz não estiver vazia/nula!
+                if matriz:
+                    # 🔴 VASSOURA DIGITAL: Arranca espaços e caracteres invisíveis do ticker!
+                    for linha in matriz[1:]:
+                        if len(linha) > 1 and linha[1].strip().lower() == setor_acao.lower():
+                            t_limpo = "".join(filter(str.isalnum, linha[0])).upper()
+                            if t_limpo: 
+                                tickers.append(t_limpo)
 
                 markup = InlineKeyboardMarkup(row_width=3)
                 if tickers:
-                    # 🔴 CORREÇÃO: Usando 'ticker' em todos os lugares para não dar curto-circuito
+                    # Usando 'ticker' de forma padronizada para evitar conflitos
                     for ticker in sorted(list(set(tickers))):
                         markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
 
