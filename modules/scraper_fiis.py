@@ -278,10 +278,14 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             else:
                 relatorio_atualizados.append(f"{emoji} *{ticker}* ({tipo})\n   R$ {preco_velho:.2f} ➔ R$ {preco:.2f} {icone_variacao}\n   P/VP: {pvp:.2f} | DY: {dy*100:.1f}%{txt_vacancia}")
 
+            print(f"   ✅ [OK] {ticker} mapeado e processado.")
         except Exception as e:
+            print(f"   ❌ [ERRO] Falha {ticker}: {e}")
             try:
                 aba_logs = planilha.worksheet("BD_Logs")
-                aba_logs.append_row([str(datetime.now(sp_tz)), f"FIIs: {ticker}", str(e)])
+                aba_logs.append_row([str(datetime.now(sp_tz)), f"Ações: {ticker}", str(e)])
+            except Exception as log_error:
+                print(f"   ⚠️ Não foi possível gravar o log: {log_error}")
             except: pass
 
     msg_blocos = ["🏢 *MOVIMENTAÇÃO DE FIIs* 🏢"]
