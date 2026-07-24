@@ -150,40 +150,46 @@ def callback_geral(call):
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
             bot.edit_message_text("📈 *Módulo de Ações*\nSelecione um Setor ou Favorita:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- FILTRO DE SETOR DAS AÇÕES ---
+        # --- FILTRO DE SETOR DAS AÇÕES (COM MODO DEBUG VISUAL) ---
         elif dados.startswith("setor_acao_"):
             setor_acao = dados.replace("setor_acao_", "").strip()
-            bot.answer_callback_query(call.id, f"Buscando {setor_acao}...")
-
+            
             try:
                 matriz = buscar_dados_planilha_com_cache("BD_Acoes")
+                
+                # 🔴 ALERTA 1: Se a planilha não carregar
+                if not matriz or len(matriz) < 2:
+                    bot.answer_callback_query(call.id, "⚠️ ERRO: A planilha de Ações não carregou ou está vazia!", show_alert=True)
+                    return
+                
                 tickers = []
+                for linha in matriz[1:]:
+                    if len(linha) > 1 and linha[1].strip().lower() == setor_acao.lower():
+                        t_limpo = "".join(filter(str.isalnum, linha[0])).upper()
+                        if t_limpo: 
+                            tickers.append(t_limpo)
 
-                # 🔴 PROTEÇÃO EXTRA: O robô só executa a varredura se a matriz não estiver vazia/nula!
-                if matriz:
-                    # 🔴 VASSOURA DIGITAL: Arranca espaços e caracteres invisíveis do ticker!
-                    for linha in matriz[1:]:
-                        if len(linha) > 1 and linha[1].strip().lower() == setor_acao.lower():
-                            t_limpo = "".join(filter(str.isalnum, linha[0])).upper()
-                            if t_limpo: 
-                                tickers.append(t_limpo)
-
+                # 🔴 ALERTA 2: Se não achar a empresa no setor
+                if not tickers:
+                    bot.answer_callback_query(call.id, f"⚠️ VAZIO: Nenhuma empresa cadastrada no setor '{setor_acao}' na planilha!", show_alert=True)
+                    return
+                
+                # ✅ SUCESSO: Se chegou aqui, ele avisa que deu certo antes de abrir a tela
+                bot.answer_callback_query(call.id, f"✅ Carregando {len(tickers)} empresa(s)...")
+                
                 markup = InlineKeyboardMarkup(row_width=3)
-                if tickers:
-                    # Usando 'ticker' de forma padronizada para evitar conflitos
-                    for ticker in sorted(list(set(tickers))):
-                        markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
-
-                    texto_resposta = f"📂 **Setor:** {setor_acao}\nEscolha a ação:"
-                else:
-                    texto_resposta = f"📭 Nenhum ativo encontrado no setor **{setor_acao}**."
+                for ticker in sorted(list(set(tickers))):
+                    markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
 
                 markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_acoes"))
+                texto_resposta = f"📂 **Setor:** {setor_acao}\nEscolha a ação desejada:"
+                
                 bot.edit_message_text(texto_resposta, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
             except Exception as e:
-                print(f"Erro ao listar setor das ações: {e}")
-                bot.answer_callback_query(call.id, "❌ Erro ao buscar ativos do setor.")
+                # 🔴 ALERTA 3: Se o código quebrar, ele joga o erro na tela do celular
+                erro_curto = str(e)[:50]
+                bot.answer_callback_query(call.id, f"❌ ERRO FATAL: {erro_curto}", show_alert=True)
 
         # --- FAVORITOS ---            
         elif dados in ["favoritos_fiis", "favoritos_acoes"]:
