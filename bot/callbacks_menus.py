@@ -169,7 +169,7 @@ def callback_geral(call):
                 markup = InlineKeyboardMarkup(row_width=3)
                 if tickers:
                     for ticker in sorted(list(set(tickers))):
-                        markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
+                        markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{tkr}_acao"))
                     
                     texto_resposta = f"📂 **Setor:** {setor_acao}\nEscolha a ação:"
                 else:
