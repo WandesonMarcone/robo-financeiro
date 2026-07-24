@@ -294,7 +294,7 @@ def callback_geral(call):
             session.close()
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-         # ==========================================
+        # ==========================================
         # --- NÍVEL 2: EXIBIR BALANÇO DE AÇÃO ---
         # ==========================================
         elif dados.startswith("mes_"):
@@ -318,21 +318,27 @@ def callback_geral(call):
                     ).first()
 
                     if balanco:
-                        # 🔴 BLINDAGEM MÁXIMA: Tenta pegar as variáveis. Se o nome estiver diferente no BD, exibe N/A sem travar!
-                        receita = getattr(balanco, 'receita_liquida', getattr(balanco, 'receita', 'N/A'))
-                        lucro = getattr(balanco, 'lucro_liquido', getattr(balanco, 'lucro', 'N/A'))
-                        patrimonio = getattr(balanco, 'patrimonio_liquido', getattr(balanco, 'patrimonio', 'N/A'))
-                        margem = getattr(balanco, 'margem_liquida', getattr(balanco, 'margem', 'N/A'))
-                        ebitda_val = getattr(balanco, 'ebitda', 'N/A')
+                        # 🔴 CORREÇÃO: Buscando exatamente as colunas que existem no seu banco de dados
+                        receita = balanco.receita if balanco.receita is not None else 'N/A'
+                        lucro = balanco.lucro_liquido if balanco.lucro_liquido is not None else 'N/A'
+                        ebitda = balanco.ebitda if balanco.ebitda is not None else 'N/A'
+                        caixa = balanco.caixa if balanco.caixa is not None else 'N/A'
+                        passivo = balanco.passivo_total if balanco.passivo_total is not None else 'N/A'
+
+                        # 🎨 BÔNUS: Função para deixar os números no formato R$ 1.000.000,00
+                        def formata_rs(valor):
+                            if valor == 'N/A': return valor
+                            # Formata com separador de milhar e 2 casas decimais, depois troca os pontos/vírgulas para o padrão BR
+                            return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
                         txt = (
                             f"📊 **Balanço CVM: {ticker}**\n"
                             f"📅 **Fechamento:** {data_ref.replace('-', '/')}\n\n"
-                            f"💰 **Receita:** R$ {receita}\n"
-                            f"💵 **Lucro:** R$ {lucro}\n"
-                            f"🏦 **Patrimônio:** R$ {patrimonio}\n"
-                            f"📉 **Margem:** {margem}%\n"
-                            f"⚙️ **EBITDA:** R$ {ebitda_val}"
+                            f"💰 **Receita:** R$ {formata_rs(receita)}\n"
+                            f"💵 **Lucro Líquido:** R$ {formata_rs(lucro)}\n"
+                            f"⚙️ **EBITDA:** R$ {formata_rs(ebitda)}\n"
+                            f"🏦 **Caixa:** R$ {formata_rs(caixa)}\n"
+                            f"📉 **Passivo Total:** R$ {formata_rs(passivo)}"
                         )
                     else:
                         txt = f"📭 Os dados detalhados para o período {data_ref} estão sendo processados pela B3."
