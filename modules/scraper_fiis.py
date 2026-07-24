@@ -286,7 +286,6 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
                 aba_logs.append_row([str(datetime.now(sp_tz)), f"Ações: {ticker}", str(e)])
             except Exception as log_error:
                 print(f"   ⚠️ Não foi possível gravar o log: {log_error}")
-            except: pass
 
     msg_blocos = ["🏢 *MOVIMENTAÇÃO DE FIIs* 🏢"]
     if relatorio_fixas_opps: msg_blocos.append("🏆 *ALERTA VIP:*\n" + "\n\n".join(relatorio_fixas_opps))
