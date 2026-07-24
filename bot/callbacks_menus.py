@@ -150,16 +150,22 @@ def callback_geral(call):
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
             bot.edit_message_text("📈 *Módulo de Ações*\nSelecione um Setor ou Favorita:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- FILTRO DE SETOR DAS AÇÕES (COM MODO DEBUG VISUAL) ---
+        # --- FILTRO DE SETOR DAS AÇÕES (MODO EXTREMO DE DEBUG) ---
         elif dados.startswith("setor_acao_"):
+            print(f"🔥 DEBUG 1: Clique no setor detectado! Comando exato recebido: '{dados}'")
             setor_acao = dados.replace("setor_acao_", "").strip()
+            print(f"🔥 DEBUG 2: Setor isolado: '{setor_acao}'")
             
             try:
-                matriz = buscar_dados_planilha_com_cache("BD_Acoes")
+                bot.answer_callback_query(call.id, f"Abrindo cofre de {setor_acao}...")
+                print("🔥 DEBUG 3: Notificação pop-up do Telegram executada.")
                 
-                # 🔴 ALERTA 1: Se a planilha não carregar
+                matriz = buscar_dados_planilha_com_cache("BD_Acoes")
+                print(f"🔥 DEBUG 4: Matriz da planilha carregada. Tamanho total: {len(matriz) if matriz else 'VAZIA'}")
+                
                 if not matriz or len(matriz) < 2:
-                    bot.answer_callback_query(call.id, "⚠️ ERRO: A planilha de Ações não carregou ou está vazia!", show_alert=True)
+                    print("❌ ERRO FATAL: Matriz nula ou sem linhas suficientes.")
+                    bot.send_message(chat_id, f"⚠️ O bot não conseguiu ler a aba 'BD_Acoes'. Verifique o nome na planilha!")
                     return
                 
                 tickers = []
@@ -168,28 +174,29 @@ def callback_geral(call):
                         t_limpo = "".join(filter(str.isalnum, linha[0])).upper()
                         if t_limpo: 
                             tickers.append(t_limpo)
-
-                # 🔴 ALERTA 2: Se não achar a empresa no setor
-                if not tickers:
-                    bot.answer_callback_query(call.id, f"⚠️ VAZIO: Nenhuma empresa cadastrada no setor '{setor_acao}' na planilha!", show_alert=True)
-                    return
                 
-                # ✅ SUCESSO: Se chegou aqui, ele avisa que deu certo antes de abrir a tela
-                bot.answer_callback_query(call.id, f"✅ Carregando {len(tickers)} empresa(s)...")
+                print(f"🔥 DEBUG 5: Filtro concluído. Tickers encontrados: {tickers}")
+
+                if not tickers:
+                    print("❌ ERRO: O filtro não encontrou nenhuma ação com esse setor.")
+                    bot.send_message(chat_id, f"⚠️ Nenhuma ação encontrada para o setor: '{setor_acao}'. Verifique se está escrito igual na planilha!")
+                    return
                 
                 markup = InlineKeyboardMarkup(row_width=3)
                 for ticker in sorted(list(set(tickers))):
                     markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
 
                 markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_acoes"))
-                texto_resposta = f"📂 **Setor:** {setor_acao}\nEscolha a ação desejada:"
+                texto_resposta = f"📂 **Setor:** {setor_acao}\nSelecione o ativo para análise:"
                 
+                print("🔥 DEBUG 6: Editando a mensagem no Telegram...")
                 bot.edit_message_text(texto_resposta, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+                print("✅ DEBUG 7: Sucesso total! Tela carregada.")
 
             except Exception as e:
-                # 🔴 ALERTA 3: Se o código quebrar, ele joga o erro na tela do celular
-                erro_curto = str(e)[:50]
-                bot.answer_callback_query(call.id, f"❌ ERRO FATAL: {erro_curto}", show_alert=True)
+                print(f"🚨 ERRO FATAL CRÍTICO: {e}")
+                # Forçamos o envio de uma mensagem nova no chat para garantir que você veja
+                bot.send_message(chat_id, f"❌ Erro de código: {e}")
 
         # --- FAVORITOS ---            
         elif dados in ["favoritos_fiis", "favoritos_acoes"]:
