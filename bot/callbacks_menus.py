@@ -282,10 +282,18 @@ def callback_geral(call):
                         datas_unicas = sorted(list(set([b.data_referencia.strftime("%Y-%m-%d") for b in balancos if b.data_referencia])), reverse=True)
                         for dt in datas_unicas[:5]:
                             ano, mes_num, dia = dt.split('-')
-                            markup.add(InlineKeyboardButton(f"📊 Balanço CVM ({mes_num}/{ano})", callback_data=f"mes_{ticker}_{tipo_ativo}_{dt}"))
+                            
+                            # 🔴 TRADUTOR DE TRIMESTRES (NÍVEL 1)
+                            if mes_num == '03': tri = '1º Tri'
+                            elif mes_num == '06': tri = '2º Tri'
+                            elif mes_num == '09': tri = '3º Tri'
+                            elif mes_num == '12': tri = '4º Tri (Anual)'
+                            else: tri = f'Mês {mes_num}'
+
+                            markup.add(InlineKeyboardButton(f"📊 Balanço CVM ({tri} / {ano})", callback_data=f"mes_{ticker}_{tipo_ativo}_{dt}"))
                         txt += "Escolha o balanço detalhado que deseja analisar:"
                     else:
-                        txt += "📭 _Os balanços detalhados (CVM) ainda não foram processados pela B3 para esta empresa._\n\n*(Você pode acompanhar os indicadores principais no painel anterior)*"
+                        txt += "📭 _Os balanços detalhados (CVM) ainda não foram processados pela B3 para esta empresa._"
                 else:
                     txt += "📭 _Ativo não encontrado no banco de dados local._"
             else:
@@ -319,22 +327,28 @@ def callback_geral(call):
                     ).first()
 
                     if balanco:
-                        # 🔴 CORREÇÃO: Buscando exatamente as colunas que existem no seu banco de dados
                         receita = balanco.receita if balanco.receita is not None else 'N/A'
                         lucro = balanco.lucro_liquido if balanco.lucro_liquido is not None else 'N/A'
                         ebitda = balanco.ebitda if balanco.ebitda is not None else 'N/A'
                         caixa = balanco.caixa if balanco.caixa is not None else 'N/A'
                         passivo = balanco.passivo_total if balanco.passivo_total is not None else 'N/A'
 
-                        # 🎨 BÔNUS: Função para deixar os números no formato R$ 1.000.000,00
                         def formata_rs(valor):
                             if valor == 'N/A': return valor
-                            # Formata com separador de milhar e 2 casas decimais, depois troca os pontos/vírgulas para o padrão BR
                             return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+                        ano, mes_num, dia = data_ref.split('-')
+                        
+                        # 🔴 TRADUTOR DE TRIMESTRES (NÍVEL 2 - TELA CHEIA)
+                        if mes_num == '03': tri_str = '1º Trimestre'
+                        elif mes_num == '06': tri_str = '2º Trimestre'
+                        elif mes_num == '09': tri_str = '3º Trimestre'
+                        elif mes_num == '12': tri_str = '4º Trimestre (Consolidado Anual)'
+                        else: tri_str = f'Mês {mes_num}'
 
                         txt = (
                             f"📊 **Balanço CVM: {ticker}**\n"
-                            f"📅 **Fechamento:** {data_ref.replace('-', '/')}\n\n"
+                            f"📅 **Período:** {tri_str} de {ano}\n\n"
                             f"💰 **Receita:** R$ {formata_rs(receita)}\n"
                             f"💵 **Lucro Líquido:** R$ {formata_rs(lucro)}\n"
                             f"⚙️ **EBITDA:** R$ {formata_rs(ebitda)}\n"
