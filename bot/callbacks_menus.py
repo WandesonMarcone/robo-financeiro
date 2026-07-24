@@ -140,9 +140,11 @@ def callback_geral(call):
             try:
                 matriz = buscar_dados_planilha_com_cache("BD_Acoes")
                 if matriz:
+                    # Padroniza os setores para evitar conflitos de maiúsculas/minúsculas
                     setores_acoes = sorted(list(set(linha[1].strip() for linha in matriz[1:] if len(linha) > 1 and linha[1].strip())))
 
                     for s in setores_acoes:
+                        # Limpa o texto do setor para caber perfeitamente no callback_data
                         markup.add(InlineKeyboardButton(f"📁 {s}", callback_data=f"setor_acao_{s}"))
             except Exception as e:
                 print(f"Erro ao ler setores de ações: {e}")
@@ -150,53 +152,43 @@ def callback_geral(call):
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
             bot.edit_message_text("📈 *Módulo de Ações*\nSelecione um Setor ou Favorita:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- FILTRO DE SETOR DAS AÇÕES (MODO EXTREMO DE DEBUG) ---
+        # --- FILTRO DE SETOR DAS AÇÕES (BLINDADO) ---
         elif dados.startswith("setor_acao_"):
-            print(f"🔥 DEBUG 1: Clique no setor detectado! Comando exato recebido: '{dados}'")
             setor_acao = dados.replace("setor_acao_", "").strip()
-            print(f"🔥 DEBUG 2: Setor isolado: '{setor_acao}'")
-            
+            bot.answer_callback_query(call.id, f"Buscando {setor_acao}...")
+
             try:
-                bot.answer_callback_query(call.id, f"Abrindo cofre de {setor_acao}...")
-                print("🔥 DEBUG 3: Notificação pop-up do Telegram executada.")
-                
                 matriz = buscar_dados_planilha_com_cache("BD_Acoes")
-                print(f"🔥 DEBUG 4: Matriz da planilha carregada. Tamanho total: {len(matriz) if matriz else 'VAZIA'}")
                 
                 if not matriz or len(matriz) < 2:
-                    print("❌ ERRO FATAL: Matriz nula ou sem linhas suficientes.")
-                    bot.send_message(chat_id, f"⚠️ O bot não conseguiu ler a aba 'BD_Acoes'. Verifique o nome na planilha!")
+                    bot.answer_callback_query(call.id, "❌ Planilha de ações vazia!", show_alert=True)
                     return
-                
+
                 tickers = []
                 for linha in matriz[1:]:
+                    # Compara ignorando maiúsculas/minúsculas e espaços extras
                     if len(linha) > 1 and linha[1].strip().lower() == setor_acao.lower():
                         t_limpo = "".join(filter(str.isalnum, linha[0])).upper()
                         if t_limpo: 
                             tickers.append(t_limpo)
-                
-                print(f"🔥 DEBUG 5: Filtro concluído. Tickers encontrados: {tickers}")
 
-                if not tickers:
-                    print("❌ ERRO: O filtro não encontrou nenhuma ação com esse setor.")
-                    bot.send_message(chat_id, f"⚠️ Nenhuma ação encontrada para o setor: '{setor_acao}'. Verifique se está escrito igual na planilha!")
-                    return
-                
                 markup = InlineKeyboardMarkup(row_width=3)
-                for ticker in sorted(list(set(tickers))):
-                    markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
+                if tickers:
+                    for ticker in sorted(list(set(tickers))):
+                        markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
+
+                    texto_resposta = f"📂 **Setor:** {setor_acao}\nEscolha a ação desejada:"
+                else:
+                    texto_resposta = f"📭 Nenhum ativo encontrado no setor **{setor_acao}**."
 
                 markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_acoes"))
-                texto_resposta = f"📂 **Setor:** {setor_acao}\nSelecione o ativo para análise:"
                 
-                print("🔥 DEBUG 6: Editando a mensagem no Telegram...")
+                # Força a edição da mensagem de forma limpa
                 bot.edit_message_text(texto_resposta, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-                print("✅ DEBUG 7: Sucesso total! Tela carregada.")
 
             except Exception as e:
-                print(f"🚨 ERRO FATAL CRÍTICO: {e}")
-                # Forçamos o envio de uma mensagem nova no chat para garantir que você veja
-                bot.send_message(chat_id, f"❌ Erro de código: {e}")
+                print(f"Erro crítico ao abrir setor de ações: {e}")
+                bot.answer_callback_query(call.id, f"❌ Erro ao abrir setor!", show_alert=True)
 
         # --- FAVORITOS ---            
         elif dados in ["favoritos_fiis", "favoritos_acoes"]:
