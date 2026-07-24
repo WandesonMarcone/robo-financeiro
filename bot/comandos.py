@@ -175,30 +175,35 @@ def acionar_varredura_manual(message):
 
 @bot.message_handler(commands=['forcar_cvm'])
 def rodar_cvm(message):
-    bot.send_message(message.chat.id, "⏳ *Iniciando motor CVM...*\nBaixando e processando milhares de balanços em segundo plano. Isso pode levar alguns minutos!", parse_mode="Markdown")
+    from datetime import datetime
     
-    def tarefa_cvm_background():
+    # Verifica se você digitou um ano (Ex: /forcar_cvm 2025). Se não, usa o ano atual.
+    texto = message.text.split()
+    ano_escolhido = datetime.now().year
+    if len(texto) > 1 and texto[1].isdigit():
+        ano_escolhido = int(texto[1])
+
+    bot.send_message(message.chat.id, f"⏳ *Iniciando motor CVM para o ano {ano_escolhido}...*\nBaixando balanços em segundo plano. Aguarde o aviso de conclusão!", parse_mode="Markdown")
+    
+    def tarefa_cvm_background(ano):
         try:
             from pipeline_dados.coletor_cvm import AcoesCVMReader
-            from datetime import datetime
-            
-            # Pega o ano atual automaticamente
-            ano_atual = datetime.now().year
+            from atualizador_documentos import SessionDB
             
             session = SessionDB()
             coletor = AcoesCVMReader(session)
             
-            # Executa a coleta pesada
-            coletor.atualizar_acoes(ano_atual) 
+            # Executa a coleta com o ano que você escolheu
+            coletor.atualizar_acoes(ano) 
             session.close()
             
-            bot.send_message(message.chat.id, f"✅ *Coleta CVM ({ano_atual}) Concluída!*\nTodos os balanços foram salvos no banco de dados.", parse_mode="Markdown")
+            bot.send_message(message.chat.id, f"✅ *Coleta CVM ({ano}) Concluída!*\nBalanços atualizados no banco de dados.", parse_mode="Markdown")
         except Exception as e:
             bot.send_message(message.chat.id, f"❌ Erro na CVM: {str(e)}")
             
-    # Inicia a tarefa em segundo plano (não congela o bot!)
+    # Inicia a tarefa em segundo plano
     import threading
-    thread_cvm = threading.Thread(target=tarefa_cvm_background)
+    thread_cvm = threading.Thread(target=tarefa_cvm_background, args=(ano_escolhido,))
     thread_cvm.start()
 
 @bot.message_handler(commands=['mapear_nomes'])
