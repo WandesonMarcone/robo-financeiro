@@ -128,7 +128,7 @@ def callback_geral(call):
             markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=f"macro_fii_{macro}"))
             bot.edit_message_text(f"📂 **Segmento:** {sub}\nEscolha o ativo:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- MÓDULO AÇÕES ---
+        # --- MÓDULO AÇÕES (CRIAÇÃO DOS BOTÕES) ---
         elif dados == "menu_acoes":
             bot.answer_callback_query(call.id, "Carregando Ações...")
             markup = InlineKeyboardMarkup(row_width=2)
@@ -138,19 +138,72 @@ def callback_geral(call):
             )
 
             try:
+                import unicodedata
+                def padronizar(texto):
+                    return unicodedata.normalize('NFKD', str(texto)).encode('ASCII', 'ignore').decode('utf-8').strip().lower()
+
                 matriz = buscar_dados_planilha_com_cache("BD_Acoes")
                 if matriz:
-                    # Padroniza os setores para evitar conflitos de maiúsculas/minúsculas
-                    setores_acoes = sorted(list(set(linha[1].strip() for linha in matriz[1:] if len(linha) > 1 and linha[1].strip())))
+                    # Pega os nomes originais e bonitos para mostrar no botão
+                    setores_originais = sorted(list(set(linha[1].strip() for linha in matriz[1:] if len(linha) > 1 and linha[1].strip())))
 
-                    for s in setores_acoes:
-                        # Limpa o texto do setor para caber perfeitamente no callback_data
-                        markup.add(InlineKeyboardButton(f"📁 {s}", callback_data=f"setor_acao_{s}"))
+                    for s in setores_originais:
+                        # 🔴 O PULO DO GATO: Usa apenas os 12 primeiros caracteres como "Código de Barras" invisível!
+                        s_limpo = padronizar(s)[:12]
+                        markup.add(InlineKeyboardButton(f"📁 {s}", callback_data=f"setor_acao_{s_limpo}"))
             except Exception as e:
                 print(f"Erro ao ler setores de ações: {e}")
 
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
             bot.edit_message_text("📈 *Módulo de Ações*\nSelecione um Setor ou Favorita:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        # --- FILTRO DE SETOR DAS AÇÕES (RECEBEDOR DOS CLIQUES) ---
+        elif dados.startswith("setor_acao_"):
+            # Recebe o "Código de Barras" (os 12 caracteres)
+            chave_setor = dados.replace("setor_acao_", "").strip()
+            bot.answer_callback_query(call.id, f"Acessando setor...")
+            
+            try:
+                matriz = buscar_dados_planilha_com_cache("BD_Acoes")
+                if not matriz or len(matriz) < 2:
+                    bot.send_message(chat_id, "❌ Erro: Planilha de ações vazia!")
+                    return
+
+                import unicodedata
+                def padronizar(texto):
+                    return unicodedata.normalize('NFKD', str(texto)).encode('ASCII', 'ignore').decode('utf-8').strip().lower()
+
+                tickers = []
+                nome_setor_real = "Setor" # Para imprimir bonito na tela depois
+
+                for linha in matriz[1:]:
+                    if len(linha) > 1:
+                        # Limpa o setor da planilha e recorta os 12 primeiros caracteres também
+                        setor_planilha_limpo = padronizar(linha[1])[:12]
+                        
+                        # Se as chaves baterem, é sucesso imediato!
+                        if setor_planilha_limpo == chave_setor:
+                            nome_setor_real = linha[1].strip()
+                            t_limpo = "".join(filter(str.isalnum, linha[0])).upper()
+                            if t_limpo: 
+                                tickers.append(t_limpo)
+
+                markup = InlineKeyboardMarkup(row_width=3)
+                if tickers:
+                    for ticker in sorted(list(set(tickers))):
+                        markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
+                    
+                    texto_resposta = f"📂 **Setor:** {nome_setor_real}\nEscolha a ação desejada:"
+                else:
+                    texto_resposta = f"📭 Nenhuma ação encontrada no setor **{nome_setor_real}**."
+
+                markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_acoes"))
+                
+                bot.edit_message_text(texto_resposta, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+            except Exception as e:
+                print(f"Erro crítico ao abrir setor de ações: {e}")
+                bot.send_message(chat_id, f"❌ Erro ao processar abertura do setor.")
 
         # --- FILTRO DE SETOR DAS AÇÕES (CORRIGIDO - API TELEGRAM) ---
         elif dados.startswith("setor_acao_"):
