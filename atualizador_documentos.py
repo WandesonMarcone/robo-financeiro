@@ -214,7 +214,8 @@ def rotina_processar_pendentes():
                 caminho_arquivo=temp_filename,
                 nome_arquivo=f"{nome_limpo}_{data_ref}_{id_doc}.pdf",
                 ticker=ticker,
-                mes_ref=mes_pasta 
+                mes_ref=mes_pasta,
+                tipo_ativo=doc_db.ativo.tipo # 🔴 O AVISO: Manda o tipo do ativo para o DriveManager
             )
             if link_gerado:
                 doc_db.url_pdf = link_gerado
