@@ -46,11 +46,14 @@ class GoogleDriveManager:
     # ==========================================
     # UPLOADS OFICIAIS
     # ==========================================
-    def upload_pdf_organizado(self, caminho_arquivo, nome_arquivo, ticker, mes_ref):
+    def upload_pdf_organizado(self, caminho_arquivo, nome_arquivo, ticker, mes_ref, tipo_ativo="FII"):
         try:
-            print(f"☁️ Estruturando pastas: Fundos Imobiliários -> {ticker} -> {mes_ref}...")
-            fiis_id = self._obter_ou_criar_pasta("Fundos Imobiliários")
-            ticker_id = self._obter_ou_criar_pasta(ticker, parent_id=fiis_id)
+            # 🔴 O ROTEADOR DINÂMICO: Decide a pasta mestre baseado no tipo!
+            pasta_raiz = "Ações" if str(tipo_ativo).upper() == "ACAO" else "Fundos Imobiliários"
+            
+            print(f"☁️ Estruturando pastas: {pasta_raiz} -> {ticker} -> {mes_ref}...")
+            raiz_id = self._obter_ou_criar_pasta(pasta_raiz)
+            ticker_id = self._obter_ou_criar_pasta(ticker, parent_id=raiz_id)
             mes_id = self._obter_ou_criar_pasta(mes_ref, parent_id=ticker_id)
 
             file_metadata = {'name': nome_arquivo, 'parents': [mes_id]}
