@@ -152,38 +152,46 @@ def callback_geral(call):
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
             bot.edit_message_text("📈 *Módulo de Ações*\nSelecione um Setor ou Favorita:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- FILTRO DE SETOR DAS AÇÕES (BLINDADO) ---
+        # --- FILTRO DE SETOR DAS AÇÕES (BLINDADO COM UNICODE) ---
         elif dados.startswith("setor_acao_"):
             setor_acao = dados.replace("setor_acao_", "").strip()
-            bot.answer_callback_query(call.id, f"Buscando {setor_acao}...")
-
+            
             try:
                 matriz = buscar_dados_planilha_com_cache("BD_Acoes")
-                
                 if not matriz or len(matriz) < 2:
                     bot.answer_callback_query(call.id, "❌ Planilha de ações vazia!", show_alert=True)
                     return
 
+                # 🔴 MÁQUINA DE LIMPEZA: Tira acentos, cê-cedilha e espaços invisíveis
+                import unicodedata
+                def padronizar(texto):
+                    return unicodedata.normalize('NFKD', str(texto)).encode('ASCII', 'ignore').decode('utf-8').strip().lower()
+
+                setor_limpo = padronizar(setor_acao)
                 tickers = []
+
                 for linha in matriz[1:]:
-                    # Compara ignorando maiúsculas/minúsculas e espaços extras
-                    if len(linha) > 1 and linha[1].strip().lower() == setor_acao.lower():
-                        t_limpo = "".join(filter(str.isalnum, linha[0])).upper()
-                        if t_limpo: 
-                            tickers.append(t_limpo)
+                    if len(linha) > 1:
+                        setor_planilha = padronizar(linha[1])
+                        # Agora a comparação é perfeita (ex: "energia" == "energia")
+                        if setor_planilha == setor_limpo:
+                            t_limpo = "".join(filter(str.isalnum, linha[0])).upper()
+                            if t_limpo: 
+                                tickers.append(t_limpo)
 
                 markup = InlineKeyboardMarkup(row_width=3)
                 if tickers:
+                    # O pop-up avisará exatamente quantas empresas achou
+                    bot.answer_callback_query(call.id, f"✅ {len(tickers)} ações encontradas!")
                     for ticker in sorted(list(set(tickers))):
                         markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
-
+                    
                     texto_resposta = f"📂 **Setor:** {setor_acao}\nEscolha a ação desejada:"
                 else:
-                    texto_resposta = f"📭 Nenhum ativo encontrado no setor **{setor_acao}**."
+                    bot.answer_callback_query(call.id, f"⚠️ Nada encontrado no setor {setor_acao}", show_alert=True)
+                    texto_resposta = f"📭 Nenhuma ação encontrada no setor **{setor_acao}**."
 
                 markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_acoes"))
-                
-                # Força a edição da mensagem de forma limpa
                 bot.edit_message_text(texto_resposta, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
             except Exception as e:
