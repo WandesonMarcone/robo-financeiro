@@ -24,37 +24,6 @@ def enviar_menu(message):
     markup.row(InlineKeyboardButton("ℹ️ Ajuda / Sobre", callback_data="menu_ajuda"))
     bot.send_message(message.chat.id, "🤖 *Terminal Institucional* 🤖\nSelecione o módulo de análise abaixo:", reply_markup=markup, parse_mode="Markdown")
 
-@bot.message_handler(commands=['resgatar_acoes'])
-def resgatar_presos(message):
-    from atualizador_documentos import SessionDB, rotina_processar_acoes
-    from pipeline_dados.banco_dados import DocumentosQualitativos, Ativo, TipoAtivo
-    
-    session = SessionDB()
-    bot.send_message(message.chat.id, "🚑 Resgatando documentos presos...")
-    
-    try:
-        # Puxa tudo que tá no "Limbo" e verifica se é de Ação
-        docs = session.query(DocumentosQualitativos).join(Ativo).filter(
-            DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO",
-            Ativo.tipo == TipoAtivo.ACAO
-        ).all()
-        
-        for d in docs:
-            d.status_processamento = "PENDENTE_ACAO" # Coloca a etiqueta certa!
-            
-        session.commit()
-        bot.send_message(message.chat.id, f"✅ {len(docs)} documentos destravados! Ligando a IA...")
-        session.close()
-        
-        # Dá a partida na IA logo em seguida
-        import threading
-        thread_ia = threading.Thread(target=rotina_processar_acoes)
-        thread_ia.start()
-        
-    except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Erro no resgate: {e}")
-        session.close()
-
 @bot.message_handler(commands=['status'])
 def status_banco(message):
     session = SessionDB() 
