@@ -187,11 +187,12 @@ def callback_geral(call):
                     for ticker in sorted(list(set(tickers))):
                         markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
                     
+                    # 🔴 CORREÇÃO AQUI: Usando a variável que contém o nome real decodificado
                     texto_resposta = f"📂 **Setor:** {nome_setor_real}\nEscolha a ação desejada:"
                 else:
                     texto_resposta = f"📭 Nenhuma ação encontrada no setor **{nome_setor_real}**."
 
-                markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_acoes"))
+                markup.add(InlineKeyboardButton("🔙 Voltar aos Setores", callback_data="menu_acoes"))
                 
                 bot.edit_message_text(texto_resposta, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
