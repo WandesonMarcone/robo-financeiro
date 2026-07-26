@@ -95,14 +95,15 @@ class GoogleDriveManager:
             print(f"❌ Erro ao enviar para REVISÃO: {e}")
             return None, None
 
-    def mover_arquivo(self, file_id, ticker, mes_ref):
+    def mover_arquivo(self, file_id, ticker, mes_ref, tipo_ativo="FII"):
         """Arrasta um arquivo já existente do Limbo para a pasta oficial do Ticker"""
         try:
-            print(f"📦 Movendo arquivo {file_id} para {ticker}/{mes_ref}...")
+            pasta_raiz = "Ações" if str(tipo_ativo).upper() == "ACAO" else "Fundos Imobiliários"
+            print(f"📦 Movendo arquivo {file_id} para {pasta_raiz}/{ticker}/{mes_ref}...")
             
-            # 1. Pega as pastas de destino do ativo
-            fiis_id = self._obter_ou_criar_pasta("Fundos Imobiliários")
-            ticker_id = self._obter_ou_criar_pasta(ticker, parent_id=fiis_id)
+            # 1. Pega as pastas de destino do ativo com o roteador
+            raiz_id = self._obter_ou_criar_pasta(pasta_raiz)
+            ticker_id = self._obter_ou_criar_pasta(ticker, parent_id=raiz_id)
             mes_id = self._obter_ou_criar_pasta(mes_ref, parent_id=ticker_id)
 
             # 2. Descobre onde o arquivo está agora para poder tirar de lá
