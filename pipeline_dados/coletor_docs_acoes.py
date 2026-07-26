@@ -82,7 +82,7 @@ class RelatoriosAcoesCVM:
                     tipo_documento=categoria,
                     url_pdf=link_pdf,
                     assunto=assunto,
-                    status_processamento="AGUARDANDO_REVISAO" 
+                    status_processamento="PENDENTE_ACAO" 
                 )
                 self.session.add(novo_doc)
                 docs_salvos += 1
