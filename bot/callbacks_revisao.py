@@ -138,14 +138,25 @@ def processar_revisao(call):
             
             bot.edit_message_text(txt, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
-        # AÇÃO: Usuário decidiu salvar, abre o catálogo de tipos de documento
+        # AÇÃO: Usuário decidiu salvar, abre o catálogo de tipos de documento dinâmico
         elif acao == 'app':
             doc_id = partes[2]
             doc = session.query(DocumentosQualitativos).get(doc_id)
+            tipo_ativo = getattr(doc.ativo.tipo, 'name', str(doc.ativo.tipo).replace("TipoAtivo.", "")).upper()
 
             markup = InlineKeyboardMarkup()
-            for id_tipo, nome_tipo in TIPOS_DOC.items():
-                markup.add(InlineKeyboardButton(text=f"📂 {nome_tipo}", callback_data=f"rev_typ_{doc.id}_{id_tipo}"))
+            
+            # Carrega o catálogo correto baseado no tipo!
+            if tipo_ativo == "ACAO":
+                # Tipos de Ações (pode adicionar mais se quiser)
+                tipos_acoes = ['Fato_Relevante', 'Aviso_aos_Acionistas', 'Comunicado_ao_Mercado', 'Apresentacao_Resultados', 'Documento_Acao']
+                for index, nome_tipo in enumerate(tipos_acoes):
+                    markup.add(InlineKeyboardButton(text=f"📂 {nome_tipo.replace('_', ' ')}", callback_data=f"rev_typ_{doc.id}_ACAO_{index}"))
+            else:
+                # Tipos de FIIs (usa o seu arquivo config.py)
+                for id_tipo, nome_tipo in TIPOS_DOC.items():
+                    markup.add(InlineKeyboardButton(text=f"📂 {nome_tipo}", callback_data=f"rev_typ_{doc.id}_FII_{id_tipo}"))
+                    
             markup.add(InlineKeyboardButton(text="🔙 Cancelar", callback_data=f"rev_d_{doc.id}"))
 
             bot.edit_message_text(f"**Renomear Arquivo**\n\nO que é este documento do `{doc.ativo.ticker}` na verdade?", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
