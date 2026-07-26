@@ -207,6 +207,27 @@ def rodar_docs_acoes(message):
     thread_docs = threading.Thread(target=tarefa_docs_background, args=(ano_escolhido,))
     thread_docs.start()
 
+@bot.message_handler(commands=['processar_acoes_ia'])
+def rodar_ia_acoes(message):
+    bot.send_message(message.chat.id, "🧠 *Iniciando motor de IA para Ações...*\nLendo PDFs da CVM, classificando e enviando ao Drive em segundo plano. Isso pode levar alguns minutos.", parse_mode="Markdown")
+    
+    def tarefa_ia_background():
+        try:
+            # Importa a nova função que criamos no atualizador
+            from atualizador_documentos import rotina_processar_acoes
+            
+            # Dá a partida no motor
+            rotina_processar_acoes()
+            
+            bot.send_message(message.chat.id, "✅ *Processamento de IA (Ações) Concluído!*\nTodos os documentos foram organizados nas pastas do Google Drive.", parse_mode="Markdown")
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ Erro fatal no processamento da IA: {str(e)}")
+            
+    # Roda em segundo plano (Thread) para não congelar o uso do bot no Telegram
+    import threading
+    thread_ia = threading.Thread(target=tarefa_ia_background)
+    thread_ia.start()
+
 @bot.message_handler(commands=['forcar_cvm'])
 def rodar_cvm(message):
     from datetime import datetime
