@@ -161,72 +161,71 @@ def processar_revisao(call):
 
             bot.edit_message_text(f"**Renomear Arquivo**\n\nO que é este documento do `{doc.ativo.ticker}` na verdade?", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
-        # AÇÃO: A MÁGICA - Renomeia no Drive, move de pasta e atualiza o Banco de Dados
+         # AÇÃO: A MÁGICA - Renomeia no Drive, move de pasta e atualiza o Banco de Dados
         elif acao == 'typ':
             doc_id = partes[2]
-            tipo_id = partes[3]
-            tipo_nome_limpo = TIPOS_DOC[tipo_id]
+            tipo_cat = partes[3] # 'ACAO' ou 'FII'
+            tipo_id = partes[4]
 
             bot.answer_callback_query(call.id, "Organizando no Drive...")
 
             doc = session.query(DocumentosQualitativos).get(doc_id)
             file_id = extrair_file_id(doc.url_pdf)
+            
+            # Descobre o nome final do arquivo
+            if tipo_cat == "ACAO":
+                tipos_acoes = ['Fato_Relevante', 'Aviso_aos_Acionistas', 'Comunicado_ao_Mercado', 'Apresentacao_Resultados', 'Documento_Acao']
+                tipo_nome_limpo = tipos_acoes[int(tipo_id)]
+            else:
+                tipo_nome_limpo = TIPOS_DOC[tipo_id]
 
-            # 🔴 CORREÇÃO DA DATA FEIA NAS PASTAS
+            # Corrige a data da pasta
             mes_ref = datetime.now().strftime("%Y-%m")
             if doc.assunto and '-' in doc.assunto:
-                assunto_limpo = doc.assunto.split(" ")[0] # Pega só o "18-05-2026", jogando o "10:00" fora
+                assunto_limpo = doc.assunto.split(" ")[0] 
                 p = assunto_limpo.split('-')
-                if len(p) == 3: mes_ref = f"{p[2]}-{p[1]}"
+                if len(p) == 3: 
+                    # Tenta formatar para YYYY-MM (FII = DD-MM-YYYY, CVM = YYYY-MM-DD)
+                    if len(p[2]) == 4: mes_ref = f"{p[2]}-{p[1]}" # Formato FII (DD-MM-YYYY)
+                    elif len(p[0]) == 4: mes_ref = f"{p[0]}-{p[1]}" # Formato CVM (YYYY-MM-DD)
 
-            # 🔴 CORREÇÃO NO NOME DO PDF (Limpa a hora do título do arquivo)
             assunto_limpo_pdf = doc.assunto.split(" ")[0] if doc.assunto else "Doc"
             novo_nome_pdf = f"{tipo_nome_limpo}_{assunto_limpo_pdf}_{doc.id_b3}.pdf"
 
-            novo_link = drive_manager.mover_e_renomear_arquivo(file_id, doc.ativo.ticker, mes_ref, novo_nome_pdf)
+            # 🔴 ENVIANDO PARA O ROTEADOR COM O TIPO CERTO
+            novo_link = drive_manager.mover_e_renomear_arquivo(file_id, doc.ativo.ticker, mes_ref, novo_nome_pdf, tipo_ativo=tipo_cat)
 
             if novo_link:
                 doc.status_processamento = "SALVO_DRIVE"
-                doc.tipo_documento = tipo_nome_limpo
+                doc.tipo_documento = tipo_nome_limpo.replace('_', ' ')
                 doc.url_pdf = novo_link
                 session.commit()
 
-                # 👇 Definido corretamente como 'ticker' para não dar erro nos botões!
                 ticker = doc.ativo.ticker
-
-                # Conta quantos documentos AINDA restam pendentes para ESTE fundo específico
                 pendentes_restantes = session.query(DocumentosQualitativos).join(Ativo).filter(
                     Ativo.ticker == ticker, 
                     DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
                 ).count()
 
                 markup = InlineKeyboardMarkup(row_width=1)
+                
+                # Para onde volta se acabar?
+                tipo_retorno = tipo_cat.lower() if tipo_cat == "FII" else "acao"
 
                 if pendentes_restantes > 0:
-                    # Se ainda tem documentos para este fundo, oferece o botão de continuar nele
                     markup.add(
-                        InlineKeyboardButton(text=f"👉 Continuar Revisando ({ticker})", callback_data=f"rev_ticker_{ticker}"),
+                        InlineKeyboardButton(text=f"👉 Continuar Revisando ({ticker})", callback_data=f"rev_t_{ticker}"),
                         InlineKeyboardButton(text="🔙 Voltar à Central de Revisão", callback_data="rev_start")
                     )
-
                     texto_resposta = (
-                        f"✅ **Arquivo Guardado com Sucesso!**\n\n"
-                        f"📁 **Ticker:** `{ticker}`\n"
-                        f"📑 **Tipo:** `{tipo_nome_limpo}`\n\n"
-                        f"⚠️ _Ainda restam {pendentes_restantes} documento(s) para revisar neste fundo._"
+                        f"✅ **Arquivo Guardado com Sucesso!**\n\n📁 **Ticker:** `{ticker}`\n📑 **Tipo:** `{tipo_nome_limpo.replace('_', ' ')}`\n\n⚠️ _Ainda restam {pendentes_restantes} documento(s) para revisar neste ativo._"
                     )
                 else:
-                    # Se acabaram os documentos deste fundo, mostra os dois botões de escolha:
                     markup.add(
-                        InlineKeyboardButton(text=f"🏢 Ir para o Painel do {ticker}", callback_data=f"painel_{ticker}_fii"),
+                        InlineKeyboardButton(text=f"🏢 Ir para o Painel de {ticker}", callback_data=f"painel_{ticker}_{tipo_retorno}"),
                         InlineKeyboardButton(text="🔙 Voltar para a Central de Revisão", callback_data="rev_start")
                     )
-
-                    texto_resposta = (
-                        f"🎉 **Fila do {ticker} Concluída!**\n\n"
-                        f"Não há mais nenhum documento pendente de revisão para este fundo.\n\n"
-                        f"O que você deseja fazer agora?"
-                    )
+                    texto_resposta = f"🎉 **Fila de {ticker} Concluída!**\n\nNão há mais nenhum documento pendente para este ativo."
 
                 bot.edit_message_text(texto_resposta, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
             else:
