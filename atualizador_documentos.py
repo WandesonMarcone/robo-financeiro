@@ -236,3 +236,96 @@ def rotina_de_atualizacao_em_massa():
     novos_encontrados = rotina_de_coleta_b3()
     rotina_processar_pendentes()
     return f"Varredura concluída. Novos encontrados: {novos_encontrados}"
+
+def rotina_processar_acoes():
+    """Esteira exclusiva da Inteligência Artificial para documentos da CVM"""
+    drive_manager = GoogleDriveManager()
+    session = SessionDB()
+
+    # Puxa apenas a fila de empresas
+    pendentes = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento == "PENDENTE_ACAO").all()
+    print(f"⚙️ Processando {len(pendentes)} documentos de AÇÕES na fila...")
+
+    for doc_db in pendentes:
+        ticker = doc_db.ativo.ticker
+        url_pdf = doc_db.url_pdf
+        
+        # Garante o formato da pasta: Ex: 2026-07
+        mes_pasta = doc_db.data_publicacao.strftime("%Y-%m") if doc_db.data_publicacao else datetime.now().strftime("%Y-%m")
+        data_str = doc_db.data_publicacao.strftime("%Y-%m-%d") if doc_db.data_publicacao else "SEM_DATA"
+
+        print(f"🔄 IA Lendo: {ticker} (Data: {data_str})...")
+
+        # 1. Download direto do link da CVM
+        try:
+            # Baixa o arquivo direto do link da B3/CVM salvo no banco
+            resposta = requests.get(url_pdf, timeout=15)
+            if resposta.status_code != 200:
+                doc_db.status_processamento = "ERRO_DOWNLOAD"
+                session.commit()
+                continue
+            pdf_bytes = resposta.content
+        except Exception as e:
+            print(f"⚠️ Erro ao baixar PDF CVM: {e}")
+            doc_db.status_processamento = "ERRO_DOWNLOAD"
+            session.commit()
+            continue
+
+        temp_filename = f"/tmp/{ticker}_cvm_temp.pdf"
+        with open(temp_filename, "wb") as f: f.write(pdf_bytes)
+
+        # 2. Extração de Texto para a IA
+        texto_pdf = ""
+        try:
+            reader = PyPDF2.PdfReader(temp_filename)
+            if len(reader.pages) > 0: 
+                texto_pdf = reader.pages[0].extract_text() or ""
+        except: pass
+
+        texto_pdf = texto_pdf.strip()
+        
+        # Chama o mesmo cérebro Groq que você já usa nos FIIs!
+        nome_ia = classificar_documento_com_ia(doc_db.tipo_documento, texto_pdf)
+        nome_limpo = "".join([c for c in str(nome_ia).title() if c.isalnum() or c in (' ', '_', '-')]).strip()
+
+        if len(nome_limpo) < 3: 
+            nome_limpo = "".join([c for c in str(doc_db.tipo_documento).title() if c.isalnum() or c in (' ', '_', '-')]).strip()
+            if len(nome_limpo) < 3: nome_limpo = "Documento_Acao"
+
+        # 3. Decisão de Roteamento
+        # Ao contrário dos FIIs, a CVM nem sempre coloca o Ticker no texto do PDF, então tiramos essa trava, 
+        # mas mantemos a trava de "PDF em branco/Imagem" para mandar pra revisão.
+        if not texto_pdf:
+            # 🚧 Suspeito/Scan: Manda pra pasta REVISÃO
+            file_id, link_gerado = drive_manager.upload_pdf_revisao(
+                caminho_arquivo=temp_filename,
+                nome_arquivo=f"REVISAR_{ticker}_{nome_limpo}_{data_str}.pdf"
+            )
+            if file_id:
+                doc_db.status_processamento = "AGUARDANDO_REVISAO"
+                doc_db.url_pdf = link_gerado
+                session.commit()
+                print(f"🚧 {ticker} enviado para revisão manual.")
+        else:
+            # ✅ Seguro: O Roteador Dinâmico envia para a pasta 'Ações'
+            link_gerado = drive_manager.upload_pdf_organizado(
+                caminho_arquivo=temp_filename,
+                nome_arquivo=f"{nome_limpo}_{data_str}.pdf",
+                ticker=ticker,
+                mes_ref=mes_pasta,
+                tipo_ativo="ACAO" # 🔴 AVISANDO O CARTEIRO!
+            )
+            if link_gerado:
+                doc_db.url_pdf = link_gerado
+                doc_db.tipo_documento = nome_limpo
+                doc_db.status_processamento = "SALVO_DRIVE" # 🟢 Libera o botão no Telegram!
+                print(f"✅ Sucesso: Drive Atualizado -> {nome_limpo}")
+            else:
+                doc_db.status_processamento = "ERRO_DRIVE"
+
+        session.commit()
+        if os.path.exists(temp_filename): os.remove(temp_filename)
+        
+        time.sleep(3) # Respiro para não tomar bloqueio da API do Google
+
+    session.close()
