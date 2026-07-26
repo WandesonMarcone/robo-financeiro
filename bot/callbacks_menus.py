@@ -265,16 +265,30 @@ def callback_geral(call):
         elif call.data.startswith("rev_t_"):
             ticker = call.data.replace("rev_t_", "")
             bot.answer_callback_query(call.id, f"Abrindo pendências de {ticker}...")
+
+            # Faz uma consulta rápida para descobrir se é FII ou Ação
+            from atualizador_documentos import SessionDB
+            from pipeline_dados.banco_dados import Ativo
+            session = SessionDB()
+            ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
             
-            # Como a lógica completa de exibir os botões de revisão está na sua rota da Central,
-            # nós criamos uma ponte que avisa o usuário e cria um botão direto pra lá!
+            tipo_ativo = "fii" # Padrão de segurança
+            if ativo:
+                if hasattr(ativo.tipo, 'name'):
+                    tipo_ativo = ativo.tipo.name.lower()
+                else:
+                    tipo_ativo = str(ativo.tipo).replace("TipoAtivo.", "").lower()
+            session.close()
+
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("⚖️ Ir para a Central de Revisão", callback_data="rev_start"))
-            markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_fii"))
             
+            # 🔴 AGORA O BOTÃO DE VOLTAR É DINÂMICO!
+            markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
+
             txt = (
                 f"⚠️ **Auditoria Necessária: {ticker}**\n\n"
-                f"Este fundo possui documentos escaneados ou suspeitos que a IA não conseguiu ler perfeitamente.\n\n"
+                f"Este ativo possui documentos escaneados ou suspeitos que a IA não conseguiu ler perfeitamente.\n\n"
                 f"Por favor, acesse a **Central de Revisão** para categorizá-los e enviá-los ao seu Google Drive."
             )
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
