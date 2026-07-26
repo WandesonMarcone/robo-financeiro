@@ -23,9 +23,10 @@ def comando_painel_revisao(message):
     enviar_painel_tickers(message.chat.id)
 
 def enviar_painel_tickers(chat_id, message_id=None):
-    """Busca no banco todos os documentos marcados como suspeitos e agrupa por Fundo"""
+    """Busca no banco todos os documentos marcados como suspeitos e agrupa por Ativo (FII/Ação)"""
     session = SessionDB()
     try:
+        # Puxa TUDO que está aguardando revisão (sem filtrar por tipo)
         pendentes = session.query(DocumentosQualitativos).filter_by(status_processamento="AGUARDANDO_REVISAO").all()
 
         if not pendentes:
@@ -34,14 +35,24 @@ def enviar_painel_tickers(chat_id, message_id=None):
             else: bot.send_message(chat_id, msg)
             return
 
-        tickers = sorted(list(set([doc.ativo.ticker for doc in pendentes])))
+        # Agrupa pelos tickers únicos
+        tickers_unicos = sorted(list(set([doc.ativo.ticker for doc in pendentes])))
         markup = InlineKeyboardMarkup()
 
-        for t in tickers:
-            qtd = len([d for d in pendentes if d.ativo.ticker == t])
-            markup.add(InlineKeyboardButton(text=f"📁 {t} ({qtd} docs)", callback_data=f"rev_t_{t}"))
+        for t in tickers_unicos:
+            docs_do_ativo = [d for d in pendentes if d.ativo.ticker == t]
+            qtd = len(docs_do_ativo)
+            
+            # Descobre se é Ação ou FII só pelo primeiro documento da lista
+            primeiro_ativo = docs_do_ativo[0].ativo
+            tipo_ativo = getattr(primeiro_ativo.tipo, 'name', str(primeiro_ativo.tipo).replace("TipoAtivo.", "")).upper()
+            
+            # Coloca um ícone visual para você saber o que está abrindo!
+            icone = "🏢" if tipo_ativo == "FII" else "📈"
+            
+            markup.add(InlineKeyboardButton(text=f"{icone} {t} ({qtd} docs)", callback_data=f"rev_t_{t}"))
 
-        msg = "⚠️ **Central de Revisão**\n\nEstes FIIs possuem documentos suspeitos ou em formato de imagem. Selecione um para analisar:"
+        msg = "⚠️ **Central de Revisão Híbrida**\n\nEstes FIIs e Ações possuem documentos suspeitos ou em formato de imagem. Selecione um para analisar:"
         if message_id:
             bot.edit_message_text(msg, chat_id, message_id, reply_markup=markup, parse_mode="Markdown")
         else:
@@ -61,7 +72,7 @@ def processar_revisao(call):
         if acao == 'start':
             enviar_painel_tickers(call.message.chat.id, call.message.message_id)
 
-        # AÇÃO: Mostrar lista de documentos suspeitos de um fundo específico
+        # AÇÃO: Mostrar lista de documentos suspeitos de um ativo específico
         elif acao == 't':
             ticker = partes[2] 
             pendentes = session.query(DocumentosQualitativos).join(Ativo).filter(
@@ -69,17 +80,22 @@ def processar_revisao(call):
                 DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
             ).all()
 
+            if not pendentes:
+                bot.answer_callback_query(call.id, "Nenhum documento pendente para este ativo.")
+                return
+
             markup = InlineKeyboardMarkup()
             for doc in pendentes:
-                # 🎨 Lógica de embelezamento: Corta a hora (10:00) e troca - por /
                 data_limpa = doc.assunto.split(" ")[0].replace("-", "/") if doc.assunto else "Data N/A"
-                
-                # Deixa o texto do botão limpo e profissional
                 btn_text = f"📅 {data_limpa} (Cód: {doc.id_b3})"
                 markup.add(InlineKeyboardButton(text=btn_text, callback_data=f"rev_d_{doc.id}"))
 
+            # Descobre o tipo para criar o botão de "Voltar ao Painel" certo
+            primeiro_ativo = pendentes[0].ativo
+            tipo_ativo = getattr(primeiro_ativo.tipo, 'name', str(primeiro_ativo.tipo).replace("TipoAtivo.", "")).lower()
+
             markup.add(
-                 InlineKeyboardButton(text=f"🏢 Ir para o Painel do {ticker}", callback_data=f"painel_{ticker}_fii"),
+                 InlineKeyboardButton(text=f"🏢 Ir para o Painel de {ticker}", callback_data=f"painel_{ticker}_{tipo_ativo}"),
                  InlineKeyboardButton(text="🔙 Voltar à Central", callback_data="rev_start")
             )
 
