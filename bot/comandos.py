@@ -176,7 +176,7 @@ def acionar_varredura_manual(message):
 @bot.message_handler(commands=['forcar_docs_acoes'])
 def rodar_docs_acoes(message):
     from datetime import datetime
-    
+
     # Verifica se você digitou um ano (Ex: /forcar_docs_acoes 2025). Se não, usa o atual.
     texto = message.text.split()
     ano_escolhido = datetime.now().year
@@ -184,24 +184,33 @@ def rodar_docs_acoes(message):
         ano_escolhido = int(texto[1])
 
     bot.send_message(message.chat.id, f"⏳ *Iniciando varredura de PDFs (Ações) para {ano_escolhido}...*\nBuscando Fatos Relevantes na CVM em segundo plano.", parse_mode="Markdown")
-    
+
     def tarefa_docs_background(ano):
         try:
             # Importa o novo módulo que criamos
             from pipeline_dados.coletor_docs_acoes import RelatoriosAcoesCVM
             from atualizador_documentos import SessionDB
-            
+
             session = SessionDB()
             coletor = RelatoriosAcoesCVM(session)
-            
+
             # Roda a função que vasculha a base IPE da CVM
             docs_baixados = coletor.vasculhar_documentos(ano)
             session.close()
-            
+
             bot.send_message(message.chat.id, f"✅ *Varredura de Ações ({ano}) Concluída!*\n📥 Documentos novos enviados para a fila do Drive: {docs_baixados}", parse_mode="Markdown")
+
+            # 🔴 GATILHO AUTOMÁTICO: Aciona o motor da IA logo após a varredura
+            # A IA só será ligada se o robô encontrou 1 ou mais documentos novos.
+            if isinstance(docs_baixados, int) and docs_baixados > 0:
+                bot.send_message(message.chat.id, "🔄 *Gatilho Automático:* Repassando a fila para a Inteligência Artificial classificar...", parse_mode="Markdown")
+                rodar_ia_acoes(message) # Chama a função da IA passando a mensagem original
+            else:
+                bot.send_message(message.chat.id, "📭 Nenhum documento novo foi baixado agora. A IA foi dispensada.", parse_mode="Markdown")
+
         except Exception as e:
             bot.send_message(message.chat.id, f"❌ Erro ao baixar docs de ações: {str(e)}")
-            
+
     # Inicia a tarefa em segundo plano
     import threading
     thread_docs = threading.Thread(target=tarefa_docs_background, args=(ano_escolhido,))
