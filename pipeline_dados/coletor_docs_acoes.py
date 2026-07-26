@@ -33,40 +33,44 @@ class RelatoriosAcoesCVM:
         return pd.read_csv(io.BytesIO(response.content), compression='zip', sep=';', encoding='latin1')
 
     def vasculhar_documentos(self, ano):
-        # 1. Pega as Ações cadastradas no seu banco de dados
         ativos_db = self.session.query(Ativo).filter(Ativo.tipo == TipoAtivo.ACAO).all()
         if not ativos_db:
             return "Nenhuma ação cadastrada no banco de dados."
             
         mapa_ativos = {self.formatar_cnpj(a.cnpj): a for a in ativos_db if a.cnpj}
-        
-        # 2. Baixa o CSV da CVM
         df_ipe = self.baixar_dados_ipe(ano)
         
-        # 3. Filtra apenas empresas do seu banco e os documentos que importam
+        # 🔴 MAPEADOR INTELIGENTE CVM: Encontra as colunas independente do nome exato!
+        col_cnpj = next((col for col in df_ipe.columns if 'CNPJ' in col.upper()), 'CNPJ_Companhia')
+        col_link = next((col for col in df_ipe.columns if 'LINK' in col.upper()), 'Link_Download')
+        col_data = next((col for col in df_ipe.columns if 'DATA' in col.upper()), 'Data_Referencia')
+        col_categoria = next((col for col in df_ipe.columns if 'CATEGORIA' in col.upper()), 'Categoria')
+        col_assunto = next((col for col in df_ipe.columns if 'ASSUNTO' in col.upper()), 'Assunto')
+
         tipos_desejados = ['Fato Relevante', 'Aviso aos Acionistas', 'Comunicado ao Mercado']
+        
+        # Filtra a planilha do governo
         df_filtrado = df_ipe[
-            (df_ipe['CNPJ_CIA'].isin(mapa_ativos.keys())) & 
-            (df_ipe['CATEGORIA'].isin(tipos_desejados))
+            (df_ipe[col_cnpj].isin(mapa_ativos.keys())) & 
+            (df_ipe[col_categoria].isin(tipos_desejados))
         ]
         
         docs_salvos = 0
-        
         for index, row in df_filtrado.iterrows():
-            cnpj_doc = str(row['CNPJ_CIA']).strip()
+            cnpj_doc = str(row[col_cnpj]).strip()
             ativo = mapa_ativos.get(cnpj_doc)
-            
-            link_pdf = str(row['LINK_ARQ']).strip()
-            data_doc_str = str(row['DATA_REFERENCIA']).strip()
-            categoria = str(row['CATEGORIA']).strip()
-            assunto = str(row['ASSUNTO']).strip()
+            link_pdf = str(row[col_link]).strip()
+            data_doc_str = str(row[col_data]).strip()
+            categoria = str(row[col_categoria]).strip()
+            assunto = str(row[col_assunto]).strip()
             
             try:
-                data_pub = datetime.strptime(data_doc_str, "%Y-%m-%d").date()
+                # Alguns arquivos da CVM vêm com hora junto com a data, o split resolve isso
+                data_limpa = data_doc_str.split(" ")[0]
+                data_pub = datetime.strptime(data_limpa, "%Y-%m-%d").date()
             except:
                 continue 
                 
-            # Evita duplicidade usando o link do documento
             existe = self.session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.url_pdf == link_pdf
             ).first()
@@ -78,7 +82,6 @@ class RelatoriosAcoesCVM:
                     tipo_documento=categoria,
                     url_pdf=link_pdf,
                     assunto=assunto,
-                    # 🔴 O PULO DO GATO: Marcamos como AGUARDANDO_REVISAO para o Google Drive capturar!
                     status_processamento="AGUARDANDO_REVISAO" 
                 )
                 self.session.add(novo_doc)
