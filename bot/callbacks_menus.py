@@ -280,6 +280,71 @@ def callback_geral(call):
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # ==========================================
+        # --- CENTRAL DE REVISÃO (FIIs e AÇÕES) ---
+        # ==========================================
+        elif dados.startswith("rev_C_") or dados.startswith("rev_A_"):
+            # Exemplo de callback: rev_C_{db_id}_{file_id}
+            partes = dados.split("_")
+            acao = partes[1] # 'C' para Confirmar, 'A' para Apagar
+            db_id = partes[2]
+            file_id = partes[3]
+
+            bot.answer_callback_query(call.id, "Processando sua decisão...")
+
+            # Faz os imports necessários
+            from atualizador_documentos import SessionDB
+            from pipeline_dados.banco_dados import DocumentosQualitativos
+            from modules.GoogleDriveManager import GoogleDriveManager
+
+            session = SessionDB()
+            drive = GoogleDriveManager()
+
+            try:
+                doc = session.query(DocumentosQualitativos).filter_by(id=db_id).first()
+                if not doc:
+                    bot.edit_message_text("❌ Documento não encontrado no banco de dados.", chat_id, msg_id)
+                    return
+
+                ativo = doc.ativo
+                
+                # 🔴 IDENTIFICADOR INTELIGENTE: Descobre o tipo para o roteador do Drive
+                if hasattr(ativo.tipo, 'name'):
+                    tipo_str = ativo.tipo.name 
+                else:
+                    tipo_str = str(ativo.tipo).replace("TipoAtivo.", "")
+
+                if acao == "C":
+                    # CONFIRMAR E ENVIAR PARA A PASTA
+                    mes_ref = doc.data_publicacao.strftime("%Y-%m") if doc.data_publicacao else "0000-00"
+                    
+                    # Chama o Drive Manager passando o tipo_ativo!
+                    link = drive.mover_arquivo(file_id, ativo.ticker, mes_ref, tipo_ativo=tipo_str)
+                    
+                    if link:
+                        doc.url_pdf = link
+                        doc.status_processamento = "SALVO_DRIVE"
+                        session.commit()
+                        bot.edit_message_text(f"✅ **{ativo.ticker}** aprovado! Arquivo movido para a pasta oficial de {tipo_str}.", chat_id, msg_id, parse_mode="Markdown")
+                    else:
+                        bot.edit_message_text("❌ Erro de permissão ao mover o arquivo no Google Drive.", chat_id, msg_id)
+                        
+                elif acao == "A":
+                    # APAGAR (LIXO)
+                    sucesso = drive.deletar_arquivo(file_id)
+                    if sucesso:
+                        session.delete(doc)
+                        session.commit()
+                        bot.edit_message_text(f"🗑️ Arquivo de **{ativo.ticker}** descartado e apagado da nuvem.", chat_id, msg_id, parse_mode="Markdown")
+                    else:
+                        bot.edit_message_text("❌ Erro ao tentar apagar o arquivo do Drive.", chat_id, msg_id)
+
+            except Exception as e:
+                print(f"Erro na central de revisão: {e}")
+                bot.edit_message_text(f"❌ Falha crítica ao processar a revisão: {e}", chat_id, msg_id)
+            finally:
+                session.close()
+
+        # ==========================================
         # --- NÍVEL 1: DADOS (Indicadores e Balanços) ---
         # ==========================================
         elif dados.startswith("dados_"):
