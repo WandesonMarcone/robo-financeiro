@@ -178,14 +178,14 @@ def acionar_varredura_manual(message):
             
             batch_updates, msg_out, aba_fiis = rodar_garimpo_fiis(planilha, agora, agora.strftime("%H:%M"), sp_tz)
             
-            # --- CORREÇÃO DA LÓGICA DE AVISO ---
-            if batch_updates:
+            # --- CORREÇÃO DA LÓGICA DE AVISO (Blindada contra Erro 400) ---
+            if batch_updates and "requests" in batch_updates and len(batch_updates["requests"]) > 0:
                 planilha.batch_update(batch_updates)
-                
+
                 # Limpa o cache da planilha
                 CACHE_PLANILHA["BD_FIIs"]["dados"] = None
                 CACHE_PLANILHA["BD_FIIs"]["timestamp"] = 0
-                
+
                 msg_planilha = f"\n\n{msg_out}"
             else:
                 msg_planilha = "\n\n📊 *Planilha:* Nenhuma atualização de cotação necessária agora."
