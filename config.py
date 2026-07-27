@@ -111,7 +111,7 @@ MAPA_ISCAS_MASTER = {
     'CACR11': 'CARTESIA RECEBÍVEIS'
 }
 
-TIPOS_DOC = {
+TIPOS_DOC_FII = {
     "0": "Relatorio Gerencial",
     "1": "Fato Relevante",
     "2": "Informe Mensal",
@@ -123,6 +123,16 @@ TIPOS_DOC = {
     "8": "Apresentação Trimestral De Resultados",
     "9": "Proposta Emissão de Cotas",
     "10": "Outros"
+}
+
+TIPOS_DOC_ACAO = {
+    "0": "Fato Relevante",
+    "1": "Aviso aos Acionistas",
+    "2": "Comunicado ao Mercado",
+    "3": "Demonstracoes Financeiras",
+    "4": "Apresentação de Resultados",
+    "5": "Relatório de Sustentabilidade",
+    "6": "Outros"
 }
 
 # ==========================================
