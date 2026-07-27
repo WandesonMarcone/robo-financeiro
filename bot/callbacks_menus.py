@@ -24,6 +24,7 @@ def callback_geral(call):
 
         # --- NAVEGAÇÃO BÁSICA ---
         if dados == "voltar_menu":
+            bot.answer_callback_query(call.id)
             markup = InlineKeyboardMarkup()
             markup.row(InlineKeyboardButton("🏢 FIIs (Imobiliários)", callback_data="menu_fiis"),
                        InlineKeyboardButton("📈 Ações (Empresas)", callback_data="menu_acoes"))
@@ -32,20 +33,27 @@ def callback_geral(call):
             bot.edit_message_text("🤖 *Terminal Institucional* 🤖\nSelecione o módulo de análise abaixo:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         elif dados == "menu_ajuda":
+            bot.answer_callback_query(call.id)
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(
                 InlineKeyboardButton("🧠 Entenda os Comandos", callback_data="ajuda_comandos"),
                 InlineKeyboardButton("🚀 Roadmap de Desenvolvimento", callback_data="ajuda_roadmap"),
                 InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu")
             )
-            texto = "ℹ️ *Painel de Ajuda*\n\nProjeto iniciado em Setembro/2025. O sistema está em fase de evolução para um ecossistema completo de análise de ativos."
+            texto = (
+                "ℹ️ *Painel de Controle e Ajuda*\n\n"
+                "Este é o seu Terminal de Análise Institucional. Ele cruza dados em tempo real da B3, CVM e Yahoo Finance.\n\n"
+                "📋 *Principais Comandos:*\n"
+                "`/revisao` - Abre a central de triagem de documentos pendentes (FIIs e Ações).\n"
+                "`/forcar_varredura` - Atualiza as cotações e indicadores das Ações na nuvem.\n"
+                "`/forcar_cvm` - Busca novos relatórios e balanços oficiais na CVM.\n\n"
+                "⚙️ *Motor: PostgreSQL (Neon) + Google Drive + IA*"
+            )
             bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # =======================================================
-        # --- MÓDULO FIIs HIERÁRQUICO DINÂMICO (CORRIGIDO) ---
+        # --- MÓDULO FIIs HIERÁRQUICO DINÂMICO ---
         # =======================================================
-
-        # --- 1ª CAMADA: MACRO CATEGORIAS (Coluna B: Tijolo, Papel, Híbrido...) ---
         elif dados == "menu_fiis":
             bot.answer_callback_query(call.id, "Carregando FIIs...")
             markup = InlineKeyboardMarkup(row_width=2)
@@ -57,13 +65,7 @@ def callback_geral(call):
             try:
                 matriz = buscar_dados_planilha_com_cache("BD_FIIs")
                 if matriz:
-                    # Pega as Macro Categorias da Coluna B (índice 1)
-                    macro_tipos = sorted(list(set(
-                        linha[1].strip() for linha in matriz[1:] 
-                        if len(linha) > 1 and linha[1].strip()
-                    )))
-
-                    # Cria um botão para cada Macro (Ex: Tijolo, Papel, Híbrido)
+                    macro_tipos = sorted(list(set(linha[1].strip() for linha in matriz[1:] if len(linha) > 1 and linha[1].strip())))
                     for macro in macro_tipos:
                         markup.add(InlineKeyboardButton(f"🏢 {macro}", callback_data=f"macro_fii_{macro}"))
             except Exception as e:
@@ -72,7 +74,6 @@ def callback_geral(call):
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
             bot.edit_message_text("🏢 *Módulo FIIs - Selecione a Categoria:*", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- 2ª CAMADA: SUB-SETORES DA MACRO (Coluna C: Logística, Shopping...) ---
         elif call.data.startswith("macro_fii_"):
             macro_escolhida = call.data.replace("macro_fii_", "").strip()
             bot.answer_callback_query(call.id, f"Abrindo {macro_escolhida}...")
@@ -80,24 +81,13 @@ def callback_geral(call):
             try:
                 matriz = buscar_dados_planilha_com_cache("BD_FIIs")
                 markup = InlineKeyboardMarkup(row_width=2)
+                sub_setores = sorted(list(set(linha[2].strip() for linha in matriz[1:] if len(linha) > 2 and linha[1].strip().lower() == macro_escolhida.lower() and linha[2].strip())))
 
-                # Busca na Coluna C (índice 2) os sub-setores pertencentes à Macro clicada (Coluna B)
-                sub_setores = sorted(list(set(
-                    linha[2].strip() for linha in matriz[1:] 
-                    if len(linha) > 2 and linha[1].strip().lower() == macro_escolhida.lower() and linha[2].strip()
-                )))
-
-                # Se houver múltiplos sub-setores (Ex: Tijolo possui Logística, Shoppings, etc)
                 if len(sub_setores) > 1:
                     for sub in sub_setores:
-                        # Passa a Macro e o Sub-setor juntos via '___' para isolar a busca
                         markup.add(InlineKeyboardButton(f"📁 {sub}", callback_data=f"subsetor_fii_{macro_escolhida}___{sub}"))
                 else:
-                    # Se não houver sub-divisões (Ex: Papel), lista os ativos diretamente
-                    tickers = [
-                        linha[0].strip().upper() for linha in matriz[1:] 
-                        if len(linha) > 1 and linha[1].strip().lower() == macro_escolhida.lower()
-                    ]
+                    tickers = [linha[0].strip().upper() for linha in matriz[1:] if len(linha) > 1 and linha[1].strip().lower() == macro_escolhida.lower()]
                     for tkr in sorted(tickers):
                         markup.add(InlineKeyboardButton(f"🏢 {tkr}", callback_data=f"painel_{tkr}_fii"))
 
@@ -106,35 +96,29 @@ def callback_geral(call):
             except Exception as e:
                 print(f"Erro ao abrir macro: {e}")
 
-        # --- 3ª CAMADA: ATIVOS DO SUB-SETOR (Ex: Tijolo -> Logística -> VILG11) ---
         elif call.data.startswith("subsetor_fii_"):
             partes = call.data.replace("subsetor_fii_", "").split("___")
             macro, sub = partes[0], partes[1]
             bot.answer_callback_query(call.id, f"Buscando {sub}...")
 
             matriz = buscar_dados_planilha_com_cache("BD_FIIs")
-
-            # Filtra ativos onde Coluna B == Macro E Coluna C == Sub-setor
-            tickers = [
-                linha[0].strip().upper() for linha in matriz[1:]
-                if len(linha) > 2 and linha[1].strip().lower() == macro.lower() and linha[2].strip().lower() == sub.lower()
-            ]
+            tickers = [linha[0].strip().upper() for linha in matriz[1:] if len(linha) > 2 and linha[1].strip().lower() == macro.lower() and linha[2].strip().lower() == sub.lower()]
 
             markup = InlineKeyboardMarkup(row_width=3)
             for ticker in sorted(tickers):
                 markup.add(InlineKeyboardButton(f"🏢 {ticker}", callback_data=f"painel_{ticker}_fii"))
 
-            # Voltar para a Macro correspondente
             markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=f"macro_fii_{macro}"))
             bot.edit_message_text(f"📂 **Segmento:** {sub}\nEscolha o ativo:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-         # --- 1ª CAMADA: MACRO-SETORES DAS AÇÕES (DINÂMICO + FIXO) ---
+        # =======================================================
+        # --- MÓDULO AÇÕES (DINÂMICO + FIXO + EMOJIS) ---
+        # =======================================================
         elif dados == "menu_acoes":
             bot.answer_callback_query(call.id, "Carregando Ações...")
             from config import MAPA_SETORES_B3
             from services.planilhas import buscar_dados_planilha_com_cache
             
-            # 🔴 LÊ A PLANILHA PRIMEIRO
             matriz = buscar_dados_planilha_com_cache("BD_Acoes")
             tickers_planilha = [linha[0].strip().upper() for linha in matriz[1:] if len(linha) > 0 and linha[0].strip()] if matriz else []
 
@@ -144,23 +128,14 @@ def callback_geral(call):
                 InlineKeyboardButton("🔥 Oportunidades", callback_data="oportunidades_acoes")
             )
 
-            # 🎨 Emojis exclusivos por setor
             emojis = {
-                "Petróleo, Gás & Biocombustíveis": "🛢️",
-                "Financeiro": "🏦",
-                "Utilidade Pública": "⚡",
-                "Materiais Básicos": "🧱",
-                "Consumo Cíclico": "🛍️",
-                "Consumo Não-Cíclico": "🛒",
-                "Saúde": "🏥",
-                "Bens Industriais": "🚜",
-                "Tecnologia & Telecom": "💻",
-                "Agronegócio": "🌱"
+                "Petróleo, Gás & Biocombustíveis": "🛢️", "Financeiro": "🏦", "Utilidade Pública": "⚡",
+                "Materiais Básicos": "🧱", "Consumo Cíclico": "🛍️", "Consumo Não-Cíclico": "🛒",
+                "Saúde": "🏥", "Bens Industriais": "🚜", "Tecnologia & Telecom": "💻", "Agronegócio": "🌱"
             }
 
             lista_macros = list(MAPA_SETORES_B3.keys())
             for idx, macro in enumerate(lista_macros):
-                # 🔴 O PULO DO GATO: Só cria o botão se o setor tiver alguma ação que você possui na planilha!
                 tem_acao = False
                 for subsetor, ativos in MAPA_SETORES_B3[macro].items():
                     if any(t in tickers_planilha for t in ativos):
@@ -174,7 +149,6 @@ def callback_geral(call):
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
             bot.edit_message_text("📈 *Módulo Ações - Selecione o Setor:*", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- 2ª CAMADA: SUB-SETORES (Ocultando vazios) ---
         elif dados.startswith("macro_ac_"):
             from config import MAPA_SETORES_B3
             from services.planilhas import buscar_dados_planilha_com_cache
@@ -192,15 +166,12 @@ def callback_geral(call):
             subsetores = list(MAPA_SETORES_B3[nome_macro].keys())
             for idx_sub, sub in enumerate(subsetores):
                 ativos_do_sub = MAPA_SETORES_B3[nome_macro][sub]
-                
-                # 🔴 Só cria o botão do subsetor se você tiver alguma empresa dele
                 if any(t in tickers_planilha for t in ativos_do_sub):
                     markup.add(InlineKeyboardButton(f"📂 {sub}", callback_data=f"sub_ac_{idx_macro}_{idx_sub}"))
                 
             markup.add(InlineKeyboardButton("🔙 Voltar aos Setores", callback_data="menu_acoes"))
             bot.edit_message_text(f"🏭 **Setor:** {nome_macro}\nSelecione o segmento de atuação:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- 3ª CAMADA: LISTA DE EMPRESAS (Filtro final) ---
         elif dados.startswith("sub_ac_"):
             from config import MAPA_SETORES_B3
             from services.planilhas import buscar_dados_planilha_com_cache
@@ -217,14 +188,10 @@ def callback_geral(call):
             nome_sub = list(MAPA_SETORES_B3[nome_macro].keys())[idx_sub]
             
             bot.answer_callback_query(call.id, f"Buscando empresas...")
-            
             tickers_do_subsetor = MAPA_SETORES_B3[nome_macro][nome_sub]
-            
-            # 🔴 Filtra a lista fina: só mostra a empresa se ela existir na planilha
             tickers_validos = [t for t in tickers_do_subsetor if t in tickers_planilha]
             
             markup = InlineKeyboardMarkup(row_width=3)
-            
             if tickers_validos:
                 for ticker in sorted(tickers_validos):
                     markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
@@ -235,32 +202,26 @@ def callback_geral(call):
             markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=f"macro_ac_{idx_macro}"))
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- FAVORITOS ---            
+        # --- FAVORITOS E OPORTUNIDADES ---            
         elif dados in ["favoritos_fiis", "favoritos_acoes"]:
             bot.answer_callback_query(call.id, "Buscando seus favoritos...")
-            
-            # Identifica contexto baseada nos dados do callback
             is_fii = (dados == "favoritos_fiis")
             tipo = "fii" if is_fii else "acao"
             menu_voltar = "menu_fiis" if is_fii else "menu_acoes"
 
-            # Busca a lista já pronta do seu config via a função que criamos
             favs = buscar_favoritos(tipo)
-            
             markup = InlineKeyboardMarkup(row_width=3)
             
             if favs:
-                # Cria os botões para cada ticker favorito
                 botoes = [InlineKeyboardButton(tkr, callback_data=f"painel_{tkr}_{tipo}") for tkr in favs]
                 markup.add(*botoes)
                 texto = f"⭐ *Seus Ativos Favoritos ({'FIIs' if is_fii else 'Ações'})*\n\nSelecione um para acessar o painel:"
             else:
-                texto = "📭 *Nenhum favorito encontrado.* \nVerifique se o seu config.py contém as listas `FIXAS_FIIS` ou `FIXAS_ACOES` preenchidas."
+                texto = "📭 *Nenhum favorito encontrado.* \nVerifique se o seu config.py contém as listas preenchidas."
 
             markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
             bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- OPORTUNIDADES ---
         elif dados in ["oportunidades_fiis", "oportunidades_acoes"]:
             bot.answer_callback_query(call.id, "Analisando o mercado...")
             is_fii = (dados == "oportunidades_fiis")
@@ -270,7 +231,6 @@ def callback_geral(call):
             try:
                 oportunidades = buscar_oportunidades(tipo)
                 markup = InlineKeyboardMarkup(row_width=3)
-            
                 if oportunidades:
                     top_oportunidades = oportunidades[:15] 
                     botoes_ativos = [InlineKeyboardButton(tkr, callback_data=f"painel_{tkr}_{tipo}") for tkr in top_oportunidades]
@@ -278,37 +238,30 @@ def callback_geral(call):
                     texto = f"🔥 *Top Oportunidades ({'FIIs' if is_fii else 'Ações'})*\n\nEstes ativos passaram na sua peneira."
                 else:
                     texto = "📭 *Nenhuma oportunidade encontrada.*"
-
                 markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
                 bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
             except Exception as e:
-                print(f"Erro ao carregar oportunidades: {e}")
-                markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
-                bot.edit_message_text("❌ Erro ao aplicar os filtros.", chat_id, msg_id, reply_markup=markup)
+                bot.answer_callback_query(call.id, "❌ Erro ao aplicar os filtros.")
 
         # ==========================================
         # --- ROTA DE RETORNO AO PAINEL DO ATIVO ---
         # ==========================================
         elif dados.startswith("painel_"):
+            bot.answer_callback_query(call.id, "Gerando painel...")
             partes = dados.split("_")
             ticker = partes[1]
-            tipo_ativo = partes[2] # "fii" ou "acao" 
+            tipo_ativo = partes[2] 
             gerar_painel_ativo(ticker, tipo_ativo, chat_id, msg_id)
 
-        # ==========================================
-        # --- ATALHO: DO PAINEL PARA A REVISÃO ---
-        # ==========================================
         elif call.data.startswith("rev_t_"):
+            bot.answer_callback_query(call.id, "Abrindo pendências...")
             ticker = call.data.replace("rev_t_", "")
-            bot.answer_callback_query(call.id, f"Abrindo pendências de {ticker}...")
-
-            # Faz uma consulta rápida para descobrir se é FII ou Ação
+            
             from atualizador_documentos import SessionDB
             from pipeline_dados.banco_dados import Ativo
             session = SessionDB()
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-            
-            tipo_ativo = "fii" # Padrão de segurança
+            tipo_ativo = "fii" 
             if ativo:
                 if hasattr(ativo.tipo, 'name'):
                     tipo_ativo = ativo.tipo.name.lower()
@@ -318,8 +271,6 @@ def callback_geral(call):
 
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("⚖️ Ir para a Central de Revisão", callback_data="rev_start"))
-            
-            # 🔴 AGORA O BOTÃO DE VOLTAR É DINÂMICO!
             markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
 
             txt = (
@@ -333,6 +284,7 @@ def callback_geral(call):
         # --- DADOS NÍVEL 1: ESCOLHER O ANO ---
         # ==========================================
         elif dados.startswith("dados_"):
+            bot.answer_callback_query(call.id, "Buscando base de dados...")
             partes = dados.split("_")
             ticker = partes[1]
             tipo_ativo = partes[2]
@@ -346,7 +298,6 @@ def callback_geral(call):
                 if ativo:
                     balancos = session.query(DadosFinanceirosAcoes).filter(DadosFinanceirosAcoes.ativo_id == ativo.id).all()
                     if balancos:
-                        # Extrai apenas os ANOS dos balanços para criar a cascata
                         anos = sorted(list(set([b.data_referencia.strftime("%Y") for b in balancos if b.data_referencia])), reverse=True)
                         for ano in anos:
                             markup.add(InlineKeyboardButton(f"📅 {ano}", callback_data=f"ano_{ticker}_{tipo_ativo}_{ano}"))
@@ -355,9 +306,7 @@ def callback_geral(call):
                 else:
                     txt = f"📭 _Ativo não encontrado no banco de dados local._"
             else:
-                # 🔴 ESPAÇO PREPARADO PARA OS FIIS (XML)
-                txt = f"📊 **Dados Estruturais: {ticker}**\n\n_⏳ Acesso aos dados do Informe Mensal e Trimestral (XML) da B3 está em fase de implantação. Em breve você poderá ver a vacância física e despesas detalhadas aqui._"
-                # Quando o XML estiver pronto, o código acima será substituído pela mesma lógica de anos das Ações.
+                txt = f"📊 **Dados Estruturais: {ticker}**\n\n_⏳ Acesso aos dados do Informe Mensal e Trimestral (XML) da B3 está em fase de implantação._"
 
             markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
             session.close()
@@ -367,6 +316,7 @@ def callback_geral(call):
         # --- DADOS NÍVEL 2: ESCOLHER O TRIMESTRE ---
         # ==========================================
         elif dados.startswith("ano_"):
+            bot.answer_callback_query(call.id, "Carregando trimestres...")
             partes = dados.split("_")
             ticker = partes[1]
             tipo_ativo = partes[2]
@@ -391,7 +341,6 @@ def callback_geral(call):
                 elif mes_num == '09': tri = '3º Trimestre (ITR)'
                 elif mes_num == '12': tri = '4º Tri / Consolidado Anual (DFP)'
                 else: tri = f'Mês {mes_num}'
-
                 markup.add(InlineKeyboardButton(f"📊 {tri}", callback_data=f"mes_{ticker}_{tipo_ativo}_{dt}"))
 
             markup.add(InlineKeyboardButton("🔙 Voltar aos Anos", callback_data=f"dados_{ticker}_{tipo_ativo}"))
@@ -424,23 +373,11 @@ def callback_geral(call):
                         if valor is None: return "N/A"
                         return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-                    # Cálculo de métricas secundárias (Margens, Dívida Líquida)
-                    divida_liquida = "N/A"
-                    if balanco.divida_bruta is not None and balanco.caixa is not None:
-                        divida_liquida = balanco.divida_bruta - balanco.caixa
-
-                    margem_ebitda = "N/A"
-                    if balanco.ebitda is not None and balanco.receita and balanco.receita > 0:
-                        margem = (balanco.ebitda / balanco.receita) * 100
-                        margem_ebitda = f"{margem:.1f}%"
-
-                    margem_liquida = "N/A"
-                    if balanco.lucro_liquido is not None and balanco.receita and balanco.receita > 0:
-                        margem = (balanco.lucro_liquido / balanco.receita) * 100
-                        margem_liquida = f"{margem:.1f}%"
+                    divida_liquida = (balanco.divida_bruta - balanco.caixa) if (balanco.divida_bruta is not None and balanco.caixa is not None) else "N/A"
+                    margem_ebitda = f"{((balanco.ebitda / balanco.receita) * 100):.1f}%" if (balanco.ebitda is not None and balanco.receita and balanco.receita > 0) else "N/A"
+                    margem_liquida = f"{((balanco.lucro_liquido / balanco.receita) * 100):.1f}%" if (balanco.lucro_liquido is not None and balanco.receita and balanco.receita > 0) else "N/A"
 
                     ano, mes_num, dia = data_ref.split('-')
-                    
                     if mes_num == '03': tri_str = '1º Trimestre'
                     elif mes_num == '06': tri_str = '2º Trimestre'
                     elif mes_num == '09': tri_str = '3º Trimestre'
@@ -454,7 +391,7 @@ def callback_geral(call):
                         f"🏦 **Ativo Total:** R$ {formata_rs(balanco.ativo_total)}\n"
                         f"🏢 **Patrimônio Líquido:** R$ {formata_rs(balanco.patrimonio_liquido)}\n"
                         f"💵 **Caixa:** R$ {formata_rs(balanco.caixa)}\n"
-                        f"📉 **Dívida Líquida:** R$ {formata_rs(divida_liquida)}\n\n"
+                        f"📉 **Dívida Líquida:** R$ {formata_rs(divida_liquida) if isinstance(divida_liquida, str) else formata_rs(divida_liquida)}\n\n"
                         f"⚙️ **D.R.E. (RESULTADOS)**\n"
                         f"💰 **Receita Líquida:** R$ {formata_rs(balanco.receita)}\n"
                         f"🏭 **EBITDA:** R$ {formata_rs(balanco.ebitda)} *(Margem: {margem_ebitda})*\n"
@@ -477,8 +414,7 @@ def callback_geral(call):
 
                 bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
             except Exception as e:
-                print(f"Erro ao buscar balanço da ação: {e}")
-                bot.answer_callback_query(call.id, "❌ Erro ao abrir balanço!")
+                bot.answer_callback_query(call.id, "❌ Erro interno no banco de dados.")
             finally:
                 session.close()
 
@@ -486,6 +422,7 @@ def callback_geral(call):
         # --- NÍVEL 1: DOCUMENTOS (PDFs do Drive) ---
         # ==========================================
         elif dados.startswith("docs_"):
+            bot.answer_callback_query(call.id, "Abrindo gaveta...")
             partes = dados.split("_")
             ticker = partes[1]
             tipo_ativo = partes[2] 
@@ -502,7 +439,6 @@ def callback_geral(call):
 
                 if tipos_existentes:
                     for (tipo_doc,) in tipos_existentes:
-                        # 🎨 MOTOR DE EMOJIS DINÂMICO
                         t_low = tipo_doc.lower()
                         if "gerencial" in t_low: emoji = "📊"
                         elif "fato" in t_low: emoji = "🚨"
@@ -510,13 +446,11 @@ def callback_geral(call):
                         elif "assembleia" in t_low or "vota" in t_low: emoji = "🗳️"
                         elif "trimestral" in t_low or "informe" in t_low: emoji = "📑"
                         elif "comunicado" in t_low: emoji = "📢"
-                        else: emoji = "📄" # Padrão para "Outros"
-                        
+                        else: emoji = "📄" 
                         markup.add(InlineKeyboardButton(f"{emoji} {tipo_doc}", callback_data=f"doctipo_{ticker}_{tipo_doc}"))
                     
                     txt = f"📂 **Gaveta de Documentos: {ticker}**\n\nSelecione a categoria que deseja visualizar:"
                 else:
-                    # 🔴 TEXTO INTELIGENTE (Sem erro de sintaxe)
                     termo = "o fundo" if tipo_ativo == "fii" else "a empresa"
                     txt = f"📭 **Ainda não há documentos processados para {termo} {ticker}.**"
             else:
@@ -526,9 +460,6 @@ def callback_geral(call):
             session.close()
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # ==========================================
-        # --- NÍVEL 2: SELEÇÃO DE MESES (FIIs) ---
-        # ==========================================
         elif dados.startswith("doctipo_"):
             bot.answer_callback_query(call.id, "Vasculhando documentos...")
             partes = dados.split("_", 2)
@@ -537,7 +468,6 @@ def callback_geral(call):
 
             session = SessionDB()
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-            
             tipo_ativo = "fii"
             if ativo and hasattr(ativo, 'tipo') and ativo.tipo:
                 if hasattr(ativo.tipo, 'value'):
@@ -546,7 +476,6 @@ def callback_geral(call):
                     tipo_ativo = str(ativo.tipo).lower()
 
             markup = InlineKeyboardMarkup(row_width=2)
-
             docs = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.ativo_id == ativo.id,
                 DocumentosQualitativos.tipo_documento == tipo_doc,
@@ -556,29 +485,19 @@ def callback_geral(call):
             if docs:
                 meses_unicos = []
                 for d in docs:
-                    # 🔴 CORREÇÃO DA DATA: Puxa o mês real direto do nome do arquivo!
                     mes_str = "0000-00"
                     if d.assunto and '-' in d.assunto:
-                        p = d.assunto.split(" ")[0].split("-") # Extrai [13, 05, 2026]
-                        if len(p) == 3:
-                            mes_str = f"{p[2]}-{p[1]}" # Transforma em 2026-05
+                        p = d.assunto.split(" ")[0].split("-")
+                        if len(p) == 3: mes_str = f"{p[2]}-{p[1]}"
                     elif d.data_publicacao:
                         mes_str = d.data_publicacao.strftime("%Y-%m")
-                    
                     if mes_str not in meses_unicos:
                         meses_unicos.append(mes_str)
                 
                 meses_unicos.sort(reverse=True)
-
                 for mes in meses_unicos[:10]:
-                    if mes == "0000-00":
-                        nome_btn = "📅 Diversos (Sem Data)"
-                    else:
-                        ano, mes_num = mes.split('-')
-                        nome_btn = f"📅 {mes_num}/{ano}"
-                        
+                    nome_btn = "📅 Diversos (Sem Data)" if mes == "0000-00" else f"📅 {mes.split('-')[1]}/{mes.split('-')[0]}"
                     markup.add(InlineKeyboardButton(nome_btn, callback_data=f"docmes_{ticker}_{tipo_doc}_{mes}"))
-
                 txt = f"📅 **{tipo_doc} - {ticker}**\n\nSelecione o período:"
             else:
                 txt = f"📭 **Opa! Houve uma falha ao abrir a gaveta.**"
@@ -587,10 +506,8 @@ def callback_geral(call):
             session.close()
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # ==========================================
-        # --- NÍVEL 3: EXIBIÇÃO DOS PDFS E RESUMO ---
-        # ==========================================
         elif dados.startswith("docmes_"):
+            bot.answer_callback_query(call.id, "Preparando links...")
             partes = dados.split("_", 3)
             ticker = partes[1]
             tipo_doc = partes[2]
@@ -598,7 +515,6 @@ def callback_geral(call):
 
             markup = InlineKeyboardMarkup(row_width=1)
             session = SessionDB()
-
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
             
             docs = session.query(DocumentosQualitativos).filter(
@@ -609,35 +525,20 @@ def callback_geral(call):
 
             docs_do_mes = []
             for d in docs:
-                # 🔴 Alinhando a busca com a nova regra de data real
                 mes_str = "0000-00"
                 if d.assunto and '-' in d.assunto:
                     p = d.assunto.split(" ")[0].split("-")
                     if len(p) == 3: mes_str = f"{p[2]}-{p[1]}"
                 elif d.data_publicacao:
                     mes_str = d.data_publicacao.strftime("%Y-%m")
-                    
-                if mes_str == periodo:
-                    docs_do_mes.append(d)
+                if mes_str == periodo: docs_do_mes.append(d)
 
-            if periodo == "0000-00":
-                txt = f"📂 **{tipo_doc}: {ticker}**\n\n"
-            else:
-                ano, mes_num = periodo.split('-')
-                txt = f"📂 **{tipo_doc}: {ticker} ({mes_num}/{ano})**\n\n"
+            txt = f"📂 **{tipo_doc}: {ticker}**\n\n" if periodo == "0000-00" else f"📂 **{tipo_doc}: {ticker} ({periodo.split('-')[1]}/{periodo.split('-')[0]})**\n\n"
 
-            # 🔴 ADIÇÃO DO RESUMO (UX Melhorada)
             for doc in docs_do_mes:
                 data_limpa = doc.assunto.split(" ")[0].replace("-", "/") if doc.assunto else "Data N/A"
-                
-                # Se o seu banco tiver uma coluna "resumo", ele usa. Senão, mostra o Assunto completo da B3
-                resumo_texto = getattr(doc, 'resumo', None)
-                if not resumo_texto:
-                    resumo_texto = doc.assunto if doc.assunto else "Detalhes não informados."
-
-                txt += f"📄 **Data:** `{data_limpa}`\n"
-                txt += f"📝 **Resumo:** _{resumo_texto}_\n\n"
-                
+                resumo_texto = getattr(doc, 'resumo', None) or (doc.assunto if doc.assunto else "Detalhes não informados.")
+                txt += f"📄 **Data:** `{data_limpa}`\n📝 **Resumo:** _{resumo_texto}_\n\n"
                 url = doc.url_pdf if (doc.url_pdf and str(doc.url_pdf).startswith("http")) else "https://drive.google.com"
                 markup.add(InlineKeyboardButton(f"🔗 Abrir PDF ({data_limpa})", url=url))
 
@@ -652,37 +553,23 @@ def callback_geral(call):
             ticker, tipo = partes[1], partes[2]
 
             markup = InlineKeyboardMarkup()
-            # 🔴 CORREÇÃO: A variável aqui é {tipo} e não {tipo_ativo}
             markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"painel_{ticker}_{tipo}"))
 
-            # 🎨 APRIMORAMENTO GERAL: Texto dinâmico que se adapta ao tipo do ativo!
             termo = "deste Fundo Imobiliário" if tipo == "fii" else "desta Empresa"
-            
-            texto_ia = (
-                f"🧠 **Central de Inteligência Artificial**\n"
-                f"🎯 **Ativo:** `{ticker}`\n\n"
-                f"⚠️ _Módulo em Fase de Treinamento (Beta)_\n\n"
-                f"Em breve, nosso motor autônomo cruzará milhares de dados {termo} para entregar:\n\n"
-            )
+            texto_ia = f"🧠 **Central de Inteligência Artificial**\n🎯 **Ativo:** `{ticker}`\n\n⚠️ _Módulo em Fase de Treinamento (Beta)_\n\nEm breve, nosso motor autônomo cruzará milhares de dados {termo} para entregar:\n\n"
             
             if tipo == "fii":
-                texto_ia += (
-                    f"🏢 **Análise de Portfólio:** Qualidade dos imóveis e risco de vacância.\n"
-                    f"💸 **Sustentabilidade:** Projeção de dividendos e risco de corte.\n"
-                    f"⚖️ **Alavancagem:** Análise do nível de endividamento do fundo.\n"
-                    f"📰 **Sentimento de Mercado:** Leitura térmica de Fatos Relevantes."
-                )
+                texto_ia += "🏢 **Análise de Portfólio:** Qualidade dos imóveis e risco de vacância.\n💸 **Sustentabilidade:** Projeção de dividendos e risco de corte.\n⚖️ **Alavancagem:** Análise do nível de endividamento do fundo.\n📰 **Sentimento de Mercado:** Leitura térmica de Fatos Relevantes."
             else:
-                texto_ia += (
-                    f"📈 **Valuation Avançado:** Preço Justo projetado via Fluxo de Caixa (DCF).\n"
-                    f"⚙️ **Eficiência Operacional:** Evolução de Margens e ROE vs Concorrentes.\n"
-                    f"💰 **Política de Proventos:** Histórico de Payout e programa de recompra.\n"
-                    f"📰 **Macroeconomia:** Impacto do ciclo de juros e inflação no balanço."
-                )
+                texto_ia += "📈 **Valuation Avançado:** Preço Justo projetado via Fluxo de Caixa (DCF).\n⚙️ **Eficiência Operacional:** Evolução de Margens e ROE vs Concorrentes.\n💰 **Política de Proventos:** Histórico de Payout e programa de recompra.\n📰 **Macroeconomia:** Impacto do ciclo de juros e inflação no balanço."
                 
             texto_ia += "\n\n*(Aguardando integração final com a rede neural)*"
-
             bot.edit_message_text(texto_ia, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
             
     except Exception as e:
-        print(f"Erro no callback geral: {e}")
+        print(f"Erro Crítico no Callback Geral: {e}")
+        # Esta linha garante que o botão destrave e mostre o aviso no topo do celular
+        try:
+            bot.answer_callback_query(call.id, f"⚠️ Erro interno. Tente novamente.")
+        except:
+            pass
