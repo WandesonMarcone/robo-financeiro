@@ -321,9 +321,8 @@ def callback_geral(call):
         # --- DADOS NÍVEL 1: ESCOLHER O ANO ---
         # ==========================================
         elif dados.startswith("dados_"):
-            # 🔴 DESTRAVADOR ADICIONADO AQUI: Acaba com o reloginho infinito
             bot.answer_callback_query(call.id, "Buscando base de dados...")
-            
+
             partes = dados.split("_")
             ticker = partes[1]
             tipo_ativo = partes[2]
@@ -337,7 +336,6 @@ def callback_geral(call):
                 if ativo:
                     balancos = session.query(DadosFinanceirosAcoes).filter(DadosFinanceirosAcoes.ativo_id == ativo.id).all()
                     if balancos:
-                        # Extrai apenas os ANOS dos balanços para criar a cascata
                         anos = sorted(list(set([b.data_referencia.strftime("%Y") for b in balancos if b.data_referencia])), reverse=True)
                         for ano in anos:
                             markup.add(InlineKeyboardButton(f"📅 {ano}", callback_data=f"ano_{ticker}_{tipo_ativo}_{ano}"))
@@ -346,7 +344,6 @@ def callback_geral(call):
                 else:
                     txt = f"📭 _Ativo não encontrado no banco de dados local._"
             else:
-                # 🔴 ESPAÇO PREPARADO PARA OS FIIS (XML)
                 txt = f"📊 **Dados Estruturais: {ticker}**\n\n_⏳ Acesso aos dados do Informe Mensal e Trimestral (XML) da B3 está em fase de implantação. Em breve você poderá ver a vacância física e despesas detalhadas aqui._"
 
             markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
@@ -357,9 +354,8 @@ def callback_geral(call):
         # --- DADOS NÍVEL 2: ESCOLHER O TRIMESTRE ---
         # ==========================================
         elif dados.startswith("ano_"):
-            # 🔴 DESTRAVADOR ADICIONADO AQUI
             bot.answer_callback_query(call.id, "Carregando trimestres...")
-            
+
             partes = dados.split("_")
             ticker = partes[1]
             tipo_ativo = partes[2]
@@ -420,7 +416,6 @@ def callback_geral(call):
                         except:
                             return "N/A"
 
-                    # 🛡️ Correção do bug silencioso: Formatação segura da Dívida e Margens
                     divida_liquida_str = "N/A"
                     if balanco.divida_bruta is not None and balanco.caixa is not None:
                         divida_liquida_str = formata_rs(balanco.divida_bruta - balanco.caixa)
@@ -434,7 +429,6 @@ def callback_geral(call):
                         margem_liquida = f"{((balanco.lucro_liquido / balanco.receita) * 100):.1f}%"
 
                     ano, mes_num, dia = data_ref.split('-')
-
                     if mes_num == '03': tri_str = '1º Trimestre'
                     elif mes_num == '06': tri_str = '2º Trimestre'
                     elif mes_num == '09': tri_str = '3º Trimestre'
@@ -480,6 +474,9 @@ def callback_geral(call):
         # --- NÍVEL 1: DOCUMENTOS (PDFs do Drive) ---
         # ==========================================
         elif dados.startswith("docs_"):
+            # 🔴 DESTRAVADOR ADICIONADO AQUI
+            bot.answer_callback_query(call.id, "Abrindo gaveta de documentos...")
+            
             partes = dados.split("_")
             ticker = partes[1]
             tipo_ativo = partes[2] 
@@ -496,7 +493,6 @@ def callback_geral(call):
 
                 if tipos_existentes:
                     for (tipo_doc,) in tipos_existentes:
-                        # 🎨 MOTOR DE EMOJIS DINÂMICO
                         t_low = tipo_doc.lower()
                         if "gerencial" in t_low: emoji = "📊"
                         elif "fato" in t_low: emoji = "🚨"
@@ -504,13 +500,12 @@ def callback_geral(call):
                         elif "assembleia" in t_low or "vota" in t_low: emoji = "🗳️"
                         elif "trimestral" in t_low or "informe" in t_low: emoji = "📑"
                         elif "comunicado" in t_low: emoji = "📢"
-                        else: emoji = "📄" # Padrão para "Outros"
-                        
+                        else: emoji = "📄" 
+
                         markup.add(InlineKeyboardButton(f"{emoji} {tipo_doc}", callback_data=f"doctipo_{ticker}_{tipo_doc}"))
-                    
+
                     txt = f"📂 **Gaveta de Documentos: {ticker}**\n\nSelecione a categoria que deseja visualizar:"
                 else:
-                    # 🔴 TEXTO INTELIGENTE (Sem erro de sintaxe)
                     termo = "o fundo" if tipo_ativo == "fii" else "a empresa"
                     txt = f"📭 **Ainda não há documentos processados para {termo} {ticker}.**"
             else:
@@ -521,7 +516,7 @@ def callback_geral(call):
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # ==========================================
-        # --- NÍVEL 2: SELEÇÃO DE MESES (FIIs) ---
+        # --- NÍVEL 2: SELEÇÃO DE MESES (FIIs e AÇÕES) ---
         # ==========================================
         elif dados.startswith("doctipo_"):
             bot.answer_callback_query(call.id, "Vasculhando documentos...")
@@ -531,7 +526,7 @@ def callback_geral(call):
 
             session = SessionDB()
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-            
+
             tipo_ativo = "fii"
             if ativo and hasattr(ativo, 'tipo') and ativo.tipo:
                 if hasattr(ativo.tipo, 'value'):
@@ -550,18 +545,17 @@ def callback_geral(call):
             if docs:
                 meses_unicos = []
                 for d in docs:
-                    # 🔴 CORREÇÃO DA DATA: Puxa o mês real direto do nome do arquivo!
                     mes_str = "0000-00"
                     if d.assunto and '-' in d.assunto:
-                        p = d.assunto.split(" ")[0].split("-") # Extrai [13, 05, 2026]
+                        p = d.assunto.split(" ")[0].split("-") 
                         if len(p) == 3:
-                            mes_str = f"{p[2]}-{p[1]}" # Transforma em 2026-05
+                            mes_str = f"{p[2]}-{p[1]}" 
                     elif d.data_publicacao:
                         mes_str = d.data_publicacao.strftime("%Y-%m")
-                    
+
                     if mes_str not in meses_unicos:
                         meses_unicos.append(mes_str)
-                
+
                 meses_unicos.sort(reverse=True)
 
                 for mes in meses_unicos[:10]:
@@ -570,7 +564,7 @@ def callback_geral(call):
                     else:
                         ano, mes_num = mes.split('-')
                         nome_btn = f"📅 {mes_num}/{ano}"
-                        
+
                     markup.add(InlineKeyboardButton(nome_btn, callback_data=f"docmes_{ticker}_{tipo_doc}_{mes}"))
 
                 txt = f"📅 **{tipo_doc} - {ticker}**\n\nSelecione o período:"
@@ -585,6 +579,9 @@ def callback_geral(call):
         # --- NÍVEL 3: EXIBIÇÃO DOS PDFS E RESUMO ---
         # ==========================================
         elif dados.startswith("docmes_"):
+            # 🔴 DESTRAVADOR ADICIONADO AQUI
+            bot.answer_callback_query(call.id, "Preparando arquivos...")
+            
             partes = dados.split("_", 3)
             ticker = partes[1]
             tipo_doc = partes[2]
@@ -594,7 +591,7 @@ def callback_geral(call):
             session = SessionDB()
 
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-            
+
             docs = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.ativo_id == ativo.id,
                 DocumentosQualitativos.tipo_documento == tipo_doc,
@@ -603,14 +600,13 @@ def callback_geral(call):
 
             docs_do_mes = []
             for d in docs:
-                # 🔴 Alinhando a busca com a nova regra de data real
                 mes_str = "0000-00"
                 if d.assunto and '-' in d.assunto:
                     p = d.assunto.split(" ")[0].split("-")
                     if len(p) == 3: mes_str = f"{p[2]}-{p[1]}"
                 elif d.data_publicacao:
                     mes_str = d.data_publicacao.strftime("%Y-%m")
-                    
+
                 if mes_str == periodo:
                     docs_do_mes.append(d)
 
@@ -620,18 +616,17 @@ def callback_geral(call):
                 ano, mes_num = periodo.split('-')
                 txt = f"📂 **{tipo_doc}: {ticker} ({mes_num}/{ano})**\n\n"
 
-            # 🔴 ADIÇÃO DO RESUMO (UX Melhorada)
             for doc in docs_do_mes:
                 data_limpa = doc.assunto.split(" ")[0].replace("-", "/") if doc.assunto else "Data N/A"
-                
-                # Se o seu banco tiver uma coluna "resumo", ele usa. Senão, mostra o Assunto completo da B3
-                resumo_texto = getattr(doc, 'resumo', None)
+
+                # 🔴 CORREÇÃO CRÍTICA DO BUG DO RESUMO DA IA
+                resumo_texto = getattr(doc, 'resumo_ia', None)
                 if not resumo_texto:
                     resumo_texto = doc.assunto if doc.assunto else "Detalhes não informados."
 
                 txt += f"📄 **Data:** `{data_limpa}`\n"
                 txt += f"📝 **Resumo:** _{resumo_texto}_\n\n"
-                
+
                 url = doc.url_pdf if (doc.url_pdf and str(doc.url_pdf).startswith("http")) else "https://drive.google.com"
                 markup.add(InlineKeyboardButton(f"🔗 Abrir PDF ({data_limpa})", url=url))
 
