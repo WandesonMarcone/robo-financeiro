@@ -579,7 +579,7 @@ def callback_geral(call):
         # --- NÍVEL 3: LISTAGEM FINAL DE PDFS ---
         # ==========================================
         elif dados.startswith("dl_"):
-            bot.answer_callback_query(call.id, "Puxando documentos do Drive...")
+            bot.answer_callback_query(call.id, "Puxando documentos...")
             partes = dados.split("_", 3)
             ticker = partes[1]
             modo = partes[2] # 't' (tipo) ou 'm' (mês)
@@ -589,7 +589,6 @@ def callback_geral(call):
             session = SessionDB()
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
 
-            # Busca todos os docs para filtrar no Python
             todos_docs = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.ativo_id == ativo.id,
                 DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")
@@ -597,7 +596,6 @@ def callback_geral(call):
 
             docs_finais = []
             if modo == 't':
-                # Filtra pelo começo do nome do tipo (segurança de callback)
                 docs_finais = [d for d in todos_docs if d.tipo_documento and d.tipo_documento.startswith(valor)]
                 txt = f"📂 **{valor} ({ticker})**\n\n"
             else:
@@ -605,48 +603,43 @@ def callback_geral(call):
                     mes_str = "0000-00"
                     if d.assunto and '-' in d.assunto:
                         p = d.assunto.split(" ")[0].split("-")
-                        if len(p) == 3: mes_str = f"{p[2]}-{p[1]}"
+                        if len(p) == 3 and len(p[2]) == 4: mes_str = f"{p[2]}-{p[1]}"
+                        elif len(p) == 3 and len(p[0]) == 4: mes_str = f"{p[0]}-{p[1]}"
                     elif d.data_publicacao:
                         mes_str = d.data_publicacao.strftime("%Y-%m")
                     if mes_str == valor: docs_finais.append(d)
                 
                 txt = f"📅 **Documentos de {valor.split('-')[1]}/{valor.split('-')[0]} ({ticker})**\n\n" if valor != "0000-00" else f"📅 **Documentos Diversos ({ticker})**\n\n"
 
-            # 🧠 DICIONÁRIO DE RESUMOS GENÉRICOS (O Fallback Inteligente)
+            # Dicionário de Resumos Explicativos
             resumos_genericos = {
-                "fato relevante": "Comunicado oficial sobre eventos que podem impactar a tese de investimento.",
-                "relatório gerencial": "Documento da gestão detalhando resultados operacionais e movimentações.",
-                "aviso aos acionistas": "Aviso oficial sobre pagamento de dividendos, JCP ou subscrições.",
-                "aviso aos cotistas": "Aviso oficial aos cotistas sobre rendimentos ou emissões de cotas.",
-                "informe mensal": "Relatório contábil da B3 com dados de caixa, cotistas e patrimônio.",
-                "informe trimestral": "Balanço trimestral simplificado de fundos imobiliários.",
-                "comunicado ao mercado": "Esclarecimentos e informações gerais da empresa ao mercado.",
-                "apresentação": "Apresentação em slides detalhando os resultados do trimestre."
+                "fato relevante": "Comunicado oficial sobre decisões estratégicas da gestão.",
+                "demonstrações financeiras": "Balanço contábil auditado com receitas, custos e lucro.",
+                "relatório gerencial": "Relatório de acompanhamento do fundo e seus ativos.",
+                "aviso aos acionistas": "Informativo sobre proventos (dividendos/JCP) e subscrições.",
+                "aviso aos cotistas": "Informativo oficial aos cotistas sobre rendimentos.",
+                "apresentação": "Apresentação em slides detalhando os resultados corporativos."
             }
 
-            for doc in sorted(docs_finais, key=lambda x: x.assunto if x.assunto else "", reverse=True):
-                data_limpa = doc.assunto.split(" ")[0].replace("-", "/") if doc.assunto else "Data N/A"
+            for doc in sorted(docs_finais, key=lambda x: x.id, reverse=True):
+                # 🔴 APLICAÇÃO DA NOVA DATA REAL
+                data_limpa = extrair_data_real(doc)
 
+                # Extrai o resumo da IA ou aplica o fallback genérico
                 resumo_texto = getattr(doc, 'resumo_ia', None)
-                
-                # Se a IA não tiver resumido, busca no dicionário genérico!
-                if not resumo_texto:
-                    tipo_doc_baixo = doc.tipo_documento.lower() if doc.tipo_documento else ""
-                    # Procura alguma palavra-chave do dicionário dentro do tipo do documento
-                    for chave, texto_generico in resumos_genericos.items():
-                        if chave in tipo_doc_baixo:
-                            resumo_texto = texto_generico
+                if not resumo_texto or resumo_texto.strip() == "":
+                    tipo_low = doc.tipo_documento.lower() if doc.tipo_documento else ""
+                    for chave, desc in resumos_genericos.items():
+                        if chave in tipo_low:
+                            resumo_texto = desc
                             break
-                    # Se não achar nada no dicionário, usa um fallback elegante
                     if not resumo_texto:
-                        resumo_texto = "Documento oficial arquivado no Google Drive."
+                        resumo_texto = "Documento oficial arquivado na nuvem."
 
-                # Se a busca foi por mês, mostra o Tipo do documento na listagem. Se foi por Tipo, não precisa repetir.
+                # Monta a estrutura limpa e profissional
                 if modo == 'm':
-                    txt += f"📄 **{doc.tipo_documento}** (`{data_limpa}`)\n"
-                else:
-                    txt += f"📄 **Data:** `{data_limpa}`\n"
-                    
+                    txt += f"📄 **{doc.tipo_documento}**\n"
+                txt += f"📅 **Data:** `{data_limpa}`\n"
                 txt += f"📝 _{resumo_texto}_\n\n"
 
                 url = doc.url_pdf if (doc.url_pdf and str(doc.url_pdf).startswith("http")) else "https://drive.google.com"
