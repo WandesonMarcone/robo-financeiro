@@ -52,7 +52,7 @@ def enviar_painel_tickers(chat_id, message_id=None):
             
             markup.add(InlineKeyboardButton(text=f"{icone} {t} ({qtd} docs)", callback_data=f"rev_t_{t}"))
 
-        msg = "⚠️ **Central de Revisão Híbrida**\n\nEstes FIIs e Ações possuem documentos suspeitos ou em formato de imagem. Selecione um para analisar:"
+        msg = "⚠️ **Central de Revisão Híbrida**\n\nEstes FIIs e Ações possuem documentos pendentes. Selecione um para analisar:"
         if message_id:
             bot.edit_message_text(msg, chat_id, message_id, reply_markup=markup, parse_mode="Markdown")
         else:
@@ -70,6 +70,7 @@ def processar_revisao(call):
     try:
         # AÇÃO: Voltar ao menu inicial de revisão
         if acao == 'start':
+            bot.answer_callback_query(call.id)
             enviar_painel_tickers(call.message.chat.id, call.message.message_id)
 
         # AÇÃO: Mostrar lista de documentos suspeitos de um ativo específico
@@ -82,12 +83,31 @@ def processar_revisao(call):
 
             if not pendentes:
                 bot.answer_callback_query(call.id, "Nenhum documento pendente para este ativo.")
+                enviar_painel_tickers(call.message.chat.id, call.message.message_id)
                 return
+            
+            bot.answer_callback_query(call.id, f"Carregando documentos de {ticker}...")
 
             markup = InlineKeyboardMarkup()
             for doc in pendentes:
-                data_limpa = doc.assunto.split(" ")[0].replace("-", "/") if doc.assunto else "Data N/A"
-                btn_text = f"📅 {data_limpa} (Cód: {doc.id_b3})"
+                # 🎨 NOVA INTELIGÊNCIA VISUAL DOS BOTÕES
+                # 1. Tenta formatar a data
+                if doc.assunto and '-' in doc.assunto.split(" ")[0]:
+                    data_limpa = doc.assunto.split(" ")[0].replace("-", "/")
+                    resumo_cru = " ".join(doc.assunto.split(" ")[1:])
+                else:
+                    data_limpa = doc.data_publicacao.strftime("%d/%m/%y") if doc.data_publicacao else "Data N/A"
+                    resumo_cru = doc.assunto
+                
+                # 2. Se não tem assunto preenchido, usa o tipo_documento
+                if not resumo_cru or resumo_cru.strip() == "":
+                    resumo_cru = doc.tipo_documento if doc.tipo_documento else "Doc sem título"
+                    
+                # 3. Corta para não estourar a tela do celular (25 caracteres no máximo)
+                resumo_curto = (resumo_cru[:25] + "..").strip() if len(resumo_cru) > 25 else resumo_cru.strip()
+                
+                # Botão final perfeito e limpo!
+                btn_text = f"📄 {data_limpa} | {resumo_curto}"
                 markup.add(InlineKeyboardButton(text=btn_text, callback_data=f"rev_d_{doc.id}"))
 
             # Descobre o tipo para criar o botão de "Voltar ao Painel" certo
@@ -103,6 +123,7 @@ def processar_revisao(call):
 
         # AÇÃO: Abrir as opções (Visualizar, Salvar, Apagar) de um documento específico
         elif acao == 'd':
+            bot.answer_callback_query(call.id)
             doc_id = partes[2]
             doc = session.query(DocumentosQualitativos).get(doc_id)
 
@@ -112,7 +133,7 @@ def processar_revisao(call):
             if doc.url_pdf and doc.url_pdf.startswith("http"):
                 markup.add(InlineKeyboardButton(text="🔗 Abrir PDF no Drive", url=doc.url_pdf))
             
-            # Usamos row() em vez de add() para os botões ficarem lado a lado (mais bonito)
+            # Usamos row() em vez de add() para os botões ficarem lado a lado
             markup.row(
                 InlineKeyboardButton(text="✅ Classificar", callback_data=f"rev_app_{doc.id}"),
                 InlineKeyboardButton(text="🗑️ Apagar", callback_data=f"rev_del_{doc.id}")
@@ -125,12 +146,12 @@ def processar_revisao(call):
 
             txt = (
                 f"🔍 **Inspecionando Documento**\n\n"
-                f"🏢 **Fundo:** `{doc.ativo.ticker}`\n"
+                f"🏢 **Ativo:** `{doc.ativo.ticker}`\n"
                 f"📅 **Data:** `{data_limpa}`\n"
                 f"🤖 **Leitura Inicial:** `{tipo_leitura}`\n\n"
             )
             
-            # Se o link estiver quebrado no banco de dados, o bot te avisa em vez de esconder o botão!
+            # Se o link estiver quebrado no banco de dados, o bot te avisa
             if not (doc.url_pdf and doc.url_pdf.startswith("http")):
                 txt += "⚠️ *O link do Google Drive para este documento está ausente ou corrompido.*\n\n"
                 
@@ -140,6 +161,7 @@ def processar_revisao(call):
 
         # AÇÃO: Usuário decidiu salvar, abre o catálogo de tipos de documento dinâmico
         elif acao == 'app':
+            bot.answer_callback_query(call.id)
             doc_id = partes[2]
             doc = session.query(DocumentosQualitativos).get(doc_id)
             tipo_ativo = getattr(doc.ativo.tipo, 'name', str(doc.ativo.tipo).replace("TipoAtivo.", "")).upper()
@@ -148,12 +170,10 @@ def processar_revisao(call):
             
             # Carrega o catálogo correto baseado no tipo!
             if tipo_ativo == "ACAO":
-                # Tipos de Ações (pode adicionar mais se quiser)
                 tipos_acoes = ['Fato_Relevante', 'Aviso_aos_Acionistas', 'Comunicado_ao_Mercado', 'Apresentacao_Resultados', 'Documento_Acao']
                 for index, nome_tipo in enumerate(tipos_acoes):
                     markup.add(InlineKeyboardButton(text=f"📂 {nome_tipo.replace('_', ' ')}", callback_data=f"rev_typ_{doc.id}_ACAO_{index}"))
             else:
-                # Tipos de FIIs (usa o seu arquivo config.py)
                 for id_tipo, nome_tipo in TIPOS_DOC.items():
                     markup.add(InlineKeyboardButton(text=f"📂 {nome_tipo}", callback_data=f"rev_typ_{doc.id}_FII_{id_tipo}"))
                     
@@ -172,27 +192,26 @@ def processar_revisao(call):
             doc = session.query(DocumentosQualitativos).get(doc_id)
             file_id = extrair_file_id(doc.url_pdf)
             
-            # Descobre o nome final do arquivo
             if tipo_cat == "ACAO":
                 tipos_acoes = ['Fato_Relevante', 'Aviso_aos_Acionistas', 'Comunicado_ao_Mercado', 'Apresentacao_Resultados', 'Documento_Acao']
                 tipo_nome_limpo = tipos_acoes[int(tipo_id)]
             else:
                 tipo_nome_limpo = TIPOS_DOC[tipo_id]
 
-            # Corrige a data da pasta
             mes_ref = datetime.now().strftime("%Y-%m")
             if doc.assunto and '-' in doc.assunto:
                 assunto_limpo = doc.assunto.split(" ")[0] 
                 p = assunto_limpo.split('-')
                 if len(p) == 3: 
-                    # Tenta formatar para YYYY-MM (FII = DD-MM-YYYY, CVM = YYYY-MM-DD)
-                    if len(p[2]) == 4: mes_ref = f"{p[2]}-{p[1]}" # Formato FII (DD-MM-YYYY)
-                    elif len(p[0]) == 4: mes_ref = f"{p[0]}-{p[1]}" # Formato CVM (YYYY-MM-DD)
+                    if len(p[2]) == 4: mes_ref = f"{p[2]}-{p[1]}" 
+                    elif len(p[0]) == 4: mes_ref = f"{p[0]}-{p[1]}" 
 
             assunto_limpo_pdf = doc.assunto.split(" ")[0] if doc.assunto else "Doc"
-            novo_nome_pdf = f"{tipo_nome_limpo}_{assunto_limpo_pdf}_{doc.id_b3}.pdf"
+            
+            # Adiciona o ID B3 no nome do arquivo para nunca duplicar no Drive se não for nulo
+            sufixo = f"_{doc.id_b3}" if doc.id_b3 else ""
+            novo_nome_pdf = f"{tipo_nome_limpo}_{assunto_limpo_pdf}{sufixo}.pdf"
 
-            # 🔴 ENVIANDO PARA O ROTEADOR COM O TIPO CERTO
             novo_link = drive_manager.mover_e_renomear_arquivo(file_id, doc.ativo.ticker, mes_ref, novo_nome_pdf, tipo_ativo=tipo_cat)
 
             if novo_link:
@@ -208,8 +227,6 @@ def processar_revisao(call):
                 ).count()
 
                 markup = InlineKeyboardMarkup(row_width=1)
-                
-                # Para onde volta se acabar?
                 tipo_retorno = tipo_cat.lower() if tipo_cat == "FII" else "acao"
 
                 if pendentes_restantes > 0:
@@ -233,20 +250,36 @@ def processar_revisao(call):
 
         # AÇÃO: Usuário decidiu que o documento era lixo
         elif acao == 'del':
-            doc_id = partes[2]
             bot.answer_callback_query(call.id, "Apagando do Drive...")
+            doc_id = partes[2]
             doc = session.query(DocumentosQualitativos).get(doc_id)
+            
+            # Guardamos o ticker ANTES de deletar para o botão de voltar não quebrar
+            ticker_atual = doc.ativo.ticker 
+            
             file_id = extrair_file_id(doc.url_pdf)
 
-            if drive_manager.deletar_arquivo(file_id):
+            # Só tenta deletar no drive se tiver um link válido
+            deletou_drive = False
+            if file_id:
+                deletou_drive = drive_manager.deletar_arquivo(file_id)
+            else:
+                deletou_drive = True # Se não tem link, considera deletado para podermos apagar do banco
+
+            if deletou_drive:
                 doc.status_processamento = "REJEITADO_MANUAL"
                 session.commit()
-                m = InlineKeyboardMarkup().add(InlineKeyboardButton(text="🔙 Voltar ao Painel", callback_data="rev_t{ticker}"))
-                bot.edit_message_text(f"🗑️ Documento apagado com sucesso.", call.message.chat.id, call.message.message_id, reply_markup=m)
+                
+                m = InlineKeyboardMarkup().add(InlineKeyboardButton(text="🔙 Voltar aos Pendentes", callback_data=f"rev_t_{ticker_atual}"))
+                bot.edit_message_text(f"🗑️ Documento ignorado e apagado com sucesso.", call.message.chat.id, call.message.message_id, reply_markup=m)
             else:
                 bot.answer_callback_query(call.id, "❌ Erro ao apagar no Drive!")
 
     except Exception as e:
         print(f"Erro no painel de revisão: {e}")
+        try:
+            bot.answer_callback_query(call.id, "⚠️ Erro interno. Tente novamente.")
+        except:
+            pass
     finally:
         session.close()
