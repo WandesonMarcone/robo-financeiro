@@ -2,7 +2,7 @@ import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.loader import bot
-from config import SPREADSHEET_URL
+from config import SPREADSHEET_URL, MAPA_SETORES_B3
 from atualizador_documentos import SessionDB
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos, DadosFinanceirosAcoes
 
@@ -131,8 +131,6 @@ def callback_geral(call):
          # --- 1ª CAMADA: MACRO-SETORES DAS AÇÕES (DINÂMICO + FIXO) ---
         elif dados == "menu_acoes":
             bot.answer_callback_query(call.id, "Carregando Ações...")
-            from config import MAPA_SETORES_B3
-            from services.planilhas import buscar_dados_planilha_com_cache
             
             # 🔴 LÊ A PLANILHA PRIMEIRO
             matriz = buscar_dados_planilha_com_cache("BD_Acoes")
@@ -176,8 +174,6 @@ def callback_geral(call):
 
         # --- 2ª CAMADA: SUB-SETORES (Ocultando vazios) ---
         elif dados.startswith("macro_ac_"):
-            from config import MAPA_SETORES_B3
-            from services.planilhas import buscar_dados_planilha_com_cache
             
             matriz = buscar_dados_planilha_com_cache("BD_Acoes")
             tickers_planilha = [linha[0].strip().upper() for linha in matriz[1:] if len(linha) > 0 and linha[0].strip()] if matriz else []
@@ -202,9 +198,6 @@ def callback_geral(call):
 
         # --- 3ª CAMADA: LISTA DE EMPRESAS (Filtro final) ---
         elif dados.startswith("sub_ac_"):
-            from config import MAPA_SETORES_B3
-            from services.planilhas import buscar_dados_planilha_com_cache
-            
             matriz = buscar_dados_planilha_com_cache("BD_Acoes")
             tickers_planilha = [linha[0].strip().upper() for linha in matriz[1:] if len(linha) > 0 and linha[0].strip()] if matriz else []
 
@@ -303,7 +296,6 @@ def callback_geral(call):
             bot.answer_callback_query(call.id, f"Abrindo pendências de {ticker}...")
 
             # Faz uma consulta rápida para descobrir se é FII ou Ação
-            from pipeline_dados.banco_dados import Ativo
             session = SessionDB()
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
             
