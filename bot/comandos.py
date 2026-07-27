@@ -270,6 +270,28 @@ def rodar_cvm(message):
     thread_cvm = threading.Thread(target=tarefa_cvm_background, args=(ano_escolhido,))
     thread_cvm.start()
 
+import threading
+from pipeline_dados.coletor_fiis import processar_informes_fiis_cvm
+
+@bot.message_handler(commands=['forcar_fiis'])
+def cmd_forcar_fiis(message):
+    chat_id = message.chat.id
+    bot.reply_to(message, "📥 Baixando informes mensais de FIIs em segundo plano. Aguarde o aviso de conclusão!")
+    
+    def background_coleta():
+        try:
+            # Roda para o ano atual (2026)
+            sucesso = processar_informes_fiis_cvm(ano=2026)
+            if sucesso:
+                bot.send_message(chat_id, "✅ **Coleta de FIIs (2026) Concluída!**\nIndicadores contábeis e operacionais atualizados no banco de dados.", parse_mode="Markdown")
+            else:
+                bot.send_message(chat_id, "⚠️ A coleta rodou, mas nenhum informe válido foi processado. Verifique os logs.")
+        except Exception as e:
+            bot.send_message(chat_id, f"❌ Erro crítico na coleta de FIIs: {str(e)}")
+
+    # Dispara a tarefa em segundo plano para não travar o Telegram
+    threading.Thread(target=background_coleta).start()
+
 @bot.message_handler(commands=['mapear_nomes'])
 def comando_mapear_nomes_b3(message):
     bot.send_message(message.chat.id, "🕵️‍♂️ Comando recebido! Como a B3 é lenta, enviei essa tarefa para o segundo plano. Pode continuar usando o Telegram normalmente, te enviarei o arquivo TXT assim que estiver pronto.")
