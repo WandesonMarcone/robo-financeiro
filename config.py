@@ -134,6 +134,7 @@ TIPOS_DOC_ACAO = {
     "5": "Relatório de Sustentabilidade",
     "6": "Outros"
 }
+TIPOS_DOCS = TIPOS_DOCS_FII
 
 # ==========================================
 # CONFIGURAÇÕES DO COLETOR CVM (AÇÕES)
