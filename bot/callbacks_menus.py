@@ -333,6 +333,9 @@ def callback_geral(call):
         # --- DADOS NÍVEL 1: ESCOLHER O ANO ---
         # ==========================================
         elif dados.startswith("dados_"):
+            # 🔴 DESTRAVADOR ADICIONADO AQUI: Acaba com o reloginho infinito
+            bot.answer_callback_query(call.id, "Buscando base de dados...")
+            
             partes = dados.split("_")
             ticker = partes[1]
             tipo_ativo = partes[2]
@@ -357,7 +360,6 @@ def callback_geral(call):
             else:
                 # 🔴 ESPAÇO PREPARADO PARA OS FIIS (XML)
                 txt = f"📊 **Dados Estruturais: {ticker}**\n\n_⏳ Acesso aos dados do Informe Mensal e Trimestral (XML) da B3 está em fase de implantação. Em breve você poderá ver a vacância física e despesas detalhadas aqui._"
-                # Quando o XML estiver pronto, o código acima será substituído pela mesma lógica de anos das Ações.
 
             markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
             session.close()
@@ -367,6 +369,9 @@ def callback_geral(call):
         # --- DADOS NÍVEL 2: ESCOLHER O TRIMESTRE ---
         # ==========================================
         elif dados.startswith("ano_"):
+            # 🔴 DESTRAVADOR ADICIONADO AQUI
+            bot.answer_callback_query(call.id, "Carregando trimestres...")
+            
             partes = dados.split("_")
             ticker = partes[1]
             tipo_ativo = partes[2]
@@ -383,7 +388,7 @@ def callback_geral(call):
             ).all()
 
             datas = sorted(list(set([b.data_referencia.strftime("%Y-%m-%d") for b in balancos if b.data_referencia])), reverse=True)
-            
+
             for dt in datas:
                 ano, mes_num, dia = dt.split('-')
                 if mes_num == '03': tri = '1º Trimestre (ITR)'
@@ -421,26 +426,27 @@ def callback_geral(call):
 
                 if balanco:
                     def formata_rs(valor):
-                        if valor is None: return "N/A"
-                        return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                        if valor is None or valor == "N/A": return "N/A"
+                        try:
+                            return f"{float(valor):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                        except:
+                            return "N/A"
 
-                    # Cálculo de métricas secundárias (Margens, Dívida Líquida)
-                    divida_liquida = "N/A"
+                    # 🛡️ Correção do bug silencioso: Formatação segura da Dívida e Margens
+                    divida_liquida_str = "N/A"
                     if balanco.divida_bruta is not None and balanco.caixa is not None:
-                        divida_liquida = balanco.divida_bruta - balanco.caixa
+                        divida_liquida_str = formata_rs(balanco.divida_bruta - balanco.caixa)
 
                     margem_ebitda = "N/A"
                     if balanco.ebitda is not None and balanco.receita and balanco.receita > 0:
-                        margem = (balanco.ebitda / balanco.receita) * 100
-                        margem_ebitda = f"{margem:.1f}%"
+                        margem_ebitda = f"{((balanco.ebitda / balanco.receita) * 100):.1f}%"
 
                     margem_liquida = "N/A"
                     if balanco.lucro_liquido is not None and balanco.receita and balanco.receita > 0:
-                        margem = (balanco.lucro_liquido / balanco.receita) * 100
-                        margem_liquida = f"{margem:.1f}%"
+                        margem_liquida = f"{((balanco.lucro_liquido / balanco.receita) * 100):.1f}%"
 
                     ano, mes_num, dia = data_ref.split('-')
-                    
+
                     if mes_num == '03': tri_str = '1º Trimestre'
                     elif mes_num == '06': tri_str = '2º Trimestre'
                     elif mes_num == '09': tri_str = '3º Trimestre'
@@ -454,7 +460,7 @@ def callback_geral(call):
                         f"🏦 **Ativo Total:** R$ {formata_rs(balanco.ativo_total)}\n"
                         f"🏢 **Patrimônio Líquido:** R$ {formata_rs(balanco.patrimonio_liquido)}\n"
                         f"💵 **Caixa:** R$ {formata_rs(balanco.caixa)}\n"
-                        f"📉 **Dívida Líquida:** R$ {formata_rs(divida_liquida)}\n\n"
+                        f"📉 **Dívida Líquida:** R$ {divida_liquida_str}\n\n"
                         f"⚙️ **D.R.E. (RESULTADOS)**\n"
                         f"💰 **Receita Líquida:** R$ {formata_rs(balanco.receita)}\n"
                         f"🏭 **EBITDA:** R$ {formata_rs(balanco.ebitda)} *(Margem: {margem_ebitda})*\n"
