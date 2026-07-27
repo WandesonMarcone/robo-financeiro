@@ -239,3 +239,51 @@ MAPA_CNPJ_B3 = {
     '02.421.421/0001-11': 'TIMS3',   # TIM Brasil
     '53.113.791/0001-22': 'TOTS3'    # Totvs (Softwares)
 }
+
+# SETORES DAS AÇÕES
+MAPA_SETORES_B3 = {
+    "Petróleo, Gás & Biocombustíveis": {
+        "Exploração e Refino": ["PETR3", "PETR4", "PRIO3", "ENAT3", "RECV3"],
+        "Distribuição de Combustíveis": ["UGPA3", "VBBR3", "CSAN3"]
+    },
+    "Financeiro": {
+        "Bancos": ["ITUB4", "BBDC4", "BBAS3", "SANB11", "BPAC11"],
+        "Seguros & Previdência": ["BBSE3", "CXSE3", "PSSA3", "SULA11"],
+        "Serviços Financeiros": ["B3SA3", "CIEL3"]
+    },
+    "Utilidade Pública": {
+        "Energia Elétrica": ["ELET3", "ELET6", "CMIG4", "TAEE11", "EGIE3", "CPLE6"],
+        "Saneamento": ["SBSP3", "SAPR11", "CSMG3"]
+    },
+    "Materiais Básicos": {
+        "Mineração": ["VALE3", "CMIN3", "BRAP4"],
+        "Siderurgia & Metalurgia": ["GGBR4", "GOAU4", "CSNA3", "USIM5"],
+        "Papel e Celulose": ["SUZB3", "KLBN11", "RANI3"]
+    },
+    "Consumo Cíclico": {
+        "Varejo & E-commerce": ["MGLU3", "BHIA3", "LREN3", "SOMA3"],
+        "Calçados & Vestuário": ["ALPA4", "VULC3", "ARZZ3"],
+        "Construção Civil": ["CYRE3", "EZTC3", "MRVE3", "DIRR3"],
+        "Aluguel de Carros": ["RENT3", "MOVI3"]
+    },
+    "Consumo Não-Cíclico": {
+        "Alimentos e Carnes": ["JBSS3", "BEEF3", "MRFG3", "BRFS3"],
+        "Bebidas": ["ABEV3"],
+        "Supermercados": ["ASAI3", "CRFB3", "PCAR3"]
+    },
+    "Saúde": {
+        "Hospitais e Análises": ["RDOR3", "FLRY3", "DASA3"],
+        "Medicamentos": ["RADL3", "HYPE3", "PGMN3"]
+    },
+    "Bens Industriais": {
+        "Máquinas e Equipamentos": ["WEGE3", "TUPY3"],
+        "Transporte & Logística": ["RAIL3", "CCRO3", "AZUL4", "GOLL4"]
+    },
+    "Tecnologia & Telecom": {
+        "Telecomunicações": ["VIVT3", "TIMS3", "OIBR3"],
+        "Programas e Serviços": ["TOTS3", "LWSA3"]
+    },
+    "Agronegócio": {
+        "Açúcar, Álcool e Grãos": ["SLCE3", "AGRO3", "SMTO3"]
+    }
+}
