@@ -56,7 +56,7 @@ class RelatoriosAcoesCVM:
             'Relatório da Administração',     # Carta do CEO explicando o trimestre
             'Assembleia',                     # Votações importantes
             'Formulário de Referência'        # O raio-x completo da empresa (anual)
-]
+        ]
 
         
         # Filtra a planilha do governo
