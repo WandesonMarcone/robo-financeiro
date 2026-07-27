@@ -303,7 +303,6 @@ def callback_geral(call):
             bot.answer_callback_query(call.id, f"Abrindo pendências de {ticker}...")
 
             # Faz uma consulta rápida para descobrir se é FII ou Ação
-            from atualizador_documentos import SessionDB
             from pipeline_dados.banco_dados import Ativo
             session = SessionDB()
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
