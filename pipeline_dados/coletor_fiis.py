@@ -4,7 +4,7 @@ import io
 import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime
-from pipeline_dados.banco_dados import SessionDB, Ativo, DadosFinanceirosFiis
+from pipeline_dados.banco_dados import Ativo, DadosFinanceirosFiis
 
 def processar_informes_fiis_cvm(ano=2026):
     """
