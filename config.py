@@ -243,47 +243,55 @@ MAPA_CNPJ_B3 = {
 # SETORES DAS AÇÕES
 MAPA_SETORES_B3 = {
     "Petróleo, Gás & Biocombustíveis": {
-        "Exploração e Refino": ["PETR3", "PETR4", "PRIO3", "ENAT3", "RECV3"],
-        "Distribuição de Combustíveis": ["UGPA3", "VBBR3", "CSAN3"]
+        "Exploração e Refino": ["PETR3", "PETR4", "PRIO3", "ENAT3", "RECV3", "RRRP3"],
+        "Distribuição de Combustíveis": ["VBBR3", "CSAN3", "UGPA3", "RAIZ4"],
+        "Equipamentos e Serviços": ["OSPA3", "LUPA3"]
     },
     "Financeiro": {
-        "Bancos": ["ITUB4", "BBDC4", "BBAS3", "SANB11", "BPAC11"],
-        "Seguros & Previdência": ["BBSE3", "CXSE3", "PSSA3", "SULA11"],
-        "Serviços Financeiros": ["B3SA3", "CIEL3"]
+        "Bancos": ["ITUB3", "ITUB4", "BBDC3", "BBDC4", "BBAS3", "SANB4", "SANB11", "BPAC11", "ABCB4", "BRSR6", "BMGB4", "PINE4"],
+        "Seguros e Resseguros": ["BBSE3", "CXSE3", "PSSA3", "IRBR3", "WIZC3", "PORT3"],
+        "Serviços Financeiros e Holdings": ["B3SA3", "CIEL3", "BPAN4", "ITSA4", "SIMH3"]
     },
     "Utilidade Pública": {
-        "Energia Elétrica": ["ELET3", "ELET6", "CMIG4", "TAEE11", "EGIE3", "CPLE6"],
-        "Saneamento": ["SBSP3", "SAPR11", "CSMG3"]
+        "Energia - Geração": ["EGIE3", "AURE3", "ENEV3", "AESB3", "MEGA3", "GEPA4"],
+        "Energia - Transmissão": ["TAEE3", "TAEE4", "TAEE11", "TRPL4", "ALUP11"],
+        "Energia - Distribuição e Integrada": ["ELET3", "ELET6", "CMIG4", "CPLE6", "EQTL3", "ENGI11", "NEOE3", "LIGT3"],
+        "Saneamento e Gestão Ambiental": ["SBSP3", "SAPR11", "CSMG3", "AMBP3", "ORVR3"]
     },
     "Materiais Básicos": {
-        "Mineração": ["VALE3", "CMIN3", "BRAP4"],
-        "Siderurgia & Metalurgia": ["GGBR4", "GOAU4", "CSNA3", "USIM5"],
-        "Papel e Celulose": ["SUZB3", "KLBN11", "RANI3"]
+        "Mineração": ["VALE3", "CMIN3", "BRAP4", "CBAV3", "AURA33", "LITH3"],
+        "Siderurgia e Metalurgia": ["GGBR4", "GOAU3", "GOAU4", "CSNA3", "USIM3", "USIM5", "FESA4"],
+        "Papel, Celulose e Madeira": ["SUZB3", "KLBN11", "RANI3", "DXCO3", "DESK3"],
+        "Química e Petroquímica": ["UNIP3", "UNIP6", "BRKM5", "DEXP3"]
     },
     "Consumo Cíclico": {
-        "Varejo & E-commerce": ["MGLU3", "BHIA3", "LREN3", "SOMA3"],
-        "Calçados & Vestuário": ["ALPA4", "VULC3", "ARZZ3"],
-        "Construção Civil": ["CYRE3", "EZTC3", "MRVE3", "DIRR3"],
-        "Aluguel de Carros": ["RENT3", "MOVI3"]
+        "Varejo e E-commerce": ["MGLU3", "BHIA3", "LREN3", "GUAR3", "CEAB3", "PETZ3", "AMER3", "CGRA4"],
+        "Calçados, Vestuário e Moda": ["ALPA4", "VULC3", "AZZA3", "SOMA3"],
+        "Construção Civil": ["CYRE3", "EZTC3", "MRVE3", "DIRR3", "TEND3", "CURY3", "GFSA3", "HBOR3", "MDNE3", "PLPL3"],
+        "Aluguel de Carros e Frotas": ["RENT3", "MOVI3", "VAMO3"],
+        "Shopping Centers e Imóveis": ["IGTI11", "MULT3", "ALOS3", "JHSF3", "SYNE3", "LPSB3"],
+        "Educação": ["YDUQ3", "COGN3", "ANIM3", "SEER3", "CSED3"],
+        "Viagens, Lazer e Esportes": ["CVCB3", "SMFT3", "SHOW3"]
     },
     "Consumo Não-Cíclico": {
-        "Alimentos e Carnes": ["JBSS3", "BEEF3", "MRFG3", "BRFS3"],
+        "Alimentos e Carnes": ["JBSS3", "BEEF3", "MRFG3", "BRFS3", "MDIA3", "CAML3", "ZAMP3", "MEAL3"],
         "Bebidas": ["ABEV3"],
-        "Supermercados": ["ASAI3", "CRFB3", "PCAR3"]
+        "Supermercados": ["ASAI3", "CRFB3", "PCAR3", "GMAT3", "MATE3"],
+        "Produtos de Uso Pessoal": ["NTCO3"]
     },
     "Saúde": {
-        "Hospitais e Análises": ["RDOR3", "FLRY3", "DASA3"],
-        "Medicamentos": ["RADL3", "HYPE3", "PGMN3"]
+        "Hospitais, Análises e Planos": ["RDOR3", "FLRY3", "DASA3", "MATD3", "QUAL3", "ONCO3", "AALR3", "ODPV3"],
+        "Medicamentos e Produtos": ["RADL3", "HYPE3", "PGMN3", "VVEO3", "BLAU3", "PNVL3"]
     },
     "Bens Industriais": {
-        "Máquinas e Equipamentos": ["WEGE3", "TUPY3"],
-        "Transporte & Logística": ["RAIL3", "CCRO3", "AZUL4", "GOLL4"]
+        "Máquinas e Equipamentos": ["WEGE3", "TUPY3", "POMO4", "ROMI3", "KEPL3", "AERI3", "SHUL4", "FRAS3"],
+        "Transporte e Logística": ["RAIL3", "CCRO3", "AZUL4", "GOLL4", "STBP3", "JSLG3", "HBSA3", "LOGN3", "TGMA3", "PTBL3"]
     },
-    "Tecnologia & Telecom": {
-        "Telecomunicações": ["VIVT3", "TIMS3", "OIBR3"],
-        "Programas e Serviços": ["TOTS3", "LWSA3"]
+    "Tecnologia e Telecom": {
+        "Telecomunicações": ["VIVT3", "TIMS3", "OIBR3", "FIQE3"],
+        "Programas, Computadores e Equipamentos": ["TOTS3", "LWSA3", "POSI3", "CASH3", "INTB3", "MLAS3", "NGRD3", "BMOB3"]
     },
     "Agronegócio": {
-        "Açúcar, Álcool e Grãos": ["SLCE3", "AGRO3", "SMTO3"]
+        "Açúcar, Álcool e Grãos": ["SLCE3", "AGRO3", "SMTO3", "TTEN3", "SOJA3", "JALL3", "AGXY3"]
     }
 }
