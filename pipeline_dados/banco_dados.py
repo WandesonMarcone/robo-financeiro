@@ -63,11 +63,17 @@ class DadosFinanceirosFiis(Base):
     ativo_total: Mapped[Optional[float]] = mapped_column(Float)
     disponibilidades_caixa: Mapped[Optional[float]] = mapped_column(Float)
     rendimento_por_cota: Mapped[Optional[float]] = mapped_column(Float)
-    
-    # --- INDICADORES FÍSICOS (XML Trimestral) ---
-    vacancia_fisica: Mapped[Optional[float]] = mapped_column(Float) # Em Porcentagem (%)
-    vacancia_financeira: Mapped[Optional[float]] = mapped_column(Float)
-    despesas_taxas: Mapped[Optional[float]] = mapped_column(Float) # Taxa adm/gestão gasta no período
+
+    # --- NOVOS INDICADORES DE MERCADO E OPERACIONAIS ---
+    cotistas: Mapped[Optional[int]] = mapped_column(Integer)                # Quantidade total de cotistas
+    cotas_emitidas: Mapped[Optional[float]] = mapped_column(Float)          # Total de cotas no mercado
+    receita_imoveis: Mapped[Optional[float]] = mapped_column(Float)         # Receita bruta de locação/imóveis
+    resultado_ligado_venda: Mapped[Optional[float]] = mapped_column(Float)  # Lucro na venda de ativos/imóveis
+
+    # --- INDICADORES FÍSICOS E GERENCIAIS (XML / Informe) ---
+    vacancia_fisica: Mapped[Optional[float]] = mapped_column(Float)       # Em Porcentagem (%)
+    vacancia_financeira: Mapped[Optional[float]] = mapped_column(Float)   # Em Porcentagem (%)
+    despesas_taxas: Mapped[Optional[float]] = mapped_column(Float)        # Taxas de adm/gestão no período
 
     ativo: Mapped["Ativo"] = relationship(back_populates="dados_fiis")
 
