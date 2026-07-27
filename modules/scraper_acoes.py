@@ -14,6 +14,21 @@ traducao_setores = {
     'consumer staples': 'Consumo Defensivo', 'consumer discretionary': 'Consumo Cíclico'
 }
 
+def classificar_setor_por_mapa(ticker):
+    """
+    Varre o mapa fixo do config.py e devolve (Macro_Setor, Sub_Setor).
+    Se a ação não estiver no mapa, devolve "Outros".
+    """
+    ticker_limpo = ticker.strip().upper()
+    
+    for macro, subsetores in MAPA_SETORES_B3.items():
+        for sub, lista_tickers in subsetores.items():
+            if ticker_limpo in lista_tickers:
+                return macro, sub
+                
+    # Se a ação não estiver mapeada no config.py
+    return "Outros", "Não Classificado"
+
 def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     print("📈 [1/5] Iniciando auditoria completa de Ações...")
     aba_base = planilha.worksheet("BD_Acoes")
