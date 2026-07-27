@@ -691,4 +691,12 @@ def callback_geral(call):
             bot.edit_message_text(texto_ia, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
             
     except Exception as e:
-        print(f"Erro no callback geral: {e}")
+        # 🛡️ Se o erro for apenas o clique duplo idêntico do Telegram, ignora silenciosamente
+        if "message is not modified" in str(e):
+            pass
+        else:
+            print(f"Erro no callback geral: {e}")
+            try:
+                bot.answer_callback_query(call.id, f"⚠️ Erro interno. Tente novamente.")
+            except:
+                pass
