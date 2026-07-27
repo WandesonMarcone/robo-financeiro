@@ -5,14 +5,7 @@ import pandas as pd
 import yfinance as yf
 import config
 from modules.utils import formatar, precisa_atualizar, get_request_with_retry
-
-traducao_setores = {
-    'energy': 'Energia', 'financial services': 'Financeiro', 'basic materials': 'Materiais Básicos', 
-    'utilities': 'Utilidade Pública', 'industrials': 'Indústria', 'consumer defensive': 'Consumo Defensivo', 
-    'consumer cyclical': 'Consumo Cíclico', 'healthcare': 'Saúde', 'technology': 'Tecnologia', 
-    'communication services': 'Comunicações', 'real estate': 'Imobiliário', 'healthcare': 'Saúde',
-    'consumer staples': 'Consumo Defensivo', 'consumer discretionary': 'Consumo Cíclico'
-}
+from config import MAPA_SETORES_B3
 
 def classificar_setor_por_mapa(ticker):
     """
