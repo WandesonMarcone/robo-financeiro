@@ -131,10 +131,26 @@ TIPOS_DOC = {
 
 # Mapa de padronização de contas contábeis da CVM
 MAPA_CONTAS_CVM = {
-    '1.01': 'caixa',               
-    '2': 'passivo_total',          
-    '3.01': 'receita',             
-    '3.11': 'lucro_liquido'        
+    '1': 'ativo_total',
+    '1.01': 'caixa',
+    '1.01.01': 'caixa',
+
+    # BALANÇO PATRIMONIAL (PASSIVO E PL)
+    '2': 'passivo_total',
+    '2.03': 'patrimonio_liquido',
+    '2.01.04': 'divida_curto_prazo',
+    '2.02.01': 'divida_longo_prazo',
+    
+    # BALANÇO PATRIMONIAL (PASSIVO E PL)
+    '3.01': 'receita',
+    '3.03': 'lucro_bruto',
+    '3.05': 'ebitda',
+    '3.06': 'resultado_financeiro',
+    '3.11': 'lucro_liquido',
+
+    # BALANÇO PATRIMONIAL (PASSIVO E PL)
+    '6.01': 'fco',
+    '6.01.01': 'fco' 
 }
 
 # Dicionário Tradutor (CNPJ para Ticker da B3)
