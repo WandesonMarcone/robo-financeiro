@@ -65,7 +65,13 @@ def callback_geral(call):
             try:
                 matriz = buscar_dados_planilha_com_cache("BD_FIIs")
                 if matriz:
-                    macro_tipos = sorted(list(set(linha[1].strip() for linha in matriz[1:] if len(linha) > 1 and linha[1].strip())))
+                    # Pega as Macro Categorias da Coluna B (índice 1)
+                    macro_tipos = sorted(list(set(
+                        linha[1].strip() for linha in matriz[1:] 
+                        if len(linha) > 1 and linha[1].strip()
+                    )))
+
+                    # Cria um botão para cada Macro (Ex: Tijolo, Papel, Híbrido)
                     for macro in macro_tipos:
                         markup.add(InlineKeyboardButton(f"🏢 {macro}", callback_data=f"macro_fii_{macro}"))
             except Exception as e:
@@ -74,6 +80,7 @@ def callback_geral(call):
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
             bot.edit_message_text("🏢 *Módulo FIIs - Selecione a Categoria:*", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
+        # --- 2ª CAMADA: SUB-SETORES DA MACRO (Coluna C: Logística, Shopping...) ---
         elif call.data.startswith("macro_fii_"):
             macro_escolhida = call.data.replace("macro_fii_", "").strip()
             bot.answer_callback_query(call.id, f"Abrindo {macro_escolhida}...")
@@ -81,13 +88,24 @@ def callback_geral(call):
             try:
                 matriz = buscar_dados_planilha_com_cache("BD_FIIs")
                 markup = InlineKeyboardMarkup(row_width=2)
-                sub_setores = sorted(list(set(linha[2].strip() for linha in matriz[1:] if len(linha) > 2 and linha[1].strip().lower() == macro_escolhida.lower() and linha[2].strip())))
 
+                # Busca na Coluna C (índice 2) os sub-setores pertencentes à Macro clicada (Coluna B)
+                sub_setores = sorted(list(set(
+                    linha[2].strip() for linha in matriz[1:] 
+                    if len(linha) > 2 and linha[1].strip().lower() == macro_escolhida.lower() and linha[2].strip()
+                )))
+
+                # Se houver múltiplos sub-setores (Ex: Tijolo possui Logística, Shoppings, etc)
                 if len(sub_setores) > 1:
                     for sub in sub_setores:
+                        # Passa a Macro e o Sub-setor juntos via '___' para isolar a busca
                         markup.add(InlineKeyboardButton(f"📁 {sub}", callback_data=f"subsetor_fii_{macro_escolhida}___{sub}"))
                 else:
-                    tickers = [linha[0].strip().upper() for linha in matriz[1:] if len(linha) > 1 and linha[1].strip().lower() == macro_escolhida.lower()]
+                    # Se não houver sub-divisões (Ex: Papel), lista os ativos diretamente
+                    tickers = [
+                        linha[0].strip().upper() for linha in matriz[1:] 
+                        if len(linha) > 1 and linha[1].strip().lower() == macro_escolhida.lower()
+                    ]
                     for tkr in sorted(tickers):
                         markup.add(InlineKeyboardButton(f"🏢 {tkr}", callback_data=f"painel_{tkr}_fii"))
 
@@ -96,18 +114,25 @@ def callback_geral(call):
             except Exception as e:
                 print(f"Erro ao abrir macro: {e}")
 
+        # --- 3ª CAMADA: ATIVOS DO SUB-SETOR (Ex: Tijolo -> Logística -> VILG11) ---
         elif call.data.startswith("subsetor_fii_"):
             partes = call.data.replace("subsetor_fii_", "").split("___")
             macro, sub = partes[0], partes[1]
             bot.answer_callback_query(call.id, f"Buscando {sub}...")
 
             matriz = buscar_dados_planilha_com_cache("BD_FIIs")
-            tickers = [linha[0].strip().upper() for linha in matriz[1:] if len(linha) > 2 and linha[1].strip().lower() == macro.lower() and linha[2].strip().lower() == sub.lower()]
+
+            # Filtra ativos onde Coluna B == Macro E Coluna C == Sub-setor
+            tickers = [
+                linha[0].strip().upper() for linha in matriz[1:]
+                if len(linha) > 2 and linha[1].strip().lower() == macro.lower() and linha[2].strip().lower() == sub.lower()
+            ]
 
             markup = InlineKeyboardMarkup(row_width=3)
             for ticker in sorted(tickers):
                 markup.add(InlineKeyboardButton(f"🏢 {ticker}", callback_data=f"painel_{ticker}_fii"))
 
+            # Voltar para a Macro correspondente
             markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=f"macro_fii_{macro}"))
             bot.edit_message_text(f"📂 **Segmento:** {sub}\nEscolha o ativo:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
