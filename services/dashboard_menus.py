@@ -97,7 +97,7 @@ def buscar_oportunidades(tipo):
 
 def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
     """Gera a mensagem principal com os botões interativos e dados em tempo real"""
-    
+
     is_fii = (tipo == 'fii')
     icone = "🏢 Fundo" if is_fii else "📈 Ação"
     voltar_cmd = "menu_fiis" if is_fii else "menu_acoes"
@@ -135,31 +135,31 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
 
     markup = InlineKeyboardMarkup(row_width=2)
 
-    markup.add(
-        InlineKeyboardButton("📎 Dados", callback_data=f"dados_{ticker}_{tipo}"),
-        InlineKeyboardButton("📑 Docs", callback_data=f"docs_{ticker}_{tipo}")
-    )
+    # 🔴 1. VERIFICAÇÃO DE AUDITORIA (Agora funciona para FIIs e Ações!)
+    pendentes = 0
+    try:
+        from atualizador_documentos import SessionDB
+        from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
+        session = SessionDB()
+        pendentes = session.query(DocumentosQualitativos).join(Ativo).filter(
+            Ativo.ticker == ticker,
+            DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
+        ).count()
+        session.close()
+    except Exception as e:
+        print(f"DEBUG: Revisão temporariamente indisponível: {e}")
 
-    if is_fii:
-        try:
-            from atualizador_documentos import SessionDB
-            from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
-            session = SessionDB()
-            pendentes = session.query(DocumentosQualitativos).join(Ativo).filter(
-                Ativo.ticker == ticker,
-                DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
-            ).count()
-
+    # 🔴 2. SE TIVER PENDÊNCIA, COLOCA O BOTÃO DE ALERTA NO TOPO
     if pendentes > 0:
         markup.add(InlineKeyboardButton(f"⚠️ Requer Auditoria ({pendentes} docs)", callback_data=f"rev_t_{ticker}"))
 
-    markup.add(
-        InlineKeyboardButton("📎 Dados", callback_data=f"dados_{ticker}_{tipo_ativo}"),
-        InlineKeyboardButton("📁 Docs", callback_data=f"docs_{ticker}_{tipo_ativo}")
+    # 🔴 3. ADICIONA OS BOTÕES PADRÕES LADO A LADO
+    markup.row(
+        InlineKeyboardButton("📎 Dados", callback_data=f"dados_{ticker}_{tipo}"),
+        InlineKeyboardButton("📁 Docs", callback_data=f"docs_{ticker}_{tipo}")
     )
-        except Exception as e:
-            print(f"DEBUG: Revisão temporariamente indisponível: {e}")
 
+    # 🔴 4. BOTÕES INFERIORES
     markup.add(InlineKeyboardButton("⚠️ Análise IA", callback_data=f"ia_{ticker}_{tipo}"))
     markup.add(InlineKeyboardButton(f"🔙 Voltar", callback_data=voltar_cmd))
 
