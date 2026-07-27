@@ -157,7 +157,7 @@ def callback_geral(call):
             # Recebe o ID numérico (ex: "3")
             index_str = dados.replace("setor_acao_", "").strip()
             bot.answer_callback_query(call.id, f"Acessando setor...")
-            
+
             try:
                 matriz = buscar_dados_planilha_com_cache("BD_Acoes")
                 if not matriz or len(matriz) < 2:
@@ -166,12 +166,12 @@ def callback_geral(call):
 
                 # Recria a mesma lista para descobrir qual nome pertence ao ID
                 setores_originais = sorted(list(set(linha[1].strip() for linha in matriz[1:] if len(linha) > 1 and linha[1].strip())))
-                
+
                 indice = int(index_str)
                 if indice >= len(setores_originais):
                     bot.send_message(chat_id, "❌ Erro de sincronia no setor.")
                     return
-                    
+
                 nome_setor_real = setores_originais[indice]
                 tickers = []
 
@@ -186,14 +186,14 @@ def callback_geral(call):
                 if tickers:
                     for ticker in sorted(list(set(tickers))):
                         markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
-                    
+
                     # 🔴 CORREÇÃO AQUI: Usando a variável que contém o nome real decodificado
                     texto_resposta = f"📂 **Setor:** {nome_setor_real}\nEscolha a ação desejada:"
                 else:
                     texto_resposta = f"📭 Nenhuma ação encontrada no setor **{nome_setor_real}**."
 
                 markup.add(InlineKeyboardButton("🔙 Voltar aos Setores", callback_data="menu_acoes"))
-                
+
                 bot.edit_message_text(texto_resposta, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
             except Exception as e:
