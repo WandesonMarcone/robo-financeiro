@@ -148,7 +148,7 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
             pendentes = session.query(DocumentosQualitativos).join(Ativo).filter(
                 Ativo.ticker == ticker,
                 DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
-    ).count()
+            ).count()
 
     if pendentes > 0:
         markup.add(InlineKeyboardButton(f"⚠️ Requer Auditoria ({pendentes} docs)", callback_data=f"rev_t_{ticker}"))
