@@ -4,6 +4,7 @@ import os
 SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1U8h3Hw2yBOmCbvBskP9zHyVVJf_3OkXtAopcFSebLvs/edit?usp=drivesdk' 
 JSON_KEY = 'credenciais.json' 
 
+TIPOS_DOCS = TIPOS_DOCS_FII
 # --- CONFIGURAÇÕES ---
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") 
 TELEGRAM_CHAT_ID = "8867098987"
@@ -134,7 +135,6 @@ TIPOS_DOC_ACAO = {
     "5": "Relatório de Sustentabilidade",
     "6": "Outros"
 }
-TIPOS_DOCS = [TIPOS_DOCS_FII]
 
 # ==========================================
 # CONFIGURAÇÕES DO COLETOR CVM (AÇÕES)
