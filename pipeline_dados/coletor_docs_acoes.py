@@ -47,7 +47,17 @@ class RelatoriosAcoesCVM:
         col_categoria = next((col for col in df_ipe.columns if 'CATEGORIA' in col.upper()), 'Categoria')
         col_assunto = next((col for col in df_ipe.columns if 'ASSUNTO' in col.upper()), 'Assunto')
 
-        tipos_desejados = ['Fato Relevante', 'Aviso aos Acionistas', 'Comunicado ao Mercado']
+        tipos_desejados = [
+            'Fato Relevante', 
+            'Aviso aos Acionistas', 
+            'Comunicado ao Mercado',
+            'Apresentação de Resultados',     # Os slides bonitos que a diretoria apresenta
+            'Demonstrações Financeiras',      # O balanço completo em PDF
+            'Relatório da Administração',     # Carta do CEO explicando o trimestre
+            'Assembleia',                     # Votações importantes
+            'Formulário de Referência'        # O raio-x completo da empresa (anual)
+]
+
         
         # Filtra a planilha do governo
         df_filtrado = df_ipe[
