@@ -45,10 +45,8 @@ def callback_geral(call):
             bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # =======================================================
-        # --- MÓDULO FIIs HIERÁRQUICO DINÂMICO (CORRIGIDO) ---
+        # --- MÓDULO FIIs HIERÁRQUICO DINÂMICO ---
         # =======================================================
-
-        # --- 1ª CAMADA: MACRO CATEGORIAS (Coluna B: Tijolo, Papel, Híbrido...) ---
         elif dados == "menu_fiis":
             bot.answer_callback_query(call.id, "Carregando FIIs...")
             markup = InlineKeyboardMarkup(row_width=2)
@@ -58,19 +56,15 @@ def callback_geral(call):
             )
 
             try:
+                # Agora ele vai achar a função porque ela está importada corretamente no topo!
                 matriz = buscar_dados_planilha_com_cache("BD_FIIs")
                 if matriz:
-                    # Pega as Macro Categorias da Coluna B (índice 1)
-                    macro_tipos = sorted(list(set(
-                        linha[1].strip() for linha in matriz[1:] 
-                        if len(linha) > 1 and linha[1].strip()
-                    )))
-
-                    # Cria um botão para cada Macro (Ex: Tijolo, Papel, Híbrido)
+                    # Pega as Macro Categorias da Coluna B
+                    macro_tipos = sorted(list(set(linha[1].strip() for linha in matriz[1:] if len(linha) > 1 and linha[1].strip())))
                     for macro in macro_tipos:
                         markup.add(InlineKeyboardButton(f"🏢 {macro}", callback_data=f"macro_fii_{macro}"))
             except Exception as e:
-                print(f"Erro ao listar macro categorias: {e}")
+                print(f"Erro ao listar macro categorias FII: {e}")
 
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
             bot.edit_message_text("🏢 *Módulo FIIs - Selecione a Categoria:*", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
