@@ -471,40 +471,33 @@ def callback_geral(call):
                 session.close()
 
         # ==========================================
-        # --- NÍVEL 1: DOCUMENTOS (PDFs do Drive) ---
+        # --- NÍVEL 1: DOCUMENTOS (BIFURCAÇÃO) ---
         # ==========================================
         elif dados.startswith("docs_"):
-            # 🔴 DESTRAVADOR ADICIONADO AQUI
-            bot.answer_callback_query(call.id, "Abrindo gaveta de documentos...")
+            bot.answer_callback_query(call.id, "Acessando o arquivo...")
             
             partes = dados.split("_")
             ticker = partes[1]
             tipo_ativo = partes[2] 
 
-            markup = InlineKeyboardMarkup(row_width=1)
+            markup = InlineKeyboardMarkup(row_width=2)
             session = SessionDB()
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
 
             if ativo:
-                tipos_existentes = session.query(DocumentosQualitativos.tipo_documento).filter(
+                # Checa se existe QUALQUER documento salvo para esse ativo
+                tem_docs = session.query(DocumentosQualitativos).filter(
                     DocumentosQualitativos.ativo_id == ativo.id,
                     DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")
-                ).distinct().all()
+                ).first()
 
-                if tipos_existentes:
-                    for (tipo_doc,) in tipos_existentes:
-                        t_low = tipo_doc.lower()
-                        if "gerencial" in t_low: emoji = "📊"
-                        elif "fato" in t_low: emoji = "🚨"
-                        elif "aviso" in t_low or "provento" in t_low: emoji = "💰"
-                        elif "assembleia" in t_low or "vota" in t_low: emoji = "🗳️"
-                        elif "trimestral" in t_low or "informe" in t_low: emoji = "📑"
-                        elif "comunicado" in t_low: emoji = "📢"
-                        else: emoji = "📄" 
-
-                        markup.add(InlineKeyboardButton(f"{emoji} {tipo_doc}", callback_data=f"doctipo_{ticker}_{tipo_doc}"))
-
-                    txt = f"📂 **Gaveta de Documentos: {ticker}**\n\nSelecione a categoria que deseja visualizar:"
+                if tem_docs:
+                    # 🔀 A BIFURCAÇÃO MÁGICA
+                    markup.add(
+                        InlineKeyboardButton("📂 Filtrar por Tipo", callback_data=f"dnav_{ticker}_t"),
+                        InlineKeyboardButton("📅 Filtrar por Mês", callback_data=f"dnav_{ticker}_m")
+                    )
+                    txt = f"🗄️ **Arquivo Central: {ticker}**\n\nComo você deseja procurar os documentos?"
                 else:
                     termo = "o fundo" if tipo_ativo == "fii" else "a empresa"
                     txt = f"📭 **Ainda não há documentos processados para {termo} {ticker}.**"
@@ -516,121 +509,150 @@ def callback_geral(call):
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # ==========================================
-        # --- NÍVEL 2: SELEÇÃO DE MESES (FIIs e AÇÕES) ---
+        # --- NÍVEL 2: NAVEGAÇÃO (TIPOS OU MESES) ---
         # ==========================================
-        elif dados.startswith("doctipo_"):
-            bot.answer_callback_query(call.id, "Vasculhando documentos...")
-            partes = dados.split("_", 2)
+        elif dados.startswith("dnav_"):
+            bot.answer_callback_query(call.id, "Listando opções...")
+            partes = dados.split("_")
             ticker = partes[1]
-            tipo_doc = partes[2]
+            modo = partes[2] # 't' para Tipo, 'm' para Mês
 
             session = SessionDB()
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-
-            tipo_ativo = "fii"
-            if ativo and hasattr(ativo, 'tipo') and ativo.tipo:
-                if hasattr(ativo.tipo, 'value'):
-                    tipo_ativo = str(ativo.tipo.value).lower()
-                else:
-                    tipo_ativo = str(ativo.tipo).lower()
-
-            markup = InlineKeyboardMarkup(row_width=2)
+            tipo_ativo = getattr(ativo.tipo, 'name', str(ativo.tipo)).replace("TipoAtivo.", "").lower() if ativo else "acao"
 
             docs = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.ativo_id == ativo.id,
-                DocumentosQualitativos.tipo_documento == tipo_doc,
                 DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")
             ).all()
 
+            markup = InlineKeyboardMarkup(row_width=1)
+
             if docs:
-                meses_unicos = []
-                for d in docs:
-                    mes_str = "0000-00"
-                    if d.assunto and '-' in d.assunto:
-                        p = d.assunto.split(" ")[0].split("-") 
-                        if len(p) == 3:
-                            mes_str = f"{p[2]}-{p[1]}" 
-                    elif d.data_publicacao:
-                        mes_str = d.data_publicacao.strftime("%Y-%m")
+                if modo == 't':
+                    # --- NAVEGAÇÃO POR TIPO ---
+                    tipos_unicos = sorted(list(set([d.tipo_documento for d in docs if d.tipo_documento])))
+                    for tipo_doc in tipos_unicos:
+                        t_low = tipo_doc.lower()
+                        if "gerencial" in t_low: emoji = "📊"
+                        elif "fato" in t_low: emoji = "🚨"
+                        elif "aviso" in t_low or "provento" in t_low: emoji = "💰"
+                        elif "assembleia" in t_low or "vota" in t_low: emoji = "🗳️"
+                        elif "trimestral" in t_low or "informe" in t_low: emoji = "📑"
+                        else: emoji = "📄" 
+                        
+                        # Usa o nome cortado para não estourar o limite de 64 bytes do Telegram
+                        callback_seguro = f"dl_{ticker}_t_{tipo_doc[:25]}"
+                        markup.add(InlineKeyboardButton(f"{emoji} {tipo_doc}", callback_data=callback_seguro))
+                    txt = f"📂 **Filtro por Tipo: {ticker}**\n\nSelecione a categoria:"
 
-                    if mes_str not in meses_unicos:
-                        meses_unicos.append(mes_str)
+                elif modo == 'm':
+                    # --- NAVEGAÇÃO POR MÊS ---
+                    meses_unicos = []
+                    for d in docs:
+                        mes_str = "0000-00"
+                        if d.assunto and '-' in d.assunto:
+                            p = d.assunto.split(" ")[0].split("-") 
+                            if len(p) == 3: mes_str = f"{p[2]}-{p[1]}" 
+                        elif d.data_publicacao:
+                            mes_str = d.data_publicacao.strftime("%Y-%m")
+                        if mes_str not in meses_unicos: meses_unicos.append(mes_str)
+                    
+                    meses_unicos.sort(reverse=True)
+                    
+                    # Cria a tela com 2 botões por linha para os meses (fica mais bonito)
+                    markup = InlineKeyboardMarkup(row_width=2)
+                    botoes_meses = []
+                    for mes in meses_unicos[:14]: # Mostra até 14 meses
+                        if mes == "0000-00": nome_btn = "📅 Sem Data"
+                        else: nome_btn = f"📅 {mes.split('-')[1]}/{mes.split('-')[0]}"
+                        botoes_meses.append(InlineKeyboardButton(nome_btn, callback_data=f"dl_{ticker}_m_{mes}"))
+                    
+                    markup.add(*botoes_meses)
+                    txt = f"📅 **Filtro por Mês: {ticker}**\n\nSelecione o período (Ano/Mês):"
 
-                meses_unicos.sort(reverse=True)
-
-                for mes in meses_unicos[:10]:
-                    if mes == "0000-00":
-                        nome_btn = "📅 Diversos (Sem Data)"
-                    else:
-                        ano, mes_num = mes.split('-')
-                        nome_btn = f"📅 {mes_num}/{ano}"
-
-                    markup.add(InlineKeyboardButton(nome_btn, callback_data=f"docmes_{ticker}_{tipo_doc}_{mes}"))
-
-                txt = f"📅 **{tipo_doc} - {ticker}**\n\nSelecione o período:"
-            else:
-                txt = f"📭 **Opa! Houve uma falha ao abrir a gaveta.**"
-
-            markup.add(InlineKeyboardButton("🔙 Voltar aos Tipos", callback_data=f"docs_{ticker}_{tipo_ativo}"))
+            markup.row(InlineKeyboardButton("🔙 Voltar ao Arquivo", callback_data=f"docs_{ticker}_{tipo_ativo}"))
             session.close()
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # ==========================================
-        # --- NÍVEL 3: EXIBIÇÃO DOS PDFS E RESUMO ---
+        # --- NÍVEL 3: LISTAGEM FINAL DE PDFS ---
         # ==========================================
-        elif dados.startswith("docmes_"):
-            # 🔴 DESTRAVADOR ADICIONADO AQUI
-            bot.answer_callback_query(call.id, "Preparando arquivos...")
-            
+        elif dados.startswith("dl_"):
+            bot.answer_callback_query(call.id, "Puxando documentos do Drive...")
             partes = dados.split("_", 3)
             ticker = partes[1]
-            tipo_doc = partes[2]
-            periodo = partes[3]
+            modo = partes[2] # 't' (tipo) ou 'm' (mês)
+            valor = partes[3]
 
             markup = InlineKeyboardMarkup(row_width=1)
             session = SessionDB()
-
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
 
-            docs = session.query(DocumentosQualitativos).filter(
+            # Busca todos os docs para filtrar no Python
+            todos_docs = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.ativo_id == ativo.id,
-                DocumentosQualitativos.tipo_documento == tipo_doc,
                 DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")
             ).all()
 
-            docs_do_mes = []
-            for d in docs:
-                mes_str = "0000-00"
-                if d.assunto and '-' in d.assunto:
-                    p = d.assunto.split(" ")[0].split("-")
-                    if len(p) == 3: mes_str = f"{p[2]}-{p[1]}"
-                elif d.data_publicacao:
-                    mes_str = d.data_publicacao.strftime("%Y-%m")
-
-                if mes_str == periodo:
-                    docs_do_mes.append(d)
-
-            if periodo == "0000-00":
-                txt = f"📂 **{tipo_doc}: {ticker}**\n\n"
+            docs_finais = []
+            if modo == 't':
+                # Filtra pelo começo do nome do tipo (segurança de callback)
+                docs_finais = [d for d in todos_docs if d.tipo_documento and d.tipo_documento.startswith(valor)]
+                txt = f"📂 **{valor} ({ticker})**\n\n"
             else:
-                ano, mes_num = periodo.split('-')
-                txt = f"📂 **{tipo_doc}: {ticker} ({mes_num}/{ano})**\n\n"
+                for d in todos_docs:
+                    mes_str = "0000-00"
+                    if d.assunto and '-' in d.assunto:
+                        p = d.assunto.split(" ")[0].split("-")
+                        if len(p) == 3: mes_str = f"{p[2]}-{p[1]}"
+                    elif d.data_publicacao:
+                        mes_str = d.data_publicacao.strftime("%Y-%m")
+                    if mes_str == valor: docs_finais.append(d)
+                
+                txt = f"📅 **Documentos de {valor.split('-')[1]}/{valor.split('-')[0]} ({ticker})**\n\n" if valor != "0000-00" else f"📅 **Documentos Diversos ({ticker})**\n\n"
 
-            for doc in docs_do_mes:
+            # 🧠 DICIONÁRIO DE RESUMOS GENÉRICOS (O Fallback Inteligente)
+            resumos_genericos = {
+                "fato relevante": "Comunicado oficial sobre eventos que podem impactar a tese de investimento.",
+                "relatório gerencial": "Documento da gestão detalhando resultados operacionais e movimentações.",
+                "aviso aos acionistas": "Aviso oficial sobre pagamento de dividendos, JCP ou subscrições.",
+                "aviso aos cotistas": "Aviso oficial aos cotistas sobre rendimentos ou emissões de cotas.",
+                "informe mensal": "Relatório contábil da B3 com dados de caixa, cotistas e patrimônio.",
+                "informe trimestral": "Balanço trimestral simplificado de fundos imobiliários.",
+                "comunicado ao mercado": "Esclarecimentos e informações gerais da empresa ao mercado.",
+                "apresentação": "Apresentação em slides detalhando os resultados do trimestre."
+            }
+
+            for doc in sorted(docs_finais, key=lambda x: x.assunto if x.assunto else "", reverse=True):
                 data_limpa = doc.assunto.split(" ")[0].replace("-", "/") if doc.assunto else "Data N/A"
 
-                # 🔴 CORREÇÃO CRÍTICA DO BUG DO RESUMO DA IA
                 resumo_texto = getattr(doc, 'resumo_ia', None)
+                
+                # Se a IA não tiver resumido, busca no dicionário genérico!
                 if not resumo_texto:
-                    resumo_texto = doc.assunto if doc.assunto else "Detalhes não informados."
+                    tipo_doc_baixo = doc.tipo_documento.lower() if doc.tipo_documento else ""
+                    # Procura alguma palavra-chave do dicionário dentro do tipo do documento
+                    for chave, texto_generico in resumos_genericos.items():
+                        if chave in tipo_doc_baixo:
+                            resumo_texto = texto_generico
+                            break
+                    # Se não achar nada no dicionário, usa um fallback elegante
+                    if not resumo_texto:
+                        resumo_texto = "Documento oficial arquivado no Google Drive."
 
-                txt += f"📄 **Data:** `{data_limpa}`\n"
-                txt += f"📝 **Resumo:** _{resumo_texto}_\n\n"
+                # Se a busca foi por mês, mostra o Tipo do documento na listagem. Se foi por Tipo, não precisa repetir.
+                if modo == 'm':
+                    txt += f"📄 **{doc.tipo_documento}** (`{data_limpa}`)\n"
+                else:
+                    txt += f"📄 **Data:** `{data_limpa}`\n"
+                    
+                txt += f"📝 _{resumo_texto}_\n\n"
 
                 url = doc.url_pdf if (doc.url_pdf and str(doc.url_pdf).startswith("http")) else "https://drive.google.com"
                 markup.add(InlineKeyboardButton(f"🔗 Abrir PDF ({data_limpa})", url=url))
 
-            markup.add(InlineKeyboardButton("🔙 Voltar aos Meses", callback_data=f"doctipo_{ticker}_{tipo_doc}"))
+            markup.add(InlineKeyboardButton("🔙 Voltar aos Filtros", callback_data=f"dnav_{ticker}_{modo}"))
             session.close()
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
