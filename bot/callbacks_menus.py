@@ -128,77 +128,67 @@ def callback_geral(call):
             markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=f"macro_fii_{macro}"))
             bot.edit_message_text(f"📂 **Segmento:** {sub}\nEscolha o ativo:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- MÓDULO AÇÕES (CRIAÇÃO DOS BOTÕES COM ÍNDICE NUMÉRICO) ---
+        # --- 1ª CAMADA: MACRO-SETORES DAS AÇÕES (FIXO) ---
         elif dados == "menu_acoes":
             bot.answer_callback_query(call.id, "Carregando Ações...")
+            from config import MAPA_SETORES_B3
+            
             markup = InlineKeyboardMarkup(row_width=2)
             markup.add(
                 InlineKeyboardButton("⭐ Minhas Favoritas", callback_data="favoritos_acoes"),
                 InlineKeyboardButton("🔥 Oportunidades", callback_data="oportunidades_acoes")
             )
 
-            try:
-                matriz = buscar_dados_planilha_com_cache("BD_Acoes")
-                if matriz:
-                    # Cria uma lista única, em ordem alfabética, com os setores reais
-                    setores_originais = sorted(list(set(linha[1].strip() for linha in matriz[1:] if len(linha) > 1 and linha[1].strip())))
-
-                    # 🔴 O PULO DO GATO: Usa a posição do setor (0, 1, 2...) como ID invisível!
-                    for index, setor_nome in enumerate(setores_originais):
-                        markup.add(InlineKeyboardButton(f"📁 {setor_nome}", callback_data=f"setor_acao_{index}"))
-            except Exception as e:
-                print(f"Erro ao ler setores de ações: {e}")
+            # Usamos índices curtos (0 a 9) apenas para navegar entre as telas e nunca estourar o limite do Telegram
+            lista_macros = list(MAPA_SETORES_B3.keys())
+            for idx, macro in enumerate(lista_macros):
+                markup.add(InlineKeyboardButton(f"🏭 {macro}", callback_data=f"macro_ac_{idx}"))
 
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
-            bot.edit_message_text("📈 *Módulo de Ações*\nSelecione um Setor ou Favorita:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            bot.edit_message_text("📈 *Módulo Ações - Selecione o Macro-Setor:*", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- FILTRO DE SETOR DAS AÇÕES (RECEBEDOR DOS CLIQUES) ---
-        elif dados.startswith("setor_acao_"):
-            # Recebe o ID numérico (ex: "3")
-            index_str = dados.replace("setor_acao_", "").strip()
-            bot.answer_callback_query(call.id, f"Acessando setor...")
+        # --- 2ª CAMADA: SUB-SETORES (Ex: Petróleo -> Refino / Distribuição) ---
+        elif dados.startswith("macro_ac_"):
+            from config import MAPA_SETORES_B3
+            idx_macro = int(dados.replace("macro_ac_", ""))
+            lista_macros = list(MAPA_SETORES_B3.keys())
+            nome_macro = lista_macros[idx_macro]
+            
+            bot.answer_callback_query(call.id, f"Abrindo {nome_macro}...")
+            markup = InlineKeyboardMarkup(row_width=1)
+            
+            subsetores = list(MAPA_SETORES_B3[nome_macro].keys())
+            for idx_sub, sub in enumerate(subsetores):
+                markup.add(InlineKeyboardButton(f"📁 {sub}", callback_data=f"sub_ac_{idx_macro}_{idx_sub}"))
+                
+            markup.add(InlineKeyboardButton("🔙 Voltar aos Setores", callback_data="menu_acoes"))
+            bot.edit_message_text(f"🏭 **Setor:** {nome_macro}\nSelecione o segmento de atuação:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-            try:
-                matriz = buscar_dados_planilha_com_cache("BD_Acoes")
-                if not matriz or len(matriz) < 2:
-                    bot.send_message(chat_id, "❌ Erro: Planilha de ações vazia!")
-                    return
-
-                # Recria a mesma lista para descobrir qual nome pertence ao ID
-                setores_originais = sorted(list(set(linha[1].strip() for linha in matriz[1:] if len(linha) > 1 and linha[1].strip())))
-
-                indice = int(index_str)
-                if indice >= len(setores_originais):
-                    bot.send_message(chat_id, "❌ Erro de sincronia no setor.")
-                    return
-
-                nome_setor_real = setores_originais[indice]
-                tickers = []
-
-                # Busca as empresas que pertencem a este setor exato
-                for linha in matriz[1:]:
-                    if len(linha) > 1 and linha[1].strip() == nome_setor_real:
-                        t_limpo = "".join(filter(str.isalnum, linha[0])).upper()
-                        if t_limpo: 
-                            tickers.append(t_limpo)
-
-                markup = InlineKeyboardMarkup(row_width=3)
-                if tickers:
-                    for ticker in sorted(list(set(tickers))):
-                        markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
-
-                    # AQUI ESTÁ A CORREÇÃO DO TEXTO!
-                    texto_resposta = f"📂 **Setor:** {nome_setor_real}\nEscolha a ação desejada:"
-                else:
-                    texto_resposta = f"📭 Nenhuma ação encontrada no setor **{nome_setor_real}**."
-
-                markup.add(InlineKeyboardButton("🔙 Voltar aos Setores", callback_data="menu_acoes"))
-
-                bot.edit_message_text(texto_resposta, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-
-            except Exception as e:
-                print(f"Erro crítico ao abrir setor de ações: {e}")
-                bot.send_message(chat_id, f"❌ Erro ao processar abertura do setor.")
+        # --- 3ª CAMADA: LISTA DE EMPRESAS (Ex: Refino -> PETR4) ---
+        elif dados.startswith("sub_ac_"):
+            from config import MAPA_SETORES_B3
+            partes = dados.split("_")
+            idx_macro = int(partes[2])
+            idx_sub = int(partes[3])
+            
+            lista_macros = list(MAPA_SETORES_B3.keys())
+            nome_macro = lista_macros[idx_macro]
+            nome_sub = list(MAPA_SETORES_B3[nome_macro].keys())[idx_sub]
+            
+            bot.answer_callback_query(call.id, f"Buscando empresas...")
+            
+            tickers_do_subsetor = MAPA_SETORES_B3[nome_macro][nome_sub]
+            markup = InlineKeyboardMarkup(row_width=3)
+            
+            if tickers_do_subsetor:
+                for ticker in sorted(tickers_do_subsetor):
+                    markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
+                txt = f"📂 **Segmento:** {nome_sub}\nEscolha a empresa para análise:"
+            else:
+                txt = f"📭 Nenhuma empresa cadastrada no segmento **{nome_sub}**."
+                
+            markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=f"macro_ac_{idx_macro}"))
+            bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # --- FAVORITOS ---            
         elif dados in ["favoritos_fiis", "favoritos_acoes"]:
