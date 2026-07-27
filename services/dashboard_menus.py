@@ -145,7 +145,7 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
             from atualizador_documentos import SessionDB
             from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
             session = SessionDB()
-    pendentes = session.query(DocumentosQualitativos).join(Ativo).filter(
+            pendentes = session.query(DocumentosQualitativos).join(Ativo).filter(
         Ativo.ticker == ticker,
         DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
     ).count()
