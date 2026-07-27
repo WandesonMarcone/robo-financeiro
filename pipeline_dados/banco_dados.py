@@ -18,7 +18,6 @@ class Ativo(Base):
     cnpj: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
     tipo: Mapped[TipoAtivo] = mapped_column(Enum(TipoAtivo), nullable=False)
 
-    # Relacionamentos
     dados_acoes: Mapped[List["DadosFinanceirosAcoes"]] = relationship(back_populates="ativo", cascade="all, delete-orphan")
     dados_fiis: Mapped[List["DadosFinanceirosFiis"]] = relationship(back_populates="ativo", cascade="all, delete-orphan")
     documentos: Mapped[List["DocumentosQualitativos"]] = relationship(back_populates="ativo", cascade="all, delete-orphan")
@@ -32,11 +31,22 @@ class DadosFinanceirosAcoes(Base):
     data_referencia: Mapped[date] = mapped_column(Date, nullable=False)
     tipo_doc: Mapped[str] = mapped_column(String(10), nullable=False) # Ex: 'ITR', 'DFP'
 
-    receita: Mapped[Optional[float]] = mapped_column(Float)
-    lucro_liquido: Mapped[Optional[float]] = mapped_column(Float)
-    ebitda: Mapped[Optional[float]] = mapped_column(Float)
+    # --- BALANÇO PATRIMONIAL ---
+    ativo_total: Mapped[Optional[float]] = mapped_column(Float)
+    patrimonio_liquido: Mapped[Optional[float]] = mapped_column(Float)
     caixa: Mapped[Optional[float]] = mapped_column(Float)
     passivo_total: Mapped[Optional[float]] = mapped_column(Float)
+    divida_bruta: Mapped[Optional[float]] = mapped_column(Float) # Empréstimos/Debêntures
+
+    # --- D.R.E (RESULTADOS) ---
+    receita: Mapped[Optional[float]] = mapped_column(Float)
+    lucro_bruto: Mapped[Optional[float]] = mapped_column(Float)
+    ebitda: Mapped[Optional[float]] = mapped_column(Float)
+    resultado_financeiro: Mapped[Optional[float]] = mapped_column(Float)
+    lucro_liquido: Mapped[Optional[float]] = mapped_column(Float)
+    
+    # --- FLUXO DE CAIXA ---
+    fco: Mapped[Optional[float]] = mapped_column(Float) # Caixa Operacional
 
     ativo: Mapped["Ativo"] = relationship(back_populates="dados_acoes")
 
@@ -46,43 +56,37 @@ class DadosFinanceirosFiis(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     ativo_id: Mapped[int] = mapped_column(ForeignKey('ativos.id'), nullable=False)
-    data_referencia: Mapped[date] = mapped_column(Date, nullable=False) # Último dia do mês do informe
+    data_referencia: Mapped[date] = mapped_column(Date, nullable=False)
 
+    # --- INDICADORES FINANCEIROS (XML Mensal/Trimestral) ---
     patrimonio_liquido: Mapped[Optional[float]] = mapped_column(Float)
     ativo_total: Mapped[Optional[float]] = mapped_column(Float)
     disponibilidades_caixa: Mapped[Optional[float]] = mapped_column(Float)
     rendimento_por_cota: Mapped[Optional[float]] = mapped_column(Float)
+    
+    # --- INDICADORES FÍSICOS (XML Trimestral) ---
+    vacancia_fisica: Mapped[Optional[float]] = mapped_column(Float) # Em Porcentagem (%)
+    vacancia_financeira: Mapped[Optional[float]] = mapped_column(Float)
+    despesas_taxas: Mapped[Optional[float]] = mapped_column(Float) # Taxa adm/gestão gasta no período
 
     ativo: Mapped["Ativo"] = relationship(back_populates="dados_fiis")
 
 class DocumentosQualitativos(Base):
     __tablename__ = 'documentos_qualitativos'
-    # Evita salvar o mesmo link de documento duas vezes para o mesmo ativo
     __table_args__ = (UniqueConstraint('ativo_id', 'url_pdf', name='uix_docs_url'),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     ativo_id: Mapped[int] = mapped_column(ForeignKey('ativos.id'), nullable=False)
     data_publicacao: Mapped[date] = mapped_column(Date, nullable=False)
-    tipo_documento: Mapped[str] = mapped_column(String(255), nullable=False) # 'Relatório Gerencial', 'Fato Relevante'
-    
-    # ⚠️ ALTERAÇÃO: url_pdf agora é opcional (nullable=True), pois na nova arquitetura da FNET, 
-    # o documento entra como PENDENTE no banco ANTES de o upload ser feito para o Drive.
-    url_pdf: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    
-    assunto: Mapped[Optional[str]] = mapped_column(String(255)) # Opcional: título do comunicado
+    tipo_documento: Mapped[str] = mapped_column(String(255), nullable=False)
 
-    # ==========================================
-    # 🆕 MÁQUINA DE ESTADOS & INTELIGÊNCIA ARTIFICIAL (NOVA ARQUITETURA FNET)
-    # ==========================================
+    url_pdf: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    assunto: Mapped[Optional[str]] = mapped_column(String(255)) 
     id_b3: Mapped[Optional[str]] = mapped_column(String(50), unique=True, nullable=True)
-    
-    # 🛡️ PROTEÇÃO CVM: O default fica "SALVO". Assim, o coletor_CVM continua salvando
-    # direto no banco sem quebrar. O robô da FNET vai inserir como "PENDENTE" manualmente.
     status_processamento: Mapped[str] = mapped_column(String(20), default="SALVO", nullable=False) 
-    
     hash_sha256: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
-    resumo_ia: Mapped[Optional[str]] = mapped_column(Text, nullable=True) # Textos longos gerados pelo Groq
-    log_erro: Mapped[Optional[str]] = mapped_column(Text, nullable=True) # Auditoria de falhas
+    resumo_ia: Mapped[Optional[str]] = mapped_column(Text, nullable=True) 
+    log_erro: Mapped[Optional[str]] = mapped_column(Text, nullable=True) 
     data_atualizacao: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=True)
 
     ativo: Mapped["Ativo"] = relationship(back_populates="documentos")
