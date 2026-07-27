@@ -169,6 +169,26 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
     else: 
         bot.send_message(chat_id, texto, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=False)
 
+import re
+
+def extrair_data_real(doc):
+    """Garante que apenas datas reais (DD/MM/YYYY) sejam exibidas na interface"""
+    # 1. Tenta buscar no campo oficial de data do Banco de Dados
+    if hasattr(doc, 'data_publicacao') and doc.data_publicacao:
+        return doc.data_publicacao.strftime("%d/%m/%Y")
+    
+    # 2. Se não houver, busca um padrão de data por Regex dentro do texto do Assunto
+    if doc.assunto:
+        match = re.search(r'(\d{2}[-/\.]\d{2}[-/\.]\d{4})|(\d{4}[-/\.]\d{2}[-/\.]\d{2})', str(doc.assunto))
+        if match:
+            data_crua = match.group(0).replace(".", "-").replace("/", "-")
+            p = data_crua.split("-")
+            if len(p[0]) == 4:  # Formato YYYY-MM-DD
+                return f"{p[2]}/{p[1]}/{p[0]}"
+            return f"{p[0]}/{p[1]}/{p[2]}"  # Formato DD-MM-YYYY
+            
+    return "Data N/A"
+
 def filtrar_ativos_por_setor(tipo, setor_clicado):
     """
     Filtra os ativos pela correspondência EXATA.
