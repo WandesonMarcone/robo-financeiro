@@ -145,14 +145,18 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
             from atualizador_documentos import SessionDB
             from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
             session = SessionDB()
-            pendentes = session.query(DocumentosQualitativos).join(Ativo).filter(
-                Ativo.ticker == ticker, 
-                DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
-            ).count()
-            session.close()
+    pendentes = session.query(DocumentosQualitativos).join(Ativo).filter(
+        Ativo.ticker == ticker,
+        DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
+    ).count()
 
-            if pendentes > 0:
-                markup.add(InlineKeyboardButton(f"⚠️ {pendentes} Doc(s) para Revisão", callback_data=f"rev_t_{ticker}"))
+    if pendentes > 0:
+        markup.add(InlineKeyboardButton(f"⚠️ Requer Auditoria ({pendentes} docs)", callback_data=f"rev_t_{ticker}"))
+
+    markup.add(
+        InlineKeyboardButton("📎 Dados", callback_data=f"dados_{ticker}_{tipo_ativo}"),
+        InlineKeyboardButton("📁 Docs", callback_data=f"docs_{ticker}_{tipo_ativo}")
+    )
         except Exception as e:
             print(f"DEBUG: Revisão temporariamente indisponível: {e}")
 
