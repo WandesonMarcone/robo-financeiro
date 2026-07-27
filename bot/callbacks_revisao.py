@@ -167,21 +167,20 @@ def processar_revisao(call):
             tipo_ativo = getattr(doc.ativo.tipo, 'name', str(doc.ativo.tipo).replace("TipoAtivo.", "")).upper()
 
             markup = InlineKeyboardMarkup()
-            
-            # Carrega o catálogo correto baseado no tipo!
+
+            # 🔴 NOVA LÓGICA: Carrega os catálogos direto do config.py
             if tipo_ativo == "ACAO":
-                tipos_acoes = ['Fato_Relevante', 'Aviso_aos_Acionistas', 'Comunicado_ao_Mercado', 'Apresentacao_Resultados', 'Documento_Acao']
-                for index, nome_tipo in enumerate(tipos_acoes):
-                    markup.add(InlineKeyboardButton(text=f"📂 {nome_tipo.replace('_', ' ')}", callback_data=f"rev_typ_{doc.id}_ACAO_{index}"))
+                for id_tipo, nome_tipo in TIPOS_DOC_ACAO.items():
+                    markup.add(InlineKeyboardButton(text=f"📂 {nome_tipo}", callback_data=f"rev_typ_{doc.id}_ACAO_{id_tipo}"))
             else:
-                for id_tipo, nome_tipo in TIPOS_DOC.items():
+                for id_tipo, nome_tipo in TIPOS_DOC_FII.items():
                     markup.add(InlineKeyboardButton(text=f"📂 {nome_tipo}", callback_data=f"rev_typ_{doc.id}_FII_{id_tipo}"))
-                    
+
             markup.add(InlineKeyboardButton(text="🔙 Cancelar", callback_data=f"rev_d_{doc.id}"))
 
             bot.edit_message_text(f"**Renomear Arquivo**\n\nO que é este documento do `{doc.ativo.ticker}` na verdade?", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
-         # AÇÃO: A MÁGICA - Renomeia no Drive, move de pasta e atualiza o Banco de Dados
+        # AÇÃO: A MÁGICA - Renomeia no Drive, move de pasta e atualiza o Banco de Dados
         elif acao == 'typ':
             doc_id = partes[2]
             tipo_cat = partes[3] # 'ACAO' ou 'FII'
@@ -191,12 +190,12 @@ def processar_revisao(call):
 
             doc = session.query(DocumentosQualitativos).get(doc_id)
             file_id = extrair_file_id(doc.url_pdf)
-            
+
+            # 🔴 NOVA LÓGICA: Puxa o nome exato dos dicionários do config.py
             if tipo_cat == "ACAO":
-                tipos_acoes = ['Fato_Relevante', 'Aviso_aos_Acionistas', 'Comunicado_ao_Mercado', 'Apresentacao_Resultados', 'Documento_Acao']
-                tipo_nome_limpo = tipos_acoes[int(tipo_id)]
+                tipo_nome_limpo = TIPOS_DOC_ACAO.get(tipo_id, "Documento_Acao")
             else:
-                tipo_nome_limpo = TIPOS_DOC[tipo_id]
+                tipo_nome_limpo = TIPOS_DOC_FII.get(tipo_id, "Outros")
 
             mes_ref = datetime.now().strftime("%Y-%m")
             if doc.assunto and '-' in doc.assunto:
@@ -207,16 +206,20 @@ def processar_revisao(call):
                     elif len(p[0]) == 4: mes_ref = f"{p[0]}-{p[1]}" 
 
             assunto_limpo_pdf = doc.assunto.split(" ")[0] if doc.assunto else "Doc"
-            
+
             # Adiciona o ID B3 no nome do arquivo para nunca duplicar no Drive se não for nulo
             sufixo = f"_{doc.id_b3}" if doc.id_b3 else ""
-            novo_nome_pdf = f"{tipo_nome_limpo}_{assunto_limpo_pdf}{sufixo}.pdf"
+            
+            # Formata o nome para o Drive (colocando underlines no lugar de espaços) 
+            nome_drive = tipo_nome_limpo.replace(' ', '_').replace('/', '')
+            novo_nome_pdf = f"{nome_drive}_{assunto_limpo_pdf}{sufixo}.pdf"
 
             novo_link = drive_manager.mover_e_renomear_arquivo(file_id, doc.ativo.ticker, mes_ref, novo_nome_pdf, tipo_ativo=tipo_cat)
 
             if novo_link:
                 doc.status_processamento = "SALVO_DRIVE"
-                doc.tipo_documento = tipo_nome_limpo.replace('_', ' ')
+                # Salva o nome bonito e legível no banco de dados
+                doc.tipo_documento = tipo_nome_limpo
                 doc.url_pdf = novo_link
                 session.commit()
 
@@ -235,7 +238,7 @@ def processar_revisao(call):
                         InlineKeyboardButton(text="🔙 Voltar à Central de Revisão", callback_data="rev_start")
                     )
                     texto_resposta = (
-                        f"✅ **Arquivo Guardado com Sucesso!**\n\n📁 **Ticker:** `{ticker}`\n📑 **Tipo:** `{tipo_nome_limpo.replace('_', ' ')}`\n\n⚠️ _Ainda restam {pendentes_restantes} documento(s) para revisar neste ativo._"
+                        f"✅ **Arquivo Guardado com Sucesso!**\n\n📁 **Ticker:** `{ticker}`\n📑 **Tipo:** `{tipo_nome_limpo}`\n\n⚠️ _Ainda restam {pendentes_restantes} documento(s) para revisar neste ativo._"
                     )
                 else:
                     markup.add(
