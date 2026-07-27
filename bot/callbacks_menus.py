@@ -285,51 +285,79 @@ def callback_geral(call):
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # ==========================================
-        # --- NÍVEL 1: DADOS (Indicadores e Balanços) ---
+        # --- DADOS NÍVEL 1: ESCOLHER O ANO ---
         # ==========================================
         elif dados.startswith("dados_"):
             partes = dados.split("_")
             ticker = partes[1]
             tipo_ativo = partes[2]
 
-            markup = InlineKeyboardMarkup(row_width=1)
+            markup = InlineKeyboardMarkup(row_width=3)
             session = SessionDB()
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
 
             if tipo_ativo == "acao":
-                txt = f"📈 **Dados Financeiros: {ticker}**\n\n"
+                txt = f"📈 **Histórico Financeiro: {ticker}**\n\nSelecione o ano para análise:"
                 if ativo:
                     balancos = session.query(DadosFinanceirosAcoes).filter(DadosFinanceirosAcoes.ativo_id == ativo.id).all()
                     if balancos:
-                        datas_unicas = sorted(list(set([b.data_referencia.strftime("%Y-%m-%d") for b in balancos if b.data_referencia])), reverse=True)
-                        for dt in datas_unicas[:5]:
-                            ano, mes_num, dia = dt.split('-')
-                            
-                            # 🔴 TRADUTOR DE TRIMESTRES (NÍVEL 1)
-                            if mes_num == '03': tri = '1º Tri'
-                            elif mes_num == '06': tri = '2º Tri'
-                            elif mes_num == '09': tri = '3º Tri'
-                            elif mes_num == '12': tri = '4º Tri (Anual)'
-                            else: tri = f'Mês {mes_num}'
-
-                            markup.add(InlineKeyboardButton(f"📊 Balanço CVM ({tri} / {ano})", callback_data=f"mes_{ticker}_{tipo_ativo}_{dt}"))
-                        txt += "Escolha o balanço detalhado que deseja analisar:"
+                        # Extrai apenas os ANOS dos balanços para criar a cascata
+                        anos = sorted(list(set([b.data_referencia.strftime("%Y") for b in balancos if b.data_referencia])), reverse=True)
+                        for ano in anos:
+                            markup.add(InlineKeyboardButton(f"📅 {ano}", callback_data=f"ano_{ticker}_{tipo_ativo}_{ano}"))
                     else:
-                        txt += "📭 _Os balanços detalhados (CVM) ainda não foram processados pela B3 para esta empresa._"
+                        txt = f"📭 _Os balanços CVM (ITR/DFP) de {ticker} ainda não foram processados._"
                 else:
-                    txt += "📭 _Ativo não encontrado no banco de dados local._"
+                    txt = f"📭 _Ativo não encontrado no banco de dados local._"
             else:
-                txt = f"📊 **Dados de {ticker}**\n\nIndicadores detalhados e atualizados conforme planilha."
+                # 🔴 ESPAÇO PREPARADO PARA OS FIIS (XML)
+                txt = f"📊 **Dados Estruturais: {ticker}**\n\n_⏳ Acesso aos dados do Informe Mensal e Trimestral (XML) da B3 está em fase de implantação. Em breve você poderá ver a vacância física e despesas detalhadas aqui._"
+                # Quando o XML estiver pronto, o código acima será substituído pela mesma lógica de anos das Ações.
 
             markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
             session.close()
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # ==========================================
-        # --- NÍVEL 2: EXIBIR BALANÇO DE AÇÃO ---
+        # --- DADOS NÍVEL 2: ESCOLHER O TRIMESTRE ---
+        # ==========================================
+        elif dados.startswith("ano_"):
+            partes = dados.split("_")
+            ticker = partes[1]
+            tipo_ativo = partes[2]
+            ano_escolhido = partes[3]
+
+            markup = InlineKeyboardMarkup(row_width=1)
+            session = SessionDB()
+            ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+
+            balancos = session.query(DadosFinanceirosAcoes).filter(
+                DadosFinanceirosAcoes.ativo_id == ativo.id,
+                DadosFinanceirosAcoes.data_referencia >= f"{ano_escolhido}-01-01",
+                DadosFinanceirosAcoes.data_referencia <= f"{ano_escolhido}-12-31"
+            ).all()
+
+            datas = sorted(list(set([b.data_referencia.strftime("%Y-%m-%d") for b in balancos if b.data_referencia])), reverse=True)
+            
+            for dt in datas:
+                ano, mes_num, dia = dt.split('-')
+                if mes_num == '03': tri = '1º Trimestre (ITR)'
+                elif mes_num == '06': tri = '2º Trimestre (ITR)'
+                elif mes_num == '09': tri = '3º Trimestre (ITR)'
+                elif mes_num == '12': tri = '4º Tri / Consolidado Anual (DFP)'
+                else: tri = f'Mês {mes_num}'
+
+                markup.add(InlineKeyboardButton(f"📊 {tri}", callback_data=f"mes_{ticker}_{tipo_ativo}_{dt}"))
+
+            markup.add(InlineKeyboardButton("🔙 Voltar aos Anos", callback_data=f"dados_{ticker}_{tipo_ativo}"))
+            session.close()
+            bot.edit_message_text(f"📅 **Exercício {ano_escolhido}: {ticker}**\n\nSelecione o período desejado:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        # ==========================================
+        # --- DADOS NÍVEL 3: EXIBIR RAIO-X COMPLETO ---
         # ==========================================
         elif dados.startswith("mes_"):
-            bot.answer_callback_query(call.id, "Buscando balanço...")
+            bot.answer_callback_query(call.id, "Gerando Raio-X...")
             partes = dados.split("_", 3)
             ticker = partes[1]
             tipo_ativo = partes[2]
@@ -338,52 +366,68 @@ def callback_geral(call):
             session = SessionDB()
             try:
                 ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+                from datetime import datetime
+                data_formatada = datetime.strptime(data_ref, "%Y-%m-%d").date()
 
-                if ativo:
-                    from datetime import datetime
-                    data_formatada = datetime.strptime(data_ref, "%Y-%m-%d").date()
+                balanco = session.query(DadosFinanceirosAcoes).filter(
+                    DadosFinanceirosAcoes.ativo_id == ativo.id,
+                    DadosFinanceirosAcoes.data_referencia == data_formatada
+                ).first()
 
-                    balanco = session.query(DadosFinanceirosAcoes).filter(
-                        DadosFinanceirosAcoes.ativo_id == ativo.id,
-                        DadosFinanceirosAcoes.data_referencia == data_formatada
-                    ).first()
+                if balanco:
+                    def formata_rs(valor):
+                        if valor is None: return "N/A"
+                        return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-                    if balanco:
-                        receita = balanco.receita if balanco.receita is not None else 'N/A'
-                        lucro = balanco.lucro_liquido if balanco.lucro_liquido is not None else 'N/A'
-                        ebitda = balanco.ebitda if balanco.ebitda is not None else 'N/A'
-                        caixa = balanco.caixa if balanco.caixa is not None else 'N/A'
-                        passivo = balanco.passivo_total if balanco.passivo_total is not None else 'N/A'
+                    # Cálculo de métricas secundárias (Margens, Dívida Líquida)
+                    divida_liquida = "N/A"
+                    if balanco.divida_bruta is not None and balanco.caixa is not None:
+                        divida_liquida = balanco.divida_bruta - balanco.caixa
 
-                        def formata_rs(valor):
-                            if valor == 'N/A': return valor
-                            return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                    margem_ebitda = "N/A"
+                    if balanco.ebitda is not None and balanco.receita and balanco.receita > 0:
+                        margem = (balanco.ebitda / balanco.receita) * 100
+                        margem_ebitda = f"{margem:.1f}%"
 
-                        ano, mes_num, dia = data_ref.split('-')
-                        
-                        # 🔴 TRADUTOR DE TRIMESTRES (NÍVEL 2 - TELA CHEIA)
-                        if mes_num == '03': tri_str = '1º Trimestre'
-                        elif mes_num == '06': tri_str = '2º Trimestre'
-                        elif mes_num == '09': tri_str = '3º Trimestre'
-                        elif mes_num == '12': tri_str = '4º Trimestre (Consolidado Anual)'
-                        else: tri_str = f'Mês {mes_num}'
+                    margem_liquida = "N/A"
+                    if balanco.lucro_liquido is not None and balanco.receita and balanco.receita > 0:
+                        margem = (balanco.lucro_liquido / balanco.receita) * 100
+                        margem_liquida = f"{margem:.1f}%"
 
-                        txt = (
-                            f"📊 **Balanço CVM: {ticker}**\n"
-                            f"📅 **Período:** {tri_str} de {ano}\n\n"
-                            f"💰 **Receita:** R$ {formata_rs(receita)}\n"
-                            f"💵 **Lucro Líquido:** R$ {formata_rs(lucro)}\n"
-                            f"⚙️ **EBITDA:** R$ {formata_rs(ebitda)}\n"
-                            f"🏦 **Caixa:** R$ {formata_rs(caixa)}\n"
-                            f"📉 **Passivo Total:** R$ {formata_rs(passivo)}"
-                        )
-                    else:
-                        txt = f"📭 Os dados detalhados para o período {data_ref} estão sendo processados pela B3."
+                    ano, mes_num, dia = data_ref.split('-')
+                    
+                    if mes_num == '03': tri_str = '1º Trimestre'
+                    elif mes_num == '06': tri_str = '2º Trimestre'
+                    elif mes_num == '09': tri_str = '3º Trimestre'
+                    elif mes_num == '12': tri_str = '4º Trimestre (Anual)'
+                    else: tri_str = f'Mês {mes_num}'
+
+                    txt = (
+                        f"📊 **Balanço CVM: {ticker}**\n"
+                        f"📅 **Período:** {tri_str} de {ano}\n\n"
+                        f"⚖️ **BALANÇO PATRIMONIAL**\n"
+                        f"🏦 **Ativo Total:** R$ {formata_rs(balanco.ativo_total)}\n"
+                        f"🏢 **Patrimônio Líquido:** R$ {formata_rs(balanco.patrimonio_liquido)}\n"
+                        f"💵 **Caixa:** R$ {formata_rs(balanco.caixa)}\n"
+                        f"📉 **Dívida Líquida:** R$ {formata_rs(divida_liquida)}\n\n"
+                        f"⚙️ **D.R.E. (RESULTADOS)**\n"
+                        f"💰 **Receita Líquida:** R$ {formata_rs(balanco.receita)}\n"
+                        f"🏭 **EBITDA:** R$ {formata_rs(balanco.ebitda)} *(Margem: {margem_ebitda})*\n"
+                        f"📉 **Resultado Financeiro:** R$ {formata_rs(balanco.resultado_financeiro)}\n"
+                        f"💵 **Lucro Líquido:** R$ {formata_rs(balanco.lucro_liquido)} *(Margem: {margem_liquida})*\n\n"
+                        f"💸 **FLUXO DE CAIXA**\n"
+                        f"🔄 **FCO (Operacional):** R$ {formata_rs(balanco.fco)}"
+                    )
                 else:
-                    txt = f"❌ Ativo **{ticker}** não encontrado no banco de dados."
+                    ano_escolhido = data_ref.split('-')[0]
+                    txt = f"📭 Os dados não foram encontrados no banco."
+                    markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🔙 Voltar", callback_data=f"ano_{ticker}_{tipo_ativo}_{ano_escolhido}"))
+                    bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+                    return
 
+                ano_escolhido = data_ref.split('-')[0]
                 markup = InlineKeyboardMarkup()
-                markup.add(InlineKeyboardButton("🔙 Voltar aos Balanços", callback_data=f"dados_{ticker}_{tipo_ativo}"))
+                markup.add(InlineKeyboardButton("🔙 Voltar aos Trimestres", callback_data=f"ano_{ticker}_{tipo_ativo}_{ano_escolhido}"))
                 markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
 
                 bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
