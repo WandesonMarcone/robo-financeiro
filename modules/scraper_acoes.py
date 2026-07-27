@@ -95,18 +95,24 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
         linha_idx = todas.index(ticker) + 2
         try:
             yf_info = yf.Ticker(f"{ticker}.SA").info
-            # AQUI A TRADUÇÃO É FEITA:
-            setor_eng = yf_info.get('sector', 'N/D')
-            # Força o texto para minúsculo (.lower()) para bater com o dicionário
-            setor = traducao_setores.get(setor_eng.lower(), setor_eng) 
+            
+            # 🔴 A MÁGICA ACONTECE AQUI: Ignoramos o Yahoo Finance e usamos o nosso Mapa Fixo!
+            macro_setor, sub_setor = classificar_setor_por_mapa(ticker)
+            
+            # A variável 'setor' agora recebe o nome perfeito e em português (Ex: "Materiais Básicos")
+            setor = macro_setor
+            
+            # Se a sua planilha também tiver uma coluna para Subsetor no futuro, 
+            # a variável 'sub_setor' já está pronta para ser enviada (Ex: "Mineração").
+
             preco_yf = formatar(yf_info.get('currentPrice') or yf_info.get('regularMarketPrice') or 0)
             f = df.loc[ticker] if (not df.empty and ticker in df.index) else {}
             preco = preco_yf if preco_yf > 0 else formatar(f.get('Cotação', 0))
-            
+
             # 🔥 Correção da Divisão por Zero
             lpa_yf = formatar(yf_info.get('trailingEps', 0))
             vpa_yf = formatar(yf_info.get('bookValue', 0))
-            
+
             pl = formatar(f.get('P/L', 0)) if f.get('P/L') else ((preco / lpa_yf) if lpa_yf > 0 else 0)
             pvp = formatar(f.get('P/VP', 0)) if f.get('P/VP') else ((preco / vpa_yf) if vpa_yf > 0 else 0)
             roe = formatar(f.get('ROE', 0))
