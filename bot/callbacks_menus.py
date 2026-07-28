@@ -726,44 +726,100 @@ def callback_geral(call):
             session.close()
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- ANÁLISE DE IA ---
+        # ==========================================
+        # --- ANÁLISE DE IA REAL (MULTI-MODELO) ---
+        # ==========================================
         elif dados.startswith("ia_"):
-            bot.answer_callback_query(call.id, "Iniciando motor de IA...")
+            bot.answer_callback_query(call.id, "🧠 Consultando motor de IA...")
             partes = dados.split("_")
             ticker, tipo = partes[1], partes[2]
 
             markup = InlineKeyboardMarkup()
-            # 🔴 CORREÇÃO: A variável aqui é {tipo} e não {tipo_ativo}
             markup.add(InlineKeyboardButton(f"🔙 Voltar para {ticker}", callback_data=f"painel_{ticker}_{tipo}"))
 
-            # 🎨 APRIMORAMENTO GERAL: Texto dinâmico que se adapta ao tipo do ativo!
-            termo = "deste Fundo Imobiliário" if tipo == "fii" else "desta Empresa"
-            
-            texto_ia = (
-                f"🧠 **Central de Inteligência Artificial**\n"
-                f"🎯 **Ativo:** `{ticker}`\n\n"
-                f"⚠️ _Módulo em Fase de Treinamento (Beta)_\n\n"
-                f"Em breve, nosso motor autônomo cruzará milhares de dados {termo} para entregar:\n\n"
+            # 1. Exibe aviso temporário para o usuário saber que o robô está pensando
+            bot.edit_message_text(
+                f"🧠 **Central de Inteligência Artificial**\n\n"
+                f"🔍 *Analisando o histórico de {ticker}...*\n\n"
+                f"⏳ O motor de IA está consultando o banco de dados e cruzando relatórios. "
+                f"Isso pode levar alguns segundos...",
+                chat_id, msg_id, parse_mode="Markdown"
             )
-            
-            if tipo == "fii":
-                texto_ia += (
-                    f"🏢 **Análise de Portfólio:** Qualidade dos imóveis e risco de vacância.\n"
-                    f"💸 **Sustentabilidade:** Projeção de dividendos e risco de corte.\n"
-                    f"⚖️ **Alavancagem:** Análise do nível de endividamento do fundo.\n"
-                    f"📰 **Sentimento de Mercado:** Leitura térmica de Fatos Relevantes."
-                )
-            else:
-                texto_ia += (
-                    f"📈 **Valuation Avançado:** Preço Justo projetado via Fluxo de Caixa (DCF).\n"
-                    f"⚙️ **Eficiência Operacional:** Evolução de Margens e ROE vs Concorrentes.\n"
-                    f"💰 **Política de Proventos:** Histórico de Payout e programa de recompra.\n"
-                    f"📰 **Macroeconomia:** Impacto do ciclo de juros e inflação no balanço."
-                )
-                
-            texto_ia += "\n\n*(Aguardando integração final com a rede neural)*"
 
-            bot.edit_message_text(texto_ia, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            session = SessionDB()
+            try:
+                # 2. Busca o ativo e seus últimos documentos no banco de dados para dar contexto à IA
+                ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+                
+                if not ativo:
+                    bot.edit_message_text(f"❌ Ativo `{ticker}` não foi encontrado no banco de dados.", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+                    return
+
+                # Puxa os 5 documentos mais recentes salvos do ativo
+                docs_recentes = session.query(DocumentosQualitativos)\
+                    .filter(DocumentosQualitativos.ativo_id == ativo.id, DocumentosQualitativos.status_processamento == "SALVO_DRIVE")\
+                    .order_by(DocumentosQualitativos.data_publicacao.desc())\
+                    .limit(5).all()
+
+                resumo_docs = ""
+                for d in docs_recentes:
+                    data_str = d.data_publicacao.strftime("%d/%m/%Y") if d.data_publicacao else "N/A"
+                    resumo_docs += f"- [{data_str}] {d.tipo_documento}: {d.assunto or 'Sem descrição'}\n"
+
+                if not resumo_docs:
+                    resumo_docs = "Nenhum documento recente registrado no banco de dados."
+
+                # 3. Monta o Prompt estruturado de acordo com o tipo do ativo
+                if tipo == "fii":
+                    prompt = (
+                        f"Atue como um analista especialista em fundos imobiliários do mercado brasileiro.\n"
+                        f"Gere um relatório executivo sucinto para o FII: {ticker}.\n\n"
+                        f"Histórico recente de documentos do fundo no banco:\n{resumo_docs}\n\n"
+                        f"Estruture a resposta obrigatoriamente nos tópicos:\n"
+                        f"🏢 **Visão Geral & Ativos:** Resumo do segmento e modelo de gestão.\n"
+                        f"💸 **Proventos & Rendimentos:** Análise do histórico recente de distribuição.\n"
+                        f"⚠️ **Fatores de Risco:** Vacância, alavancagem ou liquidez.\n"
+                        f"🎯 **Parecer Executivo:** Conclusão objetiva para investidores de longo prazo.\n\n"
+                        f"Instruções de formatação: Seja direto, técnico e use formatação limpa em Markdown para Telegram."
+                    )
+                else:
+                    prompt = (
+                        f"Atue como um analista de ações sênior (Equities) do mercado brasileiro.\n"
+                        f"Gere um relatório executivo sucinto para a empresa: {ticker}.\n\n"
+                        f"Histórico recente de comunicados da empresa no banco:\n{resumo_docs}\n\n"
+                        f"Estruture a resposta obrigatoriamente nos tópicos:\n"
+                        f"📈 **Modelo de Negócios:** Posição no mercado e vantagem competitiva.\n"
+                        f"⚙️ **Saúde Financeira:** Margens, nível de endividamento e geração de caixa.\n"
+                        f"💰 **Política de Dividendos / Proventos:** Histórico de distribuição.\n"
+                        f"🎯 **Parecer Executivo:** Conclusão de longo prazo baseada no cenário atual.\n\n"
+                        f"Instruções de formatação: Seja direto, técnico e use formatação limpa em Markdown para Telegram."
+                    )
+
+                # 4. Chama o módulo de IA modular
+                # (Ajuste o import de acordo com onde está sua função analisar_fatos_com_ia)
+                from atualizador_documentos import analisar_fatos_com_ia 
+                
+                resposta_ia = analisar_fatos_com_ia(prompt)
+
+                texto_final = (
+                    f"🧠 **Análise de Inteligência Artificial: {ticker}**\n\n"
+                    f"{resposta_ia}"
+                )
+
+                # Trava de segurança para não estourar o limite de 4096 caracteres do Telegram
+                if len(texto_final) > 3900:
+                    texto_final = texto_final[:3890] + "\n\n*(Análise resumida por limite de tamanho)*"
+
+                bot.edit_message_text(texto_final, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+            except Exception as e:
+                print(f"Erro ao gerar análise de IA para {ticker}: {e}")
+                bot.edit_message_text(
+                    f"❌ **Falha ao gerar relatório de IA para {ticker}**\n\nErro: `{str(e)[:150]}`", 
+                    chat_id, msg_id, reply_markup=markup, parse_mode="Markdown"
+                )
+            finally:
+                session.close()
             
     except Exception as e:
         # 🛡️ Se o erro for apenas o clique duplo idêntico do Telegram, ignora silenciosamente
