@@ -1,4 +1,5 @@
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import re
 import config
 from bot.loader import bot
 from services.planilhas import buscar_dados_planilha_com_cache, buscar_ativo_na_planilha
@@ -169,24 +170,31 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
     else: 
         bot.send_message(chat_id, texto, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=False)
 
-import re
-
 def extrair_data_real(doc):
-    """Garante que apenas datas reais (DD/MM/YYYY) sejam exibidas na interface"""
-    # 1. Tenta buscar no campo oficial de data do Banco de Dados
+    """Garante que datas reais sejam exibidas, priorizando o Mês/Ano no Assunto do documento."""
+    if doc.assunto:
+        assunto_str = str(doc.assunto)
+        
+        # 1. Tenta achar formato completo com dia (DD/MM/YYYY ou YYYY-MM-DD)
+        match_full = re.search(r'(\d{2}[-/\.]\d{2}[-/\.]\d{4})|(\d{4}[-/\.]\d{2}[-/\.]\d{2})', assunto_str)
+        if match_full:
+            data_crua = match_full.group(0).replace(".", "-").replace("/", "-")
+            p = data_crua.split("-")
+            if len(p[0]) == 4: return f"{p[2]}/{p[1]}/{p[0]}"
+            return f"{p[0]}/{p[1]}/{p[2]}"
+        
+        # 2. Tenta achar formato apenas Mês/Ano (MM/YYYY ou YYYY-MM) - Muito comum em FIIs
+        match_mes = re.search(r'(\d{2}[-/\.]\d{4})|(\d{4}[-/\.]\d{2})', assunto_str)
+        if match_mes:
+            data_crua = match_mes.group(0).replace(".", "-").replace("/", "-")
+            p = data_crua.split("-")
+            if len(p[0]) == 4: return f"{p[1]}/{p[0]}" # YYYY-MM vira MM/YYYY
+            return f"{p[0]}/{p[1]}" # MM-YYYY vira MM/YYYY
+
+    # 3. Fallback: Se não achar nenhuma data no texto, usa a data oficial de publicação
     if hasattr(doc, 'data_publicacao') and doc.data_publicacao:
         return doc.data_publicacao.strftime("%d/%m/%Y")
     
-    # 2. Se não houver, busca um padrão de data por Regex dentro do texto do Assunto
-    if doc.assunto:
-        match = re.search(r'(\d{2}[-/\.]\d{2}[-/\.]\d{4})|(\d{4}[-/\.]\d{2}[-/\.]\d{2})', str(doc.assunto))
-        if match:
-            data_crua = match.group(0).replace(".", "-").replace("/", "-")
-            p = data_crua.split("-")
-            if len(p[0]) == 4:  # Formato YYYY-MM-DD
-                return f"{p[2]}/{p[1]}/{p[0]}"
-            return f"{p[0]}/{p[1]}/{p[2]}"  # Formato DD-MM-YYYY
-            
     return "Data N/A"
 
 def filtrar_ativos_por_setor(tipo, setor_clicado):
