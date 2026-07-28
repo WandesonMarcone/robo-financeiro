@@ -14,7 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import PyPDF2
 from groq import Groq
-from config import MAPA_ISCAS_MASTER, TIPOS_DOC
+from config import MAPA_ISCAS_MASTER, TIPOS_DOC_FII
 
 client = Groq(api_key=config.GROQ_API_KEY)
 
@@ -54,7 +54,7 @@ def classificar_documento_com_ia(nome_original, texto_extraido):
     if not texto_limpo: 
         return nome_original, 0
 
-    lista_opcoes = ", ".join(TIPOS_DOC.values())
+    lista_opcoes = ", ".join(TIPOS_DOC_FII.values())
     
     # Prompt de engenharia reversa exigindo JSON
     prompt = (
@@ -79,7 +79,7 @@ def classificar_documento_com_ia(nome_original, texto_extraido):
         confianca_ia = int(dados_ia.get("confianca", 0))
 
         # Validação: se a IA inventar uma palavra que não está na lista, zera a confiança
-        if tipo_ia not in TIPOS_DOC.values():
+        if tipo_ia not in TIPOS_DOC_FII.values():
             return nome_original, 0
 
         return tipo_ia, confianca_ia
