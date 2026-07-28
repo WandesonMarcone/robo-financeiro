@@ -143,17 +143,37 @@ class AcoesCVMReader:
         for dado in dados:
             cnpj_alvo = dado.pop('cnpj')
             ticker_real = MAPA_CNPJ_B3[cnpj_alvo]
+            
             ativo = self.session.query(Ativo).filter(Ativo.ticker == ticker_real).first()
             if not ativo:
                 ativo = Ativo(ticker=ticker_real, cnpj=cnpj_alvo, tipo="ACAO")
                 self.session.add(ativo)
-                try: self.session.commit()
-                except: self.session.rollback(); continue
+                try: 
+                    self.session.commit()
+                except: 
+                    self.session.rollback()
+                    continue
+                    
             dado['ativo_id'] = ativo.id
+            
+            # 🔴 A MÁGICA AQUI: Procura se o balanço já existe
+            registro_existente = self.session.query(DadosFinanceirosAcoes).filter_by(
+                ativo_id=ativo.id,
+                data_referencia=dado['data_referencia'],
+                tipo_doc=dado['tipo_doc']
+            ).first()
+
             try:
-                novo_registro = DadosFinanceirosAcoes(**dado)
-                self.session.add(novo_registro)
+                if registro_existente:
+                    # Se existe, SOBRESCREVE os N/A antigos pelos dados novos
+                    for chave, valor in dado.items():
+                        setattr(registro_existente, chave, valor)
+                else:
+                    # Se não existe, cria um novo
+                    novo_registro = DadosFinanceirosAcoes(**dado)
+                    self.session.add(novo_registro)
+                    
                 self.session.commit()
-            except IntegrityError:
+            except Exception as e:
                 self.session.rollback()
-                pass
+                logger.error(f"Erro ao salvar/atualizar CVM de {ticker_real}: {e}")
