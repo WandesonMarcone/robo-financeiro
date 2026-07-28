@@ -71,9 +71,11 @@ class AcoesCVMReader:
             response.raise_for_status() 
             with zipfile.ZipFile(io.BytesIO(response.content)) as z:
                 dfs = {}
+                # 🔥 CORREÇÃO 1: Adicionado o DFC_MI para extrair o Fluxo de Caixa e Depreciação!
                 arquivos_alvo = [f'itr_cia_aberta_BPA_con_{ano}.csv', 
                                  f'itr_cia_aberta_BPP_con_{ano}.csv', 
-                                 f'itr_cia_aberta_DRE_con_{ano}.csv']
+                                 f'itr_cia_aberta_DRE_con_{ano}.csv',
+                                 f'itr_cia_aberta_DFC_MI_con_{ano}.csv']
                 for arquivo in arquivos_alvo:
                     if arquivo in z.namelist():
                         with z.open(arquivo) as f:
@@ -90,7 +92,7 @@ class AcoesCVMReader:
             for _, row in df_filtrado.iterrows():
                 cnpj = row['CNPJ_CIA']
                 if cnpj not in self.cnpjs_alvo: continue
-                
+
                 data_ref_str = row['DT_REFER']
                 conta = row['CD_CONTA']
                 valor = row['VL_CONTA'] * 1000  
@@ -101,11 +103,40 @@ class AcoesCVMReader:
 
                 chave = f"{cnpj}_{data_ref_str}"
                 if chave not in registros:
+                    # 🔥 CORREÇÃO 2: Preparando as gavetas vazias para TODAS as métricas
                     registros[chave] = {
                         'cnpj': cnpj, 'data_referencia': data_ref, 'tipo_doc': 'ITR',
-                        'caixa': None, 'passivo_total': None, 'receita': None, 'lucro_liquido': None, 'ebitda': None 
+                        'ativo_total': None, 'patrimonio_liquido': None, 'caixa': None,
+                        'passivo_total': None, 'divida_curto_prazo': None, 'divida_longo_prazo': None,
+                        'divida_bruta': None, 'divida_liquida': None, 'receita': None, 
+                        'lucro_bruto': None, 'resultado_financeiro': None, 'lucro_liquido': None, 
+                        'ebitda': None, 'fco': None, 'ebit': None, 'depreciacao': None
                     }
                 registros[chave][MAPA_CONTAS_CVM[conta]] = float(valor)
+
+        # 🔥 CORREÇÃO 3: Motor de Cálculo Final (EBITDA, Dívida Bruta e Líquida)
+        for reg in registros.values():
+            # Calcula as Dívidas
+            cp = reg.get('divida_curto_prazo')
+            lp = reg.get('divida_longo_prazo')
+            
+            if cp is not None or lp is not None:
+                reg['divida_bruta'] = (cp or 0) + (lp or 0)
+                caixa = reg.get('caixa') or 0
+                reg['divida_liquida'] = reg['divida_bruta'] - caixa
+
+            # Calcula o EBITDA (EBIT + Depreciação)
+            ebit = reg.get('ebit')
+            dep = reg.get('depreciacao')
+            
+            if ebit is not None:
+                # Na CVM a depreciação costuma vir negativa, usamos abs() para somar certo
+                reg['ebitda'] = ebit + abs(dep or 0)
+
+            # Remove as chaves temporárias para não dar erro na hora de salvar no banco
+            reg.pop('ebit', None)
+            reg.pop('depreciacao', None)
+
         return list(registros.values())
 
     def _salvar_no_banco(self, dados: List[Dict[str, Any]]) -> None:
