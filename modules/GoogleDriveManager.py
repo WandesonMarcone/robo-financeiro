@@ -169,18 +169,50 @@ class GoogleDriveManager:
     # ==========================================
     # OUTROS UPLOADS
     # ==========================================
-    def upload_imagem_logo(self, bytes_imagem, nome_arquivo, pasta_destino_id):
+    def salvar_logo_drive(self, ticker: str, conteudo_bytes: bytes) -> str:
+        """
+        Garante a existência da pasta 'Logos', faz upload da imagem 
+        e retorna o link direto público para o Telegram.
+        """
         try:
-            file_metadata = {'name': nome_arquivo, 'parents': [pasta_destino_id]}
-            media = MediaFileUpload(io.BytesIO(bytes_imagem), mimetype='image/png', resumable=True)
+            ticker_upper = ticker.upper().strip()
+            nome_arquivo = f"{ticker_upper}.png"
 
-            arquivo = self.service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-            file_id = arquivo.get('id')
-            
-            self.service.permissions().create(fileId=file_id, body={'type': 'anyone', 'role': 'reader'}).execute()
-            link = self.service.files().get(fileId=file_id, fields='webViewLink').execute()
-            return link.get('webViewLink')
+            # 1. Localiza ou cria a pasta 'Logos' dentro da pasta raiz do seu robô
+            id_pasta_logos = self.obter_ou_criar_pasta("Logos", parent_id=self.root_folder_id)
+
+            # 2. Checa se essa logo já foi salva anteriormente
+            query = f"'{id_pasta_logos}' in parents and name = '{nome_arquivo}' and trashed = false"
+            resultados = self.service.files().list(q=query, fields="files(id)").execute().get('files', [])
+
+            if resultados:
+                file_id = resultados[0]['id']
+                return f"https://drive.google.com/uc?export=view&id={file_id}"
+
+            # 3. Se não existe, faz o upload dos bytes da imagem
+            media = MediaIoBaseUpload(BytesIO(conteudo_bytes), mimetype='image/png', resumable=True)
+            file_metadata = {
+                'name': nome_arquivo,
+                'parents': [id_pasta_logos]
+            }
+
+            arquivo_salvo = self.service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id'
+            ).execute()
+
+            file_id = arquivo_salvo.get('id')
+
+            # 4. Libera permissão de leitura para o Telegram conseguir carregar a foto
+            permission = {'type': 'anyone', 'role': 'reader'}
+            self.service.permissions().create(fileId=file_id, body=permission).execute()
+
+            # Retorna o link direto de imagem
+            return f"https://drive.google.com/uc?export=view&id={file_id}"
+
         except Exception as e:
+            print(f"⚠️ Erro ao salvar logo do {ticker} no Drive: {e}")
             return None
 
     def upload_pdf(self, caminho_arquivo, nome_arquivo):
