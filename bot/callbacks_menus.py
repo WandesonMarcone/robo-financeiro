@@ -7,7 +7,7 @@ from config import SPREADSHEET_URL, MAPA_SETORES_B3
 
 # Banco de Dados
 from atualizador_documentos import SessionDB
-from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos, DadosFinanceirosAcoes
+from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos, DadosFinanceirosAcoes, DadosFinanceirosFiis
 
 # Serviços Inteligentes (Planilhas e Painéis)
 from services.dashboard_menus import buscar_oportunidades, gerar_painel_ativo, buscar_favoritos, filtrar_ativos_por_setor, extrair_data_real
@@ -482,7 +482,6 @@ def callback_geral(call):
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
             
             # Puxa os últimos 4 relatórios mensais do fundo cadastrados no banco
-            from pipeline_dados.banco_dados import DadosFinanceirosFiis # Certifique-se de importar se não estiver no topo
             
             informes = session.query(DadosFinanceirosFiis).filter(
                 DadosFinanceirosFiis.ativo_id == ativo.id
