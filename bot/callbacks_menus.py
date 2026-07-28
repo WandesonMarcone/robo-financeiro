@@ -355,12 +355,11 @@ def callback_geral(call):
                     session.close()
                     return
 
-                txt = f"🏢 **Raio-X Contábil: {ticker}**\n_Indicadores oficiais extraídos da CVM_\n\n"
+                txt = f"🏢 *Raio-X Contábil: {ticker}*\nIndicadores oficiais extraídos da CVM\n\n"
                 
                 for inf in informes:
                     mes_ano = inf.data_referencia.strftime("%m/%Y")
                     
-                    # Formatação de Valores
                     if inf.patrimonio_liquido:
                         pl_fmt = f"R$ {inf.patrimonio_liquido/1000000000:.2f} Bi" if inf.patrimonio_liquido >= 1000000000 else f"R$ {inf.patrimonio_liquido/1000000:.2f} Mi"
                     else:
@@ -369,10 +368,10 @@ def callback_geral(call):
                     caixa_fmt = f"R$ {inf.disponibilidades_caixa/1000000:.2f} Mi" if inf.disponibilidades_caixa else "N/A"
                     cotistas = f"{inf.cotistas:,}".replace(",", ".") if inf.cotistas else "N/A"
                     
-                    txt += f"📅 **Referência:** `{mes_ano}`\n"
-                    txt += f"💰 **Patrimônio Líquido:** `{pl_fmt}`\n"
-                    txt += f"👥 **Total de Cotistas:** `{cotistas}`\n"
-                    txt += f"💵 **Caixa / Disponível:** `{caixa_fmt}`\n"
+                    txt += f"📅 *Referência:* {mes_ano}\n"
+                    txt += f"💰 *Patrimônio Líquido:* {pl_fmt}\n"
+                    txt += f"👥 *Total de Cotistas:* {cotistas}\n"
+                    txt += f"💵 *Caixa / Disponível:* {caixa_fmt}\n"
                     txt += "➖➖➖➖➖➖➖➖\n"
                 
                 markup = InlineKeyboardMarkup()
