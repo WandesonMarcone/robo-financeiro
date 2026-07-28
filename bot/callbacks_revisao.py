@@ -4,7 +4,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Imports da nossa nova arquitetura
 from bot.loader import bot
-from config import TIPOS_DOC, TIPOS_DOC_FII, TIPOS_DOC_ACAO
+from config import TIPOS_DOC_FII, TIPOS_DOC_ACAO
 from atualizador_documentos import SessionDB
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from modules.GoogleDriveManager import GoogleDriveManager
