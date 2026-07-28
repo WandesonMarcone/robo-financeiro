@@ -25,7 +25,13 @@ url_banco = os.environ.get('DATABASE_URL', 'sqlite:///pipeline_dados/banco_insti
 if url_banco.startswith("postgres://"):
     url_banco = url_banco.replace("postgres://", "postgresql://", 1)
 
-engine = create_engine(url_banco)
+engine = create_engine(
+    DATABASE_URL,            # Se no seu código estiver config.DATABASE_URL, mantenha config.DATABASE_URL
+    pool_pre_ping=True,      # Testa se a conexão com o Neon caiu antes de fazer a query
+    pool_recycle=1800,       # Renova a conexão a cada 30 minutos (evita o fechamento forçado)
+    pool_size=5,             # Mantém um limite seguro de conexões para não estourar a memória
+    max_overflow=10
+)
 SessionDB = sessionmaker(bind=engine)
 
 def obter_tickers_da_planilha():
