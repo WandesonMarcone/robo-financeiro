@@ -12,7 +12,6 @@ gunicorn
 # ==========================================
 pyTelegramBotAPI
 apscheduler==3.10.4
-schedule
 pytz
 
 # ==========================================
@@ -21,21 +20,10 @@ pytz
 pandas
 requests
 yfinance
-urllib3<2.0.0 # Trava de segurança para o brfinance
 lxml
-cssselect
 html5lib
 beautifulsoup4
-xmltodict
 python-dateutil
-
-# ==========================================
-# 🏛️ INSTITUCIONAL E DADOS DA CVM
-# ==========================================
-quantstats
-finlogic
-brfinance
-playwright==1.42.0 # Motor Headless para invasão ao StatusInvest
 
 # ==========================================
 # ☁️ ECOSSISTEMA GOOGLE (SHEETS E DRIVE)
@@ -51,12 +39,9 @@ google-auth-oauthlib==1.2.0
 openai
 groq
 PyPDF2
-pdfplumber # Leitor de texto bruto para alimentar o Llama 3
 
 # ==========================================
 # 🗄️ BANCO DE DADOS E ARMAZENAMENTO EXTRA
 # ==========================================
 SQLAlchemy
-openpyxl
-xlrd
 psycopg2-binary
