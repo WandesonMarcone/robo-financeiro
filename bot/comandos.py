@@ -104,25 +104,6 @@ def comando_adicionar(message):
     except Exception as e:
         bot.reply_to(message, f"❌ Erro ao adicionar ativo: {e}")
 
-@bot.message_handler(commands=['reciclar_rejeitados'])
-def comando_reciclar_rejeitados(message):
-    bot.send_message(message.chat.id, "♻️ Buscando documentos rejeitados no banco...")
-    session = SessionDB()
-    try:
-        rejeitados = session.query(DocumentosQualitativos).filter(
-            DocumentosQualitativos.status_processamento == 'REJEITADO_DUPLO_FATOR'
-        ).all()
-
-        contador = 0
-        for doc in rejeitados:
-            doc.status_processamento = 'PENDENTE' 
-            contador += 1
-
-        session.commit()
-        bot.send_message(message.chat.id, f"✅ {contador} documentos foram devolvidos para a fila!")
-    finally:
-        session.close()
-
 @bot.message_handler(commands=['forcar_varredura'])
 def acionar_varredura_manual(message):
     bot.reply_to(message, "⚙️ *Iniciando varredura completa (FIIs + Documentos)...*\nIsso pode levar alguns minutos. Aguarde o aviso de conclusão!", parse_mode="Markdown")
