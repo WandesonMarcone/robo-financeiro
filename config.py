@@ -141,26 +141,26 @@ TIPOS_DOC_ACAO = {
 
 # Mapa de padronização de contas contábeis da CVM
 MAPA_CONTAS_CVM = {
+    # --- BALANÇO PATRIMONIAL (ATIVO) ---
     '1': 'ativo_total',
-    '1.01': 'caixa',
-    '1.01.01': 'caixa',
+    '1.01.01': 'caixa',                  # Conta analítica exata de Caixa e Equivalentes
 
-    # BALANÇO PATRIMONIAL (PASSIVO E PL)
+    # --- BALANÇO PATRIMONIAL (PASSIVO E PL) ---
     '2': 'passivo_total',
+    '2.01.04': 'divida_curto_prazo',     # Empréstimos a Curto Prazo
+    '2.02.01': 'divida_longo_prazo',     # Empréstimos a Longo Prazo
     '2.03': 'patrimonio_liquido',
-    '2.01.04': 'divida_curto_prazo',
-    '2.02.01': 'divida_longo_prazo',
-    
-    # BALANÇO PATRIMONIAL (PASSIVO E PL)
+
+    # --- D.R.E. (RESULTADOS) ---
     '3.01': 'receita',
     '3.03': 'lucro_bruto',
-    '3.05': 'ebitda',
+    '3.05': 'ebit',                      # Alterado de 'ebitda' para 'ebit'
     '3.06': 'resultado_financeiro',
     '3.11': 'lucro_liquido',
 
-    # BALANÇO PATRIMONIAL (PASSIVO E PL)
+    # --- D.F.C. (FLUXO DE CAIXA) ---
     '6.01': 'fco',
-    '6.01.01': 'fco' 
+    '6.01.01.04': 'depreciacao'          # Adicionado para permitir o cálculo do EBITDA
 }
 
 # Dicionário Tradutor (CNPJ para Ticker da B3)
