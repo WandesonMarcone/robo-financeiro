@@ -48,6 +48,7 @@ google-auth-oauthlib==1.2.0
 # ==========================================
 # 🧠 INTELIGÊNCIA ARTIFICIAL E PDFs
 # ==========================================
+openai
 groq
 PyPDF2
 pdfplumber # Leitor de texto bruto para alimentar o Llama 3
