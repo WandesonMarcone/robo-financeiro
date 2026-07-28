@@ -191,7 +191,7 @@ def processar_revisao(call):
             doc = session.query(DocumentosQualitativos).get(doc_id)
             file_id = extrair_file_id(doc.url_pdf)
 
-            # 🔴 NOVA LÓGICA: Puxa o nome exato dos dicionários do config.py
+            # Puxa o nome exato dos dicionários do config.py
             if tipo_cat == "ACAO":
                 tipo_nome_limpo = TIPOS_DOC_ACAO.get(tipo_id, "Documento_Acao")
             else:
@@ -206,23 +206,34 @@ def processar_revisao(call):
                     elif len(p[0]) == 4: mes_ref = f"{p[0]}-{p[1]}" 
 
             assunto_limpo_pdf = doc.assunto.split(" ")[0] if doc.assunto else "Doc"
-
-            # Adiciona o ID B3 no nome do arquivo para nunca duplicar no Drive se não for nulo
             sufixo = f"_{doc.id_b3}" if doc.id_b3 else ""
-            
-            # Formata o nome para o Drive (colocando underlines no lugar de espaços) 
+
             nome_drive = tipo_nome_limpo.replace(' ', '_').replace('/', '')
             novo_nome_pdf = f"{nome_drive}_{assunto_limpo_pdf}{sufixo}.pdf"
 
-            novo_link = drive_manager.mover_e_renomear_arquivo(file_id, doc.ativo.ticker, mes_ref, novo_nome_pdf)
+            tipo_ativo_str = "ACAO" if tipo_cat == "ACAO" else "FII"
+
+            # 1. MOVER CORRETAMENTE DA REVISÃO PARA A PASTA OFICIAL DO ATIVO NO DRIVE
+            novo_link = drive_manager.mover_arquivo_da_revisao_por_id(
+                file_id=file_id,
+                ticker=doc.ativo.ticker,
+                mes_ref=mes_ref,
+                novo_nome=novo_nome_pdf,
+                tipo_ativo=tipo_ativo_str
+            )
 
             if novo_link:
+                # 2. ATUALIZA O BANCO
                 doc.status_processamento = "SALVO_DRIVE"
-                # Salva o nome bonito e legível no banco de dados
                 doc.tipo_documento = tipo_nome_limpo
                 doc.url_pdf = novo_link
                 session.commit()
 
+                # 3. 🔥 APAGA O ARQUIVO DA PASTA REVISÃO PARA SUMIR DE LÁ
+                if file_id:
+                    drive_manager.deletar_arquivo(file_id)
+
+                # --- DAQUI PARA BAIXO SEGUE O SEU CÓDIGO DA CONTAGEM DE PENDENTES QUE JÁ ESTÁ PERFEITO ---
                 ticker = doc.ativo.ticker
                 pendentes_restantes = session.query(DocumentosQualitativos).join(Ativo).filter(
                     Ativo.ticker == ticker, 
