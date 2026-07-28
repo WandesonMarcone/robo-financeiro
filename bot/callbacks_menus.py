@@ -15,6 +15,16 @@ from services.planilhas import buscar_dados_planilha_com_cache, buscar_ativo_na_
 
 logger = logging.getLogger(__name__)
 
+def sanitizar_markdown(texto: str) -> str:
+    """Escapa caracteres do Markdown para não quebrar a API do Telegram."""
+    if not texto:
+        return ""
+    texto = str(texto)
+    # Substitui caracteres especiais que o Telegram confunde com formatação
+    for char in ['_', '*', '`', '[']:
+        texto = texto.replace(char, f"\\{char}")
+    return texto
+
 # ==========================================
 # ----- BOTÕES PRINCIPAIS -----
 # ==========================================
