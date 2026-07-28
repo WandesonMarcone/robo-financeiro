@@ -122,9 +122,15 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
 
     resumo_ia = f"Ativo monitorado do setor {indicadores.get('setor', 'Geral')}."
 
+    resumo_limpo = sanitizar_markdown(resumo_ia)
+    setor_limpo = sanitizar_markdown(indicadores.get('setor', 'Geral'))
+    
+    # Se o ticker vier sujo com algum caractere (ex: MXRF11_fii), limpa ele também
+    ticker_limpo = sanitizar_markdown(ticker)
+
     texto = (
-        f"{link_invisivel}{icone}: **{ticker}**\n"
-        f"📝 **Resumo:** _{resumo_ia}_\n\n"
+        f"{link_invisivel}{icone}: **{ticker_limpo}**\n"
+        f"📝 **Resumo:** _{resumo_limpo}_ (Setor: {setor_limpo})\n\n"
         f"💰 **Preço:** R$ {indicadores.get('preco', 'N/A')}\n"
         f"💸 **Dividend Yield:** {indicadores.get('dy', 'N/A')}\n"
     )
