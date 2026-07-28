@@ -41,33 +41,52 @@ def normalizar_texto(texto):
     return ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
 
 # ==========================================
-# 🚨 TRAVA 1: CLASSIFICAÇÃO COM IA PROTEGIDA
+# 🚨 TRAVA 1: CLASSIFICAÇÃO HÍBRIDA COM IA (AUTO-SAVE)
 # ==========================================
 def classificar_documento_com_ia(nome_original, texto_extraido):
     if not texto_extraido: 
-        return nome_original 
+        return nome_original, 0 
 
-    # 🛡️ HIGIENIZADOR: Remove caracteres invisíveis que dão Erro 400 na Groq
+    # 🛡️ HIGIENIZADOR: Remove caracteres invisíveis que dão Erro 400
     texto_limpo = re.sub(r'[^\x20-\x7E\u00A0-\u00FF]', ' ', str(texto_extraido)).strip()
-    texto_limpo = texto_limpo[:800] 
+    texto_limpo = texto_limpo[:1500] # Aumentei um pouco para a IA ter mais contexto
 
-    # Se após limpar, não sobrar nenhuma palavra, cancela a IA com segurança
     if not texto_limpo: 
-        return nome_original
+        return nome_original, 0
 
     lista_opcoes = ", ".join(TIPOS_DOC.values())
-    prompt = f"Classifique este documento FII que começa assim: {texto_limpo}\nEscolha ESTRITAMENTE UMA destas opções: {lista_opcoes}. Responda APENAS o nome."
+    
+    # Prompt de engenharia reversa exigindo JSON
+    prompt = (
+        f"Você é um analista financeiro sênior avaliando um PDF de Fundo Imobiliário. "
+        f"O documento começa assim: '{texto_limpo}'\n\n"
+        f"Classifique o documento escolhendo ESTRITAMENTE UMA destas opções: {lista_opcoes}.\n"
+        f"Responda EXATAMENTE E APENAS com um objeto JSON válido, contendo as chaves 'tipo' e 'confianca'. "
+        f"A chave 'confianca' deve ser um número inteiro de 0 a 100 representando sua certeza."
+    )
 
     try:
         chat = client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
-            model="llama-3.3-70b-versatile"
+            model="llama-3.3-70b-versatile",
+            response_format={"type": "json_object"} # 🚀 Força a Groq a cuspir JSON puro
         )
-        resposta = chat.choices[0].message.content
-        return resposta.strip() if resposta and resposta.strip() else nome_original
+        resposta_str = chat.choices[0].message.content
+        
+        # Transforma a resposta da IA em um dicionário Python
+        dados_ia = json.loads(resposta_str)
+        tipo_ia = dados_ia.get("tipo", nome_original)
+        confianca_ia = int(dados_ia.get("confianca", 0))
+
+        # Validação: se a IA inventar uma palavra que não está na lista, zera a confiança
+        if tipo_ia not in TIPOS_DOC.values():
+            return nome_original, 0
+
+        return tipo_ia, confianca_ia
+
     except Exception as e:
-        print(f"⚠️ Erro ao consultar IA para classificação: {e}")
-        return nome_original 
+        print(f"⚠️ Erro ao consultar IA para classificação híbrida: {e}")
+        return nome_original, 0
 
 def enviar_alerta_revisao_telegram(ticker, nome_doc, link_pdf, file_id, db_id):
     """Envia a mensagem interativa com botões para o seu Telegram"""
