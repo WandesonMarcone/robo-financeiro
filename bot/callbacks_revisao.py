@@ -214,7 +214,7 @@ def processar_revisao(call):
             nome_drive = tipo_nome_limpo.replace(' ', '_').replace('/', '')
             novo_nome_pdf = f"{nome_drive}_{assunto_limpo_pdf}{sufixo}.pdf"
 
-            novo_link = drive_manager.mover_e_renomear_arquivo(file_id, doc.ativo.ticker, mes_ref, novo_nome_pdf, tipo_ativo=tipo_cat)
+            novo_link = drive_manager.mover_e_renomear_arquivo(file_id, doc.ativo.ticker, mes_ref, novo_nome_pdf)
 
             if novo_link:
                 doc.status_processamento = "SALVO_DRIVE"
