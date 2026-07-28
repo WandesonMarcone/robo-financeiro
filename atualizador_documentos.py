@@ -199,48 +199,65 @@ def rotina_processar_pendentes():
                 texto_pdf = reader.pages[0].extract_text() or ""
         except: pass
 
-        # 🚨 TRAVA 2: LIMPEZA DE ESPAÇOS EM BRANCO
+        # ==========================================
+        # 🤖 CAMADA HÍBRIDA DE IA E AUTO-SAVE (>= 80%)
+        # ==========================================
         texto_pdf = texto_pdf.strip()
 
-        nome_ia = classificar_documento_com_ia(doc_db.tipo_documento, texto_pdf)
-        nome_limpo = "".join([c for c in str(nome_ia).title() if c.isalnum() or c in (' ', '_', '-')]).strip()
+        # 1. Pede à IA o tipo e a nota de confiança (retorna duas variáveis agora)
+        nome_ia, confianca = classificar_documento_com_ia(doc_db.tipo_documento, texto_pdf)
 
-        if len(nome_limpo) < 3: 
-            nome_limpo = "".join([c for c in str(doc_db.tipo_documento).title() if c.isalnum() or c in (' ', '_', '-')]).strip()
-            if len(nome_limpo) < 3:
-                nome_limpo = "Documento_FII"
+        # Higieniza o nome retornado pela IA para virar uma string limpa de arquivo
+        nome_limpo = "".join([c for c in str(nome_ia).title() if c.isalnum() or c in (' ', '_', '-')]).strip()
+        if len(nome_limpo) < 3:
+            nome_limpo = "Documento_FII"
 
         partes_data = data_ref.split('-')
         mes_pasta = f"{partes_data[2]}-{partes_data[1]}" if len(partes_data) == 3 else datetime.now().strftime("%Y-%m")
 
-        # ⚖️ DECISÃO: DIRETO PRO DRIVE OU LIMBO DE REVISÃO?
-        if not texto_pdf or ticker.upper() not in texto_pdf.upper():
-            # 🚧 Suspeito: Manda pra pasta REVISÃO
-            file_id, link_gerado = drive_manager.upload_pdf_revisao(
-                caminho_arquivo=temp_filename,
-                nome_arquivo=f"REVISAR_{ticker}_{nome_limpo}_{data_ref}.pdf"
-            )
-            if file_id:
-                doc_db.status_processamento = "AGUARDANDO_REVISAO"
-                doc_db.url_pdf = link_gerado
-                session.commit()
-                print(f"🚧 {ticker} enviado para revisão manual.")
-            else:
-                doc_db.status_processamento = "ERRO_DRIVE"
-        else:
-            # ✅ Seguro: Manda direto pra pasta oficial
+        # 2. ENCRUZILHADA DO AUTO-SAVE (Threshold de Confiança >= 80%)
+        if confianca >= 80 and texto_pdf:
+            print(f"🤖 IA tem {confianca}% de certeza. Auto-salvando '{nome_limpo}' para {ticker}...")
+            
+            # Salva direto na pasta oficial do Google Drive
             link_gerado = drive_manager.upload_pdf_organizado(
                 caminho_arquivo=temp_filename,
                 nome_arquivo=f"{nome_limpo}_{data_ref}_{id_doc}.pdf",
                 ticker=ticker,
                 mes_ref=mes_pasta,
-                tipo_ativo=doc_db.ativo.tipo # 🔴 O AVISO: Manda o tipo do ativo para o DriveManager
+                tipo_ativo=doc_db.ativo.tipo 
             )
+            
             if link_gerado:
                 doc_db.url_pdf = link_gerado
                 doc_db.tipo_documento = nome_limpo
                 doc_db.status_processamento = "SALVO_DRIVE"
-                print(f"✅ Sucesso: {ticker} -> {nome_limpo}")
+                print(f"✅ Sucesso (Auto-save): {ticker} -> {nome_limpo}")
+            else:
+                doc_db.status_processamento = "ERRO_DRIVE"
+
+        else:
+            # 3. CONFIANÇA BAIXA OU PDF ESCaneado: Manda para a Pasta de Revisão + Alerta Telegram
+            print(f"⚠️ IA incerta ({confianca}%). Enviando para revisão manual e alerta Telegram...")
+            
+            file_id, link_gerado = drive_manager.upload_pdf_revisao(
+                caminho_arquivo=temp_filename,
+                nome_arquivo=f"REVISAR_{ticker}_{nome_limpo}_{data_ref}.pdf"
+            )
+            
+            if file_id:
+                doc_db.status_processamento = "AGUARDANDO_REVISAO"
+                doc_db.url_pdf = link_gerado
+                session.commit()
+                
+                # 📲 Dispara o alerta interativo no seu Telegram com os botões
+                enviar_alerta_revisao_telegram(
+                    ticker=ticker,
+                    nome_doc=nome_limpo,
+                    link_pdf=link_gerado,
+                    file_id=file_id,
+                    db_id=doc_db.id
+                )
             else:
                 doc_db.status_processamento = "ERRO_DRIVE"
 
