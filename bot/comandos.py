@@ -162,18 +162,35 @@ def acionar_varredura_manual(message):
             # --- NOVA LÓGICA DE CONTAGEM REAL NO BANCO DE DADOS ---
             from pipeline_dados.banco_dados import DocumentosQualitativos
             from atualizador_documentos import SessionDB
-            
+
             session = SessionDB()
+            
+            # 1. Conta os que exigiram revisão manual
             pendentes = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
             ).count()
+            
+            # 2. Conta os que a IA auto-salvou direto no Google Drive
+            salvos_automaticos = session.query(DocumentosQualitativos).filter(
+                DocumentosQualitativos.status_processamento == "SALVO_DRIVE"
+            ).count()
+            
             session.close()
 
-            # O bot agora SEMPRE avisa o tamanho real da fila
+            # 3. Calcula a porcentagem de eficiência da IA
+            total_geral = salvos_automaticos + pendentes
+            if total_geral > 0:
+                eficiencia = (salvos_automaticos / total_geral) * 100
+            else:
+                eficiencia = 0
+
+            # O bot agora entrega o panorama completo da operação
             resposta_final = (
                 f"✅ *Varredura Concluída!*\n\n"
-                f"📥 **Fila de Revisão:** Existem `{pendentes}` documentos novos aguardando sua organização.\n"
-                f"👉 _Digite /revisao para classificá-los e enviá-los ao Drive._"
+                f"🤖 **Auto-salvos no Drive:** `{salvos_automaticos}` documentos\n"
+                f"📥 **Fila de Revisão:** `{pendentes}` documentos\n"
+                f"📈 **Taxa de Eficiência da IA:** `{eficiencia:.1f}%`\n\n"
+                f"👉 _Digite /revisao para organizar as pendências._"
                 f"{msg_planilha}"
             )
             bot.send_message(message.chat.id, resposta_final, parse_mode="Markdown")
