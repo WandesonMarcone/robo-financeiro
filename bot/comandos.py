@@ -131,22 +131,22 @@ def acionar_varredura_manual(message):
         try:
             # 1. Rotina de Documentos (PDFs/CVM)
             from atualizador_documentos import rotina_de_atualizacao_em_massa
-            relatorios_baixados = rotina_de_atualizacao_em_massa()
-            
+            rotina_de_atualizacao_em_massa() # Roda a varredura normalmente
+
             # 2. Rotina de FIIs (Motor JSON para a Planilha)
             from datetime import datetime
             import pytz
             from modules.utils import conectar_gspread
             from services.planilhas import CACHE_PLANILHA
-            
+
             sp_tz = pytz.timezone('America/Sao_Paulo')
             agora = datetime.now(sp_tz)
-            
+
             client = conectar_gspread()
             planilha = client.open_by_url(config.SPREADSHEET_URL)
-            
+
             batch_updates, msg_out, aba_fiis = rodar_garimpo_fiis(planilha, agora, agora.strftime("%H:%M"), sp_tz)
-            
+
             # --- CORREÇÃO DA LÓGICA DE AVISO (Blindada contra Erro 400) ---
             if batch_updates and "requests" in batch_updates and len(batch_updates["requests"]) > 0:
                 planilha.batch_update(batch_updates)
@@ -159,14 +159,25 @@ def acionar_varredura_manual(message):
             else:
                 msg_planilha = "\n\n📊 *Planilha:* Nenhuma atualização de cotação necessária agora."
 
-            # O bot agora SEMPRE avisa quantos relatórios baixou
+            # --- NOVA LÓGICA DE CONTAGEM REAL NO BANCO DE DADOS ---
+            from pipeline_dados.banco_dados import DocumentosQualitativos
+            from atualizador_documentos import SessionDB
+            
+            session = SessionDB()
+            pendentes = session.query(DocumentosQualitativos).filter(
+                DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
+            ).count()
+            session.close()
+
+            # O bot agora SEMPRE avisa o tamanho real da fila
             resposta_final = (
                 f"✅ *Varredura Concluída!*\n\n"
-                f"📥 **Docs processados (B3):** {relatorios_baixados}"
+                f"📥 **Fila de Revisão:** Existem `{pendentes}` documentos novos aguardando sua organização.\n"
+                f"👉 _Digite /revisao para classificá-los e enviá-los ao Drive._"
                 f"{msg_planilha}"
             )
             bot.send_message(message.chat.id, resposta_final, parse_mode="Markdown")
-            
+
         except Exception as e:
             bot.send_message(message.chat.id, f"❌ Erro na varredura: {str(e)[:200]}") 
 
