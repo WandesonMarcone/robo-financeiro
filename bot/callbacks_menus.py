@@ -797,7 +797,7 @@ def callback_geral(call):
 
                 # 4. Chama o módulo de IA modular
                 # (Ajuste o import de acordo com onde está sua função analisar_fatos_com_ia)
-                from atualizador_documentos import analisar_fatos_com_ia 
+                from modules.module_ia import analisar_fatos_com_ia 
                 
                 resposta_ia = analisar_fatos_com_ia(prompt)
 
