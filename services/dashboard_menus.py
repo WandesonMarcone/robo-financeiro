@@ -11,6 +11,15 @@ from pipeline_dados.banco_dados import DocumentosQualitativos, Ativo
 # Instancia o gerenciador de arquivos uma vez
 drive_manager = GoogleDriveManager()
 
+def sanitizar_markdown(texto: str) -> str:
+    """Escapa caracteres do Markdown para não quebrar a API do Telegram."""
+    if not texto:
+        return ""
+    texto = str(texto)
+    for char in ['_', '*', '`', '[']:
+        texto = texto.replace(char, f"\\{char}")
+    return texto
+
 def buscar_favoritos(tipo):
     """Filtra os ativos da planilha que estão na lista de config.FAVORITOS"""
     is_fii = (tipo == 'fii')
