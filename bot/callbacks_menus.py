@@ -344,7 +344,6 @@ def callback_geral(call):
                 else:
                     txt = f"📭 _Ativo não encontrado no banco de dados local._"
             else:
-                from pipeline_dados.banco_dados import DadosFinanceirosFiis
                 
                 informes = session.query(DadosFinanceirosFiis).filter(
                     DadosFinanceirosFiis.ativo_id == ativo.id
