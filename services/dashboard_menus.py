@@ -104,7 +104,7 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
     voltar_cmd = "menu_fiis" if is_fii else "menu_acoes"
 
     # Puxa o link direto gerado pelo seu código (GitHub ou Logo.dev)
-    url_logo = obter_link_logo(ticker, tipo, GoogleDriveManager=GoogleDriveManager)
+    url_logo = obter_link_logo(ticker, tipo, drive_manager=drive_manager)
     link_invisivel = ""
 
     # Como o link já é uma URL direta de imagem, nós injetamos direto no Telegram!
