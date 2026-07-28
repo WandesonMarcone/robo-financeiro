@@ -37,6 +37,7 @@ class DadosFinanceirosAcoes(Base):
     caixa: Mapped[Optional[float]] = mapped_column(Float)
     passivo_total: Mapped[Optional[float]] = mapped_column(Float)
     divida_bruta: Mapped[Optional[float]] = mapped_column(Float) # Empréstimos/Debêntures
+    divida_longo_prazo = Column(Float, nullable=True)
 
     # --- D.R.E (RESULTADOS) ---
     receita: Mapped[Optional[float]] = mapped_column(Float)
