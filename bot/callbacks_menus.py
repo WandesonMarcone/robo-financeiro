@@ -471,6 +471,55 @@ def callback_geral(call):
                 session.close()
 
         # ==========================================
+        # --- EXIBIÇÃO DE DADOS FINANCEIROS FIIs ---
+        # ==========================================
+        elif dados.startswith("dd_") or dados.startswith("dados_") or dados.startswith("fii_dados_"): # (Ajuste para o prefixo exato que você usa no botão)
+            bot.answer_callback_query(call.id, "Gerando Raio-X...")
+            partes = dados.split("_")
+            ticker = partes[-1] # Pega o ticker do final do callback
+            
+            session = SessionDB()
+            ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+            
+            # Puxa os últimos 4 relatórios mensais do fundo cadastrados no banco
+            from pipeline_dados.banco_dados import DadosFinanceirosFiis # Certifique-se de importar se não estiver no topo
+            
+            informes = session.query(DadosFinanceirosFiis).filter(
+                DadosFinanceirosFiis.ativo_id == ativo.id
+            ).order_by(DadosFinanceirosFiis.data_referencia.desc()).limit(4).all()
+            
+            if not informes:
+                markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🔙 Voltar", callback_data=f"painel_{ticker}_fii"))
+                bot.edit_message_text(f"📊 **Dados Estruturais: {ticker}**\n\nNenhum dado contábil encontrado na CVM para este fundo ainda.", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+                session.close()
+                return
+
+            txt = f"🏢 **Raio-X Contábil: {ticker}**\n_Indicadores oficias extraídos da CVM_\n\n"
+            
+            for inf in informes:
+                mes_ano = inf.data_referencia.strftime("%m/%Y")
+                
+                # Formatações Elegantes para Bilhões e Milhões
+                if inf.patrimonio_liquido:
+                    pl_fmt = f"R$ {inf.patrimonio_liquido/1000000000:.2f} Bi" if inf.patrimonio_liquido >= 1000000000 else f"R$ {inf.patrimonio_liquido/1000000:.2f} Mi"
+                else: pl_fmt = "N/A"
+                
+                caixa_fmt = f"R$ {inf.disponibilidades_caixa/1000000:.2f} Mi" if inf.disponibilidades_caixa else "N/A"
+                cotistas = f"{inf.cotistas:,}".replace(",", ".") if inf.cotistas else "N/A"
+                
+                txt += f"📅 **Referência:** `{mes_ano}`\n"
+                txt += f"💰 **Patrimônio Líquido:** `{pl_fmt}`\n"
+                txt += f"👥 **Total de Cotistas:** `{cotistas}`\n"
+                txt += f"💵 **Caixa / Disponível:** `{caixa_fmt}`\n"
+                txt += "➖➖➖➖➖➖➖➖\n"
+            
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_fii"))
+            
+            bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            session.close()
+
+        # ==========================================
         # --- NÍVEL 1: DOCUMENTOS (BIFURCAÇÃO) ---
         # ==========================================
         elif dados.startswith("docs_"):
