@@ -37,7 +37,9 @@ class DadosFinanceirosAcoes(Base):
     caixa: Mapped[Optional[float]] = mapped_column(Float)
     passivo_total: Mapped[Optional[float]] = mapped_column(Float)
     divida_bruta: Mapped[Optional[float]] = mapped_column(Float) # Empréstimos/Debêntures
-    divida_longo_prazo = Column(Float, nullable=True)
+    divida_curto_prazo: Mapped[Optional[float]] = mapped_column(Float)  # 👈 ADICIONADO
+    divida_longo_prazo: Mapped[Optional[float]] = mapped_column(Float)  # 👈 PADRONIZADO
+    divida_liquida: Mapped[Optional[float]] = mapped_column(Float)      # 👈 ADICIONADO
 
     # --- D.R.E (RESULTADOS) ---
     receita: Mapped[Optional[float]] = mapped_column(Float)
@@ -45,7 +47,7 @@ class DadosFinanceirosAcoes(Base):
     ebitda: Mapped[Optional[float]] = mapped_column(Float)
     resultado_financeiro: Mapped[Optional[float]] = mapped_column(Float)
     lucro_liquido: Mapped[Optional[float]] = mapped_column(Float)
-    
+
     # --- FLUXO DE CAIXA ---
     fco: Mapped[Optional[float]] = mapped_column(Float) # Caixa Operacional
 
