@@ -490,8 +490,10 @@ def callback_geral(call):
                 ano_escolhido = data_ref.split('-')[0]
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("❓ Entender os Indicadores", callback_data=f"ajuda_cvm_{ticker}_menu"))
-                markup.add(InlineKeyboardButton("🔙 Voltar aos Trimestres", callback_data=f"ano_{ticker}_{tipo_ativo}_{ano_escolhido}"))
-                markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
+                markup.add(
+                    InlineKeyboardButton("🔙 Voltar aos Trimestres", callback_data=f"ano_{ticker}_{tipo_ativo}_{ano_escolhido}"),
+                    InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}")
+                )
 
                 bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
             except Exception as e:
