@@ -376,8 +376,19 @@ def callback_geral(call):
                 
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_fii"))
+            # (Substitua as últimas linhas do bloco elif dados.startswith("dados_"):)
+            
             session.close()
-            bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+            # PARAQUEDAS ANTI-ERRO 400
+            try:
+                bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            except Exception as e:
+                if "can't parse entities" in str(e).lower() or "bad request" in str(e).lower():
+                    # Manda sem formatação Markdown se o Telegram recusar
+                    bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup)
+                else:
+                    bot.edit_message_text(f"❌ Erro ao exibir dados: {str(e)[:100]}", chat_id, msg_id, reply_markup=markup)
 
         # ==========================================
         # --- DADOS NÍVEL 2: ESCOLHER O TRIMESTRE ---
