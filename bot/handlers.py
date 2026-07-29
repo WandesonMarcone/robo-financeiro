@@ -160,3 +160,37 @@ def callback_ajuda_comandos(call):
     markup.add(InlineKeyboardButton("🔙 Voltar à Ajuda", callback_data="menu_ajuda"))
 
     bot.edit_message_text(texto_comandos, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+
+@bot.callback_query_handler(func=lambda call: call.data == "ver_raiox_docs")
+def callback_raiox_docs(call):
+    """Gera e exibe a lista completa de documentos sob demanda."""
+    try:
+        from atualizador_documentos import SessionDB
+        from pipeline_dados.banco_dados import DocumentosQualitativos
+        from sqlalchemy import func
+
+        session = SessionDB()
+        
+        # Faz o agrupamento SQL apenas quando o botão é clicado
+        tipos_docs = session.query(
+            DocumentosQualitativos.tipo_documento, 
+            func.count(DocumentosQualitativos.id)
+        ).group_by(DocumentosQualitativos.tipo_documento).order_by(func.count(DocumentosQualitativos.id).desc()).all()
+
+        session.close()
+
+        texto_tipos = "📂 **Raio-X do Acervo de Documentos:**\n\n"
+        if tipos_docs:
+            for tipo, quantidade in tipos_docs:
+                nome_bonito = str(tipo).replace("_", " ").title() if tipo else "Outros"
+                texto_tipos += f"  ├ `{quantidade}x` {nome_bonito}\n"
+        else:
+            texto_tipos += "  ├ Banco de dados vazio."
+
+        # Retorna a lista como um alerta (popup) ou manda uma nova mensagem!
+        # Aqui enviamos como uma nova mensagem para ficar fácil de ler
+        bot.send_message(call.message.chat.id, texto_tipos, parse_mode="Markdown")
+        bot.answer_callback_query(call.id)
+        
+    except Exception as e:
+        bot.answer_callback_query(call.id, f"Erro ao gerar Raio-X: {str(e)[:50]}", show_alert=True)
