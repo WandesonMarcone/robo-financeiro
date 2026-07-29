@@ -113,24 +113,22 @@ def acionar_varredura_manual(message):
             from atualizador_documentos import rotina_de_atualizacao_em_massa, SessionDB
             from pipeline_dados.banco_dados import DocumentosQualitativos
             from sqlalchemy import func
+            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
             import threading
 
             session = SessionDB()
 
-            # 1. Tira uma "foto" do banco ANTES da varredura
+            # 1. Foto do banco ANTES
             total_antes = session.query(DocumentosQualitativos).count()
 
-            # 2. RODA A VARREDURA
-            # (O bloqueio de duplicidade já é feito silenciosamente pelo seu banco de dados)
+            # 2. Roda a Varredura (Baixa PDFs novos, ignora duplicados)
             rotina_de_atualizacao_em_massa()
 
-            # 3. Tira uma "foto" do banco DEPOIS da varredura
+            # 3. Foto do banco DEPOIS
             total_depois = session.query(DocumentosQualitativos).count()
-            
-            # A diferença é a sua Fila de Espera/Capturados no momento!
             novos_capturados = total_depois - total_antes 
 
-            # 4. Conta os status de IA (Panorama Geral)
+            # 4. Conta status da IA
             pendentes = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
             ).count()
@@ -139,39 +137,37 @@ def acionar_varredura_manual(message):
                 DocumentosQualitativos.status_processamento == "SALVO_DRIVE"
             ).count()
 
-            # 5. Conta os documentos separados por TIPO
-            tipos_docs = session.query(
-                DocumentosQualitativos.tipo_documento, 
-                func.count(DocumentosQualitativos.id)
-            ).group_by(DocumentosQualitativos.tipo_documento).all()
-
-            texto_tipos = ""
-            if tipos_docs:
-                for tipo, quantidade in tipos_docs:
-                    # Limpa o texto (ex: "XML_MENSAL" vira "Xml Mensal")
-                    nome_bonito = str(tipo).replace("_", " ").title() if tipo else "Outros"
-                    texto_tipos += f"  ├ `{quantidade}x` {nome_bonito}\n"
-            else:
-                texto_tipos = "  ├ Nenhum documento no banco ainda.\n"
+            # 5. Busca as datas (O mais antigo e o mais novo do banco)
+            min_data = session.query(func.min(DocumentosQualitativos.data_publicacao)).scalar()
+            max_data = session.query(func.max(DocumentosQualitativos.data_publicacao)).scalar()
+            
+            data_inicio = min_data.strftime("%d/%m/%Y") if min_data else "N/A"
+            data_fim = max_data.strftime("%d/%m/%Y") if max_data else "N/A"
 
             session.close()
 
-            # 6. Calcula a Eficiência
-            total_processado_ia = salvos_automaticos + pendentes
-            eficiencia = (salvos_automaticos / total_processado_ia * 100) if total_processado_ia > 0 else 0
+            # 6. Calcula Eficiência
+            total_processado = salvos_automaticos + pendentes
+            eficiencia = (salvos_automaticos / total_processado * 100) if total_processado > 0 else 0
 
-            # 7. Monta a resposta final
+            # 7. Criação dos Botões Interativos
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(
+                InlineKeyboardButton("📂 Ver Raio-X de Documentos", callback_data="ver_raiox_docs"),
+                InlineKeyboardButton("📥 Iniciar Revisão Manual", callback_data="iniciar_revisao_pendencias")
+            )
+
+            # 8. Mensagem Final (Limpa, Direta e com as Datas!)
             resposta_final = (
                 f"✅ *Varredura Concluída!*\n\n"
-                f"🆕 **Novos Capturados Agora:** `{novos_capturados}`\n\n"
+                f"🆕 **Novos Capturados Agora:** `{novos_capturados}`\n"
+                f"📅 **Cobertura do Banco:** `{data_inicio}` até `{data_fim}`\n\n"
                 f"🤖 **Auto-salvos no Drive:** `{salvos_automaticos}`\n"
                 f"📥 **Fila de Revisão:** `{pendentes}`\n"
-                f"📈 **Taxa de Eficiência da IA:** `{eficiencia:.1f}%`\n\n"
-                f"📂 **Raio-X dos Documentos:**\n"
-                f"{texto_tipos}\n"
-                f"👉 _Digite /revisao para organizar as pendências._"
+                f"📈 **Taxa de Eficiência da IA:** `{eficiencia:.1f}%`\n"
             )
-            bot.send_message(message.chat.id, resposta_final, parse_mode="Markdown")
+            
+            bot.send_message(message.chat.id, resposta_final, parse_mode="Markdown", reply_markup=markup)
 
         except Exception as e:
             bot.send_message(message.chat.id, f"❌ Erro na varredura: {str(e)[:200]}") 
