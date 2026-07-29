@@ -275,6 +275,11 @@ def callback_menu_inteligencia(call):
                 bot.edit_message_text(texto_final, call.message.chat.id, call.message.message_id, reply_markup=markup)
             else:
                 bot.edit_message_text(f"❌ Erro na IA: `{str(e)[:100]}`", call.message.chat.id, call.message.message_id)
+                
+    except Exception as e:
+        bot.edit_message_text(f"❌ Erro na IA: `{str(e)[:150]}`", call.message.chat.id, call.message.message_id)
+    finally:
+        session.close()
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("ajuda_cvm_"))
 def menu_duvidas_cvm(call):
