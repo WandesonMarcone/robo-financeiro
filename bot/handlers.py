@@ -208,7 +208,11 @@ def callback_menu_inteligencia(call):
     topico = partes[3] if len(partes) > 3 else "resumo"
 
     # Avisa o usuário que a IA está pensando (Evita que ele ache que travou)
-    bot.answer_callback_query(call.id, "🧠 Processando dados com IA...")
+    try:
+        bot.answer_callback_query(call.id, "🧠 Processando dados com IA...")
+    except Exception as e:
+        print(f"Aviso: Timeout do botão no Telegram ignorado. {e}")
+
     
     mensagem_espera = f"🧠 **Central de IA: {ticker}**\n\n⏳ _Analisando relatórios e estruturando dados..._"
     bot.edit_message_text(mensagem_espera, call.message.chat.id, call.message.message_id, parse_mode="Markdown")
