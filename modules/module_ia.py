@@ -99,3 +99,45 @@ def analisar_fatos_com_ia(prompt: str) -> str:
 
     # Se nenhum provedor respondeu ou se faltam chaves de API
     return f"❌ Erro crítico na IA (Nenhum modelo respondeu). Último erro: {ultimo_erro}"
+
+def construir_prompt_interativo(ticker: str, tipo: str, topico: str, resumo_docs: str) -> str:
+    """Monta o prompt exato dependendo do botão que o usuário clicou."""
+    
+    # REGRA DE OURO PARA O TELEGRAM (Impede a IA de fazer textões)
+    restricao_formato = (
+        "\n\nREGRAS DE FORMATAÇÃO (OBRIGATÓRIO):\n"
+        "1. Seja extremamente conciso e direto ao ponto.\n"
+        "2. NÃO escreva parágrafos longos, introduções genéricas ou conclusões.\n"
+        "3. Use no máximo 3 bullet points curtos (máximo de 2 linhas cada).\n"
+        "4. Formate em Markdown limpo."
+    )
+
+    contexto = f"Ativo: {ticker}\nDocumentos recentes:\n{resumo_docs}\n\n"
+
+    # Define a missão baseada no tipo e no botão clicado
+    if tipo == "fii":
+        if topico == "resumo":
+            missao = "Faça um micro-resumo de 2 linhas sobre o que é este Fundo Imobiliário e seu foco principal de atuação."
+        elif topico == "visao":
+            missao = "Descreva a Visão Geral, o Segmento de atuação e o Modelo de Gestão deste fundo."
+        elif topico == "proventos":
+            missao = "Analise os Proventos, Rendimentos recentes e a consistência de distribuição deste fundo."
+        elif topico == "riscos":
+            missao = "Aponte os principais Fatores de Risco (vacância, alavancagem, calotes ou liquidez) baseados nos relatórios recentes."
+        elif topico == "parecer":
+            missao = "Dê um Parecer Executivo final e direto para um investidor de longo prazo focado em renda."
+            
+    else: # AÇÃO
+        if topico == "resumo":
+            missao = "Faça um micro-resumo de 2 linhas sobre a empresa e seu core business."
+        elif topico == "negocios":
+            missao = "Descreva o Modelo de Negócios, sua posição no mercado e vantagens competitivas."
+        elif topico == "saude":
+            missao = "Analise a Saúde Financeira: margens, nível de endividamento e geração de caixa."
+        elif topico == "dividendos":
+            missao = "Analise a Política de Dividendos e o histórico recente de proventos da empresa."
+        elif topico == "parecer":
+            missao = "Dê um Parecer Executivo final e direto para um investidor de longo prazo (Value Investing)."
+
+    return f"Você é um analista institucional sênior.\n{contexto}Sua tarefa: {missao}{restricao_formato}"
+
