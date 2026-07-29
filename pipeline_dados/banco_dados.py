@@ -90,6 +90,7 @@ class DocumentosQualitativos(Base):
     tipo_documento: Mapped[str] = mapped_column(String(255), nullable=False)
 
     url_pdf: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    texto_extraido: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     assunto = Column(Text, nullable=True)
     id_b3: Mapped[Optional[str]] = mapped_column(String(50), unique=True, nullable=True)
     status_processamento: Mapped[str] = mapped_column(String(20), default="SALVO", nullable=False) 
