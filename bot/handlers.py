@@ -268,10 +268,10 @@ def callback_menu_inteligencia(call):
         }
         
         texto_final = f"🧠 **Inteligência Artificial: {ticker}**\n📍 *{titulos.get(topico, 'Análise')}*\n\n{resposta_ia}"
-
-        bot.edit_message_text(texto_final, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
-
-    except Exception as e:
-        bot.edit_message_text(f"❌ Erro na IA: `{str(e)[:150]}`", call.message.chat.id, call.message.message_id)
-    finally:
-        session.close()
+        try:
+            bot.edit_message_text(texto_final, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+        except Exception as e:
+            if "can't parse entities" in str(e).lower() or "bad request" in str(e).lower():
+                bot.edit_message_text(texto_final, call.message.chat.id, call.message.message_id, reply_markup=markup)
+            else:
+                bot.edit_message_text(f"❌ Erro na IA: `{str(e)[:100]}`", call.message.chat.id, call.message.message_id)
