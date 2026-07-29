@@ -39,6 +39,7 @@ google-auth-oauthlib==1.2.0
 openai
 groq
 PyPDF2
+PyMuPDF==1.23.21
 
 # ==========================================
 # 🗄️ BANCO DE DADOS E ARMAZENAMENTO EXTRA
