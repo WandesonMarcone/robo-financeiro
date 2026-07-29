@@ -275,3 +275,51 @@ def callback_menu_inteligencia(call):
                 bot.edit_message_text(texto_final, call.message.chat.id, call.message.message_id, reply_markup=markup)
             else:
                 bot.edit_message_text(f"❌ Erro na IA: `{str(e)[:100]}`", call.message.chat.id, call.message.message_id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("ajuda_cvm_"))
+def menu_duvidas_cvm(call):
+    """Sistema de dicionário financeiro interativo para o painel da CVM."""
+    partes = call.data.split("_")
+    ticker = partes[2]
+    tela = partes[3] # Pode ser: menu, bp, dre, fco
+
+    markup = InlineKeyboardMarkup(row_width=2)
+    
+    if tela == "menu":
+        texto = "📖 *Dicionário Financeiro CVM*\n\nEscolha qual grupo de indicadores você deseja entender:"
+        markup.add(
+            InlineKeyboardButton("⚖️ Balanço Patrimonial", callback_data=f"ajuda_cvm_{ticker}_bp"),
+            InlineKeyboardButton("⚙️ D.R.E (Resultados)", callback_data=f"ajuda_cvm_{ticker}_dre"),
+            InlineKeyboardButton("💸 Fluxo de Caixa", callback_data=f"ajuda_cvm_{ticker}_fco")
+        )
+    elif tela == "bp":
+        texto = (
+            "⚖️ *Balanço Patrimonial*\n\n"
+            "• *Ativo Total:* Tudo o que a empresa possui (dinheiro, imóveis, estoques).\n"
+            "• *Patrimônio Líquido:* A riqueza real dos acionistas (Ativos menos Passivos).\n"
+            "• *Caixa:* Dinheiro vivo ou investimentos de curtíssimo prazo disponíveis.\n"
+            "• *Dívida Líquida:* O total de dívidas da empresa MENOS o dinheiro que ela tem em caixa. Se for negativa, ela tem mais caixa que dívida!"
+        )
+        markup.add(InlineKeyboardButton("🔙 Voltar ao Menu de Dúvidas", callback_data=f"ajuda_cvm_{ticker}_menu"))
+    elif tela == "dre":
+        texto = (
+            "⚙️ *D.R.E. (Resultados)*\n\n"
+            "• *Receita Líquida:* Todo o dinheiro que entrou pelas vendas, descontados os impostos diretos.\n"
+            "• *EBITDA:* Geração de caixa operacional pura (Lucro antes de juros, impostos, depreciação e amortização).\n"
+            "• *Resultado Financeiro:* A diferença entre o que a empresa ganha com juros e o que ela paga de juros de dívidas.\n"
+            "• *Lucro Líquido:* O dinheiro que sobra no bolso no fim do trimestre."
+        )
+        markup.add(InlineKeyboardButton("🔙 Voltar ao Menu de Dúvidas", callback_data=f"ajuda_cvm_{ticker}_menu"))
+    elif tela == "fco":
+        texto = (
+            "💸 *Fluxo de Caixa Operacional (FCO)*\n\n"
+            "Mostra o dinheiro real que entrou na conta bancária da empresa apenas com a sua operação principal.\n\n"
+            "⚠️ *Dica:* Uma empresa pode ter Lucro na DRE, mas FCO negativo (lucro contábil que ainda não virou dinheiro no banco)."
+        )
+        markup.add(InlineKeyboardButton("🔙 Voltar ao Menu de Dúvidas", callback_data=f"ajuda_cvm_{ticker}_menu"))
+
+    # O botão mais importante: Voltar para a análise da ação!
+    markup.add(InlineKeyboardButton(f"🔙 Voltar ao Painel ({ticker})", callback_data=f"painel_{ticker}_acao"))
+
+    bot.edit_message_text(texto, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+
