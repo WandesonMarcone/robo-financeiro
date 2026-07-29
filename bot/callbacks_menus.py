@@ -506,7 +506,15 @@ def callback_geral(call):
                     InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}")
                 )
 
-                bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+                # 🛡️ PARAQUEDAS ANTI-ERRO 400 OBRIGATÓRIO AQUI TAMBÉM:
+                try:
+                    bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+                except Exception as e:
+                    if "can't parse entities" in str(e).lower() or "bad request" in str(e).lower():
+                        bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup)
+                    else:
+                        bot.edit_message_text(f"❌ Erro ao exibir: {str(e)[:100]}", chat_id, msg_id, reply_markup=markup)
+            
             except Exception as e:
                 print(f"Erro ao buscar balanço da ação: {e}")
                 bot.answer_callback_query(call.id, "❌ Erro ao abrir balanço!")
