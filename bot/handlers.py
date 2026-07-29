@@ -194,3 +194,84 @@ def callback_raiox_docs(call):
         
     except Exception as e:
         bot.answer_callback_query(call.id, f"Erro ao gerar Raio-X: {str(e)[:50]}", show_alert=True)
+
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("ia_"))
+def callback_menu_inteligencia(call):
+    """Gerencia o menu interativo de IA dividindo a análise em botões menores."""
+    # Desempacota os dados (Exemplo de call.data: ia_PETR4_acao_dividendos)
+    partes = call.data.split("_")
+    ticker = partes[1]
+    tipo = partes[2]
+    # Se clicar no botão principal de IA, o tópico padrão é "resumo"
+    topico = partes[3] if len(partes) > 3 else "resumo"
+
+    # Avisa o usuário que a IA está pensando (Evita que ele ache que travou)
+    bot.answer_callback_query(call.id, "🧠 Processando dados com IA...")
+    
+    mensagem_espera = f"🧠 **Central de IA: {ticker}**\n\n⏳ _Analisando relatórios e estruturando dados..._"
+    bot.edit_message_text(mensagem_espera, call.message.chat.id, call.message.message_id, parse_mode="Markdown")
+
+    try:
+        from atualizador_documentos import SessionDB
+        from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
+        from modules.module_ia import analisar_fatos_com_ia, construir_prompt_interativo
+        
+        session = SessionDB()
+        ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+
+        if not ativo:
+            bot.edit_message_text(f"❌ Ativo `{ticker}` sem registros.", call.message.chat.id, call.message.message_id)
+            return
+
+        # Puxa os documentos para contexto
+        docs_recentes = session.query(DocumentosQualitativos)\
+            .filter(DocumentosQualitativos.ativo_id == ativo.id, DocumentosQualitativos.status_processamento == "SALVO_DRIVE")\
+            .order_by(DocumentosQualitativos.data_publicacao.desc()).limit(5).all()
+
+        resumo_docs = "\n".join([f"- [{d.data_publicacao.strftime('%d/%m/%Y')}] {d.tipo_documento}: {d.assunto}" for d in docs_recentes])
+        if not resumo_docs:
+            resumo_docs = "Nenhum documento recente no banco."
+
+        # Pede para o novo módulo de IA montar a pergunta exata
+        prompt = construir_prompt_interativo(ticker, tipo, topico, resumo_docs)
+        
+        # Dispara para a Groq/OpenAI
+        resposta_ia = analisar_fatos_com_ia(prompt)
+
+        # Monta os botões do Menu Interativo com base no Tipo (Ação ou FII)
+        markup = InlineKeyboardMarkup(row_width=2)
+        
+        if tipo == "fii":
+            markup.add(
+                InlineKeyboardButton("🏢 Visão & Ativos", callback_data=f"ia_{ticker}_fii_visao"),
+                InlineKeyboardButton("💸 Rendimentos", callback_data=f"ia_{ticker}_fii_proventos"),
+                InlineKeyboardButton("⚠️ Fatores de Risco", callback_data=f"ia_{ticker}_fii_riscos"),
+                InlineKeyboardButton("🎯 Parecer", callback_data=f"ia_{ticker}_fii_parecer")
+            )
+        else:
+            markup.add(
+                InlineKeyboardButton("📈 Negócios", callback_data=f"ia_{ticker}_acao_negocios"),
+                InlineKeyboardButton("⚙️ Saúde Fin.", callback_data=f"ia_{ticker}_acao_saude"),
+                InlineKeyboardButton("💰 Dividendos", callback_data=f"ia_{ticker}_acao_dividendos"),
+                InlineKeyboardButton("🎯 Parecer", callback_data=f"ia_{ticker}_acao_parecer")
+            )
+            
+        markup.add(InlineKeyboardButton(f"🔙 Voltar ao Painel do {ticker}", callback_data=f"painel_{ticker}_{tipo}"))
+
+        # Formatação final da resposta
+        titulos = {
+            "resumo": "Micro-Resumo", "visao": "Visão Geral & Ativos", "proventos": "Rendimentos e Proventos",
+            "riscos": "Fatores de Risco", "negocios": "Modelo de Negócios", "saude": "Saúde Financeira", 
+            "dividendos": "Política de Dividendos", "parecer": "Parecer Executivo"
+        }
+        
+        texto_final = f"🧠 **Inteligência Artificial: {ticker}**\n📍 *{titulos.get(topico, 'Análise')}*\n\n{resposta_ia}"
+
+        bot.edit_message_text(texto_final, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+
+    except Exception as e:
+        bot.edit_message_text(f"❌ Erro na IA: `{str(e)[:150]}`", call.message.chat.id, call.message.message_id)
+    finally:
+        session.close()
