@@ -106,79 +106,77 @@ def comando_adicionar(message):
 
 @bot.message_handler(commands=['forcar_varredura'])
 def acionar_varredura_manual(message):
-    bot.reply_to(message, "⚙️ *Iniciando varredura completa (FIIs + Documentos)...*\nIsso pode levar alguns minutos. Aguarde o aviso de conclusão!", parse_mode="Markdown")
+    bot.reply_to(message, "⚙️ *Iniciando varredura na B3 e CVM...*\nIsso pode levar alguns minutos. Buscando apenas documentos novos!", parse_mode="Markdown")
 
     def tarefa_pesada_background():
         try:
-            # 1. Rotina de Documentos (PDFs/CVM)
-            from atualizador_documentos import rotina_de_atualizacao_em_massa
-            rotina_de_atualizacao_em_massa() # Roda a varredura normalmente
-
-            # 2. Rotina de FIIs (Motor JSON para a Planilha)
-            from datetime import datetime
-            import pytz
-            from modules.utils import conectar_gspread
-            from services.planilhas import CACHE_PLANILHA
-
-            sp_tz = pytz.timezone('America/Sao_Paulo')
-            agora = datetime.now(sp_tz)
-
-            client = conectar_gspread()
-            planilha = client.open_by_url(config.SPREADSHEET_URL)
-
-            batch_updates, msg_out, aba_fiis = rodar_garimpo_fiis(planilha, agora, agora.strftime("%H:%M"), sp_tz)
-
-            # --- CORREÇÃO DA LÓGICA DE AVISO (Blindada contra Erro 400) ---
-            if batch_updates and "requests" in batch_updates and len(batch_updates["requests"]) > 0:
-                planilha.batch_update(batch_updates)
-
-                # Limpa o cache da planilha
-                CACHE_PLANILHA["BD_FIIs"]["dados"] = None
-                CACHE_PLANILHA["BD_FIIs"]["timestamp"] = 0
-
-                msg_planilha = f"\n\n{msg_out}"
-            else:
-                msg_planilha = "\n\n📊 *Planilha:* Nenhuma atualização de cotação necessária agora."
-
-            # --- NOVA LÓGICA DE CONTAGEM REAL NO BANCO DE DADOS ---
+            from atualizador_documentos import rotina_de_atualizacao_em_massa, SessionDB
             from pipeline_dados.banco_dados import DocumentosQualitativos
-            from atualizador_documentos import SessionDB
+            from sqlalchemy import func
+            import threading
 
             session = SessionDB()
+
+            # 1. Tira uma "foto" do banco ANTES da varredura
+            total_antes = session.query(DocumentosQualitativos).count()
+
+            # 2. RODA A VARREDURA
+            # (O bloqueio de duplicidade já é feito silenciosamente pelo seu banco de dados)
+            rotina_de_atualizacao_em_massa()
+
+            # 3. Tira uma "foto" do banco DEPOIS da varredura
+            total_depois = session.query(DocumentosQualitativos).count()
             
-            # 1. Conta os que exigiram revisão manual
+            # A diferença é a sua Fila de Espera/Capturados no momento!
+            novos_capturados = total_depois - total_antes 
+
+            # 4. Conta os status de IA (Panorama Geral)
             pendentes = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
             ).count()
-            
-            # 2. Conta os que a IA auto-salvou direto no Google Drive
+
             salvos_automaticos = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.status_processamento == "SALVO_DRIVE"
             ).count()
-            
+
+            # 5. Conta os documentos separados por TIPO
+            tipos_docs = session.query(
+                DocumentosQualitativos.tipo_documento, 
+                func.count(DocumentosQualitativos.id)
+            ).group_by(DocumentosQualitativos.tipo_documento).all()
+
+            texto_tipos = ""
+            if tipos_docs:
+                for tipo, quantidade in tipos_docs:
+                    # Limpa o texto (ex: "XML_MENSAL" vira "Xml Mensal")
+                    nome_bonito = str(tipo).replace("_", " ").title() if tipo else "Outros"
+                    texto_tipos += f"  ├ `{quantidade}x` {nome_bonito}\n"
+            else:
+                texto_tipos = "  ├ Nenhum documento no banco ainda.\n"
+
             session.close()
 
-            # 3. Calcula a porcentagem de eficiência da IA
-            total_geral = salvos_automaticos + pendentes
-            if total_geral > 0:
-                eficiencia = (salvos_automaticos / total_geral) * 100
-            else:
-                eficiencia = 0
+            # 6. Calcula a Eficiência
+            total_processado_ia = salvos_automaticos + pendentes
+            eficiencia = (salvos_automaticos / total_processado_ia * 100) if total_processado_ia > 0 else 0
 
-            # O bot agora entrega o panorama completo da operação
+            # 7. Monta a resposta final
             resposta_final = (
                 f"✅ *Varredura Concluída!*\n\n"
-                f"🤖 **Auto-salvos no Drive:** `{salvos_automaticos}` documentos\n"
-                f"📥 **Fila de Revisão:** `{pendentes}` documentos\n"
+                f"🆕 **Novos Capturados Agora:** `{novos_capturados}`\n\n"
+                f"🤖 **Auto-salvos no Drive:** `{salvos_automaticos}`\n"
+                f"📥 **Fila de Revisão:** `{pendentes}`\n"
                 f"📈 **Taxa de Eficiência da IA:** `{eficiencia:.1f}%`\n\n"
+                f"📂 **Raio-X dos Documentos:**\n"
+                f"{texto_tipos}\n"
                 f"👉 _Digite /revisao para organizar as pendências._"
-                f"{msg_planilha}"
             )
             bot.send_message(message.chat.id, resposta_final, parse_mode="Markdown")
 
         except Exception as e:
             bot.send_message(message.chat.id, f"❌ Erro na varredura: {str(e)[:200]}") 
 
+    import threading
     thread = threading.Thread(target=tarefa_pesada_background)
     thread.start()
 
