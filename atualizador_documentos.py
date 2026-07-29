@@ -357,11 +357,27 @@ def rotina_processar_acoes():
                 mes_ref=mes_pasta,
                 tipo_ativo="ACAO" # 🔴 AVISANDO O CARTEIRO!
             )
+            
             if link_gerado:
                 doc_db.url_pdf = link_gerado
                 doc_db.tipo_documento = nome_limpo
                 doc_db.status_processamento = "SALVO_DRIVE" # 🟢 Libera o botão no Telegram!
                 print(f"✅ Sucesso: Drive Atualizado -> {nome_limpo}")
+
+                # 🔌 CATRACA INTELIGENTE DA IA (Ações)
+                if "gerencial" in nome_limpo.lower() or "fato" in nome_limpo.lower() or "release" in nome_limpo.lower():
+                    print(f"🧠 Sugando texto profundo do PDF para a IA...")
+                    try:
+                        doc_fitz = fitz.open(temp_filename)
+                        texto_completo = "".join([pagina.get_text("text") + "\n" for pagina in doc_fitz[:15]])
+                        doc_db.texto_extraido = " ".join(texto_completo.split())[:15000]
+                        doc_fitz.close()
+                    except Exception as e:
+                        print(f"⚠️ Erro ao extrair texto RAG: {e}")
+                        doc_db.texto_extraido = None
+                else:
+                    doc_db.texto_extraido = None
+
             else:
                 doc_db.status_processamento = "ERRO_DRIVE"
 
