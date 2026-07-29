@@ -425,7 +425,17 @@ def callback_geral(call):
 
             markup.add(InlineKeyboardButton("🔙 Voltar aos Anos", callback_data=f"dados_{ticker}_{tipo_ativo}"))
             session.close()
-            bot.edit_message_text(f"📅 **Exercício {ano_escolhido}: {ticker}**\n\nSelecione o período desejado:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            txt_ano = f"📅 **Exercício {ano_escolhido}: {ticker}**\n\nSelecione o período desejado:"
+
+            # 🛡️ PARAQUEDAS ANTI-ERRO 400
+            try:
+                bot.edit_message_text(txt_ano, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            except Exception as e:
+                if "can't parse entities" in str(e).lower() or "bad request" in str(e).lower():
+                    # Tira o Markdown e manda puro
+                    bot.edit_message_text(txt_ano, chat_id, msg_id, reply_markup=markup)
+                else:
+                    bot.edit_message_text(f"❌ Erro ao exibir anos: {str(e)[:100]}", chat_id, msg_id, reply_markup=markup)
 
         # ==========================================
         # --- DADOS NÍVEL 3: EXIBIR RAIO-X COMPLETO ---
