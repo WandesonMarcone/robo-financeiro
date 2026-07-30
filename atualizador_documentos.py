@@ -250,7 +250,8 @@ def rotina_processar_pendentes():
                         doc_db.texto_extraido = " ".join(texto_completo.split())[:15000]
                         doc_fitz.close()
                     except Exception as e:
-                        print(f"⚠️ Erro ao extrair texto RAG: {e}")
+                        # 🔴 AGORA MOSTRA O ERRO EXATO EM VEZ DE SAIR EM BRANCO
+                        print(f"⚠️ Erro detalhado ao extrair texto RAG ({type(e).__name__}): {str(e)}")
                         doc_db.texto_extraido = None
                 else:
                     doc_db.texto_extraido = None
@@ -381,15 +382,16 @@ def rotina_processar_acoes():
                 print(f"✅ Sucesso: Drive Atualizado -> {nome_limpo}")
 
                 # 🔌 CATRACA INTELIGENTE DA IA (Ações)
-                if "gerencial" in nome_limpo.lower() or "fato" in nome_limpo.lower() or "release" in nome_limpo.lower():
+                if "gerencial" in nome_limpo.lower() or "fato" in nome_limpo.lower():
                     print(f"🧠 Sugando texto profundo do PDF para a IA...")
                     try:
                         doc_fitz = fitz.open(temp_filename)
-                        texto_completo = "".join([pagina.get_text("text") + "\n" for pagina in doc_fitz[:15]])
+                        texto_completo = "".join([pagina.get_text("text") + "\n" for pagina in doc_fitz[:12]])
                         doc_db.texto_extraido = " ".join(texto_completo.split())[:15000]
                         doc_fitz.close()
                     except Exception as e:
-                        print(f"⚠️ Erro ao extrair texto RAG: {e}")
+                        # 🔴 AGORA MOSTRA O ERRO EXATO EM VEZ DE SAIR EM BRANCO
+                        print(f"⚠️ Erro detalhado ao extrair texto RAG ({type(e).__name__}): {str(e)}")
                         doc_db.texto_extraido = None
                 else:
                     doc_db.texto_extraido = None
