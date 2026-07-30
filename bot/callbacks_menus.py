@@ -344,19 +344,18 @@ def callback_geral(call):
                 else:
                     txt = f"📭 _Ativo não encontrado no banco de dados local._"
             else:
-                
                 informes = session.query(DadosFinanceirosFiis).filter(
                     DadosFinanceirosFiis.ativo_id == ativo.id
                 ).order_by(DadosFinanceirosFiis.data_referencia.desc()).limit(4).all()
-                
+
                 if not informes:
                     markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_fii"))
-                    bot.edit_message_text(f"📊 **Dados Estruturais: {ticker}**\n\nNenhum dado contábil encontrado na CVM para este fundo ainda.\n\n👉 _Execute o comando /forcar_fiis para atualizar os dados._", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+                    bot.edit_message_text(f"📊 Dados Estruturais: {ticker}\n\nNenhum dado contábil encontrado na CVM para este fundo ainda.\n\n👉 Execute o comando /forcar_fiis para atualizar os dados.", chat_id, msg_id, reply_markup=markup)
                     session.close()
                     return
 
-                # 👇 Substitua a geração de texto dos FIIs por esta versão blindada:
-                txt = f"🏢 *Raio-X Contábil: {ticker}*\nIndicadores oficiais da CVM\n\n"
+                # 🛡️ TEXTO 100% PLANO (Sem Markdown, zero risco de Erro 400 do Telegram)
+                txt = f"Raio-X Contábil: {ticker}\nIndicadores oficiais da CVM\n\n"
 
                 for inf in informes:
                     mes_ano = inf.data_referencia.strftime("%m/%Y")
@@ -369,23 +368,22 @@ def callback_geral(call):
                     caixa_fmt = f"R$ {inf.disponibilidades_caixa/1000000:.2f} Mi" if inf.disponibilidades_caixa else "N/A"
                     cotistas = f"{inf.cotistas:,}".replace(",", ".") if inf.cotistas else "N/A"
 
-                    # Tirei os asteriscos (**) daqui de dentro para garantir que o Telegram não quebre a mensagem!
-                    txt += f"📅 Referência: {mes_ano}\n"
-                    txt += f"💰 Patrimônio Líquido: {pl_fmt}\n"
-                    txt += f"👥 Total de Cotistas: {cotistas}\n"
-                    txt += f"💵 Caixa / Disponível: {caixa_fmt}\n"
-                    txt += "➖➖➖➖➖➖➖➖\n"
+                    txt += f"Referência: {mes_ano}\n"
+                    txt += f"Patrimônio Líquido: {pl_fmt}\n"
+                    txt += f"Total de Cotistas: {cotistas}\n"
+                    txt += f"Caixa / Disponível: {caixa_fmt}\n"
+                    txt += "--------------------\n"
 
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_fii"))
-            
+
             session.close()
 
-            # Paraquedas
+            # Envia sem parse_mode para garantir que NUNCA mais dê erro 400
             try:
-                bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-            except Exception as e:
                 bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup)
+            except Exception as e:
+                bot.edit_message_text(f"❌ Erro ao exibir dados: {str(e)[:100]}", chat_id, msg_id, reply_markup=markup)
 
         # ==========================================
         # --- DADOS NÍVEL 2: ESCOLHER O TRIMESTRE ---
