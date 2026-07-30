@@ -2,9 +2,9 @@ import threading
 import time
 import requests
 import config
+import fitz
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from sqlalchemy import func
-
+from sqlalchemy import func, or_
 from bot.loader import bot
 from atualizador_documentos import SessionDB 
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
