@@ -332,3 +332,48 @@ def menu_duvidas_cvm(call):
 
     bot.edit_message_text(texto, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
+@bot.message_handler(commands=['alimentar_ia'])
+def alimentar_ia_passado(message):
+    bot.send_message(message.chat.id, "⏳ *Iniciando a leitura do Passado!* O robô está abrindo os PDFs antigos para ensinar a IA. Isso pode levar alguns minutos...", parse_mode="Markdown")
+
+    def tarefa_leitura():
+        try:
+            from pipeline_dados.banco_dados import DocumentosQualitativos
+            from atualizador_documentos import SessionDB
+            import requests
+            import fitz
+            import io
+
+            session = SessionDB()
+            # Pega docs que estão sem texto lido
+            docs = session.query(DocumentosQualitativos).filter(
+                DocumentosQualitativos.texto_extraido == None,
+                DocumentosQualitativos.url_pdf != None
+            ).all()
+
+            lidos = 0
+            for doc in docs:
+                nome_low = str(doc.tipo_documento).lower()
+                # Só lê o que importa para a IA não perder tempo
+                if "gerencial" in nome_low or "fato" in nome_low or "release" in nome_low:
+                    try:
+                        resp = requests.get(doc.url_pdf, timeout=15)
+                        if resp.status_code == 200:
+                            pdf_mem = io.BytesIO(resp.content)
+                            doc_fitz = fitz.open(stream=pdf_mem, filetype="pdf")
+                            texto = "".join([pagina.get_text("text") + "\n" for pagina in doc_fitz[:12]])
+                            doc.texto_extraido = " ".join(texto.split())[:15000]
+                            doc_fitz.close()
+                            lidos += 1
+                            session.commit()
+                    except:
+                        pass
+            session.close()
+            bot.send_message(message.chat.id, f"✅ **Cérebro da IA Atualizado!**\n`{lidos}` relatórios antigos foram mastigados com sucesso.", parse_mode="Markdown")
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ Erro: {e}")
+
+    import threading
+    threading.Thread(target=tarefa_leitura).start()
+
+
