@@ -1,8 +1,9 @@
 import os
-import io  
+import io
+from io import BytesIO  # 👈 CORREÇÃO: Faltava isso para salvar as logos!
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload  # 👈 CORREÇÃO: Faltava o MediaIoBaseUpload!
 
 class GoogleDriveManager:
     def __init__(self):
@@ -50,7 +51,7 @@ class GoogleDriveManager:
         try:
             # 🔴 O ROTEADOR DINÂMICO: Decide a pasta mestre baseado no tipo!
             pasta_raiz = "Ações" if str(tipo_ativo).upper() == "ACAO" else "Fundos Imobiliários"
-            
+
             print(f"☁️ Estruturando pastas: {pasta_raiz} -> {ticker} -> {mes_ref}...")
             raiz_id = self._obter_ou_criar_pasta(pasta_raiz)
             ticker_id = self._obter_ou_criar_pasta(ticker, parent_id=raiz_id)
@@ -100,7 +101,7 @@ class GoogleDriveManager:
         try:
             pasta_raiz = "Ações" if str(tipo_ativo).upper() == "ACAO" else "Fundos Imobiliários"
             print(f"📦 Movendo arquivo {file_id} para {pasta_raiz}/{ticker}/{mes_ref}...")
-            
+
             # 1. Pega as pastas de destino do ativo com o roteador
             raiz_id = self._obter_ou_criar_pasta(pasta_raiz)
             ticker_id = self._obter_ou_criar_pasta(ticker, parent_id=raiz_id)
@@ -124,6 +125,7 @@ class GoogleDriveManager:
             print(f"❌ Erro ao mover arquivo no Drive: {e}")
             return None
 
+    # 👇 SUBSTITUIÇÃO APLICADA AQUI (Com Roteador de Ações e FIIs)
     def mover_arquivo_da_revisao_por_id(self, file_id, ticker, mes_ref, novo_nome, tipo_ativo="FII"):
         """Aprova o arquivo da Revisão, joga na pasta correta (Ações ou FII) e renomeia."""
         try:
@@ -184,7 +186,7 @@ class GoogleDriveManager:
             nome_arquivo = f"{ticker_upper}.png"
 
             # 1. Localiza ou cria a pasta 'Logos' dentro da pasta raiz do seu robô
-            id_pasta_logos = self.obter_ou_criar_pasta("Logos", parent_id=self.root_folder_id)
+            id_pasta_logos = self._obter_ou_criar_pasta("Logos", parent_id=self.root_folder_id)
 
             # 2. Checa se essa logo já foi salva anteriormente
             query = f"'{id_pasta_logos}' in parents and name = '{nome_arquivo}' and trashed = false"
