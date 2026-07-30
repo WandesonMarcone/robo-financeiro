@@ -13,6 +13,7 @@ from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import PyPDF2
+import fitz  # 👈 AQUI ESTÁ A BIBLIOTECA DA IA (PyMuPDF)
 from groq import Groq
 from config import DATABASE_URL, MAPA_ISCAS_MASTER, TIPOS_DOC_FII
 
@@ -239,6 +240,21 @@ def rotina_processar_pendentes():
                 doc_db.tipo_documento = nome_limpo
                 doc_db.status_processamento = "SALVO_DRIVE"
                 print(f"✅ Sucesso (Auto-save): {ticker} -> {nome_limpo}")
+
+                # 🔌 CATRACA INTELIGENTE DA IA (FIIs) 👈 ADICIONADO AQUI!
+                if "gerencial" in nome_limpo.lower() or "fato" in nome_limpo.lower():
+                    print(f"🧠 Sugando texto profundo do PDF para a IA...")
+                    try:
+                        doc_fitz = fitz.open(temp_filename)
+                        texto_completo = "".join([pagina.get_text("text") + "\n" for pagina in doc_fitz[:12]])
+                        doc_db.texto_extraido = " ".join(texto_completo.split())[:15000]
+                        doc_fitz.close()
+                    except Exception as e:
+                        print(f"⚠️ Erro ao extrair texto RAG: {e}")
+                        doc_db.texto_extraido = None
+                else:
+                    doc_db.texto_extraido = None
+
             else:
                 doc_db.status_processamento = "ERRO_DRIVE"
 
