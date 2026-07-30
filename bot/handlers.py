@@ -234,9 +234,21 @@ def callback_menu_inteligencia(call):
             .filter(DocumentosQualitativos.ativo_id == ativo.id, DocumentosQualitativos.status_processamento == "SALVO_DRIVE")\
             .order_by(DocumentosQualitativos.data_publicacao.desc()).limit(5).all()
 
-        resumo_docs = "\n".join([f"- [{d.data_publicacao.strftime('%d/%m/%Y')}] {d.tipo_documento}: {d.assunto}" for d in docs_recentes])
-        if not resumo_docs:
-            resumo_docs = "Nenhum documento recente no banco."
+        # O ELO PERDIDO: Injetando o texto profundo do PDF na memória da IA
+        resumo_docs = ""
+        for d in docs_recentes:
+            data_str = d.data_publicacao.strftime('%d/%m/%Y') if d.data_publicacao else "Sem Data"
+            
+            # Se o documento tiver texto extraído (RAG), usa os primeiros 3000 caracteres. Senão, usa o assunto.
+            if d.texto_extraido:
+                conteudo = str(d.texto_extraido)[:3000] + "..."
+            else:
+                conteudo = str(d.assunto) if d.assunto else "Sem informações detalhadas."
+                
+            resumo_docs += f"--- {d.tipo_documento} ({data_str}) ---\n{conteudo}\n\n"
+
+        if not resumo_docs.strip():
+            resumo_docs = "Nenhum documento detalhado no banco de dados para este ativo."
 
         # Pede para o novo módulo de IA montar a pergunta exata
         prompt = construir_prompt_interativo(ticker, tipo, topico, resumo_docs)
