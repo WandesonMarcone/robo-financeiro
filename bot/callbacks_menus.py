@@ -355,40 +355,37 @@ def callback_geral(call):
                     session.close()
                     return
 
-                txt = f"🏢 *Raio-X Contábil: {ticker}*\nIndicadores oficiais extraídos da CVM\n\n"
-                
+                # 👇 Substitua a geração de texto dos FIIs por esta versão blindada:
+                txt = f"🏢 *Raio-X Contábil: {ticker}*\nIndicadores oficiais da CVM\n\n"
+
                 for inf in informes:
                     mes_ano = inf.data_referencia.strftime("%m/%Y")
-                    
+
                     if inf.patrimonio_liquido:
                         pl_fmt = f"R$ {inf.patrimonio_liquido/1000000000:.2f} Bi" if inf.patrimonio_liquido >= 1000000000 else f"R$ {inf.patrimonio_liquido/1000000:.2f} Mi"
                     else:
                         pl_fmt = "N/A"
-                    
+
                     caixa_fmt = f"R$ {inf.disponibilidades_caixa/1000000:.2f} Mi" if inf.disponibilidades_caixa else "N/A"
                     cotistas = f"{inf.cotistas:,}".replace(",", ".") if inf.cotistas else "N/A"
-                    
-                    txt += f"📅 *Referência:* {mes_ano}\n"
-                    txt += f"💰 *Patrimônio Líquido:* {pl_fmt}\n"
-                    txt += f"👥 *Total de Cotistas:* {cotistas}\n"
-                    txt += f"💵 *Caixa / Disponível:* {caixa_fmt}\n"
+
+                    # Tirei os asteriscos (**) daqui de dentro para garantir que o Telegram não quebre a mensagem!
+                    txt += f"📅 Referência: {mes_ano}\n"
+                    txt += f"💰 Patrimônio Líquido: {pl_fmt}\n"
+                    txt += f"👥 Total de Cotistas: {cotistas}\n"
+                    txt += f"💵 Caixa / Disponível: {caixa_fmt}\n"
                     txt += "➖➖➖➖➖➖➖➖\n"
-                
+
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_fii"))
-            # (Substitua as últimas linhas do bloco elif dados.startswith("dados_"):)
             
             session.close()
 
-            # PARAQUEDAS ANTI-ERRO 400
+            # Paraquedas
             try:
                 bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
             except Exception as e:
-                if "can't parse entities" in str(e).lower() or "bad request" in str(e).lower():
-                    # Manda sem formatação Markdown se o Telegram recusar
-                    bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup)
-                else:
-                    bot.edit_message_text(f"❌ Erro ao exibir dados: {str(e)[:100]}", chat_id, msg_id, reply_markup=markup)
+                bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup)
 
         # ==========================================
         # --- DADOS NÍVEL 2: ESCOLHER O TRIMESTRE ---
