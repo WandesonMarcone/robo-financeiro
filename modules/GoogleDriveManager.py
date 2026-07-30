@@ -124,36 +124,41 @@ class GoogleDriveManager:
             print(f"❌ Erro ao mover arquivo no Drive: {e}")
             return None
 
-    def mover_e_renomear_arquivo(self, file_id, ticker, mes_ref, novo_nome):
+    def mover_arquivo_da_revisao_por_id(self, file_id, ticker, mes_ref, novo_nome, tipo_ativo="FII"):
+        """Aprova o arquivo da Revisão, joga na pasta correta (Ações ou FII) e renomeia."""
         try:
-            # 1. Pega o ID da pasta do Fundo (Ex: GARE11) e cria se não existir
-            pasta_ticker_id = self._obter_ou_criar_pasta(ticker, self.root_folder_id)
-            # 2. Pega o ID da subpasta do Mês (Ex: 2026-05) e cria se não existir
+            # 1. Roteador Dinâmico (Ações ou FIIs)
+            pasta_raiz = "Ações" if str(tipo_ativo).upper() == "ACAO" else "Fundos Imobiliários"
+            raiz_id = self._obter_ou_criar_pasta(pasta_raiz, self.root_folder_id)
+            
+            # 2. Pega o ID da pasta do Fundo/Ação (Ex: GARE11) e do Mês (Ex: 2026-05)
+            pasta_ticker_id = self._obter_ou_criar_pasta(ticker, raiz_id)
             pasta_mes_id = self._obter_ou_criar_pasta(mes_ref, pasta_ticker_id)
 
-            # 🔴 O SEGREDO ESTÁ AQUI: Descobrir em qual pasta ele está agora (A pasta de Revisão)
+            # 3. Descobrir em qual pasta ele está agora (A pasta de Revisão)
             arquivo_atual = self.service.files().get(fileId=file_id, fields='parents').execute()
             pastas_antigas = ",".join(arquivo_atual.get('parents', []))
 
-            # 3. Atualiza o arquivo movendo para a nova e DELETANDO da antiga!
+            # 4. Atualiza o arquivo movendo para a nova e DELETANDO da pasta de Revisão!
             self.service.files().update(
                 fileId=file_id,
-                addParents=pasta_mes_id,          # Adiciona na pasta do Fundo
-                removeParents=pastas_antigas,     # 🗑️ Remove da pasta de Revisão!
+                addParents=pasta_mes_id,          
+                removeParents=pastas_antigas,     
                 fields='id, parents'
             ).execute()
 
-            # 4. Renomeia o arquivo
+            # 5. Renomeia o arquivo com o nome limpo e oficial
             arquivo_renomeado = self.service.files().update(
                 fileId=file_id,
                 body={'name': novo_nome},
                 fields='webViewLink'
             ).execute()
 
+            print(f"✅ Arquivo {novo_nome} aprovado e movido com sucesso para {pasta_raiz}!")
             return arquivo_renomeado.get('webViewLink')
 
         except Exception as e:
-            print(f"❌ Erro ao mover e renomear no Drive: {e}")
+            print(f"❌ Erro ao aprovar, mover e renomear no Drive: {e}")
             return None
 
     def deletar_arquivo(self, file_id):
