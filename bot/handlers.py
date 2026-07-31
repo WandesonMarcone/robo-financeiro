@@ -163,39 +163,60 @@ def callback_ajuda_comandos(call):
 
 @bot.callback_query_handler(func=lambda call: call.data == "ver_raiox_docs")
 def callback_raiox_docs(call):
-    """Gera e exibe a lista completa de documentos sob demanda."""
+    """Gera e exibe a lista completa de documentos e estatísticas sob demanda."""
     try:
         from atualizador_documentos import SessionDB
         from pipeline_dados.banco_dados import DocumentosQualitativos
         from sqlalchemy import func
 
         session = SessionDB()
-        
-        # Faz o agrupamento SQL apenas quando o botão é clicado
+
+        # Agrupamento de Tipos
         tipos_docs = session.query(
             DocumentosQualitativos.tipo_documento, 
             func.count(DocumentosQualitativos.id)
-        ).group_by(DocumentosQualitativos.tipo_documento).order_by(func.count(DocumentosQualitativos.id).desc()).all()
+        ).filter(DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%"))\
+         .group_by(DocumentosQualitativos.tipo_documento)\
+         .order_by(func.count(DocumentosQualitativos.id).desc()).all()
+
+        # Estatísticas Globais
+        total_banco = session.query(DocumentosQualitativos).count()
+        total_salvos = sum([qtd for tipo, qtd in tipos_docs])
+        total_erros = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.in_(["ERRO_DOWNLOAD", "ERRO_DRIVE"])).count()
+        
+        # Datas do Sistema
+        todos_assuntos = session.query(DocumentosQualitativos.assunto).filter(DocumentosQualitativos.assunto != None).all()
+        datas_reais = [a[0].split(" ")[0] for a in todos_assuntos if a[0] and '-' in a[0] and len(a[0].split('-')[0])==4]
+        datas_reais.sort()
+        data_ini = f"{datas_reais[0].split('-')[2]}/{datas_reais[0].split('-')[1]}/{datas_reais[0].split('-')[0]}" if datas_reais else "N/A"
+        data_fim = f"{datas_reais[-1].split('-')[2]}/{datas_reais[-1].split('-')[1]}/{datas_reais[-1].split('-')[0]}" if datas_reais else "N/A"
 
         session.close()
 
-        texto_tipos = "📂 **Raio-X do Acervo de Documentos:**\n\n"
+        taxa_eficacia = (total_salvos / (total_salvos + total_erros) * 100) if (total_salvos + total_erros) > 0 else 0
+
+        texto_tipos = (
+            f"📊 **RAIO-X GLOBAL DO SISTEMA**\n\n"
+            f"📈 **Estatísticas de Acervo:**\n"
+            f" ├ Total no Banco de Dados: `{total_banco}`\n"
+            f" ├ Documentos Processados (Drive): `{total_salvos}`\n"
+            f" ├ Cobertura Temporal: `{data_ini}` a `{data_fim}`\n"
+            f" └ Eficácia Histórica: `{taxa_eficacia:.1f}%`\n\n"
+            f"📂 **Distribuição por Categorias Salvas:**\n"
+        )
+        
         if tipos_docs:
             for tipo, quantidade in tipos_docs:
                 nome_bonito = str(tipo).replace("_", " ").title() if tipo else "Outros"
-                texto_tipos += f"  ├ `{quantidade}x` {nome_bonito}\n"
+                texto_tipos += f"  ├ `{quantidade}x` {nome_bonito[:25]}\n"
         else:
             texto_tipos += "  ├ Banco de dados vazio."
 
-        # Retorna a lista como um alerta (popup) ou manda uma nova mensagem!
-        # Aqui enviamos como uma nova mensagem para ficar fácil de ler
         bot.send_message(call.message.chat.id, texto_tipos, parse_mode="Markdown")
         bot.answer_callback_query(call.id)
-        
+
     except Exception as e:
         bot.answer_callback_query(call.id, f"Erro ao gerar Raio-X: {str(e)[:50]}", show_alert=True)
-
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("ia_"))
 def callback_menu_inteligencia(call):
