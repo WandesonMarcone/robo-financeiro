@@ -114,17 +114,17 @@ def acionar_varredura_manual(message):
             from pipeline_dados.banco_dados import DocumentosQualitativos
             from sqlalchemy import func
             from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-            import threading
+            
+            # 1. 🟢 ABRE A SESSÃO PARA A "FOTO ANTES"
+            session_antes = SessionDB()
+            total_antes = session_antes.query(DocumentosQualitativos).count()
+            session_antes.close() # 🔴 FECHA PARA NÃO CAIR POR INATIVIDADE!
 
-            session = SessionDB()
-
-            # 1. Foto do banco ANTES
-            total_antes = session.query(DocumentosQualitativos).count()
-
-            # 2. Roda a Varredura (Baixa PDFs novos, ignora duplicados)
+            # 2. Roda a Varredura Pesada (Pode demorar 10 minutos, não tem problema)
             rotina_de_atualizacao_em_massa()
 
-            # 3. Foto do banco DEPOIS
+            # 3. 🟢 ABRE UMA NOVA SESSÃO PARA A "FOTO DEPOIS"
+            session = SessionDB()
             total_depois = session.query(DocumentosQualitativos).count()
             novos_capturados = total_depois - total_antes 
 
@@ -137,7 +137,6 @@ def acionar_varredura_manual(message):
                 DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")
             ).count()
             
-            # 🔴 ADICIONADO: Contagem da fila que ainda falta processar (Ler PDF)
             fila_processamento = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.status_processamento == "PENDENTE"
             ).count()
@@ -149,7 +148,7 @@ def acionar_varredura_manual(message):
             data_inicio = min_data.strftime("%d/%m/%Y") if min_data else "N/A"
             data_fim = max_data.strftime("%d/%m/%Y") if max_data else "N/A"
 
-            session.close()
+            session.close() # 🔴 FECHA A SEGUNDA SESSÃO
 
             # 6. Calcula Eficiência
             total_processado = salvos_automaticos + pendentes_revisao
@@ -162,7 +161,7 @@ def acionar_varredura_manual(message):
                 InlineKeyboardButton("📥 Iniciar Revisão Manual", callback_data="iniciar_revisao_pendencias")
             )
 
-            # 8. Mensagem Final Turbinada
+            # 8. Mensagem Final
             resposta_final = (
                 f"✅ *Varredura Concluída!*\n\n"
                 f"📥 **Fila do Banco de Dados:**\n"
