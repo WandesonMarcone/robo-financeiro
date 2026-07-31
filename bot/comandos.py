@@ -421,3 +421,20 @@ def comando_mapear_nomes_b3(message):
 
     thread = threading.Thread(target=tarefa_pesada)
     thread.start()
+
+@bot.message_handler(commands=['resetar_docs'])
+def limpar_banco_documentos(message):
+    bot.send_message(message.chat.id, "💥 Iniciando a queima de arquivo do banco de dados...")
+    try:
+        from atualizador_documentos import SessionDB
+        from pipeline_dados.banco_dados import DocumentosQualitativos
+        
+        session = SessionDB()
+        apagados = session.query(DocumentosQualitativos).delete()
+        session.commit()
+        session.close()
+        
+        bot.send_message(message.chat.id, f"✅ **Limpeza Concluída!**\n`{apagados}` registros de PDFs antigos foram apagados. O banco está virgem e pronto para o novo motor da IA.", parse_mode="Markdown")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Erro ao apagar: {e}")
+
