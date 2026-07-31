@@ -250,9 +250,10 @@ def rotina_processar_pendentes():
                         doc_db.texto_extraido = " ".join(texto_completo.split())[:15000]
                         doc_fitz.close()
                     except Exception as e:
-                        # 🔴 AGORA MOSTRA O ERRO EXATO EM VEZ DE SAIR EM BRANCO
-                        print(f"⚠️ Erro detalhado ao extrair texto RAG ({type(e).__name__}): {str(e)}")
-                        doc_db.texto_extraido = None
+                        print(f"⚠️ Erro ao extrair RAG avançado ({type(e).__name__}). Acionando Plano B (PyPDF2)...")
+                        # 🔴 PLANO B: Usa o texto que o PyPDF2 já tinha lido lá em cima com sucesso!
+                        doc_db.texto_extraido = texto_pdf[:15000] if texto_pdf else None
+
                 else:
                     doc_db.texto_extraido = None
 
@@ -390,9 +391,9 @@ def rotina_processar_acoes():
                         doc_db.texto_extraido = " ".join(texto_completo.split())[:15000]
                         doc_fitz.close()
                     except Exception as e:
-                        # 🔴 AGORA MOSTRA O ERRO EXATO EM VEZ DE SAIR EM BRANCO
-                        print(f"⚠️ Erro detalhado ao extrair texto RAG ({type(e).__name__}): {str(e)}")
-                        doc_db.texto_extraido = None
+                        print(f"⚠️ Erro ao extrair RAG avançado ({type(e).__name__}). Acionando Plano B (PyPDF2)...")
+                        # 🔴 PLANO B: Usa o texto que o PyPDF2 já tinha lido lá em cima com sucesso!
+                        doc_db.texto_extraido = texto_pdf[:15000] if texto_pdf else None
                 else:
                     doc_db.texto_extraido = None
 
