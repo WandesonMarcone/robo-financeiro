@@ -1,5 +1,6 @@
 import os
 import io
+from datetime import datetime
 from io import BytesIO  # 👈 CORREÇÃO: Faltava isso para salvar as logos!
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
