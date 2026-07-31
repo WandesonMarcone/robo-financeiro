@@ -115,53 +115,51 @@ def acionar_varredura_manual(message):
             from sqlalchemy import func
             from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
             
-            # 1. 🟢 ABRE A SESSÃO PARA A "FOTO ANTES"
             session_antes = SessionDB()
             total_antes = session_antes.query(DocumentosQualitativos).count()
-            session_antes.close() # 🔴 FECHA PARA NÃO CAIR POR INATIVIDADE!
+            session_antes.close()
 
-            # 2. Roda a Varredura Pesada (Pode demorar 10 minutos, não tem problema)
             rotina_de_atualizacao_em_massa()
 
-            # 3. 🟢 ABRE UMA NOVA SESSÃO PARA A "FOTO DEPOIS"
             session = SessionDB()
             total_depois = session.query(DocumentosQualitativos).count()
             novos_capturados = total_depois - total_antes 
 
-            # 4. Status detalhado de todas as filas
-            pendentes_revisao = session.query(DocumentosQualitativos).filter(
-                DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
-            ).count()
-
-            salvos_automaticos = session.query(DocumentosQualitativos).filter(
-                DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")
-            ).count()
+            pendentes_revisao = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO").count()
+            salvos_automaticos = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")).count()
+            fila_processamento = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento == "PENDENTE").count()
             
-            fila_processamento = session.query(DocumentosQualitativos).filter(
-                DocumentosQualitativos.status_processamento == "PENDENTE"
+            # 🔴 ADICIONADO: Contagem dos arquivos quebrados/corrompidos da B3
+            erros_b3 = session.query(DocumentosQualitativos).filter(
+                DocumentosQualitativos.status_processamento.in_(["ERRO_DOWNLOAD", "ERRO_DRIVE"])
             ).count()
 
-            # 5. Busca as datas
-            min_data = session.query(func.min(DocumentosQualitativos.data_publicacao)).scalar()
-            max_data = session.query(func.max(DocumentosQualitativos.data_publicacao)).scalar()
+            # 🔴 CORREÇÃO DA DATA: Busca a data verdadeira extraindo os anos da coluna assunto (Ex: 2026-06-15)
+            todos_assuntos = session.query(DocumentosQualitativos.assunto).filter(DocumentosQualitativos.assunto != None).all()
+            datas_reais = []
+            for (assunto,) in todos_assuntos:
+                try:
+                    if assunto and '-' in assunto:
+                        data_limpa = assunto.split(" ")[0]
+                        if len(data_limpa.split('-')[0]) == 4: # Se começar com Ano
+                            datas_reais.append(data_limpa)
+                except: pass
+            
+            datas_reais.sort()
+            data_inicio = f"{datas_reais[0].split('-')[2]}/{datas_reais[0].split('-')[1]}/{datas_reais[0].split('-')[0]}" if datas_reais else "N/A"
+            data_fim = f"{datas_reais[-1].split('-')[2]}/{datas_reais[-1].split('-')[1]}/{datas_reais[-1].split('-')[0]}" if datas_reais else "N/A"
+            
+            session.close()
 
-            data_inicio = min_data.strftime("%d/%m/%Y") if min_data else "N/A"
-            data_fim = max_data.strftime("%d/%m/%Y") if max_data else "N/A"
-
-            session.close() # 🔴 FECHA A SEGUNDA SESSÃO
-
-            # 6. Calcula Eficiência
-            total_processado = salvos_automaticos + pendentes_revisao
+            total_processado = salvos_automaticos + pendentes_revisao + erros_b3
             eficiencia = (salvos_automaticos / total_processado * 100) if total_processado > 0 else 0
 
-            # 7. Criação dos Botões Interativos
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(
                 InlineKeyboardButton("📂 Ver Raio-X de Documentos", callback_data="ver_raiox_docs"),
                 InlineKeyboardButton("📥 Iniciar Revisão Manual", callback_data="iniciar_revisao_pendencias")
             )
 
-            # 8. Mensagem Final
             resposta_final = (
                 f"✅ *Varredura Concluída!*\n\n"
                 f"📥 **Fila do Banco de Dados:**\n"
@@ -169,8 +167,9 @@ def acionar_varredura_manual(message):
                 f" ├ Presos na Fila de Leitura: `{fila_processamento}`\n\n"
                 f"🤖 **Status do Processamento:**\n"
                 f" ├ Auto-salvos (Drive + IA): `{salvos_automaticos}`\n"
-                f" ├ Fila de Revisão Manual: `{pendentes_revisao}`\n\n"
-                f"📅 **Cobertura Atual:**\n"
+                f" ├ Fila de Revisão Manual: `{pendentes_revisao}`\n"
+                f" ├ Falhas (Corrompidos B3): `{erros_b3}`\n\n" # A conta vai fechar!
+                f"📅 **Cobertura do Acervo:**\n"
                 f" └ `{data_inicio}` até `{data_fim}`\n\n"
                 f"📈 **Taxa de Eficiência da IA:** `{eficiencia:.1f}%`"
             )
