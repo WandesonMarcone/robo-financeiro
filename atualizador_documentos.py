@@ -106,8 +106,8 @@ def enviar_alerta_revisao_telegram(ticker, nome_doc, link_pdf, file_id, db_id):
 
     teclado = {
         "inline_keyboard": [
-            [{"text": f"✅ Confirmar como {ticker}", "callback_data": f"rev_C_{db_id}_{file_id}"}],
-            [{"text": "🗑️ Apagar / Lixo", "callback_data": f"rev_A_{db_id}_{file_id}"}]
+            [{"text": f"✅ Confirmar como {ticker}", "callback_data": f"rev_app_{doc.id}"}],
+            [{"text": "🗑️ Apagar / Lixo", "callback_data": f"rev_del_{doc.id}"}]
         ]
     }
 
