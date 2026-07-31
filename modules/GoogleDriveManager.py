@@ -116,9 +116,15 @@ class GoogleDriveManager:
     # MOTOR "HUMAN-IN-THE-LOOP" (REVISÃO MANUAL)
     # ==========================================
     def upload_pdf_revisao(self, caminho_arquivo, nome_arquivo):
+        """Salva o PDF temporariamente na pasta '⚠️ REVISÃO' (dentro da raiz 'Documentos')"""
         try:
             print(f"🚧 Enviando {nome_arquivo} para a pasta de REVISÃO...")
-            revisao_id = self._obter_ou_criar_pasta("⚠️ REVISÃO")
+            
+            # 1. Garante a existência da pasta raiz "Documentos"
+            doc_raiz_id = self._obter_ou_criar_pasta("Documentos", self.root_folder_id)
+            
+            # 2. Cria ou localiza a pasta de REVISÃO dentro de "Documentos"
+            revisao_id = self._obter_ou_criar_pasta("⚠️ REVISÃO", parent_id=doc_raiz_id)
 
             file_metadata = {'name': nome_arquivo, 'parents': [revisao_id]}
             media = MediaFileUpload(caminho_arquivo, mimetype='application/pdf', resumable=True)
@@ -129,6 +135,7 @@ class GoogleDriveManager:
                 fields='id, webViewLink'
             ).execute()
 
+            # Retorna uma tupla com o ID e o link
             return arquivo_upado.get('id'), arquivo_upado.get('webViewLink')
         except Exception as e:
             print(f"❌ Erro ao enviar para REVISÃO: {e}")
