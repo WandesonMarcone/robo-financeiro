@@ -45,18 +45,73 @@ class GoogleDriveManager:
         pasta = self.service.files().create(body=metadata, fields='id').execute()
         return pasta.get('id')
 
+    def _limpar_e_extrair_ano_mes(self, mes_ref):
+        """🛡️ Trava de segurança contra o erro da hora e tradutor de meses"""
+        
+        # O nosso tradutor particular de meses
+        mapa_meses = {
+            "01": "Janeiro", "1": "Janeiro",
+            "02": "Fevereiro", "2": "Fevereiro",
+            "03": "Março", "3": "Março",
+            "04": "Abril", "4": "Abril",
+            "05": "Maio", "5": "Maio",
+            "06": "Junho", "6": "Junho",
+            "07": "Julho", "7": "Julho",
+            "08": "Agosto", "8": "Agosto",
+            "09": "Setembro", "9": "Setembro",
+            "10": "Outubro",
+            "11": "Novembro",
+            "12": "Dezembro"
+        }
+
+        try:
+            # Pega apenas a primeira parte antes do espaço (exclui o "10:00")
+            mes_ref_limpo = str(mes_ref).strip().split(' ')[0] 
+            
+            # Identifica e separa Ano e Mês de forma inteligente
+            if '-' in mes_ref_limpo:
+                partes = mes_ref_limpo.split('-')
+                ano = partes[0] if len(partes[0]) == 4 else partes[1]
+                mes_num = partes[1] if len(partes[0]) == 4 else partes[0]
+                
+                # Converte o número para o nome bonito
+                mes_nome = mapa_meses.get(mes_num, mes_num)
+                
+                return ano, mes_nome
+            
+            # Se vier completamente quebrado, usa a data de hoje
+            ano_atual = datetime.now().strftime("%Y")
+            mes_atual_num = datetime.now().strftime("%m")
+            return ano_atual, mapa_meses.get(mes_atual_num, mes_atual_num)
+            
+        except:
+            # Em caso de falha fatal, cai de pé com a data atual
+            ano_atual = datetime.now().strftime("%Y")
+            mes_atual_num = datetime.now().strftime("%m")
+            return ano_atual, mapa_meses.get(mes_atual_num, mes_atual_num)
+
     # ==========================================
-    # UPLOADS OFICIAIS
+    # UPLOADS OFICIAIS COM HIERARQUIA PROFUNDA
     # ==========================================
     def upload_pdf_organizado(self, caminho_arquivo, nome_arquivo, ticker, mes_ref, tipo_ativo="FII"):
         try:
-            # 🔴 O ROTEADOR DINÂMICO: Decide a pasta mestre baseado no tipo!
-            pasta_raiz = "Ações" if str(tipo_ativo).upper() == "ACAO" else "Fundos Imobiliários"
+            ano, mes = self._limpar_e_extrair_ano_mes(mes_ref)
 
-            print(f"☁️ Estruturando pastas: {pasta_raiz} -> {ticker} -> {mes_ref}...")
-            raiz_id = self._obter_ou_criar_pasta(pasta_raiz)
-            ticker_id = self._obter_ou_criar_pasta(ticker, parent_id=raiz_id)
-            mes_id = self._obter_ou_criar_pasta(mes_ref, parent_id=ticker_id)
+            # 1. 📂 CRIA A PASTA MESTRE GLOBAL "Documentos"
+            doc_raiz_id = self._obter_ou_criar_pasta("Documentos", self.root_folder_id)
+
+            # 2. 📂 TIPO (Ações ou Fundos Imobiliários)
+            pasta_tipo = "Ações" if str(tipo_ativo).upper() == "ACAO" else "Fundos Imobiliários"
+            tipo_id = self._obter_ou_criar_pasta(pasta_tipo, parent_id=doc_raiz_id)
+
+            # 3. 📂 TICKER (Mantido para não misturar todos os ativos!)
+            ticker_id = self._obter_ou_criar_pasta(ticker, parent_id=tipo_id)
+
+            # 4. 📂 ANO e MÊS
+            ano_id = self._obter_ou_criar_pasta(ano, parent_id=ticker_id)
+            mes_id = self._obter_ou_criar_pasta(mes, parent_id=ano_id)
+
+            print(f"☁️ Estruturando Drive: Documentos -> {pasta_tipo} -> {ticker} -> {ano} -> {mes}")
 
             file_metadata = {'name': nome_arquivo, 'parents': [mes_id]}
             media = MediaFileUpload(caminho_arquivo, mimetype='application/pdf', resumable=True)
@@ -128,21 +183,27 @@ class GoogleDriveManager:
 
     # 👇 SUBSTITUIÇÃO APLICADA AQUI (Com Roteador de Ações e FIIs)
     def mover_arquivo_da_revisao_por_id(self, file_id, ticker, mes_ref, novo_nome, tipo_ativo="FII"):
-        """Aprova o arquivo da Revisão, joga na pasta correta (Ações ou FII) e renomeia."""
+        """Aprova o arquivo da Revisão, joga na pasta correta com a nova hierarquia."""
         try:
-            # 1. Roteador Dinâmico (Ações ou FIIs)
-            pasta_raiz = "Ações" if str(tipo_ativo).upper() == "ACAO" else "Fundos Imobiliários"
-            raiz_id = self._obter_ou_criar_pasta(pasta_raiz, self.root_folder_id)
-            
-            # 2. Pega o ID da pasta do Fundo/Ação (Ex: GARE11) e do Mês (Ex: 2026-05)
-            pasta_ticker_id = self._obter_ou_criar_pasta(ticker, raiz_id)
-            pasta_mes_id = self._obter_ou_criar_pasta(mes_ref, pasta_ticker_id)
+            ano, mes = self._limpar_e_extrair_ano_mes(mes_ref)
 
-            # 3. Descobrir em qual pasta ele está agora (A pasta de Revisão)
+            # 1. 📂 CRIA A PASTA MESTRE GLOBAL "Documentos"
+            doc_raiz_id = self._obter_ou_criar_pasta("Documentos", self.root_folder_id)
+
+            # 2. 📂 TIPO (Ações ou Fundos Imobiliários)
+            pasta_tipo = "Ações" if str(tipo_ativo).upper() == "ACAO" else "Fundos Imobiliários"
+            tipo_id = self._obter_ou_criar_pasta(pasta_tipo, parent_id=doc_raiz_id)
+            
+            # 3. 📂 TICKER, ANO e MÊS
+            pasta_ticker_id = self._obter_ou_criar_pasta(ticker, parent_id=tipo_id)
+            pasta_ano_id = self._obter_ou_criar_pasta(ano, parent_id=pasta_ticker_id)
+            pasta_mes_id = self._obter_ou_criar_pasta(mes, parent_id=pasta_ano_id)
+
+            # 4. Descobrir em qual pasta ele está agora (A pasta de Revisão)
             arquivo_atual = self.service.files().get(fileId=file_id, fields='parents').execute()
             pastas_antigas = ",".join(arquivo_atual.get('parents', []))
 
-            # 4. Atualiza o arquivo movendo para a nova e DELETANDO da pasta de Revisão!
+            # 5. Move e deleta da revisão
             self.service.files().update(
                 fileId=file_id,
                 addParents=pasta_mes_id,          
@@ -150,29 +211,19 @@ class GoogleDriveManager:
                 fields='id, parents'
             ).execute()
 
-            # 5. Renomeia o arquivo com o nome limpo e oficial
+            # 6. Renomeia
             arquivo_renomeado = self.service.files().update(
                 fileId=file_id,
                 body={'name': novo_nome},
                 fields='webViewLink'
             ).execute()
 
-            print(f"✅ Arquivo {novo_nome} aprovado e movido com sucesso para {pasta_raiz}!")
+            print(f"✅ Arquivo {novo_nome} aprovado e movido com sucesso para a nova estrutura!")
             return arquivo_renomeado.get('webViewLink')
 
         except Exception as e:
             print(f"❌ Erro ao aprovar, mover e renomear no Drive: {e}")
             return None
-
-    def deletar_arquivo(self, file_id):
-        """Apaga sumariamente o arquivo do Google Drive"""
-        try:
-            self.service.files().delete(fileId=file_id).execute()
-            print(f"🗑️ Arquivo {file_id} apagado do Drive.")
-            return True
-        except Exception as e:
-            print(f"❌ Erro ao deletar arquivo: {e}")
-            return False
 
     # ==========================================
     # OUTROS UPLOADS
