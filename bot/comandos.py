@@ -128,26 +128,31 @@ def acionar_varredura_manual(message):
             total_depois = session.query(DocumentosQualitativos).count()
             novos_capturados = total_depois - total_antes 
 
-            # 4. Conta status da IA
-            pendentes = session.query(DocumentosQualitativos).filter(
+            # 4. Status detalhado de todas as filas
+            pendentes_revisao = session.query(DocumentosQualitativos).filter(
                 DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
             ).count()
 
             salvos_automaticos = session.query(DocumentosQualitativos).filter(
-                DocumentosQualitativos.status_processamento == "SALVO_DRIVE"
+                DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")
+            ).count()
+            
+            # 🔴 ADICIONADO: Contagem da fila que ainda falta processar (Ler PDF)
+            fila_processamento = session.query(DocumentosQualitativos).filter(
+                DocumentosQualitativos.status_processamento == "PENDENTE"
             ).count()
 
-            # 5. Busca as datas (O mais antigo e o mais novo do banco)
+            # 5. Busca as datas
             min_data = session.query(func.min(DocumentosQualitativos.data_publicacao)).scalar()
             max_data = session.query(func.max(DocumentosQualitativos.data_publicacao)).scalar()
-            
+
             data_inicio = min_data.strftime("%d/%m/%Y") if min_data else "N/A"
             data_fim = max_data.strftime("%d/%m/%Y") if max_data else "N/A"
 
             session.close()
 
             # 6. Calcula Eficiência
-            total_processado = salvos_automaticos + pendentes
+            total_processado = salvos_automaticos + pendentes_revisao
             eficiencia = (salvos_automaticos / total_processado * 100) if total_processado > 0 else 0
 
             # 7. Criação dos Botões Interativos
@@ -157,16 +162,20 @@ def acionar_varredura_manual(message):
                 InlineKeyboardButton("📥 Iniciar Revisão Manual", callback_data="iniciar_revisao_pendencias")
             )
 
-            # 8. Mensagem Final (Limpa, Direta e com as Datas!)
+            # 8. Mensagem Final Turbinada
             resposta_final = (
                 f"✅ *Varredura Concluída!*\n\n"
-                f"🆕 **Novos Capturados Agora:** `{novos_capturados}`\n"
-                f"📅 **Cobertura do Banco:** `{data_inicio}` até `{data_fim}`\n\n"
-                f"🤖 **Auto-salvos no Drive:** `{salvos_automaticos}`\n"
-                f"📥 **Fila de Revisão:** `{pendentes}`\n"
-                f"📈 **Taxa de Eficiência da IA:** `{eficiencia:.1f}%`\n"
+                f"📥 **Fila do Banco de Dados:**\n"
+                f" ├ Capturados na B3 agora: `{novos_capturados}`\n"
+                f" ├ Presos na Fila de Leitura: `{fila_processamento}`\n\n"
+                f"🤖 **Status do Processamento:**\n"
+                f" ├ Auto-salvos (Drive + IA): `{salvos_automaticos}`\n"
+                f" ├ Fila de Revisão Manual: `{pendentes_revisao}`\n\n"
+                f"📅 **Cobertura Atual:**\n"
+                f" └ `{data_inicio}` até `{data_fim}`\n\n"
+                f"📈 **Taxa de Eficiência da IA:** `{eficiencia:.1f}%`"
             )
-            
+
             bot.send_message(message.chat.id, resposta_final, parse_mode="Markdown", reply_markup=markup)
 
         except Exception as e:
