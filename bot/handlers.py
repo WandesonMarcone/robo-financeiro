@@ -164,8 +164,11 @@ def callback_ajuda_comandos(call):
 
 @bot.callback_query_handler(func=lambda call: call.data == "ver_raiox_docs")
 def callback_raiox_docs(call):
-    """Gera e exibe a lista completa de documentos e estatísticas sob demanda."""
+    """Gera e exibe a lista completa de documentos e estatísticas sob demanda (Sem repetição na tela)."""
     try:
+        # Avisa o telegram que o clique foi recebido (evita que o botão fique com reloginho)
+        bot.answer_callback_query(call.id, "Gerando Raio-X Global...")
+        
         from atualizador_documentos import SessionDB
         from pipeline_dados.banco_dados import DocumentosQualitativos
         from sqlalchemy import func
@@ -180,23 +183,24 @@ def callback_raiox_docs(call):
          .group_by(DocumentosQualitativos.tipo_documento)\
          .order_by(func.count(DocumentosQualitativos.id).desc()).all()
 
-        # Estatísticas Globais
+        # Estatísticas Globais Completas
         total_banco = session.query(DocumentosQualitativos).count()
-        total_salvos = sum([qtd for tipo, qtd in tipos_docs])
+        total_salvos = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")).count()
         total_erros = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.in_(["ERRO_DOWNLOAD", "ERRO_DRIVE"])).count()
-        
+        total_revisao = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO").count()
+        total_fila = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento == "PENDENTE").count()
+
         # Datas do Sistema (Fatiador Blindado)
         todos_assuntos = session.query(DocumentosQualitativos.assunto).filter(DocumentosQualitativos.assunto != None).all()
         datas_reais = []
-        
+
         for (assunto,) in todos_assuntos:
             primeira_palavra = assunto.split(" ")[0] if assunto else ""
             if '-' in primeira_palavra:
                 partes = primeira_palavra.split('-')
-                # 🛡️ A MÁGICA AQUI: Além de ter tamanho 4, TEM QUE SER NÚMERO
                 if len(partes[0]) == 4 and partes[0].isdigit():
                     datas_reais.append(primeira_palavra)
-        
+
         datas_reais.sort()
 
         def formatar_data_br(data_iso):
@@ -210,18 +214,22 @@ def callback_raiox_docs(call):
 
         session.close()
 
-        taxa_eficacia = (total_salvos / (total_salvos + total_erros) * 100) if (total_salvos + total_erros) > 0 else 0
+        total_processado = total_salvos + total_erros + total_revisao
+        taxa_eficacia = (total_salvos / total_processado * 100) if total_processado > 0 else 0
 
         texto_tipos = (
             f"📊 **RAIO-X GLOBAL DO SISTEMA**\n\n"
             f"📈 **Estatísticas de Acervo:**\n"
             f" ├ Total no Banco de Dados: `{total_banco}`\n"
             f" ├ Documentos Processados (Drive): `{total_salvos}`\n"
+            f" ├ Em Revisão Manual: `{total_revisao}`\n"
+            f" ├ Falhas B3 / Links Quebrados: `{total_erros}`\n"
+            f" ├ Pendentes (Fila): `{total_fila}`\n"
             f" ├ Cobertura Temporal: `{data_ini}` a `{data_fim}`\n"
-            f" └ Eficácia Histórica: `{taxa_eficacia:.1f}%`\n\n"
+            f" └ Eficácia Histórica da IA: `{taxa_eficacia:.1f}%`\n\n"
             f"📂 **Distribuição por Categorias Salvas:**\n"
         )
-        
+
         if tipos_docs:
             for tipo, quantidade in tipos_docs:
                 nome_bonito = str(tipo).replace("_", " ").title() if tipo else "Outros"
@@ -229,8 +237,12 @@ def callback_raiox_docs(call):
         else:
             texto_tipos += "  ├ Banco de dados vazio."
 
-        bot.send_message(call.message.chat.id, texto_tipos, parse_mode="Markdown")
-        bot.answer_callback_query(call.id)
+        # 🔴 A SOLUÇÃO DO SPAM: Edita a mensagem onde o botão foi clicado!
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="voltar_menu"))
+        
+        bot.edit_message_text(texto_tipos, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
     except Exception as e:
         bot.answer_callback_query(call.id, f"Erro ao gerar Raio-X: {str(e)[:50]}", show_alert=True)
