@@ -102,21 +102,23 @@ def enviar_alerta_revisao_telegram(ticker, nome_doc, link_pdf, file_id, db_id):
         print("⚠️ TELEGRAM_CHAT_ID não configurado. Alerta não enviado.")
         return
 
+    import json # Garante o import do json caso não tenha no topo
     url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
 
+    # 🔴 CORREÇÃO AQUI: Mudança de doc.id para db_id
     teclado = {
         "inline_keyboard": [
-            [{"text": f"✅ Confirmar como {ticker}", "callback_data": f"rev_app_{doc.id}"}],
-            [{"text": "🗑️ Apagar / Lixo", "callback_data": f"rev_del_{doc.id}"}]
+            [{"text": f"✅ Classificar Arquivo", "callback_data": f"rev_app_{db_id}"}],
+            [{"text": "🗑️ Apagar Lixo", "callback_data": f"rev_del_{db_id}"}]
         ]
     }
 
     mensagem = (
-        f"🚨 **Novo documento suspeito!**\n\n"
-        f"A B3 diz que é do **{ticker}**, mas o robô não conseguiu confirmar no texto (pode ser imagem/scan).\n"
-        f"📄 **Tipo:** {nome_doc}\n\n"
-        f"🔗 [Clique aqui para abrir o PDF]({link_pdf})\n\n"
-        f"O que eu faço?"
+        f"🚨 **Documento Suspeito Identificado!**\n\n"
+        f"A B3 diz que é de `{ticker}`, mas a IA precisa de sua ajuda para confirmar.\n"
+        f"📄 **Leitura Inicial:** `{nome_doc}`\n\n"
+        f"🔗 [Clique aqui para ler o PDF]({link_pdf})\n\n"
+        f"O que faremos com ele?"
     )
 
     payload = {
