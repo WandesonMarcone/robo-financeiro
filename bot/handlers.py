@@ -2,6 +2,7 @@ import config
 from bot.loader import bot
 from services.planilhas import buscar_dados_planilha_com_cache
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pipeline_dados.banco_dados import DocumentosQualitativos
 
 # ==========================================
 # ----- BOTÃO TIPO/SETOR FIIS -----
