@@ -134,20 +134,19 @@ def acionar_varredura_manual(message):
                 DocumentosQualitativos.status_processamento.in_(["ERRO_DOWNLOAD", "ERRO_DRIVE"])
             ).count()
 
-            # 🔴 CORREÇÃO DA DATA: Busca a data verdadeira extraindo os anos da coluna assunto
+            # 🔴 CORREÇÃO DA DATA: Fatiador Blindado contra "AGOE" e "Vale"
             todos_assuntos = session.query(DocumentosQualitativos.assunto).filter(DocumentosQualitativos.assunto != None).all()
             datas_reais = []
             for (assunto,) in todos_assuntos:
-                try:
-                    if assunto and '-' in assunto:
-                        data_limpa = assunto.split(" ")[0]
-                        if len(data_limpa.split('-')[0]) == 4: # Se começar com Ano (YYYY)
-                            datas_reais.append(data_limpa)
-                except: pass
+                primeira_palavra = assunto.split(" ")[0] if assunto else ""
+                if '-' in primeira_palavra:
+                    partes = primeira_palavra.split('-')
+                    # 🛡️ A MÁGICA AQUI: Além de ter tamanho 4, TEM QUE SER NÚMERO (isdigit)
+                    if len(partes[0]) == 4 and partes[0].isdigit():
+                        datas_reais.append(primeira_palavra)
             
             datas_reais.sort()
             
-            # 🛡️ NOVO FATIADOR BLINDADO (Aceita YYYY-MM-DD e YYYY-MM)
             def formatar_data_br(data_iso):
                 p = data_iso.split('-')
                 if len(p) == 3: return f"{p[2]}/{p[1]}/{p[0]}"
