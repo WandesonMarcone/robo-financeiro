@@ -134,20 +134,28 @@ def acionar_varredura_manual(message):
                 DocumentosQualitativos.status_processamento.in_(["ERRO_DOWNLOAD", "ERRO_DRIVE"])
             ).count()
 
-            # 🔴 CORREÇÃO DA DATA: Busca a data verdadeira extraindo os anos da coluna assunto (Ex: 2026-06-15)
+            # 🔴 CORREÇÃO DA DATA: Busca a data verdadeira extraindo os anos da coluna assunto
             todos_assuntos = session.query(DocumentosQualitativos.assunto).filter(DocumentosQualitativos.assunto != None).all()
             datas_reais = []
             for (assunto,) in todos_assuntos:
                 try:
                     if assunto and '-' in assunto:
                         data_limpa = assunto.split(" ")[0]
-                        if len(data_limpa.split('-')[0]) == 4: # Se começar com Ano
+                        if len(data_limpa.split('-')[0]) == 4: # Se começar com Ano (YYYY)
                             datas_reais.append(data_limpa)
                 except: pass
             
             datas_reais.sort()
-            data_inicio = f"{datas_reais[0].split('-')[2]}/{datas_reais[0].split('-')[1]}/{datas_reais[0].split('-')[0]}" if datas_reais else "N/A"
-            data_fim = f"{datas_reais[-1].split('-')[2]}/{datas_reais[-1].split('-')[1]}/{datas_reais[-1].split('-')[0]}" if datas_reais else "N/A"
+            
+            # 🛡️ NOVO FATIADOR BLINDADO (Aceita YYYY-MM-DD e YYYY-MM)
+            def formatar_data_br(data_iso):
+                p = data_iso.split('-')
+                if len(p) == 3: return f"{p[2]}/{p[1]}/{p[0]}"
+                if len(p) == 2: return f"{p[1]}/{p[0]}"
+                return data_iso
+
+            data_inicio = formatar_data_br(datas_reais[0]) if datas_reais else "N/A"
+            data_fim = formatar_data_br(datas_reais[-1]) if datas_reais else "N/A"
             
             session.close()
 
