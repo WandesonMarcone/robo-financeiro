@@ -178,119 +178,115 @@ def rotina_de_coleta_b3():
 def rotina_processar_pendentes():
     b3 = FnetDownloader()
     drive_manager = GoogleDriveManager()
-    session = SessionDB()
 
-    pendentes = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento == "PENDENTE").all()
-    print(f"⚙️ Processando {len(pendentes)} documentos na fila...")
+    # 1. 🟢 ABRE SESSÃO APENAS PARA PEGAR A FILA
+    session_fila = SessionDB()
+    pendentes_ids = [doc.id for doc in session_fila.query(DocumentosQualitativos.id).filter(DocumentosQualitativos.status_processamento == "PENDENTE").all()]
+    session_fila.close() # 🔴 FECHA IMEDIATAMENTE
 
-    for doc_db in pendentes:
-        ticker = doc_db.ativo.ticker
-        id_doc = doc_db.id_b3
-        data_ref = doc_db.assunto 
+    print(f"⚙️ Processando {len(pendentes_ids)} documentos na fila...")
 
-        print(f"🔄 Processando fila: {ticker} (ID {id_doc})...")
-
-        pdf_bytes = b3.baixar_pdf(id_doc)
-        if not pdf_bytes:
-            doc_db.status_processamento = "ERRO_DOWNLOAD"
-            session.commit()
-            continue
-
-        temp_filename = f"/tmp/{ticker}_{id_doc}.pdf"
-        with open(temp_filename, "wb") as f: f.write(pdf_bytes)
-
-        texto_pdf = ""
+    for doc_id in pendentes_ids:
+        # 2. 🟢 ABRE UMA NOVA SESSÃO EXCLUSIVA PARA ESTE ARQUIVO
+        session = SessionDB()
         try:
-            reader = PyPDF2.PdfReader(temp_filename)
-            if len(reader.pages) > 0: 
-                texto_pdf = reader.pages[0].extract_text() or ""
-        except: pass
+            doc_db = session.query(DocumentosQualitativos).filter_by(id=doc_id).first()
+            if not doc_db:
+                continue
 
-        # ==========================================
-        # 🤖 CAMADA HÍBRIDA DE IA E AUTO-SAVE (>= 80%)
-        # ==========================================
-        texto_pdf = texto_pdf.strip()
+            ticker = doc_db.ativo.ticker
+            id_doc = doc_db.id_b3
+            data_ref = doc_db.assunto 
 
-        # 1. Pede à IA o tipo e a nota de confiança (retorna duas variáveis agora)
-        nome_ia, confianca = classificar_documento_com_ia(doc_db.tipo_documento, texto_pdf)
+            print(f"🔄 Processando fila: {ticker} (ID {id_doc})...")
 
-        # Higieniza o nome retornado pela IA para virar uma string limpa de arquivo
-        nome_limpo = "".join([c for c in str(nome_ia).title() if c.isalnum() or c in (' ', '_', '-')]).strip()
-        if len(nome_limpo) < 3:
-            nome_limpo = "Documento_FII"
-
-        partes_data = data_ref.split('-')
-        mes_pasta = f"{partes_data[2]}-{partes_data[1]}" if len(partes_data) == 3 else datetime.now().strftime("%Y-%m")
-
-        # 2. ENCRUZILHADA DO AUTO-SAVE (Threshold de Confiança >= 80%)
-        if confianca >= 80 and texto_pdf:
-            print(f"🤖 IA tem {confianca}% de certeza. Auto-salvando '{nome_limpo}' para {ticker}...")
-            
-            # Salva direto na pasta oficial do Google Drive
-            link_gerado = drive_manager.upload_pdf_organizado(
-                caminho_arquivo=temp_filename,
-                nome_arquivo=f"{nome_limpo}_{data_ref}_{id_doc}.pdf",
-                ticker=ticker,
-                mes_ref=mes_pasta,
-                tipo_ativo=doc_db.ativo.tipo 
-            )
-            
-            if link_gerado:
-                doc_db.url_pdf = link_gerado
-                doc_db.tipo_documento = nome_limpo
-                doc_db.status_processamento = "SALVO_DRIVE"
-                print(f"✅ Sucesso (Auto-save): {ticker} -> {nome_limpo}")
-
-                # 🔌 CATRACA INTELIGENTE DA IA (FIIs) 👈 ADICIONADO AQUI!
-                if "gerencial" in nome_limpo.lower() or "fato" in nome_limpo.lower():
-                    print(f"🧠 Sugando texto profundo do PDF para a IA...")
-                    try:
-                        doc_fitz = fitz.open(temp_filename)
-                        texto_completo = "".join([pagina.get_text("text") + "\n" for pagina in doc_fitz[:12]])
-                        doc_db.texto_extraido = " ".join(texto_completo.split())[:15000]
-                        doc_fitz.close()
-                    except Exception as e:
-                        print(f"⚠️ Erro ao extrair RAG avançado ({type(e).__name__}). Acionando Plano B (PyPDF2)...")
-                        # 🔴 PLANO B: Usa o texto que o PyPDF2 já tinha lido lá em cima com sucesso!
-                        doc_db.texto_extraido = texto_pdf[:15000] if texto_pdf else None
-
-                else:
-                    doc_db.texto_extraido = None
-
-            else:
-                doc_db.status_processamento = "ERRO_DRIVE"
-
-        else:
-            # 3. CONFIANÇA BAIXA OU PDF ESCaneado: Manda para a Pasta de Revisão + Alerta Telegram
-            print(f"⚠️ IA incerta ({confianca}%). Enviando para revisão manual e alerta Telegram...")
-            
-            file_id, link_gerado = drive_manager.upload_pdf_revisao(
-                caminho_arquivo=temp_filename,
-                nome_arquivo=f"REVISAR_{ticker}_{nome_limpo}_{data_ref}.pdf"
-            )
-            
-            if file_id:
-                doc_db.status_processamento = "AGUARDANDO_REVISAO"
-                doc_db.url_pdf = link_gerado
+            pdf_bytes = b3.baixar_pdf(id_doc)
+            if not pdf_bytes:
+                doc_db.status_processamento = "ERRO_DOWNLOAD"
                 session.commit()
-                
-                # 📲 Dispara o alerta interativo no seu Telegram com os botões
-                enviar_alerta_revisao_telegram(
+                continue
+
+            temp_filename = f"/tmp/{ticker}_{id_doc}.pdf"
+            with open(temp_filename, "wb") as f: f.write(pdf_bytes)
+
+            texto_pdf = ""
+            try:
+                reader = PyPDF2.PdfReader(temp_filename)
+                if len(reader.pages) > 0: 
+                    texto_pdf = reader.pages[0].extract_text() or ""
+            except: pass
+
+            # ==========================================
+            # 🤖 CAMADA HÍBRIDA DE IA E AUTO-SAVE
+            # ==========================================
+            texto_pdf = texto_pdf.strip()
+            nome_ia, confianca = classificar_documento_com_ia(doc_db.tipo_documento, texto_pdf)
+
+            nome_limpo = "".join([c for c in str(nome_ia).title() if c.isalnum() or c in (' ', '_', '-')]).strip()
+            if len(nome_limpo) < 3:
+                nome_limpo = "Documento_FII"
+
+            partes_data = data_ref.split('-')
+            mes_pasta = f"{partes_data[2]}-{partes_data[1]}" if len(partes_data) == 3 else datetime.now().strftime("%Y-%m")
+
+            if confianca >= 80 and texto_pdf:
+                print(f"🤖 IA tem {confianca}% de certeza. Auto-salvando '{nome_limpo}' para {ticker}...")
+                link_gerado = drive_manager.upload_pdf_organizado(
+                    caminho_arquivo=temp_filename,
+                    nome_arquivo=f"{nome_limpo}_{data_ref}_{id_doc}.pdf",
                     ticker=ticker,
-                    nome_doc=nome_limpo,
-                    link_pdf=link_gerado,
-                    file_id=file_id,
-                    db_id=doc_db.id
+                    mes_ref=mes_pasta,
+                    tipo_ativo=doc_db.ativo.tipo 
                 )
+
+                if link_gerado:
+                    doc_db.url_pdf = link_gerado
+                    doc_db.tipo_documento = nome_limpo
+                    doc_db.status_processamento = "SALVO_DRIVE"
+                    print(f"✅ Sucesso (Auto-save): {ticker} -> {nome_limpo}")
+
+                    if "gerencial" in nome_limpo.lower() or "fato" in nome_limpo.lower():
+                        print(f"🧠 Sugando texto profundo do PDF para a IA...")
+                        try:
+                            import fitz
+                            doc_fitz = fitz.open(temp_filename)
+                            texto_completo = "".join([pagina.get_text("text") + "\n" for pagina in doc_fitz[:12]])
+                            doc_db.texto_extraido = " ".join(texto_completo.split())[:15000]
+                            doc_fitz.close()
+                        except Exception as e:
+                            print(f"⚠️ Erro ao extrair RAG ({type(e).__name__}). Plano B (PyPDF2)...")
+                            doc_db.texto_extraido = texto_pdf[:15000] if texto_pdf else None
+                    else:
+                        doc_db.texto_extraido = None
+                else:
+                    doc_db.status_processamento = "ERRO_DRIVE"
+
             else:
-                doc_db.status_processamento = "ERRO_DRIVE"
+                print(f"⚠️ IA incerta ({confianca}%). Enviando para revisão manual...")
+                file_id, link_gerado = drive_manager.upload_pdf_revisao(
+                    caminho_arquivo=temp_filename,
+                    nome_arquivo=f"REVISAR_{ticker}_{nome_limpo}_{data_ref}.pdf"
+                )
 
-        session.commit()
-        if os.path.exists(temp_filename): os.remove(temp_filename)
+                if file_id:
+                    doc_db.status_processamento = "AGUARDANDO_REVISAO"
+                    doc_db.url_pdf = link_gerado
+                    enviar_alerta_revisao_telegram(ticker, nome_limpo, link_gerado, file_id, doc_db.id)
+                else:
+                    doc_db.status_processamento = "ERRO_DRIVE"
 
-        time.sleep(6) 
+            # 3. 💾 SALVA O PROGRESSO DESTE ARQUIVO E DELETA O TEMPORÁRIO
+            session.commit()
+            if os.path.exists(temp_filename): os.remove(temp_filename)
+            time.sleep(6) 
 
-    session.close()
+        except Exception as e:
+            # Se der um erro bizarro, cancela SÓ este documento e continua vivo!
+            print(f"❌ Erro crítico ao processar o documento {doc_id}: {e}")
+            session.rollback()
+        finally:
+            # 4. 🔴 FECHA A SESSÃO DO ARQUIVO PARA NÃO DAR TIMEOUT
+            session.close()
 
 def rotina_de_atualizacao_em_massa():
     novos_encontrados = rotina_de_coleta_b3()
@@ -300,109 +296,115 @@ def rotina_de_atualizacao_em_massa():
 def rotina_processar_acoes():
     """Esteira exclusiva da Inteligência Artificial para documentos da CVM"""
     drive_manager = GoogleDriveManager()
-    session = SessionDB()
 
-    # Puxa apenas a fila de empresas
-    pendentes = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento == "PENDENTE_ACAO").all()
-    print(f"⚙️ Processando {len(pendentes)} documentos de AÇÕES na fila...")
+    # 1. 🟢 SESSÃO CURTA PARA A FILA
+    session_fila = SessionDB()
+    pendentes_ids = [doc.id for doc in session_fila.query(DocumentosQualitativos.id).filter(DocumentosQualitativos.status_processamento == "PENDENTE_ACAO").all()]
+    session_fila.close()
 
-    for doc_db in pendentes:
-        ticker = doc_db.ativo.ticker
-        url_pdf = doc_db.url_pdf
-        
-        # Garante o formato da pasta: Ex: 2026-07
-        mes_pasta = doc_db.data_publicacao.strftime("%Y-%m") if doc_db.data_publicacao else datetime.now().strftime("%Y-%m")
-        data_str = doc_db.data_publicacao.strftime("%Y-%m-%d") if doc_db.data_publicacao else "SEM_DATA"
+    print(f"⚙️ Processando {len(pendentes_ids)} documentos de AÇÕES na fila...")
 
-        print(f"🔄 IA Lendo: {ticker} (Data: {data_str})...")
-
-        # 1. Download direto do link da CVM
+    for doc_id in pendentes_ids:
+        # 2. 🟢 SESSÃO EXCLUSIVA POR AÇÃO
+        session = SessionDB()
         try:
-            # Baixa o arquivo direto do link da B3/CVM salvo no banco
-            resposta = requests.get(url_pdf, timeout=15)
-            if resposta.status_code != 200:
+            doc_db = session.query(DocumentosQualitativos).filter_by(id=doc_id).first()
+            if not doc_db:
+                continue
+
+            ticker = doc_db.ativo.ticker
+            url_pdf = doc_db.url_pdf
+
+            mes_pasta = doc_db.data_publicacao.strftime("%Y-%m") if doc_db.data_publicacao else datetime.now().strftime("%Y-%m")
+            data_str = doc_db.data_publicacao.strftime("%Y-%m-%d") if doc_db.data_publicacao else "SEM_DATA"
+
+            print(f"🔄 IA Lendo: {ticker} (Data: {data_str})...")
+
+            try:
+                resposta = requests.get(url_pdf, timeout=15)
+                if resposta.status_code != 200:
+                    doc_db.status_processamento = "ERRO_DOWNLOAD"
+                    session.commit()
+                    continue
+                pdf_bytes = resposta.content
+            except Exception as e:
+                print(f"⚠️ Erro ao baixar PDF CVM: {e}")
                 doc_db.status_processamento = "ERRO_DOWNLOAD"
                 session.commit()
                 continue
-            pdf_bytes = resposta.content
-        except Exception as e:
-            print(f"⚠️ Erro ao baixar PDF CVM: {e}")
-            doc_db.status_processamento = "ERRO_DOWNLOAD"
-            session.commit()
-            continue
 
-        temp_filename = f"/tmp/{ticker}_cvm_temp.pdf"
-        with open(temp_filename, "wb") as f: f.write(pdf_bytes)
+            temp_filename = f"/tmp/{ticker}_cvm_temp.pdf"
+            with open(temp_filename, "wb") as f: f.write(pdf_bytes)
 
-        # 2. Extração de Texto para a IA
-        texto_pdf = ""
-        try:
-            reader = PyPDF2.PdfReader(temp_filename)
-            if len(reader.pages) > 0: 
-                texto_pdf = reader.pages[0].extract_text() or ""
-        except: pass
+            texto_pdf = ""
+            try:
+                reader = PyPDF2.PdfReader(temp_filename)
+                if len(reader.pages) > 0: 
+                    texto_pdf = reader.pages[0].extract_text() or ""
+            except: pass
 
-        texto_pdf = texto_pdf.strip()
-        
-        # Chama o mesmo cérebro Groq que você já usa nos FIIs!
-        nome_ia = classificar_documento_com_ia(doc_db.tipo_documento, texto_pdf)
-        nome_limpo = "".join([c for c in str(nome_ia).title() if c.isalnum() or c in (' ', '_', '-')]).strip()
+            texto_pdf = texto_pdf.strip()
 
-        if len(nome_limpo) < 3: 
-            nome_limpo = "".join([c for c in str(doc_db.tipo_documento).title() if c.isalnum() or c in (' ', '_', '-')]).strip()
-            if len(nome_limpo) < 3: nome_limpo = "Documento_Acao"
-
-        # 3. Decisão de Roteamento
-        # Ao contrário dos FIIs, a CVM nem sempre coloca o Ticker no texto do PDF, então tiramos essa trava, 
-        # mas mantemos a trava de "PDF em branco/Imagem" para mandar pra revisão.
-        if not texto_pdf:
-            # 🚧 Suspeito/Scan: Manda pra pasta REVISÃO
-            file_id, link_gerado = drive_manager.upload_pdf_revisao(
-                caminho_arquivo=temp_filename,
-                nome_arquivo=f"REVISAR_{ticker}_{nome_limpo}_{data_str}.pdf"
-            )
-            if file_id:
-                doc_db.status_processamento = "AGUARDANDO_REVISAO"
-                doc_db.url_pdf = link_gerado
-                session.commit()
-                print(f"🚧 {ticker} enviado para revisão manual.")
-        else:
-            # ✅ Seguro: O Roteador Dinâmico envia para a pasta 'Ações'
-            link_gerado = drive_manager.upload_pdf_organizado(
-                caminho_arquivo=temp_filename,
-                nome_arquivo=f"{nome_limpo}_{data_str}.pdf",
-                ticker=ticker,
-                mes_ref=mes_pasta,
-                tipo_ativo="ACAO" # 🔴 AVISANDO O CARTEIRO!
-            )
+            nome_ia = classificar_documento_com_ia(doc_db.tipo_documento, texto_pdf)
             
-            if link_gerado:
-                doc_db.url_pdf = link_gerado
-                doc_db.tipo_documento = nome_limpo
-                doc_db.status_processamento = "SALVO_DRIVE" # 🟢 Libera o botão no Telegram!
-                print(f"✅ Sucesso: Drive Atualizado -> {nome_limpo}")
+            # Corrige a tupla de retorno caso a IA das ações não retorne a confiança
+            if isinstance(nome_ia, tuple):
+                nome_ia = nome_ia[0]
 
-                # 🔌 CATRACA INTELIGENTE DA IA (Ações)
-                if "gerencial" in nome_limpo.lower() or "fato" in nome_limpo.lower():
-                    print(f"🧠 Sugando texto profundo do PDF para a IA...")
-                    try:
-                        doc_fitz = fitz.open(temp_filename)
-                        texto_completo = "".join([pagina.get_text("text") + "\n" for pagina in doc_fitz[:12]])
-                        doc_db.texto_extraido = " ".join(texto_completo.split())[:15000]
-                        doc_fitz.close()
-                    except Exception as e:
-                        print(f"⚠️ Erro ao extrair RAG avançado ({type(e).__name__}). Acionando Plano B (PyPDF2)...")
-                        # 🔴 PLANO B: Usa o texto que o PyPDF2 já tinha lido lá em cima com sucesso!
-                        doc_db.texto_extraido = texto_pdf[:15000] if texto_pdf else None
-                else:
-                    doc_db.texto_extraido = None
+            nome_limpo = "".join([c for c in str(nome_ia).title() if c.isalnum() or c in (' ', '_', '-')]).strip()
 
+            if len(nome_limpo) < 3: 
+                nome_limpo = "".join([c for c in str(doc_db.tipo_documento).title() if c.isalnum() or c in (' ', '_', '-')]).strip()
+                if len(nome_limpo) < 3: nome_limpo = "Documento_Acao"
+
+            if not texto_pdf:
+                file_id, link_gerado = drive_manager.upload_pdf_revisao(
+                    caminho_arquivo=temp_filename,
+                    nome_arquivo=f"REVISAR_{ticker}_{nome_limpo}_{data_str}.pdf"
+                )
+                if file_id:
+                    doc_db.status_processamento = "AGUARDANDO_REVISAO"
+                    doc_db.url_pdf = link_gerado
+                    print(f"🚧 {ticker} enviado para revisão manual.")
             else:
-                doc_db.status_processamento = "ERRO_DRIVE"
+                link_gerado = drive_manager.upload_pdf_organizado(
+                    caminho_arquivo=temp_filename,
+                    nome_arquivo=f"{nome_limpo}_{data_str}.pdf",
+                    ticker=ticker,
+                    mes_ref=mes_pasta,
+                    tipo_ativo="ACAO" 
+                )
 
-        session.commit()
-        if os.path.exists(temp_filename): os.remove(temp_filename)
-        
-        time.sleep(3) # Respiro para não tomar bloqueio da API do Google
+                if link_gerado:
+                    doc_db.url_pdf = link_gerado
+                    doc_db.tipo_documento = nome_limpo
+                    doc_db.status_processamento = "SALVO_DRIVE" 
+                    print(f"✅ Sucesso: Drive Atualizado -> {nome_limpo}")
 
-    session.close()
+                    if "gerencial" in nome_limpo.lower() or "fato" in nome_limpo.lower() or "release" in nome_limpo.lower():
+                        print(f"🧠 Sugando texto profundo do PDF para a IA...")
+                        try:
+                            import fitz
+                            doc_fitz = fitz.open(temp_filename)
+                            texto_completo = "".join([pagina.get_text("text") + "\n" for pagina in doc_fitz[:15]])
+                            doc_db.texto_extraido = " ".join(texto_completo.split())[:15000]
+                            doc_fitz.close()
+                        except Exception as e:
+                            print(f"⚠️ Erro ao extrair RAG ({type(e).__name__}). Plano B...")
+                            doc_db.texto_extraido = texto_pdf[:15000] if texto_pdf else None
+                    else:
+                        doc_db.texto_extraido = None
+                else:
+                    doc_db.status_processamento = "ERRO_DRIVE"
+
+            # 3. 💾 SALVA O PROGRESSO
+            session.commit()
+            if os.path.exists(temp_filename): os.remove(temp_filename)
+            time.sleep(3) 
+            
+        except Exception as e:
+            print(f"❌ Erro crítico na ação {doc_id}: {e}")
+            session.rollback()
+        finally:
+            # 4. 🔴 FECHA SESSÃO
+            session.close()
