@@ -112,41 +112,47 @@ def acionar_varredura_manual(message):
         try:
             from atualizador_documentos import rotina_de_atualizacao_em_massa, SessionDB
             from pipeline_dados.banco_dados import DocumentosQualitativos
-            from sqlalchemy import func
             from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-            
+
             session_antes = SessionDB()
+            
+            # --- FOTO DO BANCO ANTES DA VARREDURA ---
             total_antes = session_antes.query(DocumentosQualitativos).count()
+            salvos_antes = session_antes.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")).count()
+            revisao_antes = session_antes.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO").count()
+            erros_antes = session_antes.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.in_(["ERRO_DOWNLOAD", "ERRO_DRIVE"])).count()
+            
             session_antes.close()
 
+            # --- A VARREDURA ACONTECE AQUI ---
             rotina_de_atualizacao_em_massa()
 
+            # --- FOTO DO BANCO DEPOIS DA VARREDURA ---
             session = SessionDB()
             total_depois = session.query(DocumentosQualitativos).count()
-            novos_capturados = total_depois - total_antes 
-
-            pendentes_revisao = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO").count()
-            salvos_automaticos = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")).count()
+            salvos_depois = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")).count()
+            revisao_depois = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO").count()
+            erros_depois = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.in_(["ERRO_DOWNLOAD", "ERRO_DRIVE"])).count()
             fila_processamento = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento == "PENDENTE").count()
-            
-            # 🔴 ADICIONADO: Contagem dos arquivos quebrados/corrompidos da B3
-            erros_b3 = session.query(DocumentosQualitativos).filter(
-                DocumentosQualitativos.status_processamento.in_(["ERRO_DOWNLOAD", "ERRO_DRIVE"])
-            ).count()
 
-            # 🔴 CORREÇÃO DA DATA: Fatiador Blindado contra "AGOE" e "Vale"
+            # --- CÁLCULO ESPECÍFICO DESTA SESSÃO (O DELTA) ---
+            novos_capturados = total_depois - total_antes 
+            salvos_agora = salvos_depois - salvos_antes
+            revisao_agora = revisao_depois - revisao_antes
+            erros_agora = erros_depois - erros_antes
+
+            # 🔴 CORREÇÃO DA DATA BLINDADA
             todos_assuntos = session.query(DocumentosQualitativos.assunto).filter(DocumentosQualitativos.assunto != None).all()
             datas_reais = []
             for (assunto,) in todos_assuntos:
                 primeira_palavra = assunto.split(" ")[0] if assunto else ""
                 if '-' in primeira_palavra:
                     partes = primeira_palavra.split('-')
-                    # 🛡️ A MÁGICA AQUI: Além de ter tamanho 4, TEM QUE SER NÚMERO (isdigit)
                     if len(partes[0]) == 4 and partes[0].isdigit():
                         datas_reais.append(primeira_palavra)
-            
+
             datas_reais.sort()
-            
+
             def formatar_data_br(data_iso):
                 p = data_iso.split('-')
                 if len(p) == 3: return f"{p[2]}/{p[1]}/{p[0]}"
@@ -155,11 +161,16 @@ def acionar_varredura_manual(message):
 
             data_inicio = formatar_data_br(datas_reais[0]) if datas_reais else "N/A"
             data_fim = formatar_data_br(datas_reais[-1]) if datas_reais else "N/A"
-            
+
             session.close()
 
-            total_processado = salvos_automaticos + pendentes_revisao + erros_b3
-            eficiencia = (salvos_automaticos / total_processado * 100) if total_processado > 0 else 0
+            # --- ESTATÍSTICA DESTA VARREDURA ---
+            processados_agora = salvos_agora + revisao_agora + erros_agora
+            eficiencia_agora = (salvos_agora / processados_agora * 100) if processados_agora > 0 else 0
+            
+            # --- ESTATÍSTICA HISTÓRICA GERAL ---
+            total_processado_geral = salvos_depois + revisao_depois + erros_depois
+            eficiencia_geral = (salvos_depois / total_processado_geral * 100) if total_processado_geral > 0 else 0
 
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(
@@ -167,18 +178,23 @@ def acionar_varredura_manual(message):
                 InlineKeyboardButton("📥 Iniciar Revisão Manual", callback_data="iniciar_revisao_pendencias")
             )
 
+            # Relatório mais limpo e profissional
             resposta_final = (
-                f"✅ *Varredura Concluída!*\n\n"
-                f"📥 **Fila do Banco de Dados:**\n"
+                f"✅ **Varredura Concluída!**\n\n"
+                f"📥 **Fila da Varredura Atual:**\n"
                 f" ├ Capturados na B3 agora: `{novos_capturados}`\n"
-                f" ├ Presos na Fila de Leitura: `{fila_processamento}`\n\n"
-                f"🤖 **Status do Processamento:**\n"
-                f" ├ Auto-salvos (Drive + IA): `{salvos_automaticos}`\n"
-                f" ├ Fila de Revisão Manual: `{pendentes_revisao}`\n"
-                f" ├ Falhas (Corrompidos B3): `{erros_b3}`\n\n" # A conta vai fechar!
+                f" ├ Processados com sucesso: `{salvos_agora}`\n"
+                f" ├ Enviados para Revisão: `{revisao_agora}`\n"
+                f" ├ Falhas (Corrompidos): `{erros_agora}`\n"
+                f" └ Eficiência DESTA Sessão: `{eficiencia_agora:.1f}%`\n\n"
+                f"🤖 **Status Total do Banco:**\n"
+                f" ├ Presos na Fila de Leitura: `{fila_processamento}`\n"
+                f" ├ Total já Auto-Salvo (IA): `{salvos_depois}`\n"
+                f" ├ Total em Revisão Manual: `{revisao_depois}`\n"
+                f" ├ Total de Falhas B3: `{erros_depois}`\n"
+                f" └ Eficiência Global da IA: `{eficiencia_geral:.1f}%`\n\n"
                 f"📅 **Cobertura do Acervo:**\n"
-                f" └ `{data_inicio}` até `{data_fim}`\n\n"
-                f"📈 **Taxa de Eficiência da IA:** `{eficiencia:.1f}%`"
+                f" └ `{data_inicio}` até `{data_fim}`"
             )
 
             bot.send_message(message.chat.id, resposta_final, parse_mode="Markdown", reply_markup=markup)
