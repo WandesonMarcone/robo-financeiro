@@ -113,15 +113,16 @@ def acionar_varredura_manual(message):
             from atualizador_documentos import rotina_de_atualizacao_em_massa, SessionDB
             from pipeline_dados.banco_dados import DocumentosQualitativos
             from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+            import re  # 🔴 IMPORTANTE: Biblioteca para a caça invencível de datas
 
             session_antes = SessionDB()
-            
+
             # --- FOTO DO BANCO ANTES DA VARREDURA ---
             total_antes = session_antes.query(DocumentosQualitativos).count()
             salvos_antes = session_antes.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")).count()
             revisao_antes = session_antes.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO").count()
             erros_antes = session_antes.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.in_(["ERRO_DOWNLOAD", "ERRO_DRIVE"])).count()
-            
+
             session_antes.close()
 
             # --- A VARREDURA ACONTECE AQUI ---
@@ -141,23 +142,27 @@ def acionar_varredura_manual(message):
             revisao_agora = revisao_depois - revisao_antes
             erros_agora = erros_depois - erros_antes
 
-            # 🔴 CORREÇÃO DA DATA BLINDADA
+            # 🔴 A MÁGICA DA DATA (REGEX INVENCÍVEL)
             todos_assuntos = session.query(DocumentosQualitativos.assunto).filter(DocumentosQualitativos.assunto != None).all()
             datas_reais = []
             for (assunto,) in todos_assuntos:
-                primeira_palavra = assunto.split(" ")[0] if assunto else ""
-                if '-' in primeira_palavra:
-                    partes = primeira_palavra.split('-')
-                    if len(partes[0]) == 4 and partes[0].isdigit():
-                        datas_reais.append(primeira_palavra)
+                if assunto:
+                    # Caça YYYY-MM-DD ou YYYY-MM em QUALQUER lugar do título (ignora "AGOE", "Vale", etc)
+                    match = re.search(r'\b(20\d{2})[-/](0[1-9]|1[0-2])(?:[-/](0[1-9]|[12]\d|3[01]))?\b', assunto)
+                    if match:
+                        ano = match.group(1)
+                        mes = match.group(2)
+                        dia = match.group(3) if match.group(3) else "01"
+                        datas_reais.append(f"{ano}-{mes}-{dia}")
 
             datas_reais.sort()
 
             def formatar_data_br(data_iso):
-                p = data_iso.split('-')
-                if len(p) == 3: return f"{p[2]}/{p[1]}/{p[0]}"
-                if len(p) == 2: return f"{p[1]}/{p[0]}"
-                return data_iso
+                try:
+                    p = data_iso.split('-')
+                    return f"{p[2]}/{p[1]}/{p[0]}"
+                except:
+                    return data_iso
 
             data_inicio = formatar_data_br(datas_reais[0]) if datas_reais else "N/A"
             data_fim = formatar_data_br(datas_reais[-1]) if datas_reais else "N/A"
@@ -167,7 +172,7 @@ def acionar_varredura_manual(message):
             # --- ESTATÍSTICA DESTA VARREDURA ---
             processados_agora = salvos_agora + revisao_agora + erros_agora
             eficiencia_agora = (salvos_agora / processados_agora * 100) if processados_agora > 0 else 0
-            
+
             # --- ESTATÍSTICA HISTÓRICA GERAL ---
             total_processado_geral = salvos_depois + revisao_depois + erros_depois
             eficiencia_geral = (salvos_depois / total_processado_geral * 100) if total_processado_geral > 0 else 0
@@ -178,7 +183,7 @@ def acionar_varredura_manual(message):
                 InlineKeyboardButton("📥 Iniciar Revisão Manual", callback_data="iniciar_revisao_pendencias")
             )
 
-            # Relatório mais limpo e profissional
+            # Relatório COMPLETO (Sessão + Global)
             resposta_final = (
                 f"✅ **Varredura Concluída!**\n\n"
                 f"📥 **Fila da Varredura Atual:**\n"
@@ -203,8 +208,7 @@ def acionar_varredura_manual(message):
             bot.send_message(message.chat.id, f"❌ Erro na varredura: {str(e)[:200]}") 
 
     import threading
-    thread = threading.Thread(target=tarefa_pesada_background)
-    thread.start()
+    threading.Thread(target=tarefa_pesada_background).start()
 
 @bot.message_handler(commands=['forcar_docs_acoes'])
 def rodar_docs_acoes(message):
