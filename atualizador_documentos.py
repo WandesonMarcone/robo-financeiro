@@ -26,8 +26,9 @@ url_banco = os.environ.get('DATABASE_URL', 'sqlite:///pipeline_dados/banco_insti
 if url_banco.startswith("postgres://"):
     url_banco = url_banco.replace("postgres://", "postgresql://", 1)
 
+# Substitua o antigo create_engine por este:
 engine = create_engine(
-    DATABASE_URL,            # Se no seu código estiver config.DATABASE_URL, mantenha config.DATABASE_URL
+    config.DATABASE_URL,     # Mantenha a sua variável exata aqui (ex: config.DATABASE_URL)
     pool_pre_ping=True,      # Testa se a conexão com o Neon caiu antes de fazer a query
     pool_recycle=1800,       # Renova a conexão a cada 30 minutos (evita o fechamento forçado)
     pool_size=5,             # Mantém um limite seguro de conexões para não estourar a memória
