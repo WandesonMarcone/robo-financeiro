@@ -185,19 +185,26 @@ def callback_raiox_docs(call):
         total_erros = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.in_(["ERRO_DOWNLOAD", "ERRO_DRIVE"])).count()
         
         # Datas do Sistema
-        todos_assuntos = session.query(DocumentosQualitativos.assunto).filter(DocumentosQualitativos.assunto != None).all()
-        datas_reais = [a[0].split(" ")[0] for a in todos_assuntos if a[0] and '-' in a[0] and len(a[0].split('-')[0])==4]
-        datas_reais.sort()
+            todos_assuntos = session.query(DocumentosQualitativos.assunto).filter(DocumentosQualitativos.assunto != None).all()
+            datas_reais = []
+            for (assunto,) in todos_assuntos:
+                primeira_palavra = assunto.split(" ")[0] if assunto else ""
+                if '-' in primeira_palavra:
+                    partes = primeira_palavra.split('-')
+                    # 🛡️ A MÁGICA AQUI: Além de ter tamanho 4, TEM QUE SER NÚMERO (isdigit)
+                    if len(partes[0]) == 4 and partes[0].isdigit():
+                        datas_reais.append(primeira_palavra)
+            
+            datas_reais.sort()
+            
+            def formatar_data_br(data_iso):
+                p = data_iso.split('-')
+                if len(p) == 3: return f"{p[2]}/{p[1]}/{p[0]}"
+                if len(p) == 2: return f"{p[1]}/{p[0]}"
+                return data_iso
 
-        # 🛡️ NOVO FATIADOR BLINDADO (Aceita YYYY-MM-DD e YYYY-MM)
-        def formatar_data_br(data_iso):
-            p = data_iso.split('-')
-            if len(p) == 3: return f"{p[2]}/{p[1]}/{p[0]}"
-            if len(p) == 2: return f"{p[1]}/{p[0]}"
-            return data_iso
-
-        data_ini = formatar_data_br(datas_reais[0]) if datas_reais else "N/A"
-        data_fim = formatar_data_br(datas_reais[-1]) if datas_reais else "N/A"
+            data_inicio = formatar_data_br(datas_reais[0]) if datas_reais else "N/A"
+            data_fim = formatar_data_br(datas_reais[-1]) if datas_reais else "N/A"
 
         session.close()
 
