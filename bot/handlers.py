@@ -164,14 +164,14 @@ def callback_ajuda_comandos(call):
 
 @bot.callback_query_handler(func=lambda call: call.data == "ver_raiox_docs")
 def callback_raiox_docs(call):
-    """Gera e exibe a lista completa de documentos e estatísticas sob demanda (Sem repetição na tela)."""
+    """Gera e exibe a lista completa de documentos e estatísticas sob demanda."""
     try:
-        # Avisa o telegram que o clique foi recebido (evita que o botão fique com reloginho)
-        bot.answer_callback_query(call.id, "Gerando Raio-X Global...")
+        bot.answer_callback_query(call.id, "Carregando Raio-X...")
         
         from atualizador_documentos import SessionDB
         from pipeline_dados.banco_dados import DocumentosQualitativos
         from sqlalchemy import func
+        import re
 
         session = SessionDB()
 
@@ -183,31 +183,34 @@ def callback_raiox_docs(call):
          .group_by(DocumentosQualitativos.tipo_documento)\
          .order_by(func.count(DocumentosQualitativos.id).desc()).all()
 
-        # Estatísticas Globais Completas
-        total_banco = session.query(DocumentosQualitativos).count()
+        # Estatísticas Globais
         total_salvos = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")).count()
         total_erros = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.in_(["ERRO_DOWNLOAD", "ERRO_DRIVE"])).count()
         total_revisao = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO").count()
         total_fila = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento == "PENDENTE").count()
 
-        # Datas do Sistema (Fatiador Blindado)
+        # 🛡️ EXTRATOR DE DATAS INVENCÍVEL (REGEX)
         todos_assuntos = session.query(DocumentosQualitativos.assunto).filter(DocumentosQualitativos.assunto != None).all()
         datas_reais = []
-
+        
         for (assunto,) in todos_assuntos:
-            primeira_palavra = assunto.split(" ")[0] if assunto else ""
-            if '-' in primeira_palavra:
-                partes = primeira_palavra.split('-')
-                if len(partes[0]) == 4 and partes[0].isdigit():
-                    datas_reais.append(primeira_palavra)
-
+            if assunto:
+                # Busca padrões como 2026-06-15 ou 2026-06 em QUALQUER lugar do texto
+                match = re.search(r'\b(20\d{2})[-/](0[1-9]|1[0-2])(?:[-/](0[1-9]|[12]\d|3[01]))?\b', assunto)
+                if match:
+                    ano = match.group(1)
+                    mes = match.group(2)
+                    dia = match.group(3) if match.group(3) else "01"
+                    datas_reais.append(f"{ano}-{mes}-{dia}")
+        
         datas_reais.sort()
 
         def formatar_data_br(data_iso):
-            p = data_iso.split('-')
-            if len(p) == 3: return f"{p[2]}/{p[1]}/{p[0]}"
-            if len(p) == 2: return f"{p[1]}/{p[0]}"
-            return data_iso
+            try:
+                p = data_iso.split('-')
+                return f"{p[2]}/{p[1]}/{p[0]}"
+            except:
+                return data_iso
 
         data_ini = formatar_data_br(datas_reais[0]) if datas_reais else "N/A"
         data_fim = formatar_data_br(datas_reais[-1]) if datas_reais else "N/A"
@@ -219,12 +222,11 @@ def callback_raiox_docs(call):
 
         texto_tipos = (
             f"📊 **RAIO-X GLOBAL DO SISTEMA**\n\n"
-            f"📈 **Estatísticas de Acervo:**\n"
-            f" ├ Total no Banco de Dados: `{total_banco}`\n"
+            f"📈 **Estatísticas Totais do Banco:**\n"
             f" ├ Documentos Processados (Drive): `{total_salvos}`\n"
+            f" ├ Presos na Fila de Leitura: `{total_fila}`\n"
             f" ├ Em Revisão Manual: `{total_revisao}`\n"
             f" ├ Falhas B3 / Links Quebrados: `{total_erros}`\n"
-            f" ├ Pendentes (Fila): `{total_fila}`\n"
             f" ├ Cobertura Temporal: `{data_ini}` a `{data_fim}`\n"
             f" └ Eficácia Histórica da IA: `{taxa_eficacia:.1f}%`\n\n"
             f"📂 **Distribuição por Categorias Salvas:**\n"
@@ -237,10 +239,9 @@ def callback_raiox_docs(call):
         else:
             texto_tipos += "  ├ Banco de dados vazio."
 
-        # 🔴 A SOLUÇÃO DO SPAM: Edita a mensagem onde o botão foi clicado!
         from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="voltar_menu"))
+        markup.add(InlineKeyboardButton("🔙 Fechar Raio-X", callback_data="voltar_menu"))
         
         bot.edit_message_text(texto_tipos, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
