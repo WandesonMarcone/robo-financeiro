@@ -128,35 +128,53 @@ def processar_revisao(call):
             doc = session.query(DocumentosQualitativos).get(doc_id)
 
             markup = InlineKeyboardMarkup()
-            
-            # 🛡️ Trava de Segurança do Telegram: Só cria o botão se o link existir e for válido!
+
+            # 🛡️ Trava de Segurança
             if doc.url_pdf and doc.url_pdf.startswith("http"):
                 markup.add(InlineKeyboardButton(text="🔗 Abrir PDF no Drive", url=doc.url_pdf))
-            
-            # Usamos row() em vez de add() para os botões ficarem lado a lado
+
             markup.row(
                 InlineKeyboardButton(text="✅ Classificar", callback_data=f"rev_app_{doc.id}"),
                 InlineKeyboardButton(text="🗑️ Apagar", callback_data=f"rev_del_{doc.id}")
             )
             markup.add(InlineKeyboardButton(text="🔙 Voltar", callback_data=f"rev_t_{doc.ativo.ticker}"))
 
-            # 🎨 Embelezamento do texto do painel
-            data_limpa = doc.assunto.split(" ")[0].replace("-", "/") if doc.assunto else "Desconhecida"
-            tipo_leitura = doc.tipo_documento if doc.tipo_documento else "Não identificado"
+            # 🔴 O SEU FATIADOR DE DATA (A MÁGICA AQUI!)
+            nome_original = str(doc.tipo_documento)
+            data_exibicao = "Data N/A"
+            nome_limpo_exibicao = nome_original
+
+            # Se for um nome sujo de revisão, ele fatia e acha a data
+            if "REVISAR_" in nome_original:
+                pedacos = nome_original.replace(".pdf", "").split("_")
+                for p in pedacos:
+                    # Acha o formato de data (ex: 2026-06-15)
+                    if len(p) == 10 and p.count('-') == 2:
+                        ano, mes, dia = p.split('-')
+                        data_exibicao = f"{dia}/{mes}/{ano}"
+                        # Limpa o nome para ficar bonito na tela
+                        nome_limpo_exibicao = nome_original.replace(f"REVISAR_{doc.ativo.ticker}_", "").replace(f"_{p}", "")
+                        break
+            else:
+                # Se não tiver REVISAR no nome (caso antigo), pega a data do assunto
+                data_limpa = doc.assunto.split(" ")[0] if doc.assunto else None
+                if data_limpa and '-' in data_limpa:
+                    try:
+                        ano, mes, dia = data_limpa.split('-')
+                        data_exibicao = f"{dia}/{mes}/{ano}"
+                    except: pass
 
             txt = (
                 f"🔍 **Inspecionando Documento**\n\n"
                 f"🏢 **Ativo:** `{doc.ativo.ticker}`\n"
-                f"📅 **Data:** `{data_limpa}`\n"
-                f"🤖 **Leitura Inicial:** `{tipo_leitura}`\n\n"
+                f"📅 **Data da Publicação:** `{data_exibicao}`\n"
+                f"🤖 **Leitura da IA:** `{nome_limpo_exibicao.replace('_', ' ')}`\n\n"
             )
-            
-            # Se o link estiver quebrado no banco de dados, o bot te avisa
+
             if not (doc.url_pdf and doc.url_pdf.startswith("http")):
                 txt += "⚠️ *O link do Google Drive para este documento está ausente ou corrompido.*\n\n"
-                
+
             txt += "O que deseja fazer?"
-            
             bot.edit_message_text(txt, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
         # AÇÃO: Usuário decidiu salvar, abre o catálogo de tipos de documento dinâmico
