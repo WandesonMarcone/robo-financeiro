@@ -142,18 +142,25 @@ def acionar_varredura_manual(message):
             revisao_agora = revisao_depois - revisao_antes
             erros_agora = erros_depois - erros_antes
 
-            # 🔴 A MÁGICA DA DATA (REGEX INVENCÍVEL)
+            # 🛡️ EXTRATOR DE DATAS HÍBRIDO (Regex + Fallback no Banco de Dados)
             todos_assuntos = session.query(DocumentosQualitativos.assunto).filter(DocumentosQualitativos.assunto != None).all()
             datas_reais = []
+            
             for (assunto,) in todos_assuntos:
                 if assunto:
-                    # Caça YYYY-MM-DD ou YYYY-MM em QUALQUER lugar do título (ignora "AGOE", "Vale", etc)
                     match = re.search(r'\b(20\d{2})[-/](0[1-9]|1[0-2])(?:[-/](0[1-9]|[12]\d|3[01]))?\b', assunto)
                     if match:
                         ano = match.group(1)
                         mes = match.group(2)
                         dia = match.group(3) if match.group(3) else "01"
                         datas_reais.append(f"{ano}-{mes}-{dia}")
+            
+            # PLANO B: Se o Regex não achou nada nos títulos, pega direto a data de publicação do banco!
+            if not datas_reais:
+                datas_db = session.query(DocumentosQualitativos.data_publicacao).filter(DocumentosQualitativos.data_publicacao != None).all()
+                for (dt,) in datas_db:
+                    if dt:
+                        datas_reais.append(dt.strftime("%Y-%m-%d"))
 
             datas_reais.sort()
 
