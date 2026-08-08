@@ -192,7 +192,7 @@ def callback_raiox_docs(call):
         # 🛡️ EXTRATOR DE DATAS INVENCÍVEL (REGEX)
         todos_assuntos = session.query(DocumentosQualitativos.assunto).filter(DocumentosQualitativos.assunto != None).all()
         datas_reais = []
-        
+
         for (assunto,) in todos_assuntos:
             if assunto:
                 # Busca padrões como 2026-06-15 ou 2026-06 em QUALQUER lugar do texto
@@ -202,7 +202,15 @@ def callback_raiox_docs(call):
                     mes = match.group(2)
                     dia = match.group(3) if match.group(3) else "01"
                     datas_reais.append(f"{ano}-{mes}-{dia}")
-        
+
+        # 👇 COLOQUE O PLANO B AQUI NO HANDLERS.PY TAMBÉM 👇
+        if not datas_reais:
+            datas_db = session.query(DocumentosQualitativos.data_publicacao).filter(DocumentosQualitativos.data_publicacao != None).all()
+            for (dt,) in datas_db:
+                if dt:
+                    datas_reais.append(dt.strftime("%Y-%m-%d"))
+        # 👆 -------------------------------------------- 👆
+
         datas_reais.sort()
 
         def formatar_data_br(data_iso):
