@@ -85,16 +85,19 @@ class DocumentosQualitativos(Base):
     __table_args__ = (UniqueConstraint('ativo_id', 'url_pdf', name='uix_docs_url'),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    ativo_id: Mapped[int] = mapped_column(ForeignKey('ativos.id'), nullable=False)
-    data_publicacao: Mapped[date] = mapped_column(Date, nullable=False)
+    ativo_id: Mapped[int] = mapped_column(ForeignKey('ativos.id'), nullable=False, index=True) # 👈 Índice adicionado
+    data_publicacao: Mapped[date] = mapped_column(Date, nullable=False, index=True)          # 👈 Índice adicionado para ordenação rápida
     tipo_documento: Mapped[str] = mapped_column(String(255), nullable=False)
 
     url_pdf: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     texto_extraido: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     assunto = Column(Text, nullable=True)
     id_b3: Mapped[Optional[str]] = mapped_column(String(50), unique=True, nullable=True)
-    status_processamento: Mapped[str] = mapped_column(String(20), default="SALVO", nullable=False) 
-    hash_sha256: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True)
+    
+    # 🚀 ADICIONADO INDEX=TRUE PARA ACELERAR AS QUERIES DO RAIO-X E DA VARREDURA
+    status_processamento: Mapped[str] = mapped_column(String(20), default="SALVO", nullable=False, index=True) 
+    
+    hash_sha256: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True, index=True)
     resumo_ia: Mapped[Optional[str]] = mapped_column(Text, nullable=True) 
     log_erro: Mapped[Optional[str]] = mapped_column(Text, nullable=True) 
     data_atualizacao: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=True)
