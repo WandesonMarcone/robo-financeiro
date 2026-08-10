@@ -167,7 +167,7 @@ def callback_raiox_docs(call):
     """Gera e exibe a lista completa de documentos e estatísticas sob demanda."""
     try:
         bot.answer_callback_query(call.id, "Carregando Raio-X...")
-        
+
         from atualizador_documentos import SessionDB
         from pipeline_dados.banco_dados import DocumentosQualitativos
         from sqlalchemy import func
@@ -175,13 +175,25 @@ def callback_raiox_docs(call):
 
         session = SessionDB()
 
-        # Agrupamento de Tipos
-        tipos_docs = session.query(
+        # Agrupamento de Tipos (VERSÃO COM LIMPEZA DE IA)
+        tipos_docs_brutos = session.query(
             DocumentosQualitativos.tipo_documento, 
             func.count(DocumentosQualitativos.id)
         ).filter(DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%"))\
-         .group_by(DocumentosQualitativos.tipo_documento)\
-         .order_by(func.count(DocumentosQualitativos.id).desc()).all()
+         .group_by(DocumentosQualitativos.tipo_documento).all()
+
+        contagem_tipos = {}
+        for tipo_bruto, quantidade in tipos_docs_brutos:
+            # Pega o nome bruto e remove qualquer número (0-9) usando regex
+            tipo_limpo = re.sub(r'\d+', '', str(tipo_bruto)).strip() if tipo_bruto else "Outros"
+            # Remove underlines e hífens residuais, e padroniza as maiúsculas
+            nome_bonito = tipo_limpo.replace("_", " ").replace("-", "").strip().title()
+            
+            # Soma no dicionário (agora o Fato Relevante 90 soma no Fato Relevante normal)
+            contagem_tipos[nome_bonito] = contagem_tipos.get(nome_bonito, 0) + quantidade
+
+        # Ordena as categorias da que tem mais documentos para a que tem menos
+        tipos_ordenados = sorted(contagem_tipos.items(), key=lambda x: x[1], reverse=True)
 
         # Estatísticas Globais
         total_salvos = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")).count()
@@ -240,9 +252,8 @@ def callback_raiox_docs(call):
             f"📂 **Distribuição por Categorias Salvas:**\n"
         )
 
-        if tipos_docs:
-            for tipo, quantidade in tipos_docs:
-                nome_bonito = str(tipo).replace("_", " ").title() if tipo else "Outros"
+        if tipos_ordenados:
+            for nome_bonito, quantidade in tipos_ordenados:
                 texto_tipos += f"  ├ `{quantidade}x` {nome_bonito[:25]}\n"
         else:
             texto_tipos += "  ├ Banco de dados vazio."
@@ -250,7 +261,7 @@ def callback_raiox_docs(call):
         from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("🔙 Fechar Raio-X", callback_data="voltar_menu"))
-        
+
         bot.edit_message_text(texto_tipos, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
     except Exception as e:
