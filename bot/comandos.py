@@ -113,7 +113,6 @@ def acionar_varredura_manual(message):
             from atualizador_documentos import rotina_de_atualizacao_em_massa, SessionDB
             from pipeline_dados.banco_dados import DocumentosQualitativos
             from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-            import re  # 🔴 IMPORTANTE: Biblioteca para a caça invencível de datas
 
             session_antes = SessionDB()
 
@@ -134,7 +133,7 @@ def acionar_varredura_manual(message):
             salvos_depois = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")).count()
             revisao_depois = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO").count()
             erros_depois = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.in_(["ERRO_DOWNLOAD", "ERRO_DRIVE"])).count()
-            fila_processamento = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento == "PENDENTE").count()
+            session.close()
 
             # --- CÁLCULO ESPECÍFICO DESTA SESSÃO (O DELTA) ---
             novos_capturados = total_depois - total_antes 
@@ -142,71 +141,26 @@ def acionar_varredura_manual(message):
             revisao_agora = revisao_depois - revisao_antes
             erros_agora = erros_depois - erros_antes
 
-            # 🛡️ EXTRATOR DE DATAS HÍBRIDO (Regex + Fallback no Banco de Dados)
-            todos_assuntos = session.query(DocumentosQualitativos.assunto).filter(DocumentosQualitativos.assunto != None).all()
-            datas_reais = []
-            
-            for (assunto,) in todos_assuntos:
-                if assunto:
-                    match = re.search(r'\b(20\d{2})[-/](0[1-9]|1[0-2])(?:[-/](0[1-9]|[12]\d|3[01]))?\b', assunto)
-                    if match:
-                        ano = match.group(1)
-                        mes = match.group(2)
-                        dia = match.group(3) if match.group(3) else "01"
-                        datas_reais.append(f"{ano}-{mes}-{dia}")
-            
-            # PLANO B: Se o Regex não achou nada nos títulos, pega direto a data de publicação do banco!
-            if not datas_reais:
-                datas_db = session.query(DocumentosQualitativos.data_publicacao).filter(DocumentosQualitativos.data_publicacao != None).all()
-                for (dt,) in datas_db:
-                    if dt:
-                        datas_reais.append(dt.strftime("%Y-%m-%d"))
-
-            datas_reais.sort()
-
-            def formatar_data_br(data_iso):
-                try:
-                    p = data_iso.split('-')
-                    return f"{p[2]}/{p[1]}/{p[0]}"
-                except:
-                    return data_iso
-
-            data_inicio = formatar_data_br(datas_reais[0]) if datas_reais else "N/A"
-            data_fim = formatar_data_br(datas_reais[-1]) if datas_reais else "N/A"
-
-            session.close()
-
             # --- ESTATÍSTICA DESTA VARREDURA ---
             processados_agora = salvos_agora + revisao_agora + erros_agora
             eficiencia_agora = (salvos_agora / processados_agora * 100) if processados_agora > 0 else 0
 
-            # --- ESTATÍSTICA HISTÓRICA GERAL ---
-            total_processado_geral = salvos_depois + revisao_depois + erros_depois
-            eficiencia_geral = (salvos_depois / total_processado_geral * 100) if total_processado_geral > 0 else 0
-
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(
-                InlineKeyboardButton("📂 Ver Raio-X de Documentos", callback_data="ver_raiox_docs"),
+                InlineKeyboardButton("📊 Ver Raio-X Global", callback_data="ver_raiox_docs"),
                 InlineKeyboardButton("📥 Iniciar Revisão Manual", callback_data="iniciar_revisao_pendencias")
             )
 
-            # Relatório COMPLETO (Sessão + Global)
+            # Relatório APENAS da Sessão (Varredura Atual)
             resposta_final = (
                 f"✅ **Varredura Concluída!**\n\n"
-                f"📥 **Fila da Varredura Atual:**\n"
-                f" ├ Capturados na B3 agora: `{novos_capturados}`\n"
-                f" ├ Processados com sucesso: `{salvos_agora}`\n"
+                f"📥 **Resumo desta Sessão:**\n"
+                f" ├ Documentos novos encontrados: `{novos_capturados}`\n"
+                f" ├ Processados (Auto-salvos): `{salvos_agora}`\n"
                 f" ├ Enviados para Revisão: `{revisao_agora}`\n"
-                f" ├ Falhas (Corrompidos): `{erros_agora}`\n"
-                f" └ Eficiência DESTA Sessão: `{eficiencia_agora:.1f}%`\n\n"
-                f"🤖 **Status Total do Banco:**\n"
-                f" ├ Presos na Fila de Leitura: `{fila_processamento}`\n"
-                f" ├ Total já Auto-Salvo (IA): `{salvos_depois}`\n"
-                f" ├ Total em Revisão Manual: `{revisao_depois}`\n"
-                f" ├ Total de Falhas B3: `{erros_depois}`\n"
-                f" └ Eficiência Global da IA: `{eficiencia_geral:.1f}%`\n\n"
-                f"📅 **Cobertura do Acervo:**\n"
-                f" └ `{data_inicio}` até `{data_fim}`"
+                f" ├ Falhas (Links corrompidos): `{erros_agora}`\n"
+                f" └ Eficiência nesta busca: `{eficiencia_agora:.1f}%`\n\n"
+                f"💡 _Dica: Para ver a cobertura completa de datas e o volume total de todos os fundos, acesse o botão de Raio-X abaixo._"
             )
 
             bot.send_message(message.chat.id, resposta_final, parse_mode="Markdown", reply_markup=markup)
