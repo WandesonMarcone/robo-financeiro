@@ -3,6 +3,7 @@ import random
 import requests
 import pandas as pd
 import yfinance as yf
+from datetime import datetime
 import config
 from modules.utils import formatar, precisa_atualizar, get_request_with_retry
 from config import MAPA_SETORES_B3
@@ -13,12 +14,12 @@ def classificar_setor_por_mapa(ticker):
     Se a ação não estiver no mapa, devolve "Outros".
     """
     ticker_limpo = ticker.strip().upper()
-    
+
     for macro, subsetores in MAPA_SETORES_B3.items():
         for sub, lista_tickers in subsetores.items():
             if ticker_limpo in lista_tickers:
                 return macro, sub
-                
+
     # Se a ação não estiver mapeada no config.py
     return "Outros", "Não Classificado"
 
@@ -33,24 +34,43 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
         }
         response = get_request_with_retry(url, headers=headers)
+        
+        # 🟢 ALTERAÇÃO 1: Adicionado decimal e thousands para ler formato BR
         df = pd.read_html(io.StringIO(response.text), decimal=',', thousands='.')[0]
+        
         df['Papel'] = df['Papel'].str.strip().str.upper()
         df = df.set_index('Papel')
+        
+        # 🟢 ALTERAÇÃO 2: Limpeza dos símbolos '%' antes de formatar
+        def limpar_porcentagem_df(val):
+            if isinstance(val, str):
+                val = val.replace('%', '').replace('.', '').replace(',', '.')
+                try:
+                    return float(val) / 100
+                except ValueError:
+                    return 0.0
+            return val
+        
+        for col_perc in ['Div.Yield', 'ROE', 'Mrg Bruta', 'Mrg Ebit', 'Mrg. Líq.', 'Cresc. Rec.5a', 'ROIC']:
+            if col_perc in df.columns:
+                df[col_perc] = df[col_perc].apply(limpar_porcentagem_df)
+                
         for col in ['P/L', 'P/VP', 'Div.Yield', 'ROE', 'Liq.2meses']:
             if col in df.columns: df[col] = df[col].apply(formatar)
+            
     except Exception as e:
         print(f"⚠️ Fundamentus indisponível: {e}. Alternando para Yahoo.")
         df = pd.DataFrame() 
 
     dados_planilha = aba_base.get_all_values()
-    dados_planilha = aba_base.get_all_values()
+    # Linha duplicada no original removida (dados_planilha = aba_base.get_all_values())
     todas_originais, mapa_atualizacao, precos_antigos = [], {}, {}
-    
+
     for row in dados_planilha[1:]:
         if row and row[0].strip() and not row[0].replace(',', '').replace('.', '').isnumeric():
             t = row[0].strip().upper()
             todas_originais.append(t)
-            
+
             # Lógica de limpeza para o preço na Coluna C (índice 2)
             try:
                 # Remove "R$", tira o ponto de milhar, troca vírgula por ponto
@@ -58,18 +78,19 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
                 precos_antigos[t] = float(raw_val) if raw_val else 0.0
             except:
                 precos_antigos[t] = 0.0
-            
+
             # Mapeamento da Coluna AG (índice 32)
             mapa_atualizacao[t] = row[32] if len(row) > 32 else ""
 
     todas = list(todas_originais)
     cat_fixas = [f for f in config.FIXAS_ACOES if f in todas and precisa_atualizar(f, mapa_atualizacao, agora_dt, sp_tz)]
-    
+
     opps_brutas, cat_novatas = [], []
     if not df.empty:
-        opps_brutas = df[(df['P/L'] > 0) & (df['P/L'] < 12) & (df['P/VP'] < 1.5) & (df['ROE'] >= 8.0)].index.tolist()
+        opps_brutas = df[(df['P/L'] > 0) & (df['P/L'] < 12) & (df['P/VP'] < 1.5) & (df['ROE'] >= 8.0)].index.tolist() # O ROE agora é um decimal pequeno (ex: 0.08)
         cat_opps = [o for o in opps_brutas if o in todas_originais and o not in cat_fixas and precisa_atualizar(o, mapa_atualizacao, agora_dt, sp_tz)][:5]
-        candidatas = df[(df['P/L']>=2)&(df['P/L']<=15)&(df['P/VP']>=0.2)&(df['P/VP']<=1.5)&(df['Div.Yield']>=6.0)&(df['ROE']>=10.0)].index.tolist()
+        # Adequação dos filtros matemáticos pois as porcentagens viraram decimais puros (Ex: 6.0% agora é 0.06)
+        candidatas = df[(df['P/L']>=2)&(df['P/L']<=15)&(df['P/VP']>=0.2)&(df['P/VP']<=1.5)&(df['Div.Yield']>=0.06)&(df['ROE']>=0.10)].index.tolist()
         cat_novatas = [c for c in candidatas if c not in todas][:2] 
         todas.extend(cat_novatas)
     else:
@@ -94,14 +115,15 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     for ticker in fila:
         linha_idx = todas.index(ticker) + 2
         try:
+            # 🟢 ALTERAÇÃO 3: Inserção do Sufixo da B3 para o Yahoo Finance (.SA)
             yf_info = yf.Ticker(f"{ticker}.SA").info
-            
+
             # 🔴 A MÁGICA ACONTECE AQUI: Ignoramos o Yahoo Finance e usamos o nosso Mapa Fixo!
             macro_setor, sub_setor = classificar_setor_por_mapa(ticker)
-            
+
             # A variável 'setor' agora recebe o nome perfeito e em português (Ex: "Materiais Básicos")
             setor = macro_setor
-            
+
             # Se a sua planilha também tiver uma coluna para Subsetor no futuro, 
             # a variável 'sub_setor' já está pronta para ser enviada (Ex: "Mineração").
 
@@ -154,7 +176,7 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
                 formatar(yf_info.get('marketCap', 0)),    # 30 | AF: Valor Mercado
                 f"{agora_sp}"                             # 31 | AG: Carimbo Atualização
             ]
-            
+
             if ticker in cat_novatas: batch_updates.append({'range': f'A{linha_idx}:AG{linha_idx}', 'values': [[ticker] + row_base]})
             else: batch_updates.append({'range': f'B{linha_idx}:AG{linha_idx}', 'values': [row_base]})
 
@@ -196,7 +218,7 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     if relatorio_opps: msg_blocos.append("🎯 *OPORTUNIDADES:*\n" + "\n\n".join(relatorio_opps))
     if relatorio_novatas: msg_blocos.append("🌟 *GARIMPADAS:*\n" + "\n\n".join(relatorio_novatas))
     if relatorio_atualizados: msg_blocos.append("🔄 *OUTRAS ATUALIZADAS:*\n" + "\n\n".join(relatorio_atualizados))
-    
+
     msg_out = "\n\n➖➖➖➖➖➖➖➖➖➖\n\n".join(msg_blocos) if batch_updates else ""
-    
+
     return batch_updates, msg_out, aba_base
