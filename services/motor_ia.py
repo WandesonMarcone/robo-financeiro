@@ -2,21 +2,17 @@ import json
 import os
 import config
 from bot.loader import bot
-from modules.leitor_pdf import extrair_texto_com_paginas # Importa a sua ferramenta de PDF
-
-# IMPORTANTE: Substitua pela biblioteca oficial da IA que você está usando (ex: groq, openai, requests)
-# Se estiver usando o Groq (Llama 3), por exemplo: from groq import Groq
-# client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+from modules.leitor_pdf import extrair_texto_com_paginas # Importa a ferramenta de PDF
 
 def processar_relatorio_com_ia(url_pdf, ticker):
     """
-    1. Extrai o texto do PDF usando a sua função com páginas marcadas.
-    2. Envia para a IA (Grok/Groq) estruturar os dados.
+    1. Extrai o texto do PDF usando a ferramenta com páginas marcadas.
+    2. Envia para a IA estruturar os dados.
     3. Envia o alerta formatado para o Telegram.
     """
     print(f"📄 [IA] Baixando e lendo o PDF de {ticker}...")
     texto_pdf = extrair_texto_com_paginas(url_pdf)
-    
+
     if not texto_pdf:
         print(f"❌ [IA] Falha ao extrair texto do PDF para {ticker}")
         return
@@ -36,20 +32,8 @@ def processar_relatorio_com_ia(url_pdf, ticker):
 
     try:
         print(f"🧠 [IA] Enviando dados para a Inteligência Artificial...")
-        
-        # --- AQUI VOCÊ FAZ A CHAMADA REAL DA SUA API GRATUITA (Grok/Groq) ---
-        # Exemplo com a biblioteca do Groq:
-        # chat_completion = client.chat.completions.create(
-        #     messages=[
-        #         {"role": "system", "content": prompt_sistema},
-        #         {"role": "user", "content": prompt_usuario}
-        #     ],
-        #     model="llama3-70b-8192", # ou o modelo do Grok que você utiliza
-        #     response_format={"type": "json_object"}
-        # )
-        # resposta_ia = chat_completion.choices[0].message.content
-        
-        # Simulação para validação do teste (remova quando conectar sua API real):
+
+        # Simulação para validação do teste (pode substituir pela API real do Groq/OpenAI/Gemini depois):
         resposta_ia = json.dumps({
             "resumo": f"O fundo {ticker} apresentou resiliência operacional, mantendo a adimplência em 100% e distribuindo dividendos consistentes aos cotistas.",
             "inquilinos": "Principais exposições concentradas em galpões logísticos de primeiríssima linha.",
@@ -59,7 +43,7 @@ def processar_relatorio_com_ia(url_pdf, ticker):
         # Converte a resposta da IA em um dicionário Python
         dados_analise = json.loads(resposta_ia)
 
-        # Monta a mensagem elegante para o Telegram (seguindo o padrão dos seus prints)
+        # Monta a mensagem elegante para o Telegram
         mensagem = f"""
 🚨 **Relatório Gerencial Analisado: {ticker}**
 
