@@ -1,4 +1,5 @@
 import fitz  # PyMuPDF
+import pdfplumber
 import requests
 import io
 
@@ -41,4 +42,33 @@ def extrair_texto_do_pdf(url_do_pdf):
 
     except Exception as e:
         print(f"⚠️ Erro ao extrair texto do PDF {url_do_pdf}: {e}")
+        return None
+
+def extrair_texto_com_paginas(url_do_pdf):
+    """
+    Baixa o PDF da B3/CVM em memória e extrai o texto, 
+    inserindo marcadores invisíveis de qual página o texto pertence.
+    """
+    try:
+        # Faz o download do PDF em tempo real sem precisar salvar no HD
+        response = requests.get(url_do_pdf, stream=True)
+        response.raise_for_status()
+        arquivo_pdf = io.BytesIO(response.content)
+        
+        texto_completo = ""
+        
+        # Abre o PDF na memória e extrai página por página
+        with pdfplumber.open(arquivo_pdf) as pdf:
+            for i, pagina in enumerate(pdf.pages):
+                texto_pagina = pagina.extract_text()
+                
+                if texto_pagina:
+                    # O PULO DO GATO: Carimba o número da página antes do texto
+                    texto_completo += f"\n\n--- [PÁGINA {i + 1}] ---\n\n"
+                    texto_completo += texto_pagina
+                    
+        return texto_completo
+        
+    except Exception as e:
+        print(f"❌ Erro ao ler o PDF {url_do_pdf}: {e}")
         return None
