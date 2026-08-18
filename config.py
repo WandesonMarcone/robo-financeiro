@@ -7,6 +7,11 @@ JSON_KEY = 'credenciais.json'
 # --- CONFIGURAÇÕES ---
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") 
 TELEGRAM_CHAT_ID = "8867098987"
+CHATS_AUTORIZADOS = [
+    c.strip()
+    for c in os.environ.get("TELEGRAM_CHATS_AUTORIZADOS", TELEGRAM_CHAT_ID).split(",")
+    if c.strip()
+]
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY") # CONFIG IA(GROQ)
 DATABASE_URL = os.environ.get("DATABASE_URL") # CONFIG BASE DE DADOS
 
