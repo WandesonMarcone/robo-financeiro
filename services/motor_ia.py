@@ -1,53 +1,84 @@
 import json
-from bot.loader import bot
+import os
 import config
+from bot.loader import bot
+from modules.leitor_pdf import extrair_texto_com_paginas # Importa a sua ferramenta de PDF
 
-# Aqui você usará a biblioteca da sua IA (Grok, Groq, etc)
-# Exemplo genérico de chamada:
-def chamar_ia_grok(texto_do_pdf):
-    prompt = f"""
-    Você é um analista financeiro sênior de Fundos Imobiliários.
-    Leia o texto extraído do Relatório Gerencial abaixo.
-    
-    Sua tarefa é me devolver APENAS um JSON (sem explicações adicionais) com as seguintes chaves:
-    1. "resumo": Um resumo de impacto de 3 linhas sobre as novidades do fundo (foco em vacância, dividendos e compras/vendas).
-    2. "inquilinos": Um dicionário com os 5 maiores inquilinos e suas porcentagens.
-    3. "pagina_fotos": O número da página onde estão as fotos dos imóveis ou o portfólio físico (procure por palavras como "Ativos", "Portfólio", "Imóveis").
+# IMPORTANTE: Substitua pela biblioteca oficial da IA que você está usando (ex: groq, openai, requests)
+# Se estiver usando o Groq (Llama 3), por exemplo: from groq import Groq
+# client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
-    Texto do Relatório:
-    {texto_do_pdf}
+def analisar_relatorio_fii(ticker, url_pdf):
     """
+    1. Extrai o texto do PDF usando a sua função com páginas marcadas.
+    2. Envia para a IA (Grok/Groq) estruturar os dados.
+    3. Envia o alerta formatado para o Telegram.
+    """
+    print(f"📄 [IA] Baixando e lendo o PDF de {ticker}...")
+    texto_pdf = extrair_texto_com_paginas(url_pdf)
     
-    # Lógica de chamada da sua API gratuita (Grok/Groq/etc) vai aqui
-    # ...
-    # resposta_ia = chamda_api(prompt)
-    
-    # Exemplo do que a IA vai devolver:
-    resposta_simulada = '''
+    if not texto_pdf:
+        print(f"❌ [IA] Falha ao extrair texto do PDF para {ticker}")
+        return
+
+    # O Prompt de Ouro: Força a IA a retornar estritamente um JSON estruturado
+    prompt_sistema = """
+    Você é um analista financeiro sênior especializado em Fundos Imobiliários (FIIs) brasileiros.
+    Analise o texto do Relatório Gerencial fornecido e extraia as informações estritamente no seguinte formato JSON puro (sem markdown extra, sem blocos de código com crases na resposta se possível, apenas o JSON válido):
     {
-        "resumo": "O fundo reduziu a vacância para 4% e adquiriu um novo galpão em Extrema-MG. O dividendo projetado aumentou para R$ 1,10.",
-        "inquilinos": {"Mercado Livre": 30, "Amazon": 20, "Assaí": 15},
-        "pagina_fotos": "14"
+        "resumo": "Um resumo de impacto de até 3 linhas focando em: variação de vacância, dividendos distribuídos e movimentação de ativos (compras/vendas).",
+        "inquilinos": "Resumo dos principais inquilinos ou concentração de receita (ex: Empresa X: 25%, Empresa Y: 15%).",
+        "pagina_fotos": "Número da página exata do PDF onde se encontram o portfólio físico, fotos dos imóveis ou mapa de localização."
     }
-    '''
-    return json.loads(resposta_simulada)
-
-def processar_relatorio_com_ia(ticker, texto_do_pdf, link_pdf):
-    """Envia para a IA e manda o alerta no Telegram"""
-    
-    dados = chamar_ia_grok(texto_do_pdf)
-    
-    mensagem = f"""
-🚨 **Novo Relatório Gerencial: {ticker}**
-
-📝 **Resumo IA:** {dados['resumo']}
-
-📊 *Gráfico de Inquilinos pode ser gerado.*
-
-📸 **Ação Manual Sugerida:** As fotos e detalhes dos imóveis físicos estão na **página {dados['pagina_fotos']}**. 
-🔗 [Clique aqui para abrir o PDF original]({link_pdf})
-
-⚙️ *Deseja aprovar e montar a arte do post? (/gerar_post {ticker})*
     """
-    
-    bot.send_message(config.TELEGRAM_CHAT_ID, mensagem, parse_mode="Markdown")
+
+    prompt_usuario = f"Ticker do Fundo: {ticker}\n\nTexto do Relatório:\n{texto_pdf}"
+
+    try:
+        print(f"🧠 [IA] Enviando dados para a Inteligência Artificial...")
+        
+        # --- AQUI VOCÊ FAZ A CHAMADA REAL DA SUA API GRATUITA (Grok/Groq) ---
+        # Exemplo com a biblioteca do Groq:
+        # chat_completion = client.chat.completions.create(
+        #     messages=[
+        #         {"role": "system", "content": prompt_sistema},
+        #         {"role": "user", "content": prompt_usuario}
+        #     ],
+        #     model="llama3-70b-8192", # ou o modelo do Grok que você utiliza
+        #     response_format={"type": "json_object"}
+        # )
+        # resposta_ia = chat_completion.choices[0].message.content
+        
+        # Simulação para validação do teste (remova quando conectar sua API real):
+        resposta_ia = json.dumps({
+            "resumo": f"O fundo {ticker} apresentou resiliência operacional, mantendo a adimplência em 100% e distribuindo dividendos consistentes aos cotistas.",
+            "inquilinos": "Principais exposições concentradas em galpões logísticos de primeiríssima linha.",
+            "pagina_fotos": "12"
+        })
+
+        # Converte a resposta da IA em um dicionário Python
+        dados_analise = json.loads(resposta_ia)
+
+        # Monta a mensagem elegante para o Telegram (seguindo o padrão dos seus prints)
+        mensagem = f"""
+🚨 **Relatório Gerencial Analisado: {ticker}**
+
+📝 **Resumo Inteligente:**
+{dados_analise['resumo']}
+
+🏢 **Inquilinos/Portfólio:**
+{dados_analise['inquilinos']}
+
+📸 **Destaque Visual:**
+As fotos e detalhes físicos dos imóveis estão na **página {dados_analise['pagina_fotos']}**.
+🔗 [Abrir PDF Original Completo]({url_pdf})
+
+⚙️ *Pronto para gerar a arte do post no sistema!*
+        """
+
+        # Envia para o seu canal/chat configurado no Telegram
+        bot.send_message(config.TELEGRAM_CHAT_ID, mensagem, parse_mode="Markdown")
+        print(f"✅ [IA] Análise de {ticker} enviada com sucesso para o Telegram!")
+
+    except Exception as e:
+        print(f"❌ [Erro na IA] Falha ao processar a IA para {ticker}: {e}")
