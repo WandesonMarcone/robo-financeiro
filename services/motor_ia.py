@@ -8,7 +8,7 @@ from modules.leitor_pdf import extrair_texto_com_paginas # Importa a sua ferrame
 # Se estiver usando o Groq (Llama 3), por exemplo: from groq import Groq
 # client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
-def analisar_relatorio_fii(ticker, url_pdf):
+def processar_relatorio_com_ia(url_pdf, ticker):
     """
     1. Extrai o texto do PDF usando a sua função com páginas marcadas.
     2. Envia para a IA (Grok/Groq) estruturar os dados.
