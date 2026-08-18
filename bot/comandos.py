@@ -13,6 +13,16 @@ from modules.utils import conectar_gspread
 from modules.scraper_fiis import rodar_garimpo_fiis # <--- Importe o arquivo que corrigimos
 
 # ==========================================
+# 🔒 UTILITÁRIOS DE SEGURANÇA
+# ==========================================
+def sanitizar_valor_planilha(valor):
+    """Neutraliza formula injection (ex.: =SUM, +cmd, -x, @x) antes de gravar no Google Sheets."""
+    texto = str(valor or "").strip()
+    if texto.startswith(("=", "+", "-", "@")):
+        return "'" + texto
+    return texto
+
+# ==========================================
 # 🧭 MENUS DE NAVEGAÇÃO E INTERFACE (UI)
 # ==========================================
 @bot.message_handler(commands=['menu', 'start'])
@@ -89,6 +99,12 @@ def comando_adicionar(message):
             return
 
         ticker = partes[1].strip().upper()
+        ticker = sanitizar_valor_planilha(ticker)
+
+        if not ticker or not ticker.isalnum() or len(ticker) > 10:
+            bot.reply_to(message, "❌ Ticker inválido. Use apenas letras e números (ex: BBAS3, MXRF11).")
+            return
+
         bot.reply_to(message, f"A procurar {ticker} e a injetar na Planilha do Google...")
 
         planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
@@ -419,17 +435,42 @@ def comando_mapear_nomes_b3(message):
 
 @bot.message_handler(commands=['resetar_docs'])
 def limpar_banco_documentos(message):
-    bot.send_message(message.chat.id, "💥 Iniciando a queima de arquivo do banco de dados...")
+    markup = InlineKeyboardMarkup()
+    markup.row(InlineKeyboardButton("💥 SIM, apagar tudo", callback_data="confirmar_reset"),
+               InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_reset"))
+    bot.send_message(
+        message.chat.id,
+        "💥 *ATENÇÃO:* isso apagará TODOS os registros de documentos do banco de dados. Essa ação é irreversível. Deseja continuar?",
+        parse_mode="Markdown",
+        reply_markup=markup,
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data in ("confirmar_reset", "cancelar_reset"))
+def tratar_reset_docs(call):
+    chat_id = call.message.chat.id
+    mensagem_id = call.message.message_id
+
+    if call.data == "cancelar_reset":
+        bot.answer_callback_query(call.id, "Operação cancelada.")
+        bot.edit_message_text("✅ Operação cancelada. Nenhum dado foi alterado.", chat_id, mensagem_id)
+        return
+
     try:
         from atualizador_documentos import SessionDB
         from pipeline_dados.banco_dados import DocumentosQualitativos
-        
+
         session = SessionDB()
         apagados = session.query(DocumentosQualitativos).delete()
         session.commit()
         session.close()
-        
-        bot.send_message(message.chat.id, f"✅ **Limpeza Concluída!**\n`{apagados}` registros de PDFs antigos foram apagados. O banco está virgem e pronto para o novo motor da IA.", parse_mode="Markdown")
-    except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Erro ao apagar: {e}")
 
+        bot.answer_callback_query(call.id, "Limpeza concluída.")
+        bot.edit_message_text(
+            f"✅ **Limpeza Concluída!**\n`{apagados}` registros de PDFs antigos foram apagados.",
+            chat_id,
+            mensagem_id,
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        bot.answer_callback_query(call.id, "Erro ao apagar.")
+        bot.edit_message_text(f"❌ Erro ao apagar: {e}", chat_id, mensagem_id)
