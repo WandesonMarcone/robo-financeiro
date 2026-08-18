@@ -40,6 +40,7 @@ openai
 groq
 PyPDF2
 PyMuPDF==1.23.21
+pdfplumber
 
 # ==========================================
 # 🗄️ BANCO DE DADOS E ARMAZENAMENTO EXTRA
