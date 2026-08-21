@@ -28,7 +28,7 @@ class LLMManager:
         # Lista de tentativas ordenadas por prioridade: (Provedor, Modelo)
         fila_modelos = [
             # --- GROQ (Gratuito e Ultra-rápido) ---
-            ("groq", os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")),
+            ("groq", os.environ.get("GROQ_MODEL", "llama3-70b-8192")),
             ("groq", "gemma2-9b-it"),            # Gemma 2 da Google
             ("groq", "mixtral-8x7b-32768"),       # Mistral / Mixtral
             
