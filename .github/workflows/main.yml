@@ -1,12 +1,35 @@
 name: Robô Financeiro
 
 on:
+  push:
   schedule:
     - cron: '0 13,15,17,19,21 * * 1-5'
   workflow_dispatch: 
 
 jobs:
+  quality:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Instalar ruff e pytest
+        run: pip install ruff pytest
+
+      - name: Lint (Ruff)
+        run: ruff check config.py main.py atualizador_documentos.py modules/seguranca.py bot/comandos.py bot/callbacks_revisao.py bot/confirmacoes.py services/orquestrador.py tests/
+
+      - name: Testes
+        run: pytest -v
+
   build:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout do código
@@ -41,4 +64,10 @@ jobs:
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
           DRIVE_ROOT_FOLDER_ID: ${{ secrets.DRIVE_ROOT_FOLDER_ID }}
+          # Planilha e espelhamento PostgreSQL (config.py lê do ambiente)
+          GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ESPELHAMENTO_PG_ATIVO: ${{ secrets.ESPELHAMENTO_PG_ATIVO }}
         run: python app.py
+
