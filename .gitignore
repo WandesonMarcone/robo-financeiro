@@ -1,6 +1,110 @@
+# =========================
+# SEGREDOS E CREDENCIAIS
+# =========================
 .env
-*.json
+.env.*
+!.env.example
+*.env
+credenciais.json
+credentials.json
+service-account.json
+*credentials*.json
+*secret*.json
+
+# Chaves e certificados
+*.pem
+*.key
+*.p12
+
+# =========================
+# PYTHON
+# =========================
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
+*.so
+
+# Ambientes virtuais
+.venv/
+venv/
+env/
+ENV/
+
+# =========================
+# TESTES / COBERTURA
+# =========================
+.pytest_cache/
+.coverage
+htmlcov/
+.coverage.*
+coverage.xml
+
+# =========================
+# FERRAMENTAS
+# =========================
+.ruff_cache/
+.mypy_cache/
+.pyre/
+.pytype/
+
+# =========================
+# IDE
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# =========================
+# SISTEMA OPERACIONAL
+# =========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =========================
+# BANCO DE DADOS LOCAL
+# =========================
 *.db
+*.sqlite
+*.sqlite3
+
+# =========================
+# LOGS
+# =========================
+*.log
+logs/
+
+# =========================
+# ARQUIVOS TEMPORÁRIOS
+# =========================
+tmp/
+temp/
+*.tmp
+*.bak
+*.backup
+
+# =========================
+# ARQUIVOS GERADOS
+# =========================
+*.zip
+*.tar
+*.tar.gz
+
+# =========================
+# ARTEFATOS DE BUILD
+# =========================
+build/
+dist/
+*.egg-info/
+
+# =========================
+# DADOS LOCAIS
+# =========================
+data/local/
+dados/local/
+
+# =========================
+# ARQUIVOS DE SISTEMAS LOCAIS
+# =========================
+.DS_Store
