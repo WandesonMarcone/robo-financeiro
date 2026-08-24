@@ -1,7 +1,7 @@
 import os
 import io
 from datetime import datetime
-from io import BytesIO 
+from io import BytesIO
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload
@@ -64,7 +64,7 @@ class GoogleDriveManager:
         }
 
         try:
-            mes_ref_limpo = str(mes_ref).strip().split(' ')[0] 
+            mes_ref_limpo = str(mes_ref).strip().split(' ')[0]
 
             if '-' in mes_ref_limpo:
                 partes = mes_ref_limpo.split('-')
@@ -119,10 +119,10 @@ class GoogleDriveManager:
         """Salva o PDF temporariamente na pasta '⚠️ REVISÃO' (dentro da raiz 'Documentos')"""
         try:
             print(f"🚧 Enviando {nome_arquivo} para a pasta de REVISÃO...")
-            
+
             # 1. Garante a existência da pasta raiz "Documentos"
             doc_raiz_id = self._obter_ou_criar_pasta("Documentos", self.root_folder_id)
-            
+
             # 2. Cria ou localiza a pasta de REVISÃO dentro de "Documentos"
             revisao_id = self._obter_ou_criar_pasta("⚠️ REVISÃO", parent_id=doc_raiz_id)
 
@@ -145,7 +145,7 @@ class GoogleDriveManager:
         """Arrasta um arquivo do Limbo para a pasta oficial (Blindado com nova hierarquia)"""
         try:
             ano, mes = self._limpar_e_extrair_ano_mes(mes_ref)
-            
+
             doc_raiz_id = self._obter_ou_criar_pasta("Documentos", self.root_folder_id)
             pasta_tipo = "Ações" if str(tipo_ativo).upper() == "ACAO" else "Fundos Imobiliários"
             tipo_id = self._obter_ou_criar_pasta(pasta_tipo, parent_id=doc_raiz_id)
@@ -187,8 +187,8 @@ class GoogleDriveManager:
 
             self.service.files().update(
                 fileId=file_id,
-                addParents=pasta_mes_id,          
-                removeParents=pastas_antigas,     
+                addParents=pasta_mes_id,
+                removeParents=pastas_antigas,
                 fields='id, parents'
             ).execute()
 
@@ -267,5 +267,5 @@ class GoogleDriveManager:
             self.service.permissions().create(fileId=file_id, body={'type': 'anyone', 'role': 'reader'}).execute()
             link_final = self.service.files().get(fileId=file_id, fields='webViewLink').execute()
             return link_final.get('webViewLink')
-        except Exception as e:
+        except Exception:
             return None

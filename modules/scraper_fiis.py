@@ -16,19 +16,19 @@ def classificar_fii_e_emoji(setor, ticker):
     """
     s = str(setor).upper()
     t = str(ticker).upper()
-    
+
     # Exceções blindadas para fundos que os sites classificam errado
     if t in ["MXRF11"]: return "Híbrido", "🧩"
     if t in ["GARE11"]: return "Tijolo", "🧱"
-    
+
     # Classificação baseada no JSON de portfólio
-    if any(x in s for x in ["TÍTULOS", "PAPEL", "RECEBÍVEL", "VALORES MOBILIÁRIOS", "CRI", "LCI", "CRA", "CERTIFICADOS"]): 
+    if any(x in s for x in ["TÍTULOS", "PAPEL", "RECEBÍVEL", "VALORES MOBILIÁRIOS", "CRI", "LCI", "CRA", "CERTIFICADOS"]):
         return "Papel", "📜"
-    if any(x in s for x in ["FUNDO DE FUNDOS", "FOF", "COTAS DE FUNDOS"]): 
+    if any(x in s for x in ["FUNDO DE FUNDOS", "FOF", "COTAS DE FUNDOS"]):
         return "FOF", "🔄"
-    if any(x in s for x in ["HÍBRIDO", "MISTO"]): 
+    if any(x in s for x in ["HÍBRIDO", "MISTO"]):
         return "Híbrido", "🧩"
-        
+
     return "Tijolo", "🧱"
 
 def buscar_dados_profundos_fii(ticker):
@@ -42,7 +42,7 @@ def buscar_dados_profundos_fii(ticker):
         "principais_inquilinos": "Não informado / Não aplicável",
         "segmento_real": None
     }
-    
+
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
@@ -54,7 +54,7 @@ def buscar_dados_profundos_fii(ticker):
         url_json = f"https://statusinvest.com.br/fii/portfolio-segment-chart?ticker={ticker.lower()}"
         headers_json = headers.copy()
         headers_json['X-Requested-With'] = 'XMLHttpRequest'
-        
+
         resp_json = requests.get(url_json, headers=headers_json, timeout=10)
         if resp_json.status_code == 200:
             dados_json = resp_json.json()
@@ -85,7 +85,7 @@ def buscar_dados_profundos_fii(ticker):
                     if titulo and valor and 'segmento' in titulo.text.lower():
                         if valor.text.strip() != '-':
                             resultado["segmento_real"] = valor.text.strip()
-            
+
             # Busca Vacância e Imóveis
             cards_info = soup.find_all('div', class_='info')
             for card in cards_info:
@@ -119,13 +119,13 @@ def buscar_dados_profundos_fii(ticker):
                             colunas = linha.find_all('td')
                             if len(colunas) >= 2:
                                 nome_inquilino = colunas[0].text.strip()
-                                porcentagem = colunas[-1].text.strip() 
+                                porcentagem = colunas[-1].text.strip()
                                 lista_inquilinos.append(f"{nome_inquilino} ({porcentagem})")
 
                         if lista_inquilinos:
                             resultado["principais_inquilinos"] = ", ".join(lista_inquilinos)
-                        break 
-                        
+                        break
+
     except Exception as e:
         print(f"Erro HTML para {ticker}: {e}")
 
@@ -139,7 +139,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     fila_total = []
     oportunidades_gerais = []
     novatos_garimpados = []
-    
+
     try:
         url = "https://www.fundamentus.com.br/fii_resultado.php"
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -149,7 +149,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
         df = df.set_index('Papel')
         for col in ['Cotação', 'P/VP', 'Dividend Yield', 'Liquidez', 'Vacância Média', 'Valor de Mercado', 'Qtd de imóveis']:
             if col in df.columns: df[col] = df[col].apply(formatar)
-    except Exception as e:
+    except Exception:
         df = pd.DataFrame()
 
     dados_planilha = aba_fiis.get_all_values()
@@ -157,7 +157,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     mapa_atualizacao = {}
     precos_antigos = {}
 
-    for row in dados_planilha[1:]: 
+    for row in dados_planilha[1:]:
         if row and row[0].strip():
             t = row[0].strip().upper()
             tickers_planilha.append(t)
@@ -167,15 +167,15 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
                     precos_antigos[t] = float(raw_val) if raw_val else 0.0
                 else: precos_antigos[t] = 0.0
             except: precos_antigos[t] = 0.0
-            mapa_atualizacao[t] = row[17] if len(row) > 17 else "" 
+            mapa_atualizacao[t] = row[17] if len(row) > 17 else ""
 
     cat_fixas = [f for f in config.FIXAS_FIIS if f in tickers_planilha and precisa_atualizar(f, mapa_atualizacao, agora_dt, sp_tz)]
 
     if not df.empty:
         df_cacador = df[
             (df['P/VP'] >= 0.85) & (df['P/VP'] <= 1.01) &
-            (df['Dividend Yield'] >= 0.095) & (df['Liquidez'] >= 5000000) &  
-            (df['Vacância Média'] <= 0.10)                 
+            (df['Dividend Yield'] >= 0.095) & (df['Liquidez'] >= 5000000) &
+            (df['Vacância Média'] <= 0.10)
         ]
         oportunidades_gerais = df_cacador.sort_values(by='Dividend Yield', ascending=False).index.tolist()
         novatos_garimpados = [fii for fii in oportunidades_gerais if fii not in tickers_planilha and fii not in cat_fixas][:3]
@@ -187,8 +187,8 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     # 2. DEFINIÇÃO DA FILA ANTES DE QUALQUER PRINT
     fila_total = cat_fixas + novatos_garimpados + cat_desatualizadas
     print(f"DEBUG: Tamanho da fila para varredura: {len(fila_total)}")
-    
-    if not fila_total: 
+
+    if not fila_total:
         return [], "", aba_fiis
 
     batch_updates = []
@@ -196,7 +196,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     relatorio_opps = []
     relatorio_atualizados = []
     relatorio_fixas_opps = []
-    proxima_linha_vazia = len(dados_planilha) + 1 
+    proxima_linha_vazia = len(dados_planilha) + 1
 
     for ticker in fila_total:
         try:
@@ -205,17 +205,17 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
 
             if not df.empty and ticker in df.index:
                 f = df.loc[ticker]
-                if isinstance(f, pd.DataFrame): f = f.iloc[0] 
+                if isinstance(f, pd.DataFrame): f = f.iloc[0]
             else: f = {}
 
             preco_fundamentus = formatar(f.get('Cotação', 0))
             preco = preco_yf if preco_yf > 0 else preco_fundamentus
-            
+
             pvp = formatar(f.get('P/VP', 0))
             dy = formatar(f.get('Dividend Yield', 0))
             liquidez = formatar(f.get('Liquidez', 0))
             valor_mercado = formatar(f.get('Valor de Mercado', 0))
-            
+
             # API JSON
             dados_profundos = buscar_dados_profundos_fii(ticker)
             setor = dados_profundos["segmento_real"] if dados_profundos["segmento_real"] else f.get('Segmento', 'N/D')
@@ -228,7 +228,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             vpa = (preco / pvp) if pvp > 0 else 0
             numero_cotas = (valor_mercado / preco) if preco > 0 else 0
             media_div_mensal = (preco * dy) / 12
-            lucro_12m = valor_mercado * dy 
+            lucro_12m = valor_mercado * dy
 
             # =========================================================================
             # 🗺️ MAPEAMENTO COMPLETO (Agora com 18 Colunas: Distribuição de A até R)
@@ -244,7 +244,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
                 vacancia,               # 07 | Coluna H: Vacância Física/Financeira Média
                 qtd_imoveis,            # 08 | Coluna I: Quantidade Física de Imóveis
                 inquilinos_planilha,     # 09 | Coluna J: LISTA DE INQUILINOS
-                "Pendente de IA",       # 10 | Coluna K: WALT 
+                "Pendente de IA",       # 10 | Coluna K: WALT
                 "Pendente de IA",       # 11 | Coluna L: Alavancagem / Dívida
                 liquidez,               # 12 | Coluna M: Liquidez Média Diária Negociada
                 valor_mercado,          # 13 | Coluna N: Patrimônio Líquido Total
@@ -254,7 +254,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
                 f"{agora_sp}"             # 17 | Coluna R: Carimbo de Conclusão da Carga
             ]
 
-            row_update_parcial = row_update_completo[1:] 
+            row_update_parcial = row_update_completo[1:]
 
             if ticker in tickers_planilha:
                 linha_idx = tickers_planilha.index(ticker) + 2

@@ -18,9 +18,9 @@ def criar_grafico_dividendos(ticker, caminho_saida="grafico_div.png"):
 
         # Filtra apenas os dias que efetivamente pagaram dividendos
         dividendos = historico[historico['Dividends'] > 0]['Dividends']
-        
+
         # Pega apenas os últimos 6 pagamentos para o gráfico não ficar espremido
-        dividendos = dividendos.tail(6) 
+        dividendos = dividendos.tail(6)
 
         # Formata as datas (Ex: de '2023-10-15' para '10/23')
         datas = [d.strftime("%m/%y") for d in dividendos.index]
@@ -28,8 +28,8 @@ def criar_grafico_dividendos(ticker, caminho_saida="grafico_div.png"):
 
         # --- INÍCIO DA CRIAÇÃO DO GRÁFICO ---
         # Tamanho (6x3) proporcional para caber no canto inferior do seu Post do Instagram
-        fig, ax = plt.subplots(figsize=(6, 3)) 
-        
+        fig, ax = plt.subplots(figsize=(6, 3))
+
         # MÁGICA: Deixa o fundo do gráfico e da imagem transparentes (Alpha = 0.0)
         fig.patch.set_alpha(0.0)
         ax.patch.set_alpha(0.0)
@@ -40,12 +40,12 @@ def criar_grafico_dividendos(ticker, caminho_saida="grafico_div.png"):
         # Escreve o valor em Reais (R$) no topo de cada barrazinha
         for barra in barras:
             yval = barra.get_height()
-            ax.text(barra.get_x() + barra.get_width()/2, yval + 0.01, f"R$ {yval:.2f}", 
+            ax.text(barra.get_x() + barra.get_width()/2, yval + 0.01, f"R$ {yval:.2f}",
                     ha='center', va='bottom', color='white', fontsize=12, fontweight='bold')
 
         # Estiliza as letras e linhas (Branco para contrastar com seu template escuro)
         ax.tick_params(axis='x', colors='white', labelsize=14)
-        
+
         # Removemos os números laterais (eixo Y) e as bordas de cima e direita para ficar mais "limpo"
         ax.get_yaxis().set_visible(False)
         ax.spines['top'].set_visible(False)
@@ -54,11 +54,11 @@ def criar_grafico_dividendos(ticker, caminho_saida="grafico_div.png"):
         ax.spines['bottom'].set_color('white') # Linha do chão branca
 
         plt.tight_layout()
-        
+
         # Salva o arquivo final em alta resolução (300 dpi)
         plt.savefig(caminho_saida, transparent=True, dpi=300)
         plt.close()
-        
+
         print(f"✅ Gráfico gerado com sucesso: {caminho_saida}")
         return True
 

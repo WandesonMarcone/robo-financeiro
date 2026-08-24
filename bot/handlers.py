@@ -37,10 +37,10 @@ def callback_selecionar_segmento(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('setor_fii_'))
 def callback_listar_ativos_fii(call):
     """Lista os FIIs do segmento e adiciona os marcadores visuais avançados"""
-    
+
     # CORREÇÃO: Extração segura do nome do setor, garantindo que espaços (como "Renda Urbana") não quebrem a string
     nome_setor = call.data.replace('setor_fii_', '').strip()
-    
+
     bot.answer_callback_query(call.id, f"Buscando ativos de {nome_setor}...")
 
     matriz = buscar_dados_planilha_com_cache("BD_FIIs")
@@ -51,10 +51,10 @@ def callback_listar_ativos_fii(call):
         # TRAVA DE SEGURANÇA: Se a linha estiver vazia, o bot pula para a próxima sem travar
         if len(linha) < 3:
             continue
-            
+
         ticker = linha[0].strip()
         tipo_fundo = linha[1].strip()
-        
+
         # Corta a barra e limpa espaços novamente para comparar corretamente
         segmentos_do_fundo = [s.strip() for s in linha[2].split('/')]
 
@@ -68,7 +68,7 @@ def callback_listar_ativos_fii(call):
             # CENÁRIO 1: Fundo com múltiplos segmentos (Ex: GARE11)
             if len(segmentos_do_fundo) > 1:
                 # Futuro: Aqui você puxará a % raspada ou da coluna da planilha
-                # Ex: porcentagem = linha[10] 
+                # Ex: porcentagem = linha[10]
                 texto_botao = f"{ticker} (*Misto/Múltiplo)"
                 # porcentagem = linha[10].strip() # Extrai o valor real da planilha
                 # texto_botao = f"{ticker} (*{porcentagem}% {nome_setor})"
@@ -97,23 +97,23 @@ def callback_listar_ativos_fii(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('setor_acao_'))
 def callback_listar_ativos_acao(call):
     """Lê a aba BD_Acoes e lista as empresas que pertencem ao setor clicado"""
-    
+
     # CORREÇÃO: Extração segura do setor (idêntica à lógica que corrigimos para os FIIs)
     nome_setor = call.data.replace('setor_acao_', '').strip()
-    
+
     bot.answer_callback_query(call.id, f"Buscando ações de {nome_setor}...")
 
     matriz = buscar_dados_planilha_com_cache("BD_Acoes")
-    markup = InlineKeyboardMarkup(row_width=3) 
+    markup = InlineKeyboardMarkup(row_width=3)
     botoes_ativos = []
 
     for linha in matriz[1:]:
         # SEGURANÇA: Verifica se a linha tem colunas suficientes
         if len(linha) < 1: continue
-            
+
         ticker = linha[0].strip()
         # Lê a coluna de setor (Ajustado para índice 1, como você mencionou no código)
-        setor_da_linha = linha[1].strip() 
+        setor_da_linha = linha[1].strip()
 
         if setor_da_linha == nome_setor:
             # Adiciona o botão da ação na lista
@@ -177,7 +177,7 @@ def callback_raiox_docs(call):
 
         # Agrupamento de Tipos (VERSÃO COM LIMPEZA DE IA)
         tipos_docs_brutos = session.query(
-            DocumentosQualitativos.tipo_documento, 
+            DocumentosQualitativos.tipo_documento,
             func.count(DocumentosQualitativos.id)
         ).filter(DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%"))\
          .group_by(DocumentosQualitativos.tipo_documento).all()
@@ -188,7 +188,7 @@ def callback_raiox_docs(call):
             tipo_limpo = re.sub(r'\d+', '', str(tipo_bruto)).strip() if tipo_bruto else "Outros"
             # Remove underlines e hífens residuais, e padroniza as maiúsculas
             nome_bonito = tipo_limpo.replace("_", " ").replace("-", "").strip().title()
-            
+
             # Soma no dicionário (agora o Fato Relevante 90 soma no Fato Relevante normal)
             contagem_tipos[nome_bonito] = contagem_tipos.get(nome_bonito, 0) + quantidade
 
@@ -283,15 +283,16 @@ def callback_menu_inteligencia(call):
     except Exception as e:
         print(f"Aviso: Timeout do botão no Telegram ignorado. {e}")
 
-    
+
     mensagem_espera = f"🧠 **Central de IA: {ticker}**\n\n⏳ _Analisando relatórios e estruturando dados..._"
     bot.edit_message_text(mensagem_espera, call.message.chat.id, call.message.message_id, parse_mode="Markdown")
 
+    session = None
     try:
         from atualizador_documentos import SessionDB
         from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
         from modules.module_ia import analisar_fatos_com_ia, construir_prompt_interativo
-        
+
         session = SessionDB()
         ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
 
@@ -308,13 +309,13 @@ def callback_menu_inteligencia(call):
         resumo_docs = ""
         for d in docs_recentes:
             data_str = d.data_publicacao.strftime('%d/%m/%Y') if d.data_publicacao else "Sem Data"
-            
+
             # Se o documento tiver texto extraído (RAG), usa os primeiros 3000 caracteres. Senão, usa o assunto.
             if d.texto_extraido:
                 conteudo = str(d.texto_extraido)[:3000] + "..."
             else:
                 conteudo = str(d.assunto) if d.assunto else "Sem informações detalhadas."
-                
+
             resumo_docs += f"--- {d.tipo_documento} ({data_str}) ---\n{conteudo}\n\n"
 
         if not resumo_docs.strip():
@@ -322,13 +323,13 @@ def callback_menu_inteligencia(call):
 
         # Pede para o novo módulo de IA montar a pergunta exata
         prompt = construir_prompt_interativo(ticker, tipo, topico, resumo_docs)
-        
+
         # Dispara para a Groq/OpenAI
         resposta_ia = analisar_fatos_com_ia(prompt)
 
         # Monta os botões do Menu Interativo com base no Tipo (Ação ou FII)
         markup = InlineKeyboardMarkup(row_width=2)
-        
+
         if tipo == "fii":
             markup.add(
                 InlineKeyboardButton("🏢 Visão & Ativos", callback_data=f"ia_{ticker}_fii_visao"),
@@ -343,16 +344,16 @@ def callback_menu_inteligencia(call):
                 InlineKeyboardButton("💰 Dividendos", callback_data=f"ia_{ticker}_acao_dividendos"),
                 InlineKeyboardButton("🎯 Parecer", callback_data=f"ia_{ticker}_acao_parecer")
             )
-            
+
         markup.add(InlineKeyboardButton(f"🔙 Voltar ao Painel do {ticker}", callback_data=f"painel_{ticker}_{tipo}"))
 
         # Formatação final da resposta
         titulos = {
             "resumo": "Micro-Resumo", "visao": "Visão Geral & Ativos", "proventos": "Rendimentos e Proventos",
-            "riscos": "Fatores de Risco", "negocios": "Modelo de Negócios", "saude": "Saúde Financeira", 
+            "riscos": "Fatores de Risco", "negocios": "Modelo de Negócios", "saude": "Saúde Financeira",
             "dividendos": "Política de Dividendos", "parecer": "Parecer Executivo"
         }
-        
+
         texto_final = f"🧠 **Inteligência Artificial: {ticker}**\n📍 *{titulos.get(topico, 'Análise')}*\n\n{resposta_ia}"
         try:
             bot.edit_message_text(texto_final, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
@@ -361,11 +362,12 @@ def callback_menu_inteligencia(call):
                 bot.edit_message_text(texto_final, call.message.chat.id, call.message.message_id, reply_markup=markup)
             else:
                 bot.edit_message_text(f"❌ Erro na IA: `{str(e)[:100]}`", call.message.chat.id, call.message.message_id)
-                
+
     except Exception as e:
         bot.edit_message_text(f"❌ Erro na IA: `{str(e)[:150]}`", call.message.chat.id, call.message.message_id)
     finally:
-        session.close()
+        if session is not None:
+            session.close()
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("ajuda_cvm_"))
 def menu_duvidas_cvm(call):
@@ -375,7 +377,7 @@ def menu_duvidas_cvm(call):
     tela = partes[3] # Pode ser: menu, bp, dre, fco
 
     markup = InlineKeyboardMarkup(row_width=2)
-    
+
     if tela == "menu":
         texto = "📖 *Dicionário Financeiro CVM*\n\nEscolha qual grupo de indicadores você deseja entender:"
         markup.add(

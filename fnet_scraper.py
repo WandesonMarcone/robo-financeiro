@@ -26,7 +26,7 @@ class FnetDownloader:
             res.raise_for_status()
             if 'application/pdf' not in res.headers.get('Content-Type', ''):
                 return None
-            return res.content 
+            return res.content
         except Exception:
             return None
 
@@ -40,8 +40,8 @@ class FnetDownloader:
         # Limite reduzido para 2000 por categoria. Seguro e não dá ban na B3.
         for start in range(0, 5000, 50):
             params = {
-                'd': '1', 's': str(start), 'l': '50', 
-                'tipoFundo': '1', 
+                'd': '1', 's': str(start), 'l': '50',
+                'tipoFundo': '1',
                 'dataInicial': data_inicio,
             }
 
@@ -50,7 +50,7 @@ class FnetDownloader:
                 data = res.json().get('data', [])
 
                 if not data:
-                    break 
+                    break
 
                 for item in data:
                     descricao_fundo = item.get('descricaoFundo', '').upper()
@@ -69,7 +69,7 @@ class FnetDownloader:
                         })
 
                 time.sleep(1.5) # Pausa maior (1.5s) para o Firewall da B3 não nos pegar
-            except Exception as e:
+            except Exception:
                 break
 
         return documentos_gerais

@@ -12,7 +12,7 @@ class LLMManager:
         # (Aceita qualquer servidor que siga o padrão da OpenAI)
         self.openai_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY", "ollama")
         self.openai_base_url = os.environ.get("OPENAI_BASE_URL") # Ex: https://openrouter.ai/api/v1 ou http://localhost:11434/v1
-        
+
         if self.openai_key or self.openai_base_url:
             self.openai_client = OpenAI(
                 api_key=self.openai_key,
@@ -28,10 +28,10 @@ class LLMManager:
         # Lista de tentativas ordenadas por prioridade: (Provedor, Modelo)
         fila_modelos = [
             # --- GROQ (Gratuito e Ultra-rápido) ---
-            ("groq", os.environ.get("GROQ_MODEL", "llama3-70b-8192")),
+            ("groq", os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")),
             ("groq", "gemma2-9b-it"),            # Gemma 2 da Google
             ("groq", "mixtral-8x7b-32768"),       # Mistral / Mixtral
-            
+
             # --- OPENROUTER / GPT OSS / OPENAI / OLLAMA ---
             ("openai", "gpt-4o-mini"),
             ("openai", "deepseek/deepseek-r1"),   # Exemplo de GPT OSS no OpenRouter

@@ -1,0 +1,17 @@
+line-length = 120
+target-version = "py311"
+exclude = ["__pycache__", ".git", ".venv"]
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = [
+    "E501",  # linha longa: tratado com tolerância no projeto legado
+    "E741",  # nomes ambíguos (l, O, I)
+    "B008",  # defaults chamáveis em argumentos
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["E402"]
+# Entrypoint: os imports do Flask/bot/agendador são intencionalmente colocados
+# após a migração legada do SQLite e a validação de configuração do startup.
+"main.py" = ["E402"]

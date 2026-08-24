@@ -1,13 +1,16 @@
 import re
 from datetime import datetime
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+from atualizador_documentos import SessionDB
 
 # Imports da nossa nova arquitetura
 from bot.loader import bot
-from config import TIPOS_DOC_FII, TIPOS_DOC_ACAO
-from atualizador_documentos import SessionDB
-from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
+from config import TIPOS_DOC_ACAO, TIPOS_DOC_FII
+from modules import seguranca
 from modules.GoogleDriveManager import GoogleDriveManager
+from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 
 # Instancia o gerenciador do Drive exclusivo para este módulo
 drive_manager = GoogleDriveManager()
@@ -20,6 +23,9 @@ def extrair_file_id(url):
 # O comando e a tela de abertura moram aqui agora, pertinho dos callbacks!
 @bot.message_handler(commands=['revisao'])
 def comando_painel_revisao(message):
+    if not seguranca.eh_admin(message.from_user.id):
+        seguranca.negar_acesso(bot, message, "ADMIN")
+        return
     enviar_painel_tickers(message.chat.id)
 
 def enviar_painel_tickers(chat_id, message_id=None):
@@ -31,8 +37,10 @@ def enviar_painel_tickers(chat_id, message_id=None):
 
         if not pendentes:
             msg = "🎉 Excelente! A sua mesa está limpa. Não há documentos aguardando revisão."
-            if message_id: bot.edit_message_text(msg, chat_id, message_id)
-            else: bot.send_message(chat_id, msg)
+            if message_id:
+                bot.edit_message_text(msg, chat_id, message_id)
+            else:
+                bot.send_message(chat_id, msg)
             return
 
         # Agrupa pelos tickers únicos
@@ -42,14 +50,14 @@ def enviar_painel_tickers(chat_id, message_id=None):
         for t in tickers_unicos:
             docs_do_ativo = [d for d in pendentes if d.ativo.ticker == t]
             qtd = len(docs_do_ativo)
-            
+
             # Descobre se é Ação ou FII só pelo primeiro documento da lista
             primeiro_ativo = docs_do_ativo[0].ativo
             tipo_ativo = getattr(primeiro_ativo.tipo, 'name', str(primeiro_ativo.tipo).replace("TipoAtivo.", "")).upper()
-            
+
             # Coloca um ícone visual para você saber o que está abrindo!
             icone = "🏢" if tipo_ativo == "FII" else "📈"
-            
+
             markup.add(InlineKeyboardButton(text=f"{icone} {t} ({qtd} docs)", callback_data=f"rev_t_{t}"))
 
         msg = "⚠️ **Central de Revisão Híbrida**\n\nEstes FIIs e Ações possuem documentos pendentes. Selecione um para analisar:"
@@ -75,9 +83,9 @@ def processar_revisao(call):
 
         # AÇÃO: Mostrar lista de documentos suspeitos de um ativo específico
         elif acao == 't':
-            ticker = partes[2] 
+            ticker = partes[2]
             pendentes = session.query(DocumentosQualitativos).join(Ativo).filter(
-                Ativo.ticker == ticker, 
+                Ativo.ticker == ticker,
                 DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
             ).all()
 
@@ -85,7 +93,7 @@ def processar_revisao(call):
                 bot.answer_callback_query(call.id, "Nenhum documento pendente para este ativo.")
                 enviar_painel_tickers(call.message.chat.id, call.message.message_id)
                 return
-            
+
             bot.answer_callback_query(call.id, f"Carregando documentos de {ticker}...")
 
             markup = InlineKeyboardMarkup()
@@ -98,14 +106,14 @@ def processar_revisao(call):
                 else:
                     data_limpa = doc.data_publicacao.strftime("%d/%m/%y") if doc.data_publicacao else "Data N/A"
                     resumo_cru = doc.assunto
-                
+
                 # 2. Se não tem assunto preenchido, usa o tipo_documento
                 if not resumo_cru or resumo_cru.strip() == "":
                     resumo_cru = doc.tipo_documento if doc.tipo_documento else "Doc sem título"
-                    
+
                 # 3. Corta para não estourar a tela do celular (25 caracteres no máximo)
                 resumo_curto = (resumo_cru[:25] + "..").strip() if len(resumo_cru) > 25 else resumo_cru.strip()
-                
+
                 # Botão final perfeito e limpo!
                 btn_text = f"📄 {data_limpa} | {resumo_curto}"
                 markup.add(InlineKeyboardButton(text=btn_text, callback_data=f"rev_d_{doc.id}"))
@@ -162,7 +170,8 @@ def processar_revisao(call):
                     try:
                         ano, mes, dia = data_limpa.split('-')
                         data_exibicao = f"{dia}/{mes}/{ano}"
-                    except: pass
+                    except Exception:
+                        pass
 
             txt = (
                 f"🔍 **Inspecionando Documento**\n\n"
@@ -200,6 +209,10 @@ def processar_revisao(call):
 
         # AÇÃO: A MÁGICA - Renomeia no Drive, move de pasta e atualiza o Banco de Dados
         elif acao == 'typ':
+            if not seguranca.eh_admin(call.from_user.id):
+                bot.answer_callback_query(call.id, "Acesso negado.", show_alert=True)
+                return
+
             doc_id = partes[2]
             tipo_cat = partes[3] # 'ACAO' ou 'FII'
             tipo_id = partes[4]
@@ -217,11 +230,13 @@ def processar_revisao(call):
 
             mes_ref = datetime.now().strftime("%Y-%m")
             if doc.assunto and '-' in doc.assunto:
-                assunto_limpo = doc.assunto.split(" ")[0] 
+                assunto_limpo = doc.assunto.split(" ")[0]
                 p = assunto_limpo.split('-')
-                if len(p) == 3: 
-                    if len(p[2]) == 4: mes_ref = f"{p[2]}-{p[1]}" 
-                    elif len(p[0]) == 4: mes_ref = f"{p[0]}-{p[1]}" 
+                if len(p) == 3:
+                    if len(p[2]) == 4:
+                        mes_ref = f"{p[2]}-{p[1]}"
+                    elif len(p[0]) == 4:
+                        mes_ref = f"{p[0]}-{p[1]}"
 
             assunto_limpo_pdf = doc.assunto.split(" ")[0] if doc.assunto else "Doc"
             sufixo = f"_{doc.id_b3}" if doc.id_b3 else ""
@@ -254,7 +269,7 @@ def processar_revisao(call):
                 # --- DAQUI PARA BAIXO SEGUE O SEU CÓDIGO DA CONTAGEM DE PENDENTES QUE JÁ ESTÁ PERFEITO ---
                 ticker = doc.ativo.ticker
                 pendentes_restantes = session.query(DocumentosQualitativos).join(Ativo).filter(
-                    Ativo.ticker == ticker, 
+                    Ativo.ticker == ticker,
                     DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO"
                 ).count()
 
@@ -282,13 +297,17 @@ def processar_revisao(call):
 
         # AÇÃO: Usuário decidiu que o documento era lixo
         elif acao == 'del':
+            if not seguranca.eh_admin(call.from_user.id):
+                bot.answer_callback_query(call.id, "Acesso negado.", show_alert=True)
+                return
+
             bot.answer_callback_query(call.id, "Apagando do Drive...")
             doc_id = partes[2]
             doc = session.query(DocumentosQualitativos).get(doc_id)
-            
+
             # Guardamos o ticker ANTES de deletar para o botão de voltar não quebrar
-            ticker_atual = doc.ativo.ticker 
-            
+            ticker_atual = doc.ativo.ticker
+
             file_id = extrair_file_id(doc.url_pdf)
 
             # Só tenta deletar no drive se tiver um link válido
@@ -301,9 +320,9 @@ def processar_revisao(call):
             if deletou_drive:
                 doc.status_processamento = "REJEITADO_MANUAL"
                 session.commit()
-                
+
                 m = InlineKeyboardMarkup().add(InlineKeyboardButton(text="🔙 Voltar aos Pendentes", callback_data=f"rev_t_{ticker_atual}"))
-                bot.edit_message_text(f"🗑️ Documento ignorado e apagado com sucesso.", call.message.chat.id, call.message.message_id, reply_markup=m)
+                bot.edit_message_text("🗑️ Documento ignorado e apagado com sucesso.", call.message.chat.id, call.message.message_id, reply_markup=m)
             else:
                 bot.answer_callback_query(call.id, "❌ Erro ao apagar no Drive!")
 
@@ -311,7 +330,7 @@ def processar_revisao(call):
         print(f"Erro no painel de revisão: {e}")
         try:
             bot.answer_callback_query(call.id, "⚠️ Erro interno. Tente novamente.")
-        except:
+        except Exception:
             pass
     finally:
         session.close()

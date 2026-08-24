@@ -24,13 +24,13 @@ def criar_imagem_fii(dados_json, ticker, caminho_saida="post_pronto.png"):
 
     # 3. Escreve os textos matematicamente na imagem (X, Y)
     # A coordenada (100, 150) significa: 100 pixels da esquerda, 150 do topo.
-    
+
     # Título (Ticker)
     draw.text((100, 100), f"FATO RELEVANTE: {ticker}", font=fonte_titulo, fill=(255, 255, 255))
-    
+
     # Manchete
     draw.text((100, 200), dados_json.get("manchete", ""), font=fonte_texto, fill=(200, 200, 200))
-    
+
     # Dividendos e Vacância
     draw.text((100, 350), f"💰 Dividendos: {dados_json.get('dividendos', '')}", font=fonte_texto, fill=(255, 255, 255))
     draw.text((100, 420), f"🏢 Vacância: {dados_json.get('vacancia', '')}", font=fonte_texto, fill=(255, 255, 255))
@@ -46,11 +46,11 @@ def criar_imagem_fii(dados_json, ticker, caminho_saida="post_pronto.png"):
     try:
         # Tenta abrir o gráfico recém gerado
         grafico = Image.open("grafico_div.png")
-        
+
         # Define onde ele vai ser colado (Ex: Canto inferior direito)
         posicao_x_grafico = 100
-        posicao_y_grafico = 750 
-        
+        posicao_y_grafico = 750
+
         # O terceiro argumento (grafico) é a "máscara" que garante que o fundo fique transparente
         img.paste(grafico, (posicao_x_grafico, posicao_y_grafico), grafico)
     except FileNotFoundError:

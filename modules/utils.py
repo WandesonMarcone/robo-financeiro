@@ -15,7 +15,7 @@ def get_request_with_retry(url, headers):
     """Uma requisição blindada que tenta 3 vezes antes de desistir."""
     session = requests.Session()
     retry = Retry(
-        total=3, 
+        total=3,
         backoff_factor=1, # Espera 1s, 2s, 4s entre tentativas
         status_forcelist=[500, 502, 503, 504]
     )
@@ -26,28 +26,51 @@ def get_request_with_retry(url, headers):
 
 
 def formatar(val):
-    try: 
+    try:
         if isinstance(val, str):
-            is_percent = '%' in val 
+            is_percent = '%' in val
             val = val.replace('%', '').replace('.', '').replace(',', '.')
             numero = float(val)
             return numero / 100 if is_percent else numero
         return float(val) if val is not None and not pd.isna(val) else 0.0
-    except: 
+    except:
         return 0.0
 
 def disparar_alertas(msg):
     """Garante a entrega da notificação via Telegram."""
-    if not msg or msg.strip() == "": 
+    if not msg or msg.strip() == "":
+        return
+    token = config.TELEGRAM_BOT_TOKEN
+    chat_id = config.TELEGRAM_CHAT_ID
+    if not token or ":" not in token:
+        print("[Telegram] TELEGRAM = SKIPPED (TELEGRAM_BOT_TOKEN ausente ou inválido)")
+        return
+    if not chat_id:
+        print("[Telegram] TELEGRAM = SKIPPED (TELEGRAM_CHAT_ID ausente)")
         return
     try:
-        bot = telebot.TeleBot(config.TELEGRAM_BOT_TOKEN)
-        bot.send_message(config.TELEGRAM_CHAT_ID, msg, parse_mode='Markdown')
+        bot = telebot.TeleBot(token)
+        bot.send_message(chat_id, msg, parse_mode='Markdown')
         print("📲 [Telegram] Notificação de ALERTA entregue com sucesso!")
     except Exception as e:
         print(f"⚠️ [Telegram] Erro de conexão ao enviar alerta: {e}")
 
 def conectar_gspread():
+    """Conecta ao Google Sheets, falhando de forma clara quando faltar configuração.
+
+    Se GOOGLE_CREDS/GOOGLE_CREDS_FILE ou SPREADSHEET_URL estiverem ausentes,
+    levanta RuntimeError com mensagem clara listando o que falta, em vez de
+    propagar uma exceção obscura do gspread. O funcionamento com a configuração
+    correta permanece inalterado.
+    """
+    ausentes = config.validar_configuracao_sheets()
+    if ausentes:
+        raise RuntimeError(
+            "CONFIGURAÇÃO AUSENTE DO GOOGLE SHEETS: "
+            + "; ".join(ausentes)
+            + ". Defina as credenciais do service account e a URL da planilha "
+            "antes de executar."
+        )
     google_creds = os.environ.get('GOOGLE_CREDS')
     if google_creds:
         creds_dict = json.loads(google_creds)
@@ -64,7 +87,7 @@ def precisa_atualizar(ticker, mapa_atualizacao, agora_dt, sp_tz):
     if 'OK' not in val:
         return True
 
-    val = val.replace('OK', '').strip() 
+    val = val.replace('OK', '').strip()
     try:
         dia, resto = val.split('/')
         mes, horario = resto.split(' ')
@@ -72,11 +95,11 @@ def precisa_atualizar(ticker, mapa_atualizacao, agora_dt, sp_tz):
 
         dt_af = datetime(agora_dt.year, int(mes), int(dia), int(hora), int(minuto))
         dt_af = sp_tz.localize(dt_af)
-        if dt_af > agora_dt: 
+        if dt_af > agora_dt:
             dt_af = dt_af.replace(year=agora_dt.year - 1)
 
         if (agora_dt - dt_af).total_seconds() < 7200:
-            return False 
+            return False
     except:
-        pass 
+        pass
     return True

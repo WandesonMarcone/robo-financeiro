@@ -32,7 +32,7 @@ def buscar_dados_planilha_com_cache(nome_aba):
         # 3. Salva no cache para as próximas chamadas
         CACHE_PLANILHA[nome_aba]["dados"] = dados
         CACHE_PLANILHA[nome_aba]["timestamp"] = agora
-        
+
         return dados
     except Exception as e:
         print(f"⚠️ Erro ao acessar o Google Sheets: {e}")

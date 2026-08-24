@@ -80,7 +80,7 @@ def callback_geral(call):
 
                 # Busca na Coluna C (índice 2) os sub-setores pertencentes à Macro clicada (Coluna B)
                 sub_setores = sorted(list(set(
-                    linha[2].strip() for linha in matriz[1:] 
+                    linha[2].strip() for linha in matriz[1:]
                     if len(linha) > 2 and linha[1].strip().lower() == macro_escolhida.lower() and linha[2].strip()
                 )))
 
@@ -92,7 +92,7 @@ def callback_geral(call):
                 else:
                     # Se não houver sub-divisões (Ex: Papel), lista os ativos diretamente
                     tickers = [
-                        linha[0].strip().upper() for linha in matriz[1:] 
+                        linha[0].strip().upper() for linha in matriz[1:]
                         if len(linha) > 1 and linha[1].strip().lower() == macro_escolhida.lower()
                     ]
                     for tkr in sorted(tickers):
@@ -128,7 +128,7 @@ def callback_geral(call):
          # --- 1ª CAMADA: MACRO-SETORES DAS AÇÕES (DINÂMICO + FIXO) ---
         elif dados == "menu_acoes":
             bot.answer_callback_query(call.id, "Carregando Ações...")
-            
+
             # 🔴 LÊ A PLANILHA PRIMEIRO
             matriz = buscar_dados_planilha_com_cache("BD_Acoes")
             tickers_planilha = [linha[0].strip().upper() for linha in matriz[1:] if len(linha) > 0 and linha[0].strip()] if matriz else []
@@ -161,7 +161,7 @@ def callback_geral(call):
                     if any(t in tickers_planilha for t in ativos):
                         tem_acao = True
                         break
-                
+
                 if tem_acao:
                     icone = emojis.get(macro, "📁")
                     markup.add(InlineKeyboardButton(f"{icone} {macro}", callback_data=f"macro_ac_{idx}"))
@@ -171,25 +171,25 @@ def callback_geral(call):
 
         # --- 2ª CAMADA: SUB-SETORES (Ocultando vazios) ---
         elif dados.startswith("macro_ac_"):
-            
+
             matriz = buscar_dados_planilha_com_cache("BD_Acoes")
             tickers_planilha = [linha[0].strip().upper() for linha in matriz[1:] if len(linha) > 0 and linha[0].strip()] if matriz else []
 
             idx_macro = int(dados.replace("macro_ac_", ""))
             lista_macros = list(MAPA_SETORES_B3.keys())
             nome_macro = lista_macros[idx_macro]
-            
+
             bot.answer_callback_query(call.id, f"Abrindo {nome_macro}...")
             markup = InlineKeyboardMarkup(row_width=1)
-            
+
             subsetores = list(MAPA_SETORES_B3[nome_macro].keys())
             for idx_sub, sub in enumerate(subsetores):
                 ativos_do_sub = MAPA_SETORES_B3[nome_macro][sub]
-                
+
                 # 🔴 Só cria o botão do subsetor se você tiver alguma empresa dele
                 if any(t in tickers_planilha for t in ativos_do_sub):
                     markup.add(InlineKeyboardButton(f"📂 {sub}", callback_data=f"sub_ac_{idx_macro}_{idx_sub}"))
-                
+
             markup.add(InlineKeyboardButton("🔙 Voltar aos Setores", callback_data="menu_acoes"))
             bot.edit_message_text(f"🏭 **Setor:** {nome_macro}\nSelecione o segmento de atuação:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
@@ -201,34 +201,34 @@ def callback_geral(call):
             partes = dados.split("_")
             idx_macro = int(partes[2])
             idx_sub = int(partes[3])
-            
+
             lista_macros = list(MAPA_SETORES_B3.keys())
             nome_macro = lista_macros[idx_macro]
             nome_sub = list(MAPA_SETORES_B3[nome_macro].keys())[idx_sub]
-            
-            bot.answer_callback_query(call.id, f"Buscando empresas...")
-            
+
+            bot.answer_callback_query(call.id, "Buscando empresas...")
+
             tickers_do_subsetor = MAPA_SETORES_B3[nome_macro][nome_sub]
-            
+
             # 🔴 Filtra a lista fina: só mostra a empresa se ela existir na planilha
             tickers_validos = [t for t in tickers_do_subsetor if t in tickers_planilha]
-            
+
             markup = InlineKeyboardMarkup(row_width=3)
-            
+
             if tickers_validos:
                 for ticker in sorted(tickers_validos):
                     markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
                 txt = f"📂 **Segmento:** {nome_sub}\nEscolha a empresa para análise:"
             else:
                 txt = f"📭 Nenhuma empresa encontrada na planilha para o segmento **{nome_sub}**."
-                
+
             markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=f"macro_ac_{idx_macro}"))
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
-        # --- FAVORITOS ---            
+        # --- FAVORITOS ---
         elif dados in ["favoritos_fiis", "favoritos_acoes"]:
             bot.answer_callback_query(call.id, "Buscando seus favoritos...")
-            
+
             # Identifica contexto baseada nos dados do callback
             is_fii = (dados == "favoritos_fiis")
             tipo = "fii" if is_fii else "acao"
@@ -236,9 +236,9 @@ def callback_geral(call):
 
             # Busca a lista já pronta do seu config via a função que criamos
             favs = buscar_favoritos(tipo)
-            
+
             markup = InlineKeyboardMarkup(row_width=3)
-            
+
             if favs:
                 # Cria os botões para cada ticker favorito
                 botoes = [InlineKeyboardButton(tkr, callback_data=f"painel_{tkr}_{tipo}") for tkr in favs]
@@ -260,9 +260,9 @@ def callback_geral(call):
             try:
                 oportunidades = buscar_oportunidades(tipo)
                 markup = InlineKeyboardMarkup(row_width=3)
-            
+
                 if oportunidades:
-                    top_oportunidades = oportunidades[:15] 
+                    top_oportunidades = oportunidades[:15]
                     botoes_ativos = [InlineKeyboardButton(tkr, callback_data=f"painel_{tkr}_{tipo}") for tkr in top_oportunidades]
                     markup.add(*botoes_ativos)
                     texto = f"🔥 *Top Oportunidades ({'FIIs' if is_fii else 'Ações'})*\n\nEstes ativos passaram na sua peneira."
@@ -282,7 +282,7 @@ def callback_geral(call):
         elif dados.startswith("painel_"):
             partes = dados.split("_")
             ticker = partes[1]
-            tipo_ativo = partes[2] # "fii" ou "acao" 
+            tipo_ativo = partes[2] # "fii" ou "acao"
             gerar_painel_ativo(ticker, tipo_ativo, chat_id, msg_id)
 
         # ==========================================
@@ -295,7 +295,7 @@ def callback_geral(call):
             # Faz uma consulta rápida para descobrir se é FII ou Ação
             session = SessionDB()
             ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-            
+
             tipo_ativo = "fii" # Padrão de segurança
             if ativo:
                 if hasattr(ativo.tipo, 'name'):
@@ -306,7 +306,7 @@ def callback_geral(call):
 
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("⚖️ Ir para a Central de Revisão", callback_data="rev_start"))
-            
+
             # 🔴 AGORA O BOTÃO DE VOLTAR É DINÂMICO!
             markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
 
@@ -342,7 +342,7 @@ def callback_geral(call):
                     else:
                         txt = f"📭 _Os balanços CVM (ITR/DFP) de {ticker} ainda não foram processados._"
                 else:
-                    txt = f"📭 _Ativo não encontrado no banco de dados local._"
+                    txt = "📭 _Ativo não encontrado no banco de dados local._"
             else:
                 informes = session.query(DadosFinanceirosFiis).filter(
                     DadosFinanceirosFiis.ativo_id == ativo.id
@@ -498,7 +498,7 @@ def callback_geral(call):
                     )
                 else:
                     ano_escolhido = data_ref.split('-')[0]
-                    txt = f"📭 Os dados não foram encontrados no banco."
+                    txt = "📭 Os dados não foram encontrados no banco."
                     markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🔙 Voltar", callback_data=f"ano_{ticker}_{tipo_ativo}_{ano_escolhido}"))
                     bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
                     return
@@ -519,7 +519,7 @@ def callback_geral(call):
                         bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup)
                     else:
                         bot.edit_message_text(f"❌ Erro ao exibir: {str(e)[:100]}", chat_id, msg_id, reply_markup=markup)
-            
+
             except Exception as e:
                 print(f"Erro ao buscar balanço da ação: {e}")
                 bot.answer_callback_query(call.id, "❌ Erro ao abrir balanço!")
@@ -531,10 +531,10 @@ def callback_geral(call):
         # ==========================================
         elif dados.startswith("docs_"):
             bot.answer_callback_query(call.id, "Acessando o arquivo...")
-            
+
             partes = dados.split("_")
             ticker = partes[1]
-            tipo_ativo = partes[2] 
+            tipo_ativo = partes[2]
 
             markup = InlineKeyboardMarkup(row_width=2)
             session = SessionDB()
@@ -595,8 +595,8 @@ def callback_geral(call):
                         elif "aviso" in t_low or "provento" in t_low: emoji = "💰"
                         elif "assembleia" in t_low or "vota" in t_low: emoji = "🗳️"
                         elif "trimestral" in t_low or "informe" in t_low: emoji = "📑"
-                        else: emoji = "📄" 
-                        
+                        else: emoji = "📄"
+
                         # Usa o nome cortado para não estourar o limite de 64 bytes do Telegram
                         callback_seguro = f"dl_{ticker}_t_{tipo_doc[:25]}"
                         markup.add(InlineKeyboardButton(f"{emoji} {tipo_doc}", callback_data=callback_seguro))
@@ -608,14 +608,14 @@ def callback_geral(call):
                     for d in docs:
                         mes_str = "0000-00"
                         if d.assunto and '-' in d.assunto:
-                            p = d.assunto.split(" ")[0].split("-") 
-                            if len(p) == 3: mes_str = f"{p[2]}-{p[1]}" 
+                            p = d.assunto.split(" ")[0].split("-")
+                            if len(p) == 3: mes_str = f"{p[2]}-{p[1]}"
                         elif d.data_publicacao:
                             mes_str = d.data_publicacao.strftime("%Y-%m")
                         if mes_str not in meses_unicos: meses_unicos.append(mes_str)
-                    
+
                     meses_unicos.sort(reverse=True)
-                    
+
                     # Cria a tela com 2 botões por linha para os meses (fica mais bonito)
                     markup = InlineKeyboardMarkup(row_width=2)
                     botoes_meses = []
@@ -623,7 +623,7 @@ def callback_geral(call):
                         if mes == "0000-00": nome_btn = "📅 Sem Data"
                         else: nome_btn = f"📅 {mes.split('-')[1]}/{mes.split('-')[0]}"
                         botoes_meses.append(InlineKeyboardButton(nome_btn, callback_data=f"dl_{ticker}_m_{mes}"))
-                    
+
                     markup.add(*botoes_meses)
                     txt = f"📅 **Filtro por Mês: {ticker}**\n\nSelecione o período (Ano/Mês):"
 
@@ -664,7 +664,7 @@ def callback_geral(call):
                     elif d.data_publicacao:
                         mes_str = d.data_publicacao.strftime("%Y-%m")
                     if mes_str == valor: docs_finais.append(d)
-                
+
                 txt = f"📅 **Documentos de {valor.split('-')[1]}/{valor.split('-')[0]} ({ticker})**\n\n" if valor != "0000-00" else f"📅 **Documentos Diversos ({ticker})**\n\n"
 
             # Dicionário de Resumos Explicativos
@@ -704,7 +704,7 @@ def callback_geral(call):
             markup.add(InlineKeyboardButton("🔙 Voltar aos Filtros", callback_data=f"dnav_{ticker}_{modo}"))
             session.close()
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-            
+
     except Exception as e:
         # 🛡️ Se o erro for apenas o clique duplo idêntico do Telegram, ignora silenciosamente
         if "message is not modified" in str(e):
@@ -712,6 +712,6 @@ def callback_geral(call):
         else:
             print(f"Erro no callback geral: {e}")
             try:
-                bot.answer_callback_query(call.id, f"⚠️ Erro interno. Tente novamente.")
+                bot.answer_callback_query(call.id, "⚠️ Erro interno. Tente novamente.")
             except:
                 pass

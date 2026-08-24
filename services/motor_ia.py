@@ -31,7 +31,7 @@ def processar_relatorio_com_ia(url_pdf, ticker):
     prompt_usuario = f"Ticker do Fundo: {ticker}\n\nTexto do Relatório:\n{texto_pdf}"
 
     try:
-        print(f"🧠 [IA] Enviando dados para a Inteligência Artificial...")
+        print("🧠 [IA] Enviando dados para a Inteligência Artificial...")
 
         # Simulação para validação do teste (pode substituir pela API real do Groq/OpenAI/Gemini depois):
         resposta_ia = json.dumps({

@@ -1,37 +1,46 @@
-import os
-import time
 import json
+import logging
+import os
 import re
-import requests
-import unicodedata
+import time
 from datetime import datetime, timedelta
+
+import PyPDF2
+import requests
+from groq import Groq
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
 import config
+from config import MAPA_ISCAS_MASTER, TIPOS_DOC_FII
 from fnet_scraper import FnetDownloader
 from modules.GoogleDriveManager import GoogleDriveManager
 from modules.utils import conectar_gspread
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-import PyPDF2
-import fitz  # 👈 AQUI ESTÁ A BIBLIOTECA DA IA (PyMuPDF)
-from groq import Groq
-from config import DATABASE_URL, MAPA_ISCAS_MASTER, TIPOS_DOC_FII
+from pipeline_dados.deduplicacao import marcar_duplicado, verificar_duplicidade
+from pipeline_dados.normalizacao import normalizar_data, normalizar_texto
+from pipeline_dados.qualidade_dados import INVALID, registrar_diagnostico, validar_registro
 
-client = Groq(api_key=config.GROQ_API_KEY)
+logger = logging.getLogger(__name__)
 
-# Pega o banco das variáveis do sistema 
-url_banco = os.environ.get('DATABASE_URL', 'sqlite:///pipeline_dados/banco_institucional.db')
+# Cliente Groq criado de forma tolerante a falhas: sem GROQ_API_KEY o módulo
+# continua importável e a classificação cai no fallback (nome original).
+_client_groq = None
+if config.GROQ_API_KEY:
+    _client_groq = Groq(api_key=config.GROQ_API_KEY)
 
-# Corrige o prefixo caso o Render mande postgres:// em vez de postgresql://
-if url_banco.startswith("postgres://"):
-    url_banco = url_banco.replace("postgres://", "postgresql://", 1)
+def _obter_client_groq():
+    return _client_groq
 
-# Substitua o antigo create_engine por este:
+# URL do banco normalizada (Fase 2): usa a fonte única de config para evitar
+# duas formas concorrentes de montagem (config.DATABASE_URL vs url_banco).
+url_banco = config.obter_database_url()
+
 engine = create_engine(
-    config.DATABASE_URL,     # Mantenha a sua variável exata aqui (ex: config.DATABASE_URL)
-    pool_pre_ping=True,      # Testa se a conexão com o Neon caiu antes de fazer a query
-    pool_recycle=1800,       # Renova a conexão a cada 30 minutos (evita o fechamento forçado)
-    pool_size=5,             # Mantém um limite seguro de conexões para não estourar a memória
+    url_banco,                 # Fonte única e normalizada (postgres:// -> postgresql://)
+    pool_pre_ping=True,        # Testa se a conexão com o Neon caiu antes de fazer a query
+    pool_recycle=1800,         # Renova a conexão a cada 30 minutos (evita o fechamento forçado)
+    pool_size=5,               # Mantém um limite seguro de conexões para não estourar a memória
     max_overflow=10
 )
 SessionDB = sessionmaker(bind=engine)
@@ -40,30 +49,27 @@ def obter_tickers_da_planilha():
     try:
         planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
         aba = planilha.worksheet("BD_FIIs")
-        tickers = aba.col_values(1)[1:] 
-        return list(set([t.strip().upper() for t in tickers if t.strip()])) 
-    except:
+        tickers = aba.col_values(1)[1:]
+        return list(set([t.strip().upper() for t in tickers if t.strip()]))
+    except Exception:
         return []
-
-def normalizar_texto(texto):
-    return ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
 
 # ==========================================
 # 🚨 TRAVA 1: CLASSIFICAÇÃO HÍBRIDA COM IA (AUTO-SAVE)
 # ==========================================
 def classificar_documento_com_ia(nome_original, texto_extraido):
-    if not texto_extraido: 
-        return nome_original, 0 
+    if not texto_extraido:
+        return nome_original, 0
 
     # 🛡️ HIGIENIZADOR: Remove caracteres invisíveis que dão Erro 400
     texto_limpo = re.sub(r'[^\x20-\x7E\u00A0-\u00FF]', ' ', str(texto_extraido)).strip()
     texto_limpo = texto_limpo[:1500] # Aumentei um pouco para a IA ter mais contexto
 
-    if not texto_limpo: 
+    if not texto_limpo:
         return nome_original, 0
 
     lista_opcoes = ", ".join(TIPOS_DOC_FII.values())
-    
+
     # Prompt de engenharia reversa exigindo JSON
     prompt = (
         f"Você é um analista financeiro sênior avaliando um PDF de Fundo Imobiliário. "
@@ -74,13 +80,18 @@ def classificar_documento_com_ia(nome_original, texto_extraido):
     )
 
     try:
+        client = _obter_client_groq()
+        if client is None:
+            print("⚠️ GROQ_API_KEY ausente. Classificação híbrida desabilitada.")
+            return nome_original, 0
+
         chat = client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
             response_format={"type": "json_object"} # 🚀 Força a Groq a cuspir JSON puro
         )
         resposta_str = chat.choices[0].message.content
-        
+
         # Transforma a resposta da IA em um dicionário Python
         dados_ia = json.loads(resposta_str)
         tipo_ia = dados_ia.get("tipo", nome_original)
@@ -98,18 +109,18 @@ def classificar_documento_com_ia(nome_original, texto_extraido):
 
 def enviar_alerta_revisao_telegram(ticker, nome_doc, link_pdf, file_id, db_id):
     """Envia a mensagem interativa com botões para o seu Telegram"""
-    chat_id = os.environ.get('TELEGRAM_CHAT_ID') 
+    chat_id = os.environ.get('TELEGRAM_CHAT_ID')
     if not chat_id:
         print("⚠️ TELEGRAM_CHAT_ID não configurado. Alerta não enviado.")
         return
 
-    import json # Garante o import do json caso não tenha no topo
+    import json  # Garante o import do json caso não tenha no topo
     url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
 
     # 🔴 CORREÇÃO AQUI: Mudança de doc.id para db_id
     teclado = {
         "inline_keyboard": [
-            [{"text": f"✅ Classificar Arquivo", "callback_data": f"rev_app_{db_id}"}],
+            [{"text": "✅ Classificar Arquivo", "callback_data": f"rev_app_{db_id}"}],
             [{"text": "🗑️ Apagar Lixo", "callback_data": f"rev_del_{db_id}"}]
         ]
     }
@@ -154,18 +165,43 @@ def rotina_de_coleta_b3():
             if isca in nome_fundo_b3:
                 existe = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.id_b3 == id_doc).first()
                 if not existe:
+                    # DATA QUALITY (Fase 3, Bloco 3): regras determinísticas antes
+                    # de criar o ativo/documento. INVALID -> não persiste (a data
+                    # de referência inválida deixa de ser mascarada com a data de
+                    # hoje); WARNING -> persiste, mas o alerta é registrado.
+                    data_publicacao = normalizar_data(doc['data_ref'])
+                    resultado = validar_registro(
+                        {
+                            "data_publicacao": data_publicacao,
+                            "tipo_documento": doc['tipo_doc'],
+                            "url_pdf": None,
+                            "id_b3": id_doc,
+                        },
+                        "documento_fnet",
+                        origem="FNET/B3",
+                        ativo=ticker,
+                        documento=id_doc,
+                    )
+                    registrar_diagnostico(resultado, logger)
+                    if resultado.status == INVALID:
+                        print(
+                            f"Qualidade: documento de {ticker} (id {id_doc}) "
+                            "rejeitado por violação de qualidade."
+                        )
+                        break
+
                     ativo_db = session.query(Ativo).filter(Ativo.ticker == ticker).first()
                     if not ativo_db:
-                        ativo_db = Ativo(ticker=ticker, cnpj=f"PENDENTE-{ticker}", tipo="FII") 
+                        ativo_db = Ativo(ticker=ticker, cnpj=f"PENDENTE-{ticker}", tipo="FII")
                         session.add(ativo_db)
                         session.commit()
 
                     novo_doc = DocumentosQualitativos(
                         ativo_id=ativo_db.id,
                         id_b3=id_doc,
-                        data_publicacao=datetime.now(),
-                        tipo_documento=doc['tipo_doc'], 
-                        assunto=doc['data_ref'], 
+                        data_publicacao=data_publicacao,
+                        tipo_documento=doc['tipo_doc'],
+                        assunto=doc['data_ref'],
                         status_processamento="PENDENTE"
                     )
                     session.add(novo_doc)
@@ -199,7 +235,7 @@ def rotina_processar_pendentes():
 
             ticker = doc_db.ativo.ticker
             id_doc = doc_db.id_b3
-            data_ref = doc_db.assunto 
+            data_ref = doc_db.assunto
 
             print(f"🔄 Processando fila: {ticker} (ID {id_doc})...")
 
@@ -209,15 +245,28 @@ def rotina_processar_pendentes():
                 session.commit()
                 continue
 
+            # Deduplicação por conteúdo: se o PDF já existe (mesmo com ID/URL
+            # diferentes), marca como duplicado e não envia novamente ao Drive.
+            hash_pdf, original = verificar_duplicidade(session, pdf_bytes, exceto_id=doc_db.id)
+            if original:
+                marcar_duplicado(doc_db, original)
+                session.commit()
+                print(f"Conteúdo duplicado do documento #{original.id}: {ticker} (ID {id_doc})")
+                continue
+
+            doc_db.hash_sha256 = hash_pdf
+
             temp_filename = f"/tmp/{ticker}_{id_doc}.pdf"
-            with open(temp_filename, "wb") as f: f.write(pdf_bytes)
+            with open(temp_filename, "wb") as f:
+                f.write(pdf_bytes)
 
             texto_pdf = ""
             try:
                 reader = PyPDF2.PdfReader(temp_filename)
-                if len(reader.pages) > 0: 
+                if len(reader.pages) > 0:
                     texto_pdf = reader.pages[0].extract_text() or ""
-            except: pass
+            except Exception:
+                pass
 
             # ==========================================
             # 🤖 CAMADA HÍBRIDA DE IA E AUTO-SAVE
@@ -239,7 +288,7 @@ def rotina_processar_pendentes():
                     nome_arquivo=f"{nome_limpo}_{data_ref}_{id_doc}.pdf",
                     ticker=ticker,
                     mes_ref=mes_pasta,
-                    tipo_ativo=doc_db.ativo.tipo 
+                    tipo_ativo=doc_db.ativo.tipo
                 )
 
                 if link_gerado:
@@ -249,7 +298,7 @@ def rotina_processar_pendentes():
                     print(f"✅ Sucesso (Auto-save): {ticker} -> {nome_limpo}")
 
                     if "gerencial" in nome_limpo.lower() or "fato" in nome_limpo.lower():
-                        print(f"🧠 Sugando texto profundo do PDF para a IA...")
+                        print("🧠 Sugando texto profundo do PDF para a IA...")
                         try:
                             import fitz
                             doc_fitz = fitz.open(temp_filename)
@@ -280,8 +329,9 @@ def rotina_processar_pendentes():
 
             # 3. 💾 SALVA O PROGRESSO DESTE ARQUIVO E DELETA O TEMPORÁRIO
             session.commit()
-            if os.path.exists(temp_filename): os.remove(temp_filename)
-            time.sleep(6) 
+            if os.path.exists(temp_filename):
+                os.remove(temp_filename)
+            time.sleep(6)
 
         except Exception as e:
             # Se der um erro bizarro, cancela SÓ este documento e continua vivo!
@@ -336,29 +386,43 @@ def rotina_processar_acoes():
                 session.commit()
                 continue
 
+            # Deduplicação por conteúdo: se o PDF já existe (mesmo com ID/URL
+            # diferentes), marca como duplicado e não envia novamente ao Drive.
+            hash_pdf, original = verificar_duplicidade(session, pdf_bytes, exceto_id=doc_db.id)
+            if original:
+                marcar_duplicado(doc_db, original)
+                session.commit()
+                print(f"Conteúdo duplicado do documento #{original.id}: {ticker} ({data_str})")
+                continue
+
+            doc_db.hash_sha256 = hash_pdf
+
             temp_filename = f"/tmp/{ticker}_cvm_temp.pdf"
-            with open(temp_filename, "wb") as f: f.write(pdf_bytes)
+            with open(temp_filename, "wb") as f:
+                f.write(pdf_bytes)
 
             texto_pdf = ""
             try:
                 reader = PyPDF2.PdfReader(temp_filename)
-                if len(reader.pages) > 0: 
+                if len(reader.pages) > 0:
                     texto_pdf = reader.pages[0].extract_text() or ""
-            except: pass
+            except Exception:
+                pass
 
             texto_pdf = texto_pdf.strip()
 
             nome_ia = classificar_documento_com_ia(doc_db.tipo_documento, texto_pdf)
-            
+
             # Corrige a tupla de retorno caso a IA das ações não retorne a confiança
             if isinstance(nome_ia, tuple):
                 nome_ia = nome_ia[0]
 
             nome_limpo = "".join([c for c in str(nome_ia).title() if c.isalnum() or c in (' ', '_', '-')]).strip()
 
-            if len(nome_limpo) < 3: 
+            if len(nome_limpo) < 3:
                 nome_limpo = "".join([c for c in str(doc_db.tipo_documento).title() if c.isalnum() or c in (' ', '_', '-')]).strip()
-                if len(nome_limpo) < 3: nome_limpo = "Documento_Acao"
+                if len(nome_limpo) < 3:
+                    nome_limpo = "Documento_Acao"
 
             if not texto_pdf:
                 file_id, link_gerado = drive_manager.upload_pdf_revisao(
@@ -375,17 +439,17 @@ def rotina_processar_acoes():
                     nome_arquivo=f"{nome_limpo}_{data_str}.pdf",
                     ticker=ticker,
                     mes_ref=mes_pasta,
-                    tipo_ativo="ACAO" 
+                    tipo_ativo="ACAO"
                 )
 
                 if link_gerado:
                     doc_db.url_pdf = link_gerado
                     doc_db.tipo_documento = nome_limpo
-                    doc_db.status_processamento = "SALVO_DRIVE" 
+                    doc_db.status_processamento = "SALVO_DRIVE"
                     print(f"✅ Sucesso: Drive Atualizado -> {nome_limpo}")
 
                     if "gerencial" in nome_limpo.lower() or "fato" in nome_limpo.lower() or "release" in nome_limpo.lower():
-                        print(f"🧠 Sugando texto profundo do PDF para a IA...")
+                        print("🧠 Sugando texto profundo do PDF para a IA...")
                         try:
                             import fitz
                             doc_fitz = fitz.open(temp_filename)
@@ -402,9 +466,10 @@ def rotina_processar_acoes():
 
             # 3. 💾 SALVA O PROGRESSO
             session.commit()
-            if os.path.exists(temp_filename): os.remove(temp_filename)
-            time.sleep(3) 
-            
+            if os.path.exists(temp_filename):
+                os.remove(temp_filename)
+            time.sleep(3)
+
         except Exception as e:
             print(f"❌ Erro crítico na ação {doc_id}: {e}")
             session.rollback()

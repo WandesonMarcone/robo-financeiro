@@ -1,19 +1,125 @@
+import logging
 import os
 
+# ==========================================
+# LOGGING
+# ==========================================
+
+def configurar_logging(nivel=logging.INFO):
+    """Configura o logging estruturado do processo (formato unificado).
+
+    Deve ser chamado no início de cada entrypoint (main.py / app.py).
+    """
+    logging.basicConfig(
+        level=nivel,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        force=True,
+    )
+
+def obter_database_url():
+    """Retorna a URL do banco de dados já normalizada.
+
+    Fonte única de inicialização do banco (Fase 2): evita múltiplas formas
+    concorrentes de montagem da URL entre os módulos.
+    """
+    url = os.environ.get("DATABASE_URL", "sqlite:///pipeline_dados/banco_institucional.db")
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+    return url
+
 # --- INFRAESTRUTURA DE BANCO DE DADOS ---
-SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1U8h3Hw2yBOmCbvBskP9zHyVVJf_3OkXtAopcFSebLvs/edit?usp=drivesdk' 
-JSON_KEY = 'credenciais.json' 
+# SPREADSHEET_URL sai do código e passa a ser configurável via ambiente.
+SPREADSHEET_URL = os.environ.get("SPREADSHEET_URL", "").strip()
+# Caminho do arquivo de credenciais do Google (service account).
+JSON_KEY = os.environ.get("GOOGLE_CREDS_FILE", "credenciais.json")
 
 # --- CONFIGURAÇÕES ---
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") 
-TELEGRAM_CHAT_ID = "8867098987"
-CHATS_AUTORIZADOS = [
-    c.strip()
-    for c in os.environ.get("TELEGRAM_CHATS_AUTORIZADOS", TELEGRAM_CHAT_ID).split(",")
-    if c.strip()
-]
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+# Chat principal de alertas (operador/dono). Configurado via ambiente, sem IDs no código.
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY") # CONFIG IA(GROQ)
-DATABASE_URL = os.environ.get("DATABASE_URL") # CONFIG BASE DE DADOS
+# URL do banco normalizada e única para todo o projeto.
+DATABASE_URL = obter_database_url()
+
+# ==========================================
+# ESPELHAMENTO POSTGRESQL (Fase 3, Bloco 5C)
+# ==========================================
+# O Google Sheets continua sendo a fonte ativa. Quando ativado, após a escrita
+# bem-sucedida no Sheets (app.py) o espelhamento 5C roda de forma controlada;
+# quando desativado, o comportamento é 100% legado (somente Sheets).
+
+def bool_ambiente(nome, padrao=False):
+    """Interpreta variável de ambiente booleana de forma tolerante."""
+    valor = os.environ.get(nome)
+    if valor is None:
+        return padrao
+    return valor.strip().lower() in ("1", "true", "yes", "sim", "on")
+
+# false (padrão) -> comportamento legado, somente Google Sheets.
+# true           -> Sheets primeiro; depois espelhamento PostgreSQL.
+ESPELHAMENTO_PG_ATIVO = bool_ambiente("ESPELHAMENTO_PG_ATIVO", padrao=False)
+
+# Base da URL pública do Render usada no webhook do Telegram.
+# Mantém o valor atual como padrão para não quebrar o deploy, mas passa a ser
+# sobrescrevível via WEBHOOK_URL_BASE.
+WEBHOOK_URL_BASE = os.environ.get("WEBHOOK_URL_BASE", "https://robo-fii-v2.onrender.com").rstrip("/")
+
+# ==========================================
+# VALIDAÇÃO DE CONFIGURAÇÃO (STARTUP)
+# ==========================================
+
+def verificar_configuracao():
+    """Verifica variáveis críticas de ambiente no startup.
+
+    Retorna (problemas, avisos). Não lança exceção: o chamador decide como
+    reagir, permitindo que o sistema continue operando parcialmente quando
+    possível, em vez de falhar de forma obscura durante o import.
+    """
+    problemas = []
+    avisos = []
+
+    if not TELEGRAM_BOT_TOKEN:
+        problemas.append("TELEGRAM_BOT_TOKEN (obrigatório para o bot do Telegram)")
+
+    if not TELEGRAM_CHAT_ID:
+        avisos.append("TELEGRAM_CHAT_ID (alertas do operador não serão enviados)")
+
+    if not SPREADSHEET_URL:
+        avisos.append("SPREADSHEET_URL (garimpo em Google Sheets não será executado)")
+
+    if not GROQ_API_KEY:
+        avisos.append("GROQ_API_KEY (classificação/análise via IA desabilitadas)")
+
+    if not (os.environ.get("GOOGLE_CREDS") or os.path.exists(JSON_KEY)):
+        avisos.append(f"GOOGLE_CREDS/JSON_KEY ({JSON_KEY}) (Google Sheets/Drive indisponíveis)")
+
+    for var in ("CLIENT_ID", "CLIENT_SECRET", "REFRESH_TOKEN", "DRIVE_ROOT_FOLDER_ID"):
+        if not os.environ.get(var):
+            avisos.append(f"{var} (Google Drive indisponível)")
+
+    return problemas, avisos
+
+# ==========================================
+# VALIDAÇÃO DA CONFIGURAÇÃO DO GOOGLE SHEETS
+# ==========================================
+
+def validar_configuracao_sheets():
+    """Retorna a lista de itens de configuração do Google Sheets ausentes.
+
+    Itens verificados: credenciais do service account (GOOGLE_CREDS ou
+    GOOGLE_CREDS_FILE) e a URL da planilha (SPREADSHEET_URL). A lista vazia
+    significa que a configuração está completa. O chamador decide como reagir
+    (mensagem clara + saída controlada), evitando exceções obscuras do gspread.
+    """
+    ausentes = []
+    if not os.environ.get("GOOGLE_CREDS") and not os.path.exists(JSON_KEY):
+        ausentes.append(
+            f"GOOGLE_CREDS (variável de ambiente) ou GOOGLE_CREDS_FILE ({JSON_KEY})"
+        )
+    if not SPREADSHEET_URL:
+        ausentes.append("SPREADSHEET_URL")
+    return ausentes
 
 # ==========================================
 # PREFERÊNCIAS DO MENU: ⭐ MEUS FAVORITOS
@@ -43,7 +149,7 @@ MAPA_ISCAS_MASTER = {
     'GARE11': 'GUARDIAN REAL ESTATE', # Ajustado pelo txt da B3
     'BTLG11': 'BTG PACTUAL LOGÍSTICA',
     'VILG11': 'VINCI LOGÍSTICA',
-    'CPSH11': 'CAPITÂNIA SHOPPINGS', 
+    'CPSH11': 'CAPITÂNIA SHOPPINGS',
     'HGCR11': 'CSHG RECEBIVEIS',
     'VGIR11': 'VALORA RENDA IMOBILIÁRIA',
     'RBRY11': 'RBR PRIVATE',
@@ -74,7 +180,6 @@ MAPA_ISCAS_MASTER = {
     'BRCR11': 'BTG PACTUAL CORPORATE',
     'BCIA11': 'BRADESCO CARTEIRA',
     'BTAL11': 'BTG PACTUAL AGRO',
-    'BTLG11': 'BTG PACTUAL LOGÍSTICA',
 
     # --- FAMÍLIA VINCI & VBI ---
     'VINO11': 'VINCI OFFICES',
@@ -258,7 +363,7 @@ MAPA_CNPJ_B3 = {
     # 🏥 Saúde e Educação
     # ==========================================
     '61.585.865/0001-51': 'RADL3',   # Raia Drogasil (RD Saúde)
-    '61.590.030/0001-56': 'HAPV3',   # Hapvida 
+    '61.590.030/0001-56': 'HAPV3',   # Hapvida
     '08.807.432/0001-10': 'YDUQ3',   # Yduqs (Estácio/Educação)
     '60.840.055/0001-31': 'FLRY3',   # Grupo Fleury (Medicina Diagnóstica) (NOVA)
     '06.047.087/0001-39': 'RDOR3',   # Rede D'Or São Luiz (Hospitais) (NOVA)

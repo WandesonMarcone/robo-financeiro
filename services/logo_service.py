@@ -9,7 +9,7 @@ def obter_link_logo(ticker: str, tipo: str, drive_manager=None) -> str:
     baixa automaticamente e salva no Google Drive.
     """
     ticker_upper = ticker.upper().strip()
-    
+
     # Cache local em memória para respostas instantâneas
     if ticker_upper in _CACHE_LOGOS:
         return _CACHE_LOGOS[ticker_upper]
@@ -59,7 +59,7 @@ def obter_link_logo(ticker: str, tipo: str, drive_manager=None) -> str:
             if img_resp.status_code == 200:
                 # Salva no Drive e pega o link do Drive
                 link_drive = drive_manager.salvar_logo_drive(
-                    ticker=ticker_upper, 
+                    ticker=ticker_upper,
                     conteudo_bytes=img_resp.content
                 )
                 if link_drive:

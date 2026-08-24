@@ -24,7 +24,7 @@ def extrair_texto_do_pdf(url_do_pdf):
         for num_pagina in range(len(documento)):
             pagina = documento.load_page(num_pagina)
             texto_pagina = pagina.get_text("text")
-            
+
             # FILTRO INTELIGENTE: Pular páginas inúteis para economizar memória da IA
             texto_minusculo = texto_pagina.lower()
             if "glossário" in texto_minusculo or "disclaimer" in texto_minusculo or "aviso legal" in texto_minusculo:
@@ -38,7 +38,7 @@ def extrair_texto_do_pdf(url_do_pdf):
         texto_limpo = " ".join(texto_completo.split())
 
         # Corta no limite de 120.000 caracteres (Equivale a um PDF de 40+ páginas)
-        return texto_limpo[:120000] 
+        return texto_limpo[:120000]
 
     except Exception as e:
         print(f"⚠️ Erro ao extrair texto do PDF {url_do_pdf}: {e}")
@@ -54,21 +54,21 @@ def extrair_texto_com_paginas(url_do_pdf):
         response = requests.get(url_do_pdf, stream=True)
         response.raise_for_status()
         arquivo_pdf = io.BytesIO(response.content)
-        
+
         texto_completo = ""
-        
+
         # Abre o PDF na memória e extrai página por página
         with pdfplumber.open(arquivo_pdf) as pdf:
             for i, pagina in enumerate(pdf.pages):
                 texto_pagina = pagina.extract_text()
-                
+
                 if texto_pagina:
                     # O PULO DO GATO: Carimba o número da página antes do texto
                     texto_completo += f"\n\n--- [PÁGINA {i + 1}] ---\n\n"
                     texto_completo += texto_pagina
-                    
+
         return texto_completo
-        
+
     except Exception as e:
         print(f"❌ Erro ao ler o PDF {url_do_pdf}: {e}")
         return None

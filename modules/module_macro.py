@@ -26,10 +26,10 @@ def obter_dados_macro():
         texto += f"🏛️ *Taxa Selic:* {selic:.2f}% a.a. _(Ref: {data_selic})_\n"
         texto += f"🛒 *IPCA (12m):* {ipca:.2f}%\n"
         texto += f"⚖️ *Juro Real (Aprox):* {juro_real:.2f}%\n\n"
-        
+
         sinal_dolar = "+" if variacao_dolar > 0 else ""
         texto += f"💵 *Dólar Comercial:* R$ {dolar:.2f} ({sinal_dolar}{variacao_dolar}%)\n\n"
-        
+
         texto += "_Dados extraídos via API do Banco Central do Brasil._"
         return texto
 

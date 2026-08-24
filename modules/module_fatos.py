@@ -28,7 +28,7 @@ def analisar_com_groq(texto_pdf, ticker):
     """Lê o relatório oficial do ativo via LLaMA 3.3 na infraestrutura do Groq."""
     if not GROQ_API_KEY or not texto_pdf.strip():
         return None
-    
+
     prompt = f"""
     Você é um analista financeiro sênior. Leia o trecho deste relatório oficial do ativo {ticker}.
     
@@ -44,7 +44,7 @@ def analisar_com_groq(texto_pdf, ticker):
     WALT: [Valor encontrado ou 'N/D']
     ALAVANCAGEM: [Valor encontrado ou 'N/D']
     """
-    
+
     try:
         client = Groq(api_key=GROQ_API_KEY)
         chat = client.chat.completions.create(
@@ -59,33 +59,33 @@ def analisar_com_groq(texto_pdf, ticker):
 
 def buscar_fatos_relevantes(aba_fatos, tickers_carteira):
     print("📰 [LOG FATOS] Monitorando CVM e B3...")
-    
+
     documentos_novos = [
         {"ticker": "MXRF11", "assunto": "Relatório Gerencial", "link": "LINK_DIRETO_DO_PDF_AQUI"}
     ]
-    
+
     relatorio_telegram = []
-    
+
     for doc in documentos_novos:
         historico = aba_fatos.col_values(4)
         if doc['link'] in historico:
             continue
-            
+
         print(f"   🔍 Analisando novo relatório de {doc['ticker']}...")
-        
+
         texto = extrair_texto_pdf(doc['link'])
         analise = analisar_com_groq(texto, doc['ticker'])
-        
+
         if analise:
             msg = f"📄 *{doc['ticker']} - {doc['assunto']}*\n"
             msg += f"{analise}\n\n"
             msg += f"🔗 [Ler PDF Original]({doc['link']})"
             relatorio_telegram.append(msg)
-            
+
             data_atual = datetime.now().strftime("%d/%m/%Y %H:%M")
             aba_fatos.append_row([data_atual, doc['ticker'], doc['assunto'], doc['link']])
 
     if relatorio_telegram:
         return "🧠 *Radar de Inteligência Artificial (Groq)* 🧠\n\n" + "\n---\n".join(relatorio_telegram)
-    
+
     return ""

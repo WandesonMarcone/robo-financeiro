@@ -36,7 +36,7 @@ def buscar_favoritos(tipo):
             ticker = linha[0].strip().upper()
             if ticker in lista_favs:
                 favoritos_encontrados.append(ticker)
-        
+
         return favoritos_encontrados
     except Exception as e:
         print(f"Erro ao buscar favoritos: {e}")
@@ -80,7 +80,7 @@ def buscar_oportunidades(tipo):
                     pvp = converter_numero(linha[5])
                     dy = converter_numero(linha[6])
                     dy_min = filtro_atual['dy_min']
-                    if dy_min < 1 and dy >= 1: dy_min *= 100 
+                    if dy_min < 1 and dy >= 1: dy_min *= 100
 
                     if (filtro_atual['pvp_min'] <= pvp <= filtro_atual['pvp_max']) and (dy >= dy_min):
                         oportunidades.append(ticker)
@@ -99,7 +99,7 @@ def buscar_oportunidades(tipo):
                        (dy >= dy_min) and (roe >= roe_min):
                         oportunidades.append(ticker)
             except IndexError:
-                pass 
+                pass
         return oportunidades
     except Exception as e:
         print(f"Erro no filtro de oportunidades: {e}")
@@ -133,7 +133,7 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
 
     resumo_limpo = sanitizar_markdown(resumo_ia)
     setor_limpo = sanitizar_markdown(indicadores.get('setor', 'Geral'))
-    
+
     # Se o ticker vier sujo com algum caractere (ex: MXRF11_fii), limpa ele também
     ticker_limpo = sanitizar_markdown(ticker)
 
@@ -177,19 +177,19 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
 
     # 🔴 4. BOTÕES INFERIORES
     markup.add(InlineKeyboardButton("⚠️ Análise IA", callback_data=f"ia_{ticker}_{tipo}"))
-    markup.add(InlineKeyboardButton(f"🔙 Voltar", callback_data=voltar_cmd))
+    markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=voltar_cmd))
 
     # O disable_web_page_preview=False é quem permite que a imagem invisível apareça no topo!
-    if message_id: 
+    if message_id:
         bot.edit_message_text(texto, chat_id, message_id, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=False)
-    else: 
+    else:
         bot.send_message(chat_id, texto, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=False)
 
 def extrair_data_real(doc):
     """Garante que datas reais sejam exibidas, priorizando o Mês/Ano no Assunto do documento."""
     if doc.assunto:
         assunto_str = str(doc.assunto)
-        
+
         # 1. Tenta achar formato completo com dia (DD/MM/YYYY ou YYYY-MM-DD)
         match_full = re.search(r'(\d{2}[-/\.]\d{2}[-/\.]\d{4})|(\d{4}[-/\.]\d{2}[-/\.]\d{2})', assunto_str)
         if match_full:
@@ -197,7 +197,7 @@ def extrair_data_real(doc):
             p = data_crua.split("-")
             if len(p[0]) == 4: return f"{p[2]}/{p[1]}/{p[0]}"
             return f"{p[0]}/{p[1]}/{p[2]}"
-        
+
         # 2. Tenta achar formato apenas Mês/Ano (MM/YYYY ou YYYY-MM) - Muito comum em FIIs
         match_mes = re.search(r'(\d{2}[-/\.]\d{4})|(\d{4}[-/\.]\d{2})', assunto_str)
         if match_mes:
@@ -209,7 +209,7 @@ def extrair_data_real(doc):
     # 3. Fallback: Se não achar nenhuma data no texto, usa a data oficial de publicação
     if hasattr(doc, 'data_publicacao') and doc.data_publicacao:
         return doc.data_publicacao.strftime("%d/%m/%Y")
-    
+
     return "Data N/A"
 
 def filtrar_ativos_por_setor(tipo, setor_clicado):
@@ -227,17 +227,17 @@ def filtrar_ativos_por_setor(tipo, setor_clicado):
 
         setor_alvo = setor_clicado.strip().lower()
 
-        for linha in matriz[1:]: 
+        for linha in matriz[1:]:
             try:
                 ticker = linha[0].strip().upper()
                 indice_setor = 2 if is_fii else 1
-                setor_planilha = linha[indice_setor].strip().lower() 
+                setor_planilha = linha[indice_setor].strip().lower()
 
                 # REGRA BLINDADA: Só aceita se for 100% igual! Acabou a mistura!
                 if setor_planilha == setor_alvo:
                     resultados.append(ticker)
             except IndexError:
-                continue 
+                continue
 
         return resultados
     except Exception as e:

@@ -34,13 +34,13 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
         }
         response = get_request_with_retry(url, headers=headers)
-        
+
         # 🟢 ALTERAÇÃO 1: Adicionado decimal e thousands para ler formato BR
         df = pd.read_html(io.StringIO(response.text), decimal=',', thousands='.')[0]
-        
+
         df['Papel'] = df['Papel'].str.strip().str.upper()
         df = df.set_index('Papel')
-        
+
         # 🟢 ALTERAÇÃO 2: Limpeza dos símbolos '%' antes de formatar
         def limpar_porcentagem_df(val):
             if isinstance(val, str):
@@ -50,17 +50,17 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
                 except ValueError:
                     return 0.0
             return val
-        
+
         for col_perc in ['Div.Yield', 'ROE', 'Mrg Bruta', 'Mrg Ebit', 'Mrg. Líq.', 'Cresc. Rec.5a', 'ROIC']:
             if col_perc in df.columns:
                 df[col_perc] = df[col_perc].apply(limpar_porcentagem_df)
-                
+
         for col in ['P/L', 'P/VP', 'Div.Yield', 'ROE', 'Liq.2meses']:
             if col in df.columns: df[col] = df[col].apply(formatar)
-            
+
     except Exception as e:
         print(f"⚠️ Fundamentus indisponível: {e}. Alternando para Yahoo.")
-        df = pd.DataFrame() 
+        df = pd.DataFrame()
 
     dados_planilha = aba_base.get_all_values()
     # Linha duplicada no original removida (dados_planilha = aba_base.get_all_values())
@@ -91,7 +91,7 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
         cat_opps = [o for o in opps_brutas if o in todas_originais and o not in cat_fixas and precisa_atualizar(o, mapa_atualizacao, agora_dt, sp_tz)][:5]
         # Adequação dos filtros matemáticos pois as porcentagens viraram decimais puros (Ex: 6.0% agora é 0.06)
         candidatas = df[(df['P/L']>=2)&(df['P/L']<=15)&(df['P/VP']>=0.2)&(df['P/VP']<=1.5)&(df['Div.Yield']>=0.06)&(df['ROE']>=0.10)].index.tolist()
-        cat_novatas = [c for c in candidatas if c not in todas][:2] 
+        cat_novatas = [c for c in candidatas if c not in todas][:2]
         todas.extend(cat_novatas)
     else:
         cat_opps = []
@@ -110,7 +110,7 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     relatorio_opps = []
     relatorio_novatas = []
     relatorio_atualizados = []
-    relatorio_fixas_opps = [] 
+    relatorio_fixas_opps = []
 
     for ticker in fila:
         linha_idx = todas.index(ticker) + 2
@@ -124,7 +124,7 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
             # A variável 'setor' agora recebe o nome perfeito e em português (Ex: "Materiais Básicos")
             setor = macro_setor
 
-            # Se a sua planilha também tiver uma coluna para Subsetor no futuro, 
+            # Se a sua planilha também tiver uma coluna para Subsetor no futuro,
             # a variável 'sub_setor' já está pronta para ser enviada (Ex: "Mineração").
 
             preco_yf = formatar(yf_info.get('currentPrice') or yf_info.get('regularMarketPrice') or 0)
@@ -186,17 +186,17 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
 
             if ticker in config.FIXAS_ACOES:
                 txt = f"🏭 *{ticker}*\n   R$ {p_v:.2f} ➔ R$ {preco:.2f} {ico}\n   P/L: {pl:.1f} | P/VP: {pvp:.2f} | ROE: {roe*100:.1f}%"
-                if ticker in opps_brutas: 
+                if ticker in opps_brutas:
                     relatorio_fixas_opps.append(f"🚨 *{ticker} EM OPORTUNIDADE!* 🚨\n{txt}")
-                else: 
+                else:
                     relatorio_fixas.append(txt)
             elif ticker in opps_brutas:
                 txt = f"🏭 *{ticker}* (Oportunidade)\n   R$ {preco:.2f}\n   P/L: {pl:.1f} | P/VP: {pvp:.2f} | ROE: {roe*100:.1f}%"
                 relatorio_opps.append(txt)
-            elif ticker in cat_novatas: 
+            elif ticker in cat_novatas:
                 txt = f"🏭 *{ticker}* (Nova Garimpada)\n   R$ {preco:.2f}\n   P/L: {pl:.1f} | P/VP: {pvp:.2f} | ROE: {roe*100:.1f}%"
                 relatorio_novatas.append(txt)
-            else: 
+            else:
                 txt = f"🏭 *{ticker}*\n   R$ {p_v:.2f} ➔ R$ {preco:.2f} {ico}\n   P/L: {pl:.1f} | P/VP: {pvp:.2f} | ROE: {roe*100:.1f}%"
                 relatorio_atualizados.append(txt)
 

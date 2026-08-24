@@ -19,7 +19,7 @@ def analisar_fatos_com_ia(prompt: str, system_prompt: str = "Você é um analist
 
     fila_modelos = [
         ("groq", modelo_groq),
-        ("openrouter", "meta-llama/llama-3.3-70b-instruct"), 
+        ("openrouter", "meta-llama/llama-3.3-70b-instruct"),
         ("openai", "gpt-4o-mini")
     ]
 
@@ -62,7 +62,7 @@ def construir_prompt_interativo(ticker: str, tipo: str, topico: str, resumo_docs
 # --- NOVA FUNÇÃO PARA GERAR O JSON DA IMAGEM ---
 def gerar_resumo_fii_para_imagem(ticker: str, texto_pdf: str):
     """Lê o relatório e devolve um JSON puro pronto para virar imagem."""
-    
+
     prompt = f"""
     Analise o Relatório do fundo {ticker}. Extraia os dados e retorne EXCLUSIVAMENTE um JSON.
     NÃO use formatação markdown (como ```json).
@@ -79,7 +79,7 @@ def gerar_resumo_fii_para_imagem(ticker: str, texto_pdf: str):
         "vies": "POSITIVO" // POSITIVO, NEGATIVO ou NEUTRO
     }}
     """
-    
+
     # Obrigamos a IA a agir como uma API
     sistema_json = "Você é um servidor de dados. Retorne apenas JSON válido."
     resposta_bruta = analisar_fatos_com_ia(prompt, system_prompt=sistema_json)
