@@ -96,6 +96,22 @@ AUDITORIA_ATIVA = bool_ambiente("AUDITORIA_ATIVA", padrao=True)
 API_ENABLED = bool_ambiente("API_ENABLED", padrao=False)
 
 # ==========================================
+# DISPATCHER DE NOTIFICAÇÕES (Fase 6, Etapa 7)
+# ==========================================
+# Processamento automático das notificações pendentes (GERADA) via job aditivo
+# no BackgroundScheduler existente (main.py). Não duplica jobs nem cria um
+# segundo agendador. Desativar não remove nada do banco — apenas impede o job
+# agendado de rodar (a entrega continua disponível via função manual e via
+# ``processar_evento_e_despachar``).
+DISPATCHER_NOTIFICACOES_ATIVO = bool_ambiente("DISPATCHER_NOTIFICACOES_ATIVO", padrao=True)
+# Intervalo (em minutos) entre ciclos de processamento das pendentes. O retry
+# respeita ``proxima_tentativa`` dentro do próprio dispatcher, então o ciclo
+# nunca antecipa uma tentativa ainda agendada. Mínimo de 1 minuto.
+DISPATCHER_NOTIFICACOES_INTERVALO_MINUTOS = max(
+    1, _int_ambiente("DISPATCHER_NOTIFICACOES_INTERVALO_MINUTOS", 5)
+)
+
+# ==========================================
 # VALIDAÇÃO DE CONFIGURAÇÃO (STARTUP)
 # ==========================================
 

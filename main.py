@@ -75,7 +75,7 @@ from atualizador_documentos import engine
 from bot.loader import bot  # noqa: F401 (garante que o bot do loader é usado, sem nova instância)
 
 # 5. Banco de Dados (Garantir a criação das tabelas)
-from pipeline_dados.banco_dados import Base
+from pipeline_dados.banco_dados import Base, garantir_coluna_plano
 
 # 4. Serviços (Orquestrador)
 from services.orquestrador import varredura_diaria
@@ -85,6 +85,15 @@ from services.seed import garantir_superadmin_inicial
 
 Base.metadata.create_all(engine)
 logger.info("Banco de dados verificado e tabelas criadas com sucesso.")
+
+# Fase 6, Etapa 8: migration aditiva e idempotente da coluna ``plano`` em
+# ``usuarios`` (bancos criados antes desta etapa). Nunca destrói dados.
+try:
+    _coluna_adicionada = garantir_coluna_plano(engine)
+    if _coluna_adicionada:
+        logger.info("Coluna 'plano' adicionada em 'usuarios' (usuários existentes mantidos).")
+except Exception as e:  # pragma: no cover - defesa extra (não bloqueia o bot)
+    logger.error("Migration da coluna 'plano' falhou (não bloqueia o bot): %s", e)
 logger.info("Groq Key presente: %s", "SIM" if os.environ.get('GROQ_API_KEY') else "NÃO")
 
 # ==========================================
@@ -147,6 +156,31 @@ scheduler = BackgroundScheduler(timezone=fuso_horario)
 
 # Agenda a varredura (que agora está protegida no services/orquestrador.py)
 scheduler.add_job(varredura_diaria, CronTrigger(day_of_week='mon-fri', hour=8, minute=0))
+
+# ==========================================
+# 📨 DISPATCHER DE NOTIFICAÇÕES (Fase 6, Etapa 7)
+# ==========================================
+# Aditivo e desativável (DISPATCHER_NOTIFICACOES_ATIVO). Reutiliza o scheduler
+# já existente acima — não cria um segundo agendador, não duplica jobs (id
+# fixo) e não altera os jobs legados. O job roda em thread própria do
+# APScheduler com max_instances=1/coalesce (nunca dois dispatchers
+# concorrentes); o ciclo seguro nunca levanta e respeita retry/proxima_tentativa.
+from services.dispatcher_notificacoes import registrar_dispatcher_no_scheduler
+
+if registrar_dispatcher_no_scheduler(
+    scheduler,
+    interval_minutos=config.DISPATCHER_NOTIFICACOES_INTERVALO_MINUTOS,
+    ativo=config.DISPATCHER_NOTIFICACOES_ATIVO,
+):
+    logger.info(
+        "Dispatcher automático de notificações ativo (intervalo=%s min).",
+        config.DISPATCHER_NOTIFICACOES_INTERVALO_MINUTOS,
+    )
+else:
+    logger.info(
+        "Dispatcher automático de notificações desativado ou já registrado."
+    )
+
 scheduler.start()
 
 # ==========================================

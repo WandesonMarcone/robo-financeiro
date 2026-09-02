@@ -35,6 +35,12 @@ TABELAS_LEGADAS = (
 # tabelas de histórico/alertas existam para o teste de exclusão em cascata.
 TABELAS_FASE4 = ("indicadores_historico", "alertas_eventos")
 
+# Fase 6, Etapa 4 (aditivo): relacionamentos de cascata de ``Ativo`` para os
+# recursos privados por usuário exigem as novas tabelas no mesmo teste.
+# Etapa 6: ``notificacoes`` referencia ``ativos`` (ativo_id) e o ORM a consulta
+# ao deletar um ``Ativo`` (NULL em ``ativo_id``) — a tabela precisa existir.
+TABELAS_FASE6 = ("ativos_acompanhados", "posicoes_carteira", "notificacoes")
+
 
 @pytest.fixture()
 def engine(tmp_path):
@@ -46,7 +52,7 @@ def engine(tmp_path):
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
-    Base.metadata.create_all(eng, tables=[Base.metadata.tables[n] for n in TABELAS_LEGADAS + TABELAS_FASE4])
+    Base.metadata.create_all(eng, tables=[Base.metadata.tables[n] for n in TABELAS_LEGADAS + TABELAS_FASE4 + TABELAS_FASE6])
     yield eng
     eng.dispose()
 
