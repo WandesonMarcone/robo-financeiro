@@ -21,12 +21,12 @@ Princípios de desenho:
   diagnóstico, sem alterar o schema do banco.
 """
 import logging
-import math
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
 from pipeline_dados.normalizacao import normalizar_cnpj, normalizar_data
+from pipeline_dados.numerico import coerir_numero, parsear_numero
 
 VALID = "VALID"
 WARNING = "WARNING"
@@ -72,46 +72,6 @@ def _achado(campo: str, severidade: str, regra: str, valor: Any, mensagem: str) 
     )
 
 
-def _coerir_numero(valor) -> tuple[float | None, str | None]:
-    """Converte para float. Retorna (numero, None) ou (None, motivo).
-
-    motivos: NAO_NUMERO (valor presente, porém não numérico) e NAO_FINITO
-    (NaN/Inf). None de entrada, string vazia e espacos retornam (None, None),
-    ou seja, são tratados como dado AUSENTE e não como dado inválido.
-    """
-    if valor is None:
-        return None, None
-    if isinstance(valor, bool):
-        return None, "NAO_NUMERO"
-    if isinstance(valor, (int, float)):
-        numero = float(valor)
-    elif isinstance(valor, str):
-        texto = valor.strip()
-        if not texto:
-            return None, None
-        if "," in texto:
-            texto = texto.replace(".", "").replace(",", ".")
-        try:
-            numero = float(texto)
-        except ValueError:
-            return None, "NAO_NUMERO"
-    else:
-        return None, "NAO_NUMERO"
-    if not math.isfinite(numero):
-        return None, "NAO_FINITO"
-    return numero, None
-
-
-def parsear_numero(valor) -> float | None:
-    """Converte valor em float ou None.
-
-    Erro de coleta NUNCA vira zero: valor não-numérico, NaN ou Inf retornam
-    None (ausente), deixando a decisão para as regras de obrigatoriedade.
-    """
-    numero, _ = _coerir_numero(valor)
-    return numero
-
-
 # ==========================================
 # REGRAS DE CAMPO
 # ==========================================
@@ -150,7 +110,7 @@ def regra_texto_se_presente(campo: str, valor) -> AchadoQualidade | None:
 
 def regra_numero(campo: str, valor) -> AchadoQualidade | None:
     """Valor deve ser numérico e finito (dado INVÁLIDO quando não é)."""
-    _, motivo = _coerir_numero(valor)
+    _, motivo = coerir_numero(valor)
     if motivo == "NAO_NUMERO":
         return _achado(
             campo, INVALID, "NAO_NUMERO", valor,
@@ -168,7 +128,7 @@ def regra_nao_negativo(
     campo: str, valor, severidade: str = INVALID, regra: str = "VALOR_NEGATIVO"
 ) -> AchadoQualidade | None:
     """Valor numérico não pode ser negativo quando não faz sentido."""
-    numero, motivo = _coerir_numero(valor)
+    numero, motivo = coerir_numero(valor)
     if motivo is not None or numero is None:
         return None
     if numero < 0:
@@ -181,7 +141,7 @@ def regra_nao_negativo(
 
 def regra_inteiro(campo: str, valor, severidade: str = WARNING) -> AchadoQualidade | None:
     """Valor deveria ser um número inteiro (contagem) — suspeito se não for."""
-    numero, motivo = _coerir_numero(valor)
+    numero, motivo = coerir_numero(valor)
     if motivo is not None or numero is None:
         return None
     if not numero.is_integer():
@@ -194,7 +154,7 @@ def regra_inteiro(campo: str, valor, severidade: str = WARNING) -> AchadoQualida
 
 def regra_vacancia(campo: str, valor) -> AchadoQualidade | None:
     """Vacância: negativa é impossível (INVALID); acima de 1 é escala suspeita (WARNING)."""
-    numero, motivo = _coerir_numero(valor)
+    numero, motivo = coerir_numero(valor)
     if motivo is not None or numero is None:
         return None
     if numero < 0:

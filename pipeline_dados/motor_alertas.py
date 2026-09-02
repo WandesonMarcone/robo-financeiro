@@ -330,51 +330,41 @@ def notificar_individual(
     """Alimenta o motor individual de notificações (Fase 6) sem quebrar o fluxo.
 
     O alerta real detectado pelo pipeline (Fase 4) vira um evento
-    ``ALERTA_MERCADO`` para ``services.notificacoes.processar_evento``, que
-    decide os usuários elegíveis (permissão central, acompanhamento do ativo,
-    preferência, limite do plano e canais) e persiste as notificações
-    individualizadas de forma idempotente. O envio legado ao Telegram é
-    preservado — este é um passo aditivo. Erros são isolados: uma falha aqui
-    nunca derruba o espelhamento 5C nem a detecção de alertas.
+    ``ALERTA_MERCADO`` publicado via ``services.publicador_eventos.publicar_evento``
+    (Fase 7, Etapa 7.7) — a interface de publicação de eventos do Financial Core.
+    O publicador chama ``services.notificacoes.processar_evento``, que decide os
+    usuários elegíveis (permissão central, acompanhamento do ativo, preferência,
+    limite do plano e canais) e persiste as notificações individualizadas de
+    forma idempotente. O envio legado ao Telegram é preservado — este é um passo
+    aditivo. Erros são isolados no publicador: uma falha aqui nunca derruba o
+    espelhamento 5C nem a detecção de alertas.
     """
-    try:
-        from services.notificacoes import processar_evento
+    from services.publicador_eventos import publicar_evento
 
-        session.flush()
-        evento = {
-            "tipo": "ALERTA_MERCADO",
-            "titulo": f"{ativo.ticker} — {_rotulo_alerta(alerta.tipo_alerta)}",
-            "mensagem": formatar_mensagem(alerta, ativo.ticker),
-            "ativo_id": alerta.ativo_id,
-            "evento_id": f"alerta:{alerta.id}",
-            "dados": {
-                "ticker": ativo.ticker,
-                "tipo_ativo": tipo_ativo,
-                "indicador": alerta.indicador,
-                "tipo_alerta": alerta.tipo_alerta,
-                "severidade": alerta.severidade,
-                "regra": alerta.regra,
-                "data_referencia": (
-                    str(alerta.data_referencia) if alerta.data_referencia else None
-                ),
-                "valor_anterior": _para_float(alerta.valor_anterior),
-                "valor_atual": _para_float(alerta.valor_atual),
-                "variacao_percentual": _para_float(alerta.variacao_percentual),
-                "origem": alerta.origem,
-            },
-        }
-        resumo = processar_evento(evento, session=session)
-        logger.info(
-            "FASE4 notificações individuais alerta=%s ativo=%s "
-            "elegiveis=%s geradas=%s",
-            alerta.id, ativo.ticker, resumo["elegiveis"], resumo["geradas"],
-        )
-    except Exception as e:
-        logger.warning(
-            "FASE4 notificações individuais falharam sem impedir o fluxo "
-            "alerta=%s ativo=%s: %s",
-            alerta.id, ativo.ticker, e,
-        )
+    session.flush()
+    evento = {
+        "tipo": "ALERTA_MERCADO",
+        "titulo": f"{ativo.ticker} — {_rotulo_alerta(alerta.tipo_alerta)}",
+        "mensagem": formatar_mensagem(alerta, ativo.ticker),
+        "ativo_id": alerta.ativo_id,
+        "evento_id": f"alerta:{alerta.id}",
+        "dados": {
+            "ticker": ativo.ticker,
+            "tipo_ativo": tipo_ativo,
+            "indicador": alerta.indicador,
+            "tipo_alerta": alerta.tipo_alerta,
+            "severidade": alerta.severidade,
+            "regra": alerta.regra,
+            "data_referencia": (
+                str(alerta.data_referencia) if alerta.data_referencia else None
+            ),
+            "valor_anterior": _para_float(alerta.valor_anterior),
+            "valor_atual": _para_float(alerta.valor_atual),
+            "variacao_percentual": _para_float(alerta.variacao_percentual),
+            "origem": alerta.origem,
+        },
+    }
+    publicar_evento(evento, session=session)
 
 
 # ===========================================================================

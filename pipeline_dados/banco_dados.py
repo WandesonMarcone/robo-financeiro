@@ -26,6 +26,11 @@ Base = declarative_base()
 class TipoAtivo(enum.Enum):
     ACAO = "ACAO"
     FII = "FII"
+    # --- Fase 7, Etapa 7.2: domínio estendido (aditivo) ---
+    # Suporte ao catálogo para novos tipos sem quebrar ACAO/FII existentes.
+    # Nesta etapa NÃO há coleta/valuation específico para ETF/CRIPTO.
+    ETF = "ETF"
+    CRIPTO = "CRIPTO"
 
 class Ativo(Base):
     __tablename__ = 'ativos'
@@ -696,3 +701,41 @@ def garantir_coluna_plano(engine):
     with engine.begin() as conexao:
         conexao.execute(text("ALTER TABLE usuarios ADD COLUMN plano VARCHAR(30)"))
     return True
+
+
+# ==========================================
+# FASE 7 — ETAPA 7.2: CATÁLOGO CENTRAL DE ATIVOS
+# ==========================================
+# Tabela ADITIVA (nova) — o PostgreSQL passa progressivamente a ser a fonte
+# ativa do catálogo financeiro. O Google Sheets permanece como legado/fallback
+# nesta etapa. Nenhuma tabela existente é alterada; ``Base.metadata.create_all``
+# cria apenas a tabela ausente (SQLite e PostgreSQL), preservando os dados.
+
+
+class AtivoCatalogo(Base):
+    """Catálogo central de ativos (Fase 7, Etapa 7.2, aditivo).
+
+    Identidade declarativa do universo de ativos suportados (ACAO/FII/ETF/
+    CRIPTO). ``cnpj`` fica NULL quando o identificador não existe — nunca se
+    inventa CNPJ. ``nome_emissor``/``setor`` documentam a identidade pública;
+    ``fonte`` registra a origem do registro (ex.: ``config``) para
+    rastreabilidade. ``tipo`` é armazenado como string (não Enum) para não
+    depender da extensão do tipo ENUM do PostgreSQL em bancos criados antes da
+    Fase 7. A tabela é nova: nenhum dado existente é tocado.
+    """
+
+    __tablename__ = "ativos_catalogo"
+    __table_args__ = (Index("ix_ativos_catalogo_tipo", "tipo"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ticker: Mapped[str] = mapped_column(
+        String(10), unique=True, nullable=False, index=True
+    )
+    tipo: Mapped[str] = mapped_column(String(10), nullable=False)
+    cnpj: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True)
+    nome_emissor: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    setor: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    fonte: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    data_atualizacao: Mapped[datetime | None] = mapped_column(
+        DateTime, default=datetime.now, onupdate=datetime.now, nullable=True
+    )

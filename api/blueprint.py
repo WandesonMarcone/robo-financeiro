@@ -18,6 +18,7 @@ from api.routes import (
     chaves_api,
     documentos,
     indicadores,
+    mercado,
     notificacoes,
     preferencias,
     relatorios,
@@ -39,6 +40,7 @@ def criar_blueprint_api():
     bp.register_blueprint(preferencias.bp, url_prefix="/preferencias")
     bp.register_blueprint(notificacoes.bp, url_prefix="/notificacoes")
     bp.register_blueprint(indicadores.bp, url_prefix="/indicadores")
+    bp.register_blueprint(mercado.bp, url_prefix="/mercado")
     bp.register_blueprint(alertas.bp, url_prefix="/alertas")
     bp.register_blueprint(documentos.bp, url_prefix="/documentos")
     bp.register_blueprint(relatorios.bp, url_prefix="/relatorios")

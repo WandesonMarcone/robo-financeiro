@@ -19,13 +19,12 @@ import logging
 
 from sqlalchemy.orm import Session
 
-import config
-from pipeline_dados.banco_dados import Ativo, Base, TipoAtivo
+from pipeline_dados.banco_dados import Ativo, TipoAtivo
+from pipeline_dados.catalogo_ativos import resolver_cnpj as resolver_cnpj_catalogo
 from pipeline_dados.mapeamento_sheets import (
     ABAS_ESPELHAVEIS,
     ORIGEM_GOOGLE_SHEETS,
     campos_sem_destino,
-    resolver_cnpj,
     tipo_ativo_da_aba,
     transformar_linha_acao,
     transformar_linha_fii,
@@ -59,21 +58,18 @@ def _rebaixar_para_warning(achado: AchadoQualidade) -> AchadoQualidade:
 
 
 def _criar_sessao() -> Session:
-    """Abre sessão local (cria tabelas se necessário) sem depender do bot."""
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
+    """Abre sessão no engine central (Fase 7, Etapa 7.4).
 
-    # Mesmos parâmetros de pool do engine central (atualizador_documentos.py):
-    # pool_pre_ping cobre conexões mortas (Neon serverless encerra conexões
-    # ociosas) e pool_recycle renova conexões antigas antes do uso. O sslmode
-    # vem da própria DATABASE_URL (ex.: sslmode=require), nunca hardcoded.
-    engine = create_engine(
-        config.obter_database_url(),
-        pool_pre_ping=True,
-        pool_recycle=1800,
-    )
-    Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine)()
+    Antes criava um engine local duplicado; agora usa o engine único de
+    ``services/db`` (mesmos parâmetros de pool do legado: ``pool_pre_ping`` e
+    ``pool_recycle``). Mantém a garantia histórica de criar as tabelas ausentes
+    (idempotente) antes de devolver a sessão, preservando o comportamento em
+    contextos sem `create_all` explícito.
+    """
+    from services.db import criar_sessao, criar_tabelas
+
+    criar_tabelas()
+    return criar_sessao()
 
 
 def espelhar_ativo(session: Session, ticker, tipo_ativo: TipoAtivo, cnpj=None, log=None):
@@ -83,6 +79,13 @@ def espelhar_ativo(session: Session, ticker, tipo_ativo: TipoAtivo, cnpj=None, l
     é INVALID (ticker ausente/vazio); ``status`` indica CRIADO/ATUALIZADO/
     INALTERADO/INVALID. WARNINGs (ex.: CNPJ do catálogo com dígitos inválidos)
     são aceitos e não bloqueiam a persistência.
+
+    A identidade do ativo segue o catálogo da Fase 7, Etapa 7.2
+    (``pipeline_dados.catalogo_ativos``): o CNPJ é resolvido no PostgreSQL
+    primeiro (``ativos_catalogo``) e apenas como fallback nos mapas de config
+    (a mesma base de seed do catálogo). O placeholder ``PENDENTE-{ticker}`` é
+    usado apenas quando o CNPJ não é conhecido por nenhuma das duas fontes —
+    exigido pela constraint ``NOT NULL`` de ``ativos.cnpj``.
     """
     resultado = validar_registro(
         {"ticker": ticker}, "sheets_ativo", origem=ORIGEM_GOOGLE_SHEETS, ativo=ticker
@@ -92,7 +95,11 @@ def espelhar_ativo(session: Session, ticker, tipo_ativo: TipoAtivo, cnpj=None, l
         return None, resultado, STATUS_INVALIDO
 
     ticker_limpo = str(ticker).strip().upper()
-    cnpj_resolvido = cnpj or resolver_cnpj(ticker_limpo, tipo_ativo)
+    cnpj_resolvido = cnpj
+    if cnpj_resolvido is None:
+        cnpj_resolvido = resolver_cnpj_catalogo(session, ticker_limpo, tipo_ativo)
+    if cnpj_resolvido is None:
+        cnpj_resolvido = f"PENDENTE-{ticker_limpo}"
 
     # CNPJ do catálogo (MAPA_CNPJ_B3) é identidade confiável, mas dígitos
     # inválidos geram WARNING (aceito). Placeholder é marcador interno e não

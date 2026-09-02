@@ -5,7 +5,7 @@ consulta (filtros/limites). ``obter_sessao`` é o ponto de injeção usado pelos
 testes com SQLite em memória: as rotas sempre chamam ``dependencias.obter_sessao``
 em runtime, permitindo substituir a fábrica sem reload de módulos.
 """
-from atualizador_documentos import SessionDB
+from services.db import SessionDB
 
 # Limites seguros de resposta (sem paginação de produção nesta etapa).
 LIMITE_PADRAO = 100

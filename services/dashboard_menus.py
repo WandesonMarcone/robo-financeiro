@@ -7,6 +7,7 @@ from services.logo_service import obter_link_logo
 from modules.GoogleDriveManager import GoogleDriveManager
 from atualizador_documentos import SessionDB
 from pipeline_dados.banco_dados import DocumentosQualitativos, Ativo
+from pipeline_dados.mapeamento_sheets import parsear_valor_market
 
 # Instancia o gerenciador de arquivos uma vez
 drive_manager = GoogleDriveManager()
@@ -42,18 +43,6 @@ def buscar_favoritos(tipo):
         print(f"Erro ao buscar favoritos: {e}")
         return []
 
-def converter_numero(valor_string):
-    """Limpa textos da planilha e transforma em número puro"""
-    try:
-        texto = str(valor_string).replace('R$', '').replace('%', '').strip()
-        if not texto or texto == '-': return 0.0
-        if ',' in texto and '.' in texto:
-            texto = texto.replace('.', '')
-        texto = texto.replace(',', '.')
-        return float(texto)
-    except:
-        return 0.0
-
 def buscar_oportunidades(tipo):
     """Vasculha a planilha usando o Cache Rápido para não travar o bot"""
     is_fii = (tipo == 'fii')
@@ -77,18 +66,25 @@ def buscar_oportunidades(tipo):
                 if not ticker: continue
 
                 if is_fii:
-                    pvp = converter_numero(linha[5])
-                    dy = converter_numero(linha[6])
+                    # Fase 7, Etapa 7.5: parsing canônico via parsear_valor_market
+                    # (erro/ausência -> None, nunca 0.0). Valor ausente apenas deixa
+                    # de ser candidato a oportunidade — mesmo comportamento do 0.0.
+                    pvp = parsear_valor_market(linha[5])
+                    dy = parsear_valor_market(linha[6])
+                    if pvp is None or dy is None:
+                        continue
                     dy_min = filtro_atual['dy_min']
                     if dy_min < 1 and dy >= 1: dy_min *= 100
 
                     if (filtro_atual['pvp_min'] <= pvp <= filtro_atual['pvp_max']) and (dy >= dy_min):
                         oportunidades.append(ticker)
                 else:
-                    dy = converter_numero(linha[3])
-                    pl = converter_numero(linha[5])
-                    pvp = converter_numero(linha[6])
-                    roe = converter_numero(linha[19])
+                    dy = parsear_valor_market(linha[3])
+                    pl = parsear_valor_market(linha[5])
+                    pvp = parsear_valor_market(linha[6])
+                    roe = parsear_valor_market(linha[19])
+                    if dy is None or pl is None or pvp is None or roe is None:
+                        continue
 
                     dy_min, roe_min = filtro_atual['dy_min'], filtro_atual['roe_min']
                     if dy_min < 1 and dy >= 1: dy_min *= 100

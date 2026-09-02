@@ -229,6 +229,143 @@ def serializar_preferencias(preferencias):
     }
 
 
+def _campos_base_snapshot(snapshot, tipo):
+    """Campos comuns a um snapshot de mercado (FII ou ação)."""
+    ativo = getattr(snapshot, "ativo", None)
+    return {
+        "id": snapshot.id,
+        "ativo_id": snapshot.ativo_id,
+        "ticker": ativo.ticker if ativo is not None else None,
+        "tipo": tipo,
+        "data_referencia": _data(snapshot.data_referencia),
+        "data_coleta": _data(snapshot.data_coleta),
+        "data_publicacao": _data(snapshot.data_publicacao),
+        "fonte": snapshot.fonte,
+        "url_origem": snapshot.url_origem,
+        "preco": _numero(snapshot.preco),
+        "dy": _numero(snapshot.dy),
+        "pvp": _numero(snapshot.pvp),
+        "vpa": _numero(snapshot.vpa),
+    }
+
+
+def serializar_snapshot_fii(snapshot):
+    """Serialize um ``SnapshotFii`` com os indicadores de mercado do FII."""
+    base = _campos_base_snapshot(snapshot, "FII")
+    return {
+        **base,
+        "qtd_imoveis": snapshot.qtd_imoveis,
+        "walt": snapshot.walt,
+        "alavancagem": snapshot.alavancagem,
+        "liquidez": _numero(snapshot.liquidez),
+        "lucro_12m": _numero(snapshot.lucro_12m),
+        "dividendo_mensal": _numero(snapshot.dividendo_mensal),
+    }
+
+
+def serializar_snapshot_acao(snapshot):
+    """Serialize um ``SnapshotAcao`` com os múltiplos e margens da ação."""
+    base = _campos_base_snapshot(snapshot, "ACAO")
+    return {
+        **base,
+        "pl": _numero(snapshot.pl),
+        "p_ativo": _numero(snapshot.p_ativo),
+        "marg_bruta": _numero(snapshot.marg_bruta),
+        "marg_ebit": _numero(snapshot.marg_ebit),
+        "marg_liquida": _numero(snapshot.marg_liquida),
+        "p_ebit": _numero(snapshot.p_ebit),
+        "ev_ebit": _numero(snapshot.ev_ebit),
+        "div_liq_ebit": _numero(snapshot.div_liq_ebit),
+        "div_liq_patrimonio": _numero(snapshot.div_liq_patrimonio),
+        "psr": _numero(snapshot.psr),
+        "p_cap_giro": _numero(snapshot.p_cap_giro),
+        "p_at_circ_liq": _numero(snapshot.p_at_circ_liq),
+        "liq_corrente": _numero(snapshot.liq_corrente),
+        "roe": _numero(snapshot.roe),
+        "roa": _numero(snapshot.roa),
+        "roic": _numero(snapshot.roic),
+        "cagr_rec_5a": _numero(snapshot.cagr_rec_5a),
+        "liq_media": _numero(snapshot.liq_media),
+        "lpa": _numero(snapshot.lpa),
+        "peg_ratio": _numero(snapshot.peg_ratio),
+        "valor_mercado": _numero(snapshot.valor_mercado),
+    }
+
+
+def serializar_snapshot(snapshot):
+    """Serialize um snapshot de mercado (FII ou ação) de forma explícita."""
+    from pipeline_dados.banco_dados import SnapshotAcao, SnapshotFii
+
+    if isinstance(snapshot, SnapshotFii):
+        return serializar_snapshot_fii(snapshot)
+    if isinstance(snapshot, SnapshotAcao):
+        return serializar_snapshot_acao(snapshot)
+    raise TypeError(f"Tipo de snapshot não suportado: {type(snapshot).__name__}")
+
+
+def _campos_base_dados_financeiros(registro, tipo):
+    """Campos comuns a um registro contábil persistido (FII ou ação)."""
+    ativo = getattr(registro, "ativo", None)
+    return {
+        "id": registro.id,
+        "ativo_id": registro.ativo_id,
+        "ticker": ativo.ticker if ativo is not None else None,
+        "tipo": tipo,
+        "data_referencia": _data(registro.data_referencia),
+        "ativo_total": _numero(registro.ativo_total),
+        "patrimonio_liquido": _numero(registro.patrimonio_liquido),
+    }
+
+
+def serializar_dados_financeiros_acoes(registro):
+    """Serialize um ``DadosFinanceirosAcoes`` (CVM ITR/DFP) de forma explícita."""
+    base = _campos_base_dados_financeiros(registro, "ACAO")
+    return {
+        **base,
+        "tipo_doc": registro.tipo_doc,
+        "caixa": _numero(registro.caixa),
+        "passivo_total": _numero(registro.passivo_total),
+        "divida_bruta": _numero(registro.divida_bruta),
+        "divida_curto_prazo": _numero(registro.divida_curto_prazo),
+        "divida_longo_prazo": _numero(registro.divida_longo_prazo),
+        "divida_liquida": _numero(registro.divida_liquida),
+        "receita": _numero(registro.receita),
+        "lucro_bruto": _numero(registro.lucro_bruto),
+        "ebitda": _numero(registro.ebitda),
+        "resultado_financeiro": _numero(registro.resultado_financeiro),
+        "lucro_liquido": _numero(registro.lucro_liquido),
+        "fco": _numero(registro.fco),
+    }
+
+
+def serializar_dados_financeiros_fiis(registro):
+    """Serialize um ``DadosFinanceirosFiis`` (informe mensal CVM)."""
+    base = _campos_base_dados_financeiros(registro, "FII")
+    return {
+        **base,
+        "disponibilidades_caixa": _numero(registro.disponibilidades_caixa),
+        "rendimento_por_cota": _numero(registro.rendimento_por_cota),
+        "cotistas": registro.cotistas,
+        "cotas_emitidas": _numero(registro.cotas_emitidas),
+        "receita_imoveis": _numero(registro.receita_imoveis),
+        "resultado_ligado_venda": _numero(registro.resultado_ligado_venda),
+        "vacancia_fisica": _numero(registro.vacancia_fisica),
+        "vacancia_financeira": _numero(registro.vacancia_financeira),
+        "despesas_taxas": _numero(registro.despesas_taxas),
+    }
+
+
+def serializar_dados_financeiros(registro):
+    """Serialize um registro contábil persistido (FII ou ação)."""
+    from pipeline_dados.banco_dados import DadosFinanceirosAcoes, DadosFinanceirosFiis
+
+    if isinstance(registro, DadosFinanceirosFiis):
+        return serializar_dados_financeiros_fiis(registro)
+    if isinstance(registro, DadosFinanceirosAcoes):
+        return serializar_dados_financeiros_acoes(registro)
+    raise TypeError(f"Tipo de dado financeiro não suportado: {type(registro).__name__}")
+
+
 def serializar_posicao(posicao):
     """Serialize uma ``PosicaoCarteira`` com a derivada simples, sem segredos.
 

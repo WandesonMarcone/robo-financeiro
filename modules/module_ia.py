@@ -1,58 +1,23 @@
-import os
 import json
-from groq import Groq
-from openai import OpenAI
+
+from services import llm
+
 
 def analisar_fatos_com_ia(prompt: str, system_prompt: str = "Você é um analista financeiro institucional sênior.") -> str:
     """
     Executa a análise testando uma cadeia modular de provedores e modelos (Groq -> OpenRouter -> OpenAI).
+
+    Fase 7, Etapa 7.6: a chamada é delegada à camada única ``services.llm``,
+    preservando a mesma cadeia, temperatura e o mesmo texto de erro do legado.
     """
-    groq_key = os.environ.get("GROQ_API_KEY")
-    openai_key = os.environ.get("OPENAI_API_KEY")
-    openrouter_key = os.environ.get("OPENROUTER_API_KEY")
-
-    groq_client = Groq(api_key=groq_key) if groq_key else None
-    openai_client = OpenAI(api_key=openai_key) if openai_key else None
-    openrouter_client = OpenAI(api_key=openrouter_key, base_url="https://openrouter.ai/api/v1") if openrouter_key else None
-
-    modelo_groq = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
-
-    fila_modelos = [
-        ("groq", modelo_groq),
-        ("openrouter", "meta-llama/llama-3.3-70b-instruct"),
-        ("openai", "gpt-4o-mini")
+    mensagens = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompt},
     ]
-
-    ultimo_erro = ""
-
-    for provedor, modelo in fila_modelos:
-        try:
-            if provedor == "groq" and groq_client:
-                response = groq_client.chat.completions.create(
-                    messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}],
-                    model=modelo, temperature=0.1 # Temperatura 0.1 para JSON mais preciso
-                )
-                return response.choices[0].message.content
-
-            elif provedor == "openrouter" and openrouter_client:
-                response = openrouter_client.chat.completions.create(
-                    messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}],
-                    model=modelo, temperature=0.1
-                )
-                return response.choices[0].message.content
-
-            elif provedor == "openai" and openai_client:
-                response = openai_client.chat.completions.create(
-                    messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}],
-                    model=modelo, temperature=0.1
-                )
-                return response.choices[0].message.content
-
-        except Exception as e:
-            ultimo_erro = f"Provedor '{provedor}' com modelo '{modelo}' falhou: {str(e)}"
-            continue
-
-    return f"❌ Erro crítico na IA. Último erro: {ultimo_erro}"
+    conteudo, erro = llm.completar_chat(mensagens, temperature=0.1)
+    if erro is None:
+        return conteudo
+    return f"❌ Erro crítico na IA. Último erro: {erro}"
 
 def construir_prompt_interativo(ticker: str, tipo: str, topico: str, resumo_docs: str) -> str:
     # ... (SEU CÓDIGO ORIGINAL SE MANTÉM AQUI) ...
@@ -66,7 +31,7 @@ def gerar_resumo_fii_para_imagem(ticker: str, texto_pdf: str):
     prompt = f"""
     Analise o Relatório do fundo {ticker}. Extraia os dados e retorne EXCLUSIVAMENTE um JSON.
     NÃO use formatação markdown (como ```json).
-    
+
     TEXTO:
     {texto_pdf}
 

@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 import config
 from config import MAPA_CNPJ_B3, MAPA_CONTAS_CVM
 from modules.utils import conectar_gspread
-from pipeline_dados.banco_dados import Ativo, DadosFinanceirosAcoes
+from pipeline_dados.banco_dados import Ativo, DadosFinanceirosAcoes, TipoAtivo
+from pipeline_dados.catalogo_ativos import obter_tickers_com_fallback
 from pipeline_dados.normalizacao import normalizar_cnpj, normalizar_data
 from pipeline_dados.qualidade_dados import INVALID, registrar_diagnostico, validar_registro
 
@@ -40,7 +41,18 @@ class AcoesCVMReader:
         logger.info(f"O robô monitorará {len(self.cnpjs_alvo)} CNPJs.")
 
     def _obter_tickers(self) -> list[str]:
-        """Método interno para buscar tickers na planilha."""
+        """Tickers de ações: catálogo PostgreSQL primeiro; Sheets como fallback.
+
+        Fase 7, Etapa 7.2: o catálogo (``ativos_catalogo``) passa a ser a fonte
+        ativa em transição. Quando o catálogo ainda não possui o tipo, recai na
+        planilha legada BD_Acoes.
+        """
+        return obter_tickers_com_fallback(
+            self.session, TipoAtivo.ACAO, self._obter_tickers_sheets
+        )
+
+    def _obter_tickers_sheets(self) -> list[str]:
+        """Fallback legado: lê a aba BD_Acoes do Google Sheets."""
         try:
             planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
             aba = planilha.worksheet("BD_Acoes")
