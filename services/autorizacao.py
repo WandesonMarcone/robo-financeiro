@@ -73,6 +73,7 @@ PAPEL_PERMISSOES = {
             "notificacoes.consultar",
             "conta.propria",
             "ativos.proprios",
+            "carteira.propria",
             "preferencias.proprias",
             # Recursos de IA destinados ao usuário serão adicionados quando
             # forem implementados (etapas posteriores).
@@ -97,6 +98,7 @@ PERMISSOES_ESCOPO_PROPRIO = frozenset(
     {
         "conta.propria",
         "ativos.proprios",
+        "carteira.propria",
         "preferencias.proprias",
         "notificacoes.consultar",
     }

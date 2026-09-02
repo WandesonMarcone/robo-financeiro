@@ -317,6 +317,48 @@ def desativar_usuario(usuario, session=None, ip=None):
         return True
 
 
+def atualizar_dados_usuario(usuario, nome=None, email=None, senha=None, session=None, ip=None):
+    """Atualiza dados permitidos de um usuário (nome, email e/ou senha).
+
+    Valida unicidade de email (``IntegrityError`` vira ``ValueError``) e o
+    comprimento mínimo de senha; a senha é persistida apenas como hash e nunca
+    é registrada na auditoria nem em logs. Registra o evento ``USUARIO_ALTERADO``.
+    A autorização (quem pode alterar o quê) é decidida pelas camadas superiores
+    (API/motor central) — esta função apenas valida e persiste os dados.
+    """
+    if usuario is None:
+        raise ValueError("Usuário inválido.")
+    if nome is not None and not str(nome).strip():
+        raise ValueError("O nome do usuário não pode ser vazio.")
+    if email is not None and not str(email).strip():
+        raise ValueError("O email do usuário não pode ser vazio.")
+    if senha is not None:
+        _validar_senha(senha)
+
+    with _sessao(session) as s:
+        usuario = s.merge(usuario)
+        if nome is not None:
+            usuario.nome = str(nome).strip()
+        if email is not None:
+            usuario.email = str(email).strip()
+        if senha is not None:
+            usuario.senha_hash = generate_password_hash(senha)
+        try:
+            s.commit()
+        except IntegrityError:
+            s.rollback()
+            raise ValueError("Já existe um usuário com este email.") from None
+
+        auditoria.registrar_evento(
+            acao="USUARIO_ALTERADO",
+            alvo=_alvo(usuario),
+            usuario_id=usuario.id,
+            ip=ip,
+            session=s,
+        )
+        return True
+
+
 def alterar_papel(usuario, novo_papel, session=None, ip=None):
     """Altera o papel de um usuário, validando contra ``PAPEIS_VALIDOS``."""
     if usuario is None:

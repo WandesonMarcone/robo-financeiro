@@ -134,6 +134,25 @@ def listar_chaves_api(usuario, autor=None, session=None):
         )
 
 
+def buscar_chave_api(usuario, chave_id, autor=None, session=None):
+    """Retorna uma API Key específica de ``usuario`` (próprio escopo).
+
+    O filtro inclui ``usuario_id`` (mesmo isolamento de ``listar_chaves_api`` e
+    ``revogar_chave_api``): uma chave de outro usuário retorna ``None`` —
+    indistinguível de inexistente (anti-IDOR/BOLA). Retorna o registro
+    ``ChaveApi`` (contém apenas o hash — nunca a chave original).
+    """
+    if usuario is None or getattr(usuario, "id", None) is None:
+        return None
+    _autorizar(autor, usuario, "usuarios.ler")
+    with _sessao(session) as s:
+        return (
+            s.query(ChaveApi)
+            .filter(ChaveApi.id == chave_id, ChaveApi.usuario_id == usuario.id)
+            .first()
+        )
+
+
 # ==========================================
 # REVOGAÇÃO
 # ==========================================

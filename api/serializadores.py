@@ -7,8 +7,12 @@ Convertem objetos ORM em dicionários JSON-friendly, campo a campo, evitando
 - usuário: exclui ``senha_hash``, sessões, API Keys, tokens e segredos;
 - valores NUMERIC/Date/DateTime são normalizados para JSON (float/isoformat).
 """
+import json
 from datetime import date, datetime
 from decimal import Decimal
+
+from services import planos
+from services.carteira import valor_investido_posicao
 
 
 def _numero(valor):
@@ -110,15 +114,137 @@ def serializar_documento(documento):
 def serializar_usuario(usuario):
     """Serialize o usuário autenticado sem nenhum campo sensível.
 
-    Exclui ``senha_hash``, sessões, API Keys, tokens, hashes e segredos.
+    Exclui ``senha_hash``, sessões, API Keys, tokens, hashes e segredos. O
+    Telegram é exposto apenas como vínculo (booleano) — nunca o ID interno.
+    ``plano`` é o plano efetivo (Fase 6, Etapa 8) decidido pela camada central
+    ``services/planos.py`` — nunca um valor vindo do cliente.
     """
     return {
         "id": usuario.id,
         "nome": usuario.nome,
         "email": usuario.email,
         "papel": usuario.papel,
+        "plano": planos.plano_de(usuario),
         "ativo": bool(usuario.ativo),
+        "telegram_vinculado": bool(usuario.telegram_user_id),
         "ultimo_login": _data(usuario.ultimo_login),
         "criado_em": _data(usuario.criado_em),
         "atualizado_em": _data(usuario.atualizado_em),
+    }
+
+
+def serializar_chave_api(registro):
+    """Serialize uma ``ChaveApi`` sem o hash nem qualquer segredo.
+
+    Nunca expõe ``chave_hash`` (a chave original é irreversível e exibida
+    somente na criação). Apenas estado e metadados para navegação do dono.
+    """
+    if registro is None:
+        return None
+    return {
+        "id": registro.id,
+        "rotulo": registro.rotulo,
+        "ativa": bool(registro.ativa),
+        "expira_em": _data(registro.expira_em),
+        "criado_em": _data(registro.criado_em),
+    }
+
+
+def serializar_acompanhamento(acompanhamento):
+    """Serialize um ``AtivoAcompanhado`` sem dados de terceiros nem segredos.
+
+    Inclui apenas dados públicos do ativo (ticker/tipo) e o vínculo; o
+    ``usuario_id`` do dono não é necessário ao cliente autenticado.
+    """
+    ativo = getattr(acompanhamento, "ativo", None)
+    return {
+        "id": acompanhamento.id,
+        "ativo_id": acompanhamento.ativo_id,
+        "ticker": ativo.ticker if ativo is not None else None,
+        "tipo": _texto_tipo_ativo(ativo.tipo) if ativo is not None else None,
+        "criado_em": _data(acompanhamento.criado_em),
+    }
+
+
+def serializar_notificacao(notificacao):
+    """Serialize uma ``Notificacao`` sem nenhum dado de terceiros nem segredos.
+
+    Não expõe ``usuario_id`` (o cliente autenticado é o dono). ``dados`` é
+    retornado como objeto quando presente — o payload já foi sanitizado pelo
+    motor (nenhum segredo é persistido ou exposto). O ticker aparece apenas
+    quando o ativo está vinculado.
+    """
+    if notificacao is None:
+        return None
+    ativo = getattr(notificacao, "ativo", None)
+    dados = None
+    if notificacao.dados:
+        try:
+            dados = json.loads(notificacao.dados)
+        except (TypeError, ValueError):
+            dados = None
+    return {
+        "id": notificacao.id,
+        "tipo": notificacao.tipo,
+        "titulo": notificacao.titulo,
+        "mensagem": notificacao.mensagem,
+        "ativo_id": notificacao.ativo_id,
+        "ticker": ativo.ticker if ativo is not None else None,
+        "canal": notificacao.canal,
+        "status": notificacao.status,
+        "dados": dados,
+        "criado_em": _data(notificacao.criado_em),
+        "lida_em": _data(notificacao.lida_em),
+        "tentativas": int(notificacao.tentativas or 0),
+        "enviada_em": _data(notificacao.enviada_em),
+    }
+
+
+def serializar_preferencias(preferencias):
+    """Serialize ``PreferenciasUsuario`` sem nenhum dado sensível.
+
+    Não expõe ``usuario_id`` (o cliente autenticado é o dono) nem qualquer
+    segredo. Campos de notificação/mercado aparecem como booleanos explícitos
+    e as frequências como texto controlado pelas enums de
+    ``services/preferencias``.
+    """
+    if preferencias is None:
+        return None
+    return {
+        "notificacoes_ativas": bool(preferencias.notificacoes_ativas),
+        "notificacoes_preco": bool(preferencias.notificacoes_preco),
+        "notificacoes_dividendos": bool(preferencias.notificacoes_dividendos),
+        "notificacoes_resultados": bool(preferencias.notificacoes_resultados),
+        "notificacoes_documentos": bool(preferencias.notificacoes_documentos),
+        "notificacoes_alertas": bool(preferencias.notificacoes_alertas),
+        "frequencia_notificacoes": preferencias.frequencia_notificacoes,
+        "telegram_ativo": bool(preferencias.telegram_ativo),
+        "web_ativo": bool(preferencias.web_ativo),
+        "relatorios_ativos": bool(preferencias.relatorios_ativos),
+        "frequencia_relatorios": preferencias.frequencia_relatorios,
+        "mercado_acoes": bool(preferencias.mercado_acoes),
+        "mercado_fiis": bool(preferencias.mercado_fiis),
+        "criado_em": _data(preferencias.criado_em),
+        "atualizado_em": _data(preferencias.atualizado_em),
+    }
+
+
+def serializar_posicao(posicao):
+    """Serialize uma ``PosicaoCarteira`` com a derivada simples, sem segredos.
+
+    Exibe ``quantidade``, ``preco_medio`` e ``valor_investido`` (derivado de
+    dados persistidos — nenhuma fonte externa). Nunca expõe ``usuario_id`` nem
+    qualquer campo sensível.
+    """
+    ativo = getattr(posicao, "ativo", None)
+    return {
+        "id": posicao.id,
+        "ativo_id": posicao.ativo_id,
+        "ticker": ativo.ticker if ativo is not None else None,
+        "tipo": _texto_tipo_ativo(ativo.tipo) if ativo is not None else None,
+        "quantidade": _numero(posicao.quantidade),
+        "preco_medio": _numero(posicao.preco_medio),
+        "valor_investido": _numero(valor_investido_posicao(posicao)),
+        "criado_em": _data(posicao.criado_em),
+        "atualizado_em": _data(posicao.atualizado_em),
     }

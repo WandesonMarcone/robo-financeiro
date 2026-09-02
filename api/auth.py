@@ -9,6 +9,15 @@ Responsabilidades:
 - identificar o usuário autenticado ou negar acesso (401) quando inválido;
 - autorizar via ``services/autorizacao.py`` (matriz central) ou negar (403).
 
+Precedência quando ``X-Session-Token`` e ``X-API-Key`` são enviados
+simultaneamente:
+- ``X-API-Key`` tem prioridade: quando presente e válida, autentica por ela;
+- somente na ausência da API Key (ou quando ela é inválida) o
+  ``X-Session-Token`` é considerado.
+Essa precedência preserva o comportamento das integrações por API Key
+existentes e é a regra única de desempate — não há terceira forma de
+autenticação.
+
 Não cria outro sistema de autenticação e não revela, na resposta, se a API Key
 não existe, está expirada ou foi revogada.
 """
@@ -18,7 +27,7 @@ from flask import g, request
 
 from api import dependencias
 from api.respostas import resposta_erro
-from services import autorizacao, chaves_api, sessoes
+from services import auditoria, autorizacao, chaves_api, sessoes
 
 
 def _extrair_credenciais():
@@ -61,6 +70,19 @@ def rota_protegida(permissao):
                 if usuario is None:
                     return resposta_erro("Não autenticado.", 401)
                 if not autorizacao.tem_permissao(usuario, permissao):
+                    auditoria.registrar_evento(
+                        acao="API_ACESSO_NEGADO",
+                        alvo=(
+                            usuario.email
+                            if usuario.email
+                            else f"usuario:{usuario.id}"
+                        ),
+                        detalhe=f"permissao={permissao}",
+                        usuario_id=usuario.id,
+                        ip=request.remote_addr,
+                        sucesso=False,
+                        session=sessao,
+                    )
                     return resposta_erro("Acesso negado.", 403)
                 g.usuario = usuario
                 g.sessao = sessao

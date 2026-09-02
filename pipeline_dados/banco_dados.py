@@ -49,6 +49,13 @@ class Ativo(Base):
     indicadores_historico: Mapped[list["IndicadorHistorico"]] = relationship(back_populates="ativo", cascade="all, delete-orphan")
     alertas_eventos: Mapped[list["AlertaEvento"]] = relationship(back_populates="ativo", cascade="all, delete-orphan")
 
+    # --- Fase 6, Etapa 4: carteira e ativos acompanhados por usuário (aditivo) ---
+    acompanhamentos: Mapped[list["AtivoAcompanhado"]] = relationship(back_populates="ativo", cascade="all, delete-orphan")
+    posicoes: Mapped[list["PosicaoCarteira"]] = relationship(back_populates="ativo", cascade="all, delete-orphan")
+
+    # --- Fase 6, Etapa 6: notificações individualizadas por usuário (aditivo) ---
+    notificacoes: Mapped[list["Notificacao"]] = relationship(back_populates="ativo")
+
 class DadosFinanceirosAcoes(Base):
     __tablename__ = 'dados_financeiros_acoes'
     __table_args__ = (UniqueConstraint('ativo_id', 'data_referencia', 'tipo_doc', name='uix_dados_acoes'),)
@@ -345,6 +352,9 @@ class Usuario(Base):
     email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     senha_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     papel: Mapped[str] = mapped_column(String(30), default="USER", nullable=False)
+    plano: Mapped[str | None] = mapped_column(
+        String(30), default="FREE", nullable=True
+    )
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, unique=True, nullable=True)
     telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -362,6 +372,21 @@ class Usuario(Base):
     )
     auditoria: Mapped[list["AuditoriaAcesso"]] = relationship(
         back_populates="usuario", passive_deletes=True
+    )
+    acompanhamentos: Mapped[list["AtivoAcompanhado"]] = relationship(
+        back_populates="usuario", cascade="all, delete-orphan", passive_deletes=True
+    )
+    posicoes: Mapped[list["PosicaoCarteira"]] = relationship(
+        back_populates="usuario", cascade="all, delete-orphan", passive_deletes=True
+    )
+    preferencias: Mapped["PreferenciasUsuario | None"] = relationship(
+        back_populates="usuario",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
+    )
+    notificacoes: Mapped[list["Notificacao"]] = relationship(
+        back_populates="usuario", cascade="all, delete-orphan", passive_deletes=True
     )
 
 
@@ -439,3 +464,235 @@ class AuditoriaAcesso(Base):
     )
 
     usuario: Mapped["Usuario | None"] = relationship(back_populates="auditoria")
+
+
+# ==========================================
+# FASE 6 — ETAPA 4: CARTEIRA E ATIVOS ACOMPANHADOS POR USUÁRIO
+# ==========================================
+# Modelos aditivos (novas tabelas) com dono (``usuario_id``) seguindo o
+# contrato da camada ``services/escopo.py`` (``publico`` ausente = privado).
+# Nenhuma tabela existente é alterada. A evolução de schema usa
+# ``Base.metadata.create_all`` (padrão do projeto): cria apenas tabelas
+# ausentes, sem DROP nem ALTER em dados existentes — SQLite local e
+# PostgreSQL/Neon recebem as novas tabelas na inicialização.
+
+
+class AtivoAcompanhado(Base):
+    """Ativo que um usuário escolheu acompanhar (Fase 6, Etapa 4, aditivo).
+
+    Recurso privado com dono (``usuario_id``) pronto para o contrato de
+    ``services/escopo.py``. A unicidade ``(usuario_id, ativo_id)`` impede o
+    mesmo ativo duas vezes por usuário. Referencia ``Ativo`` (ticker/CNPJ/tipo)
+    sem duplicar dados de plataforma. Base para alertas/notificações
+    individualizadas de etapas futuras — nada disso é implementado aqui.
+    """
+
+    __tablename__ = "ativos_acompanhados"
+    __table_args__ = (
+        UniqueConstraint("usuario_id", "ativo_id", name="uix_ativos_acompanhados_usuario"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    ativo_id: Mapped[int] = mapped_column(
+        ForeignKey("ativos.id"), nullable=False, index=True
+    )
+    criado_em: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, nullable=False
+    )
+
+    usuario: Mapped["Usuario"] = relationship(back_populates="acompanhamentos")
+    ativo: Mapped["Ativo"] = relationship(back_populates="acompanhamentos")
+
+
+class PosicaoCarteira(Base):
+    """Posição de um usuário em um ativo — carteira (Fase 6, Etapa 4, aditivo).
+
+    Recurso privado com dono (``usuario_id``) pronto para o contrato de
+    ``services/escopo.py``. Uma linha por ``(usuario_id, ativo_id)``. Acompanhar
+    um ativo (``AtivoAcompanhado``) é independente de possuí-lo: conceitos
+    separados por design. Valores monetários usam NUMERIC (padrão do projeto
+    para evitar drift) e nenhuma fonte externa de preço é consultada nesta
+    etapa. Compra/venda real, corretora, tributação e ordens são etapas
+    posteriores.
+    """
+
+    __tablename__ = "posicoes_carteira"
+    __table_args__ = (
+        UniqueConstraint("usuario_id", "ativo_id", name="uix_posicoes_carteira_usuario"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    ativo_id: Mapped[int] = mapped_column(
+        ForeignKey("ativos.id"), nullable=False, index=True
+    )
+    quantidade: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    preco_medio: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    criado_em: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, nullable=False
+    )
+    atualizado_em: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, onupdate=datetime.now, nullable=False
+    )
+
+    usuario: Mapped["Usuario"] = relationship(back_populates="posicoes")
+    ativo: Mapped["Ativo"] = relationship(back_populates="posicoes")
+
+
+# ==========================================
+# FASE 6 — ETAPA 5: PREFERÊNCIAS INDIVIDUAIS DO USUÁRIO
+# ==========================================
+# Modelo aditivo (nova tabela) 1:1 com o usuário (``usuario_id`` UNIQUE),
+# seguindo o padrão das etapas anteriores. Nenhuma tabela existente é alterada;
+# ``Base.metadata.create_all`` cria apenas a tabela ausente (SQLite e
+# PostgreSQL). As preferências preparam notificações/alertas/canais/relatórios
+# de etapas futuras — nenhuma lógica de envio é implementada aqui.
+
+
+class PreferenciasUsuario(Base):
+    """Configurações individuais do usuário (Fase 6, Etapa 5, aditivo).
+
+    Uma única linha por usuário (``UNIQUE(usuario_id)``). Os defaults seguros
+    são aplicados no próprio modelo e espelhados em
+    ``services/preferencias.preferencias_padrao``. ``telegram_ativo`` é a
+    PREFERÊNCIA do usuário por notificações Telegram; a disponibilidade real
+    depende de um ``telegram_user_id`` válido e será verificada pelo futuro
+    serviço de notificações (nenhum envio acontece nesta etapa).
+    """
+
+    __tablename__ = "preferencias_usuarios"
+    __table_args__ = (
+        UniqueConstraint("usuario_id", name="uix_preferencias_usuarios_usuario"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+
+    notificacoes_ativas: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notificacoes_preco: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notificacoes_dividendos: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notificacoes_resultados: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notificacoes_documentos: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notificacoes_alertas: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    frequencia_notificacoes: Mapped[str] = mapped_column(String(20), default="imediata", nullable=False)
+    telegram_ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    web_ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    relatorios_ativos: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    frequencia_relatorios: Mapped[str] = mapped_column(String(20), default="semanal", nullable=False)
+    mercado_acoes: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    mercado_fiis: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    criado_em: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, nullable=False
+    )
+    atualizado_em: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, onupdate=datetime.now, nullable=False
+    )
+
+    usuario: Mapped["Usuario"] = relationship(back_populates="preferencias")
+
+
+# ==========================================
+# FASE 6 — ETAPA 6: MOTOR DE NOTIFICAÇÕES INDIVIDUALIZADAS
+# ==========================================
+# Modelo aditivo (nova tabela) 1:N com o usuário, seguindo o padrão das etapas
+# anteriores. Nenhuma tabela existente é alterada; ``Base.metadata.create_all``
+# cria apenas a tabela ausente (SQLite e PostgreSQL). Persiste o RESULTADO do
+# motor central (``services/notificacoes``) para consumo futuro pelos canais —
+# nenhum envio (Telegram/web) acontece nesta etapa.
+
+
+class Notificacao(Base):
+    """Notificação individualizada por usuário (Fase 6, Etapa 6, aditivo).
+
+    Privada por usuário (``usuario_id``). A deduplicação usa a chave de
+    idempotência ``(evento_id, usuario_id, tipo, canal)``: reprocessar o mesmo
+    evento não gera duplicatas; eventos distintos ou sem ``evento_id`` geram
+    múltiplas notificações legítimas (UNIQUE não impede notificações reais).
+    ``dados`` guarda apenas payload estruturado JÁ SANITIZADO — nunca senha,
+    token, API Key ou credencial.
+    """
+
+    __tablename__ = "notificacoes"
+    __table_args__ = (
+        UniqueConstraint(
+            "evento_id",
+            "usuario_id",
+            "tipo",
+            "canal",
+            name="uix_notificacoes_idempotencia",
+        ),
+        Index("ix_notificacoes_usuario_criado", "usuario_id", "criado_em"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    tipo: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    titulo: Mapped[str] = mapped_column(String(255), nullable=False)
+    mensagem: Mapped[str] = mapped_column(Text, nullable=False)
+    ativo_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ativos.id"), nullable=True, index=True
+    )
+    evento_id: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, index=True
+    )
+    canal: Mapped[str] = mapped_column(String(20), default="WEB", nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), default="GERADA", nullable=False, index=True
+    )
+    dados: Mapped[str | None] = mapped_column(Text, nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, nullable=False
+    )
+    lida_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # --- Fase 6, Etapa 7: estado de entrega do dispatcher (aditivo) ---
+    # Campos nulos/zero por padrão (nenhuma alteração destrutiva em dados
+    # existentes). ``tentativas`` conta as tentativas de entrega;
+    # ``proxima_tentativa`` agenda o retry controlado (backoff persistido);
+    # ``ultimo_erro`` guarda apenas o MOTIVO sanitizado (nunca segredos).
+    tentativas: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    enviada_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ultimo_erro: Mapped[str | None] = mapped_column(Text, nullable=True)
+    proxima_tentativa: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, index=True
+    )
+
+    usuario: Mapped["Usuario"] = relationship(back_populates="notificacoes")
+    ativo: Mapped["Ativo | None"] = relationship(back_populates="notificacoes")
+
+
+# ==========================================
+# FASE 6 — ETAPA 8: PLANOS E ENTITLEMENTS
+# ==========================================
+# A coluna ``plano`` é ADITIVA e idempotente: ``create_all`` a cria em bancos
+# novos e ``garantir_coluna_plano`` a adiciona em bancos existentes (SQLite e
+# PostgreSQL) via ``ALTER TABLE``, preservando todos os dados. Usuários
+# existentes ficam com ``NULL``, que o serviço central interpreta como
+# ``PLANO_PADRAO`` (FREE). Nenhuma tabela é alterada ou destruída.
+
+
+def garantir_coluna_plano(engine):
+    """Migration aditiva e idempotente da coluna ``plano`` em ``usuarios``.
+
+    Retorna ``True`` quando a coluna foi adicionada e ``False`` quando já
+    existia. Compatível com SQLite e PostgreSQL; nunca remove ou altera dados.
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    colunas = {c["name"] for c in insp.get_columns("usuarios")}
+    if "plano" in colunas:
+        return False
+    with engine.begin() as conexao:
+        conexao.execute(text("ALTER TABLE usuarios ADD COLUMN plano VARCHAR(30)"))
+    return True

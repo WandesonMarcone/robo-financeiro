@@ -305,6 +305,78 @@ def notificar_telegram(alerta: AlertaEvento, ticker: str) -> bool:
     return True
 
 
+def _rotulo_alerta(tipo_alerta: str) -> str:
+    """Rótulo amigável do alerta (reaproveitado na notificação individual)."""
+    return {
+        TIPO_MERCADO: "ALERTA DE MERCADO",
+        TIPO_QUALIDADE: "ALERTA DE QUALIDADE",
+        TIPO_CRITICO: "ALERTA CRÍTICO",
+    }.get(tipo_alerta, "ALERTA")
+
+
+def _para_float(valor):
+    """Converte valor numérico para float (payload JSON do motor individual)."""
+    if valor is None:
+        return None
+    return float(valor)
+
+
+def notificar_individual(
+    session,
+    alerta: AlertaEvento,
+    ativo,
+    tipo_ativo: str,
+) -> None:
+    """Alimenta o motor individual de notificações (Fase 6) sem quebrar o fluxo.
+
+    O alerta real detectado pelo pipeline (Fase 4) vira um evento
+    ``ALERTA_MERCADO`` para ``services.notificacoes.processar_evento``, que
+    decide os usuários elegíveis (permissão central, acompanhamento do ativo,
+    preferência, limite do plano e canais) e persiste as notificações
+    individualizadas de forma idempotente. O envio legado ao Telegram é
+    preservado — este é um passo aditivo. Erros são isolados: uma falha aqui
+    nunca derruba o espelhamento 5C nem a detecção de alertas.
+    """
+    try:
+        from services.notificacoes import processar_evento
+
+        session.flush()
+        evento = {
+            "tipo": "ALERTA_MERCADO",
+            "titulo": f"{ativo.ticker} — {_rotulo_alerta(alerta.tipo_alerta)}",
+            "mensagem": formatar_mensagem(alerta, ativo.ticker),
+            "ativo_id": alerta.ativo_id,
+            "evento_id": f"alerta:{alerta.id}",
+            "dados": {
+                "ticker": ativo.ticker,
+                "tipo_ativo": tipo_ativo,
+                "indicador": alerta.indicador,
+                "tipo_alerta": alerta.tipo_alerta,
+                "severidade": alerta.severidade,
+                "regra": alerta.regra,
+                "data_referencia": (
+                    str(alerta.data_referencia) if alerta.data_referencia else None
+                ),
+                "valor_anterior": _para_float(alerta.valor_anterior),
+                "valor_atual": _para_float(alerta.valor_atual),
+                "variacao_percentual": _para_float(alerta.variacao_percentual),
+                "origem": alerta.origem,
+            },
+        }
+        resumo = processar_evento(evento, session=session)
+        logger.info(
+            "FASE4 notificações individuais alerta=%s ativo=%s "
+            "elegiveis=%s geradas=%s",
+            alerta.id, ativo.ticker, resumo["elegiveis"], resumo["geradas"],
+        )
+    except Exception as e:
+        logger.warning(
+            "FASE4 notificações individuais falharam sem impedir o fluxo "
+            "alerta=%s ativo=%s: %s",
+            alerta.id, ativo.ticker, e,
+        )
+
+
 # ===========================================================================
 # API PÚBLICA (genérica para AÇÕES e FIIs)
 # ===========================================================================
@@ -345,6 +417,7 @@ def processar_indicadores_ativo(
                 continue
             if notificar:
                 notificar_telegram(alerta, ativo.ticker)
+                notificar_individual(session, alerta, ativo, tipo_ativo)
             alertas_gerados.append(alerta)
             logger_efetivo.info(
                 "FASE4 alerta=%s ativo=%s tipo=%s indicador=%s regra=%s "

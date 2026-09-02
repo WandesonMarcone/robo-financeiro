@@ -124,3 +124,48 @@ def desvincular_telegram_usuario(autor, usuario, session=None, ip=None):
     """
     _autorizar_vincular(autor, usuario, session, ip)
     return usuarios.desvincular_telegram(usuario, session=session, ip=ip)
+
+
+# ==========================================
+# ENTREGA INDIVIDUAL (Fase 6, Etapa 7)
+# ==========================================
+
+
+def _formatar_notificacao(titulo, mensagem):
+    """Texto simples da notificação (sem Markdown frágil, sem segredos)."""
+    return f"[NOTIFICACAO] {titulo}\n\n{mensagem}"
+
+
+def enviar_notificacao(usuario, titulo, mensagem, session=None):
+    """Envia uma notificação individual via Telegram para o ``usuario``.
+
+    Usa EXCLUSIVAMENTE o vínculo existente ``Usuario.telegram_user_id`` +
+    ``Usuario.telegram_chat_id`` — nenhum chat id é aceito do chamador/cliente.
+    Sem vínculo válido, retorna ``False`` sem lançar (o dispatcher decide o
+    estado da notificação). Reutiliza o bot existente
+    (``bot.loader.enviar_mensagem``): broadcasts, comandos, ``TELEGRAM_CHAT_ID``
+    e o comportamento legado permanecem inalterados. Nunca registra chat id,
+    token do bot ou qualquer segredo.
+    """
+    if usuario is None:
+        return False
+    if getattr(usuario, "telegram_user_id", None) is None:
+        return False
+    if getattr(usuario, "telegram_chat_id", None) is None:
+        return False
+    try:
+        from bot.loader import enviar_mensagem as _enviar
+    except Exception as e:  # pragma: no cover - import do bot indisponível
+        logger.warning("Bot indisponível para entrega individual: %s", type(e).__name__)
+        return False
+    try:
+        enviado = _enviar(
+            usuario.telegram_chat_id, _formatar_notificacao(titulo, mensagem)
+        )
+        return enviado is not None
+    except Exception:
+        logger.warning(
+            "Falha transitória na entrega Telegram para o usuário %s.",
+            getattr(usuario, "id", None),
+        )
+        return False

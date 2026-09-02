@@ -34,7 +34,19 @@ _TABELAS_LEGADAS = {
     "alertas_eventos",
 }
 
-_TABELAS_NOVAS = {"usuarios", "sessoes", "chaves_api", "auditoria_acesso"}
+_TABELAS_NOVAS = {
+    "usuarios",
+    "sessoes",
+    "chaves_api",
+    "auditoria_acesso",
+    # Fase 6, Etapa 4 (aditivo): recursos privados por usuário.
+    "ativos_acompanhados",
+    "posicoes_carteira",
+    # Fase 6, Etapa 5 (aditivo): preferências individuais por usuário.
+    "preferencias_usuarios",
+    # Fase 6, Etapa 6 (aditivo): motor de notificações individualizadas.
+    "notificacoes",
+}
 
 
 @pytest.fixture()
