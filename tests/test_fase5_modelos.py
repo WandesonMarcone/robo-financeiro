@@ -46,6 +46,8 @@ _TABELAS_NOVAS = {
     "preferencias_usuarios",
     # Fase 6, Etapa 6 (aditivo): motor de notificações individualizadas.
     "notificacoes",
+    # Fase 7, Etapa 7.2 (aditivo): catálogo central de ativos no PostgreSQL.
+    "ativos_catalogo",
 }
 
 

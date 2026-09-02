@@ -2,8 +2,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-import config
-from pipeline_dados.banco_dados import Ativo, Base, TipoAtivo
+from pipeline_dados.banco_dados import Ativo, AtivoCatalogo, Base, TipoAtivo
+from pipeline_dados.catalogo_ativos import registrar_no_catalogo
 from pipeline_dados.espelhamento_sheets import (
     ORIGEM_GOOGLE_SHEETS,
     STATUS_ATUALIZADO,
@@ -30,8 +30,10 @@ def db_session():
 # HELPER DE SESSÃO (HARDENING OPERACIONAL)
 # ==========================================
 
-def test_criar_sessao_configura_pool_para_neon(monkeypatch):
-    monkeypatch.setattr(config, "obter_database_url", lambda: "sqlite:///:memory:")
+def test_criar_sessao_configura_pool_para_neon():
+    # Fase 7, Etapa 7.4: _criar_sessao delega para o engine central único de
+    # services/db (não cria mais engine local a cada chamada). O teste valida
+    # que a sessão vem do engine central com os parâmetros de pool do legado.
     sessao = _criar_sessao()
     try:
         pool = sessao.get_bind().pool
@@ -143,6 +145,37 @@ def test_cnpj_invalido_do_catalogo_gera_warning_mas_nao_bloqueia(db_session):
     assert ativo is not None
     assert ativo.cnpj == "22.180.207/0001-72"
     assert any(a.campo == "cnpj" for a in resultado.achados)
+
+
+# ==========================================
+# IDENTIDADE VIA CATÁLOGO DA FASE 7, ETAPA 7.2
+# ==========================================
+
+def test_espelhar_ativo_prefere_cnpj_do_catalogo_ao_placeholder(db_session):
+    registrar_no_catalogo(
+        db_session, "MXRF11", TipoAtivo.FII,
+        cnpj="29.265.280/0001-40", nome_emissor="MXRF11 Fundo", fonte="teste",
+    )
+    ativo, _, status = espelhar_ativo(db_session, "MXRF11", TipoAtivo.FII)
+    assert status == STATUS_CRIADO
+    assert ativo.cnpj == "29.265.280/0001-40"
+
+
+def test_espelhar_ativo_catalogo_tem_prioridade_sobre_config(db_session):
+    registrar_no_catalogo(
+        db_session, "PETR4", TipoAtivo.ACAO,
+        cnpj="33.000.167/0001-01", fonte="teste",
+    )
+    ativo, _, status = espelhar_ativo(db_session, "PETR4", TipoAtivo.ACAO)
+    assert status == STATUS_CRIADO
+    assert ativo.cnpj == "33.000.167/0001-01"
+
+
+def test_espelhar_ativo_fii_sem_catalogo_mantem_placeholder(db_session):
+    ativo, _, status = espelhar_ativo(db_session, "MXRF11", TipoAtivo.FII)
+    assert status == STATUS_CRIADO
+    assert ativo.cnpj == "PENDENTE-MXRF11"
+    assert db_session.query(AtivoCatalogo).count() == 0
 
 
 # ==========================================

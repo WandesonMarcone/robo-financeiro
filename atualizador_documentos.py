@@ -7,45 +7,41 @@ from datetime import datetime, timedelta
 
 import PyPDF2
 import requests
-from groq import Groq
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 import config
 from config import MAPA_ISCAS_MASTER, TIPOS_DOC_FII
 from fnet_scraper import FnetDownloader
 from modules.GoogleDriveManager import GoogleDriveManager
 from modules.utils import conectar_gspread
-from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
+from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos, TipoAtivo
+from pipeline_dados.catalogo_ativos import obter_tickers_com_fallback
 from pipeline_dados.deduplicacao import marcar_duplicado, verificar_duplicidade
 from pipeline_dados.normalizacao import normalizar_data, normalizar_texto
 from pipeline_dados.qualidade_dados import INVALID, registrar_diagnostico, validar_registro
+from services import llm
+from services.db import SessionDB as SessionDB
+from services.db import engine as engine
 
 logger = logging.getLogger(__name__)
 
-# Cliente Groq criado de forma tolerante a falhas: sem GROQ_API_KEY o módulo
-# continua importável e a classificação cai no fallback (nome original).
-_client_groq = None
-if config.GROQ_API_KEY:
-    _client_groq = Groq(api_key=config.GROQ_API_KEY)
-
-def _obter_client_groq():
-    return _client_groq
-
-# URL do banco normalizada (Fase 2): usa a fonte única de config para evitar
-# duas formas concorrentes de montagem (config.DATABASE_URL vs url_banco).
-url_banco = config.obter_database_url()
-
-engine = create_engine(
-    url_banco,                 # Fonte única e normalizada (postgres:// -> postgresql://)
-    pool_pre_ping=True,        # Testa se a conexão com o Neon caiu antes de fazer a query
-    pool_recycle=1800,         # Renova a conexão a cada 30 minutos (evita o fechamento forçado)
-    pool_size=5,               # Mantém um limite seguro de conexões para não estourar a memória
-    max_overflow=10
-)
-SessionDB = sessionmaker(bind=engine)
-
 def obter_tickers_da_planilha():
+    """Tickers de FIIs: catálogo PostgreSQL primeiro; Sheets como fallback.
+
+    Fase 7, Etapa 7.2: o catálogo (``ativos_catalogo``) passa a ser a fonte
+    ativa em transição. Quando o catálogo ainda não possui o tipo, recai na
+    planilha legada BD_FIIs.
+    """
+    sessao = SessionDB()
+    try:
+        return obter_tickers_com_fallback(
+            sessao, TipoAtivo.FII, _obter_tickers_sheets_fiis
+        )
+    finally:
+        sessao.close()
+
+
+def _obter_tickers_sheets_fiis():
+    """Fallback legado: lê a aba BD_FIIs do Google Sheets."""
     try:
         planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
         aba = planilha.worksheet("BD_FIIs")
@@ -79,21 +75,24 @@ def classificar_documento_com_ia(nome_original, texto_extraido):
         f"A chave 'confianca' deve ser um número inteiro de 0 a 100 representando sua certeza."
     )
 
+    # Fase 7, Etapa 7.6: a chamada passa pela camada única services.llm, com a
+    # mesma fila (Groq), o mesmo modelo e o mesmo response_format do legado.
+    if not llm.GROQ_API_KEY:
+        print("⚠️ GROQ_API_KEY ausente. Classificação híbrida desabilitada.")
+        return nome_original, 0
+
     try:
-        client = _obter_client_groq()
-        if client is None:
-            print("⚠️ GROQ_API_KEY ausente. Classificação híbrida desabilitada.")
+        conteudo, erro = llm.completar_chat(
+            [{"role": "user", "content": prompt}],
+            fila_modelos=[("groq", "llama-3.3-70b-versatile")],
+            response_format={"type": "json_object"}, # 🚀 Força a Groq a cuspir JSON puro
+        )
+        if erro is not None:
+            print(f"⚠️ IA indisponível para classificação híbrida: {erro}")
             return nome_original, 0
 
-        chat = client.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
-            model="llama-3.3-70b-versatile",
-            response_format={"type": "json_object"} # 🚀 Força a Groq a cuspir JSON puro
-        )
-        resposta_str = chat.choices[0].message.content
-
         # Transforma a resposta da IA em um dicionário Python
-        dados_ia = json.loads(resposta_str)
+        dados_ia = json.loads(conteudo)
         tipo_ia = dados_ia.get("tipo", nome_original)
         confianca_ia = int(dados_ia.get("confianca", 0))
 
@@ -104,7 +103,7 @@ def classificar_documento_com_ia(nome_original, texto_extraido):
         return tipo_ia, confianca_ia
 
     except Exception as e:
-        print(f"⚠️ Erro ao consultar IA para classificação híbrida: {e}")
+        print(f"⚠️ Erro ao consultar IA para classificação híbrida: {type(e).__name__}")
         return nome_original, 0
 
 def enviar_alerta_revisao_telegram(ticker, nome_doc, link_pdf, file_id, db_id):
