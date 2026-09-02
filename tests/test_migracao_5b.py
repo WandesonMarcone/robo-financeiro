@@ -31,6 +31,10 @@ TABELAS_LEGADAS = (
     "documentos_qualitativos",
 )
 
+# Fase 4 (aditivo): relacionamentos de cascata de ``Ativo`` exigem que as
+# tabelas de histórico/alertas existam para o teste de exclusão em cascata.
+TABELAS_FASE4 = ("indicadores_historico", "alertas_eventos")
+
 
 @pytest.fixture()
 def engine(tmp_path):
@@ -42,7 +46,7 @@ def engine(tmp_path):
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
-    Base.metadata.create_all(eng, tables=[Base.metadata.tables[n] for n in TABELAS_LEGADAS])
+    Base.metadata.create_all(eng, tables=[Base.metadata.tables[n] for n in TABELAS_LEGADAS + TABELAS_FASE4])
     yield eng
     eng.dispose()
 

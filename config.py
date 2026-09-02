@@ -66,6 +66,36 @@ ESPELHAMENTO_PG_ATIVO = bool_ambiente("ESPELHAMENTO_PG_ATIVO", padrao=False)
 WEBHOOK_URL_BASE = os.environ.get("WEBHOOK_URL_BASE", "https://robo-fii-v2.onrender.com").rstrip("/")
 
 # ==========================================
+# AUTENTICAÇÃO E ADMINISTRAÇÃO (Fase 5)
+# ==========================================
+# Configurações aditivas para a futura camada de autenticação. Os padrões são
+# conservadores para não alterar o comportamento da V1.0.1: a API permanece
+# desabilitada e a auditoria é inerte até ser integrada.
+
+def _int_ambiente(nome, padrao):
+    """Interpreta variável de ambiente inteira de forma tolerante."""
+    try:
+        valor = os.environ.get(nome, "").strip()
+        return int(valor) if valor else padrao
+    except (TypeError, ValueError):
+        return padrao
+
+# TTL padrão de sessões autenticadas (em horas). Padrão seguro: 7 dias (168h).
+SESSAO_TTL_HORAS = _int_ambiente("SESSAO_TTL_HORAS", 168)
+
+# Telegram ID elevado a primeiro administrador (seed da Fase 5).
+# Vazio por padrão: nenhum usuário é criado/alterado automaticamente.
+PRIMEIRO_ADMIN_TELEGRAM_ID = os.environ.get("PRIMEIRO_ADMIN_TELEGRAM_ID", "").strip()
+
+# Trilha de auditoria de acesso. Habilitada por padrão; por ser aditiva, não
+# afeta nenhum fluxo da V1.0.1 até ser integrada.
+AUDITORIA_ATIVA = bool_ambiente("AUDITORIA_ATIVA", padrao=True)
+
+# Habilita a API de integração. Desabilitada por padrão: a API é uma superfície
+# de ataque e só será exposta quando explicitamente ativada.
+API_ENABLED = bool_ambiente("API_ENABLED", padrao=False)
+
+# ==========================================
 # VALIDAÇÃO DE CONFIGURAÇÃO (STARTUP)
 # ==========================================
 

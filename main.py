@@ -80,14 +80,42 @@ from pipeline_dados.banco_dados import Base
 # 4. Serviços (Orquestrador)
 from services.orquestrador import varredura_diaria
 
+# 4.1 Seed do SUPERADMIN (Fase 5, Etapa 5): roda após a criação das tabelas.
+from services.seed import garantir_superadmin_inicial
+
 Base.metadata.create_all(engine)
 logger.info("Banco de dados verificado e tabelas criadas com sucesso.")
 logger.info("Groq Key presente: %s", "SIM" if os.environ.get('GROQ_API_KEY') else "NÃO")
 
 # ==========================================
+# 🚀 SEED DO PRIMEIRO SUPERADMIN (FASE 5)
+# ==========================================
+# Idempotente: cria/eleva o administrador de referência (PRIMEIRO_ADMIN_TELEGRAM_ID
+# ou TELEGRAM_CHAT_ID legado) sem duplicar usuários e sem sobrescrever dados.
+# Qualquer falha é apenas registrada — nunca derruba o bot/webhook/agendador.
+try:
+    _resultado_seed = garantir_superadmin_inicial()
+    logger.info("Seed do SUPERADMIN: status=%s", _resultado_seed.get("status"))
+except Exception as e:  # pragma: no cover - defesa extra (o seed nunca lança)
+    logger.error("Seed do SUPERADMIN falhou (não bloqueia o bot): %s", e)
+
+# ==========================================
 # 🌐 SERVIDOR WEB E WEBHOOK (RENDER)
 # ==========================================
 app = Flask(__name__)
+
+# ==========================================
+# 🌐 API HTTP /api/v1 (Fase 5, Etapa 10)
+# ==========================================
+# Integração aditiva: respeita API_ENABLED. Desabilitada (padrão) -> nenhuma
+# rota/handler é registrado e o comportamento legado permanece intacto.
+from api import integrar_api
+
+if config.API_ENABLED:
+    integrar_api(app)
+    logger.info("API HTTP /api/v1 habilitada.")
+else:
+    logger.info("API HTTP /api/v1 desabilitada (API_ENABLED).")
 
 # A rota do webhook só existe quando TELEGRAM_BOT_TOKEN está definido.
 # Sem token, não registramos a rota (evita rota inválida '/' + None).

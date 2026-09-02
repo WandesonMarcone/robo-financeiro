@@ -6,8 +6,18 @@ logger = logging.getLogger(__name__)
 ROLE_USER = "USER"
 ROLE_ADMIN = "ADMIN"
 ROLE_SUPERADMIN = "SUPERADMIN"
+ROLE_VISITOR = "VISITOR"
 
+# Sinalização interna (Etapa 8): Telegram ID vinculado no banco a um usuário
+# DESATIVADO. Não é um papel atribuível: apenas indica que a identidade do banco
+# prevalece sobre o legado e o acesso às funções protegidas deve ser negado.
+ROLE_DESATIVADO = "DESATIVADO"
+
+# Níveis usados apenas para comparar hierarquia na resolução de papel
+# (Fase 5, Etapa 4). VISITOR fica abaixo de USER; a matriz completa de
+# permissões pertence a uma etapa posterior.
 NIVEIS = {
+    ROLE_VISITOR: -1,
     ROLE_USER: 0,
     ROLE_ADMIN: 1,
     ROLE_SUPERADMIN: 2,
@@ -54,8 +64,58 @@ def obter_dono_ids():
     return [int(dono)] if dono.isdigit() else []
 
 
-def papel_do_usuario(user_id):
-    """Retorna o papel (USER/ADMIN/SUPERADMIN) de um usuário."""
+def _papel_no_banco(user_id):
+    """Papel do Telegram ID a partir do banco (Fase 5, Etapas 4 e 8).
+
+    Consulta a tabela ``usuarios`` pelo ``telegram_user_id`` vinculado. Retorna:
+
+    - o ``papel`` quando o usuário está vinculado e ATIVO;
+    - ``ROLE_DESATIVADO`` quando vinculado porém desativado (a identidade do
+      banco prevalece sobre o legado: o acesso às funções protegidas é negado e
+      NÃO há fallback para as variáveis de ambiente — o vínculo não é apagado e
+      o SUPERADMIN pode reativar o usuário depois);
+    - ``None`` quando não há vínculo, o banco está vazio/indisponível ou a
+      consulta falha (o chamador cai no comportamento legado).
+
+    Nunca lança exceção: qualquer falha é registrada em log sem segredos. A
+    importação é preguiçosa para não atrasar o import do módulo nem quebrá-lo
+    caso a infraestrutura de banco não esteja pronta.
+    """
+    try:
+        from atualizador_documentos import SessionDB
+        from pipeline_dados.banco_dados import Usuario
+
+        sessao = SessionDB()
+        try:
+            usuario = (
+                sessao.query(Usuario)
+                .filter(Usuario.telegram_user_id == user_id)
+                .first()
+            )
+            if usuario is None:
+                return None
+            if not usuario.ativo:
+                return ROLE_DESATIVADO
+            if usuario.papel in NIVEIS:
+                return usuario.papel
+            return None
+        finally:
+            sessao.close()
+    except Exception as e:
+        logger.warning(
+            "Falha ao consultar papel do usuário %s no banco (%s); usando comportamento legado.",
+            user_id,
+            type(e).__name__,
+        )
+        return None
+
+
+def _papel_legado(user_id):
+    """Mecanismo legado exato de resolução de papel.
+
+    Ordem preservada: SUPERADMIN_CHAT_IDS, ADMIN_CHAT_IDS e TELEGRAM_CHAT_ID
+    (dono, também SUPERADMIN). Sem configuração, retorna USER.
+    """
     if user_id in obter_superadmin_ids():
         return ROLE_SUPERADMIN
     if user_id in obter_admin_ids():
@@ -63,6 +123,28 @@ def papel_do_usuario(user_id):
     if user_id in obter_dono_ids():
         return ROLE_SUPERADMIN
     return ROLE_USER
+
+
+def papel_do_usuario(user_id):
+    """Retorna o papel (VISITOR/USER/ADMIN/SUPERADMIN) de um usuário.
+
+    Resolução DB-first (Fase 5, Etapas 4 e 8):
+    1. Se o Telegram ID está vinculado a um ``Usuario`` ATIVO no banco, o papel
+       vem do banco (fonte de identidade).
+    2. Se está vinculado a um usuário DESATIVADO, o acesso é negado
+       (retorna ``VISITOR``) — o banco prevalece e não há fallback legado.
+    3. Sem vínculo, banco vazio/indisponível ou erro na consulta, utiliza
+       EXATAMENTE o mecanismo legado (``SUPERADMIN_CHAT_IDS``,
+       ``ADMIN_CHAT_IDS`` e ``TELEGRAM_CHAT_ID``).
+    """
+    if user_id is None:
+        return _papel_legado(user_id)
+    papel_db = _papel_no_banco(user_id)
+    if papel_db == ROLE_DESATIVADO:
+        return ROLE_VISITOR
+    if papel_db is not None:
+        return papel_db
+    return _papel_legado(user_id)
 
 
 def usuario_tem_papel(user_id, papel_minimo):

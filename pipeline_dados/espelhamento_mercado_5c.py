@@ -60,6 +60,7 @@ from pipeline_dados.mapeamento_sheets import (
     transformar_linha_acao,
     transformar_linha_fii,
 )
+from pipeline_dados.motor_alertas import processar_indicadores_ativo
 from pipeline_dados.normalizacao import normalizar_texto
 from pipeline_dados.qualidade_dados import (
     INVALID,
@@ -412,6 +413,7 @@ def _relatorio_vazio(aba: str, data_referencia: date) -> dict:
         "perfis_atualizados": 0,
         "inquilinos_criados": 0,
         "inquilinos_atualizados": 0,
+        "alertas": 0,
         "tickers": [],
     }
 
@@ -452,6 +454,19 @@ def _espelhar_matriz_fiis(session: Session, matriz, data_referencia: date, log=N
             relatorio["atualizados"] += 1
         if resultado.status == WARNING:
             relatorio["warnings"] += 1
+
+        try:
+            alertas = processar_indicadores_ativo(
+                session, ativo, dados, "FII",
+                data_referencia=data_referencia, origem=ORIGEM_GOOGLE_SHEETS,
+                log=log,
+            )
+            relatorio["alertas"] += len(alertas)
+        except Exception as e:
+            (log or logger).warning(
+                "FASE4 espelhamento FIIs ativo=%s falhou sem impedir o fluxo 5C: %s",
+                dados["ticker"], e,
+            )
 
         _, status_perfil = gravar_perfil_fii(session, ativo, dados, log=log)
         if status_perfil == STATUS_CRIADO:
@@ -628,6 +643,19 @@ def _espelhar_matriz_acoes(session: Session, matriz, data_referencia: date, log=
             relatorio["atualizados"] += 1
         if resultado.status == WARNING:
             relatorio["warnings"] += 1
+
+        try:
+            alertas = processar_indicadores_ativo(
+                session, ativo, dados, "ACAO",
+                data_referencia=data_referencia, origem=ORIGEM_GOOGLE_SHEETS,
+                log=log,
+            )
+            relatorio["alertas"] += len(alertas)
+        except Exception as e:
+            (log or logger).warning(
+                "FASE4 espelhamento Ações ativo=%s falhou sem impedir o fluxo 5C: %s",
+                dados["ticker"], e,
+            )
 
         _, status_perfil = gravar_perfil_acao(session, ativo, dados, log=log)
         if status_perfil == STATUS_CRIADO:
