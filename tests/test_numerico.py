@@ -9,8 +9,13 @@ from pipeline_dados import numerico
 from pipeline_dados.numerico import (
     NAO_FINITO,
     NAO_NUMERO,
+    campo_numerico,
     coerir_numero,
+    derivar_divisao,
+    derivar_produto,
     parsear_numero,
+    parsear_percentual,
+    primeiro_numero,
 )
 
 # ==========================================
@@ -142,3 +147,43 @@ def test_qualidade_dados_reexporta_o_mesmo_parsear_numero():
     from pipeline_dados.qualidade_dados import parsear_numero as qd_parsear
 
     assert qd_parsear is parsear_numero
+
+
+# ==========================================
+# HELPERS 8.2: PERCENTUAL / CAMPO / DERIVAÇÃO
+# ==========================================
+
+def test_parsear_percentual_zero_real_e_ausencia():
+    assert parsear_percentual("0%") == 0.0
+    assert parsear_percentual(0) == 0.0
+    assert parsear_percentual("12,5%") == 0.125
+    assert parsear_percentual("") is None
+    assert parsear_percentual(None) is None
+    assert parsear_percentual("   ") is None
+    assert parsear_percentual("abc%") is None
+
+
+def test_campo_numerico_nao_usa_default_zero():
+    assert campo_numerico(None, "preco") is None
+    assert campo_numerico({}, "preco") is None
+    assert campo_numerico({"preco": 0}, "preco") == 0.0
+    assert campo_numerico({"dy": "0%"}, "dy", percentual=True) == 0.0
+    assert campo_numerico({"dy": "abc"}, "dy") is None
+
+
+def test_primeiro_numero_nao_pula_zero():
+    assert primeiro_numero(0, 5) == 0.0
+    assert primeiro_numero(None, "", "abc", 0.0) == 0.0
+    assert primeiro_numero(None, float("nan"), 2.5) == 2.5
+    assert primeiro_numero(None, "", "x") is None
+
+
+def test_derivar_divisao_e_produto_respeitam_ausencia():
+    assert derivar_divisao(10, 2) == 5.0
+    assert derivar_divisao(0, 2) == 0.0
+    assert derivar_divisao(10, 0) is None
+    assert derivar_divisao(10, None) is None
+    assert derivar_divisao(None, 2) is None
+    assert derivar_produto(10, 0) == 0.0
+    assert derivar_produto(10, None) is None
+    assert derivar_produto(2, 3, 4) == 24.0

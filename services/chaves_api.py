@@ -115,23 +115,30 @@ def criar_chave_api(
 # ==========================================
 
 
-def listar_chaves_api(usuario, autor=None, session=None):
+def listar_chaves_api(usuario, autor=None, session=None, limite=None, offset=0):
     """Lista as API Keys de ``usuario`` (próprio escopo).
 
     O próprio usuário lista suas chaves; outro ``autor`` precisa da permissão
     ``usuarios.ler`` da matriz central. Retorna os registros ``ChaveApi`` em
     ordem de criação (contêm apenas o hash — nunca a chave original).
+
+    Sem ``limite``, devolve a lista completa. Com ``limite``, devolve
+    ``(registros, total)`` já recortado no SQL.
     """
     if usuario is None or getattr(usuario, "id", None) is None:
-        return []
+        return ([], 0) if limite is not None else []
     _autorizar(autor, usuario, "usuarios.ler")
     with _sessao(session) as s:
-        return (
+        query = (
             s.query(ChaveApi)
             .filter(ChaveApi.usuario_id == usuario.id)
             .order_by(ChaveApi.id)
-            .all()
         )
+        if limite is None:
+            return query.all()
+        total = query.count()
+        registros = query.offset(int(offset or 0)).limit(int(limite)).all()
+        return registros, total
 
 
 def buscar_chave_api(usuario, chave_id, autor=None, session=None):

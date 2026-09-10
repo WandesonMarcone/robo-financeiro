@@ -14,7 +14,8 @@ Reutiliza exclusivamente (nenhuma regra paralela):
   (dono do recurso); a entrega confirma o escopo de acesso (anti-IDOR/BOLA) —
   nenhum ``usuario_id`` ou ``telegram_chat_id`` vem do cliente;
 - ``services/preferencias.py``: mestre ``notificacoes_ativas``, preferência do
-  tipo de evento e ``web_ativo``/``telegram_ativo``;
+  tipo de evento, ``web_ativo``/``telegram_ativo``, ``frequencia_notificacoes``
+  e filtros ``mercado_acoes``/``mercado_fiis``;
 - ``services/telegram.py``: entrega individual usando o vínculo Telegram
   existente (``telegram_user_id``/``telegram_chat_id``);
 - ``services/auditoria.py``: trilha de eventos sem segredos;
@@ -117,9 +118,16 @@ def _motivo_inelegivel(usuario, notificacao, session):
         prefs = preferencias.preferencias_padrao()
     if not _pref(prefs, "notificacoes_ativas"):
         return "preferencias_desativadas"
+    if notificacoes.frequencia_efetiva(prefs) == notificacoes.FREQUENCIA_DESATIVADA:
+        return "preferencias_desativadas"
     campo = notificacoes.PREFERENCIA_POR_EVENTO.get(notificacao.tipo)
     if campo is not None and not _pref(prefs, campo):
         return "preferencias_desativadas"
+    tipo_ativo = notificacoes.tipo_mercado_do_ativo(
+        session, getattr(notificacao, "ativo_id", None)
+    )
+    if not notificacoes.mercado_permitido(prefs, tipo_ativo):
+        return "mercado_filtrado"
 
     if notificacao.canal == notificacoes.CANAL_WEB:
         if not _pref(prefs, "web_ativo"):

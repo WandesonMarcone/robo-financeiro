@@ -27,6 +27,13 @@ Estrutura base por ativo/indicador (arquitetura genérica da Fase 4):
 from dataclasses import dataclass
 
 from pipeline_dados.qualidade_dados import parsear_numero
+from pipeline_dados.semantica_indicadores import (
+    AUSENTE,
+    INVALIDO,
+    NAO_APLICAVEL,
+    interpretar_valor,
+    tipo_canonico,
+)
 
 OK = "OK"
 WARNING = "WARNING"
@@ -176,7 +183,10 @@ REGRAS_POR_TIPO: dict[str, dict[str, RegraIndicador]] = {
 
 def obter_regra(tipo_ativo: str, indicador: str) -> RegraIndicador | None:
     """Retorna a regra do indicador ou None (indicador sem regra/não monitorado)."""
-    return REGRAS_POR_TIPO.get(tipo_ativo, {}).get(indicador)
+    tipo = tipo_canonico(tipo_ativo)
+    if tipo is None:
+        return None
+    return REGRAS_POR_TIPO.get(tipo, {}).get(indicador)
 
 
 def _fora_da_faixa(valor: float, faixa: tuple[float | None, float | None] | None) -> bool:
@@ -193,44 +203,72 @@ def _fora_da_faixa(valor: float, faixa: tuple[float | None, float | None] | None
 def classificar_indicador(tipo_ativo: str, indicador: str, valor) -> dict:
     """Classifica uma ocorrência de um indicador (OK/WARNING/ERRO/CRITICO).
 
-    Retorna um dict com chaves: ``regra``, ``severidade``, ``motivo`` e
-    ``nome_exibicao``. Valor ausente/ilegível retorna ``severidade`` "IGNORADO"
-    (não é erro nem alerta). A classificação NÃO altera o valor original.
+    Retorna um dict com chaves: ``regra``, ``severidade``, ``motivo``,
+    ``nome_exibicao`` e ``semantica`` (Fase 8.5). Valor ausente, N/A ou
+    ilegível retorna ``severidade`` "IGNORADO" (não é erro nem alerta).
+    N/A explícito e indicador não aplicável ao tipo não viram 0 nem ausência.
+    A classificação NÃO altera o valor original.
     """
+    interpretacao = interpretar_valor(tipo_ativo, indicador, valor)
     regra = obter_regra(tipo_ativo, indicador)
-    if regra is None:
-        return {"regra": "SEM_REGRA", "severidade": OK, "motivo": "", "nome_exibicao": indicador}
+    nome = regra.nome_exibicao if regra else indicador
+    semantica = interpretacao["semantica"]
 
-    numero = parsear_numero(valor)
+    if not interpretacao["aplicavel"] or semantica == NAO_APLICAVEL:
+        return {"regra": "NAO_APLICAVEL", "severidade": "IGNORADO",
+                "motivo": "Indicador não aplicável (N/A); não é ausência nem zero.",
+                "nome_exibicao": nome, "semantica": NAO_APLICAVEL}
+
+    if regra is None:
+        return {"regra": "SEM_REGRA", "severidade": OK, "motivo": "",
+                "nome_exibicao": indicador, "semantica": semantica}
+
+    if semantica == AUSENTE:
+        return {"regra": "VALOR_AUSENTE", "severidade": "IGNORADO",
+                "motivo": "Valor ausente; indicador não avaliado.",
+                "nome_exibicao": regra.nome_exibicao, "semantica": AUSENTE}
+
+    if semantica == INVALIDO:
+        return {"regra": "VALOR_INVALIDO", "severidade": "IGNORADO",
+                "motivo": "Valor presente e ilegível; indicador não avaliado.",
+                "nome_exibicao": regra.nome_exibicao, "semantica": INVALIDO}
+
+    numero = interpretacao["valor_numerico"]
+    if numero is None:
+        numero = parsear_numero(valor)
     if numero is None:
         return {"regra": "VALOR_AUSENTE", "severidade": "IGNORADO",
-                "motivo": "Valor ausente/ilegível; indicador não avaliado.", "nome_exibicao": regra.nome_exibicao}
+                "motivo": "Valor ausente/ilegível; indicador não avaliado.",
+                "nome_exibicao": regra.nome_exibicao, "semantica": AUSENTE}
 
+    extra = {"semantica": semantica}
     if numero < 0:
         if regra.classificacao_negativo == ERRO:
             return {"regra": "VALOR_NEGATIVO_IMPOSSIVEL", "severidade": ERRO,
-                    "motivo": regra.motivo_negativo, "nome_exibicao": regra.nome_exibicao}
+                    "motivo": regra.motivo_negativo, "nome_exibicao": regra.nome_exibicao, **extra}
         if regra.classificacao_negativo == WARNING:
             return {"regra": "VALOR_NEGATIVO_SUSPEITO", "severidade": WARNING,
-                    "motivo": regra.motivo_negativo, "nome_exibicao": regra.nome_exibicao}
+                    "motivo": regra.motivo_negativo, "nome_exibicao": regra.nome_exibicao, **extra}
         return {"regra": "VALOR_NEGATIVO_LEGITIMO", "severidade": OK,
-                "motivo": "Dado financeiramente válido, porém negativo.", "nome_exibicao": regra.nome_exibicao}
+                "motivo": "Dado financeiramente válido, porém negativo.",
+                "nome_exibicao": regra.nome_exibicao, **extra}
 
     if numero == 0 and not regra.aceita_zero:
         return {"regra": "VALOR_ZERO_SUSPEITO", "severidade": WARNING,
-                "motivo": f"Valor zero é improvável para {regra.nome_exibicao}.", "nome_exibicao": regra.nome_exibicao}
+                "motivo": f"Valor zero é improvável para {regra.nome_exibicao}.",
+                "nome_exibicao": regra.nome_exibicao, **extra}
 
     if regra.faixa_critica is not None and _fora_da_faixa(numero, regra.faixa_critica):
         return {"regra": "FORA_FAIXA_CRITICA", "severidade": CRITICO,
                 "motivo": f"{regra.nome_exibicao} fora da faixa de plausibilidade "
                           f"{regra.faixa_critica} (possível inconsistência de fonte/escala).",
-                "nome_exibicao": regra.nome_exibicao}
+                "nome_exibicao": regra.nome_exibicao, **extra}
 
     if regra.faixa_ok is not None and _fora_da_faixa(numero, regra.faixa_ok):
         return {"regra": "FORA_FAIXA", "severidade": WARNING,
                 "motivo": f"{regra.nome_exibicao} fora da faixa usual "
                           f"{regra.faixa_ok} (possível dado incorreto).",
-                "nome_exibicao": regra.nome_exibicao}
+                "nome_exibicao": regra.nome_exibicao, **extra}
 
     return {"regra": "OK", "severidade": OK, "motivo": "Valor dentro da faixa esperada.",
-            "nome_exibicao": regra.nome_exibicao}
+            "nome_exibicao": regra.nome_exibicao, **extra}

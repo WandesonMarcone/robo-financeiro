@@ -29,7 +29,7 @@ from pipeline_dados.banco_dados import (
 from pipeline_dados.espelhamento_mercado_5c import espelhar_mercado_acoes, espelhar_mercado_fiis
 from services import chaves_api, mercado, usuarios
 
-FII_CNPJ = "PENDENTE-MXRF11"
+FII_CNPJ = None
 
 
 @pytest.fixture()
@@ -74,7 +74,7 @@ def matriz_acoes():
 
 
 def _criar_ativo(sessao, ticker, tipo):
-    ativo = Ativo(ticker=ticker, cnpj=f"PENDENTE-{ticker}", tipo=tipo)
+    ativo = Ativo(ticker=ticker, cnpj=None, tipo=tipo)
     sessao.add(ativo)
     sessao.flush()
     return ativo
@@ -441,3 +441,10 @@ def test_api_dados_financeiros(ambiente):
     assert dados["meta"]["total"] == 1
     assert dados["data"][0]["tipo"] == "FII"
     assert dados["data"][0]["patrimonio_liquido"] == 50.0
+    assert dados["data"][0]["data_referencia"] == "2026-06-30"
+    campos = dados["data"][0]["campos"]
+    assert campos["patrimonio_liquido"]["semantica"] == "PRESENTE"
+    assert campos["patrimonio_liquido"]["unidade"] == "R$"
+    assert campos["vacancia_fisica"]["semantica"] == "AUSENTE"
+    assert dados["data"][0]["vacancia_fisica"] is None
+    assert dados["data"][0]["proveniencia"]["valor_patrimonial_cotas"]

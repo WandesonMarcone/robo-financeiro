@@ -89,7 +89,7 @@ def test_espelhar_ativo_cria_registro_fii(db_session):
     assert resultado.status == VALID
     assert ativo.ticker == "MXRF11"
     assert ativo.tipo == TipoAtivo.FII
-    assert ativo.cnpj == "PENDENTE-MXRF11"
+    assert ativo.cnpj is None
     assert db_session.query(Ativo).count() == 1
 
 
@@ -171,10 +171,10 @@ def test_espelhar_ativo_catalogo_tem_prioridade_sobre_config(db_session):
     assert ativo.cnpj == "33.000.167/0001-01"
 
 
-def test_espelhar_ativo_fii_sem_catalogo_mantem_placeholder(db_session):
+def test_espelhar_ativo_fii_sem_catalogo_fica_sem_cnpj(db_session):
     ativo, _, status = espelhar_ativo(db_session, "MXRF11", TipoAtivo.FII)
     assert status == STATUS_CRIADO
-    assert ativo.cnpj == "PENDENTE-MXRF11"
+    assert ativo.cnpj is None
     assert db_session.query(AtivoCatalogo).count() == 0
 
 

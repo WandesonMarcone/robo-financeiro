@@ -1,28 +1,27 @@
-"""Integração consolidada entre usuários e Telegram (Fase 5, Etapa 8).
+"""Integração consolidada entre usuários e Telegram (Fase 5/10).
 
-Permite que o Telegram reconheça corretamente um ``Usuario`` cadastrado no
-banco, sem quebrar o comportamento legado. Esta etapa apenas consolida a
-identidade e a gestão administrativa do vínculo; a autenticação de mensagens
-continua sendo resolvida por ``modules/seguranca.py`` (DB-first com fallback
-legado) e nenhuma sessão é criada por mensagem.
+A identidade do Telegram é sempre um ``Usuario`` existente: não há uma segunda
+conta. O vínculo administrativo continua exigindo ``telegram.administrar``; o
+autoatendimento (Etapa 10.2) prova a sessão web/API já emitida e grava o
+``telegram_user_id`` no mesmo registro.
 
-Regras (sem criar regras paralelas — tudo passa pelo motor central):
-- Apenas quem possui a permissão ``telegram.administrar`` (SUPERADMIN via ``*``
-  ou ADMIN pela matriz) pode vincular/desvincular;
-- ADMIN não pode alterar um usuário protegido (SUPERADMIN);
-- USER/VISITOR não podem vincular nenhum usuário;
-- Tentativas sem permissão ou de escalonamento são auditadas e negadas.
-
-As funções ``vincular_telegram``, ``desvincular_telegram`` e
-``buscar_usuario_por_telegram`` de ``services/usuarios.py`` são reutilizadas —
-nada é duplicado aqui. Nenhuma senha, token ou segredo é persistido ou
-registrado.
+Nenhuma senha, token ou segredo é persistido ou registrado.
 """
+import hmac
 import logging
 
-from services import auditoria, autorizacao, usuarios
+import config
+from services import auditoria, autorizacao, escopo, sessoes, usuarios
 
 logger = logging.getLogger(__name__)
+
+FLUXO_PUBLICO = "publico"
+FLUXO_USUARIO = "usuario"
+FLUXO_OPERACIONAL = "operacional"
+
+HEADER_WEBHOOK_SECRET = "X-Telegram-Bot-Api-Secret-Token"
+
+ACAO_VINCULO_SESSAO_NEGADO = "TELEGRAM_VINCULO_SESSAO_NEGADO"
 
 # Permissão da matriz central exigida para vincular/desvincular Telegram.
 PERMISSAO_VINCULO = "telegram.administrar"
@@ -169,3 +168,162 @@ def enviar_notificacao(usuario, titulo, mensagem, session=None):
             getattr(usuario, "id", None),
         )
         return False
+
+
+def payload_comando_start(texto):
+    """Extrai o payload de ``/start`` (token de sessão), ou string vazia.
+
+    Não interpreta o payload: o token só é validado em
+    ``vincular_telegram_por_sessao``. Aceita ``/start@Bot payload``.
+    """
+    if not isinstance(texto, str) or not texto.strip():
+        return ""
+    partes = texto.strip().split(maxsplit=1)
+    comando = partes[0].split("@", 1)[0]
+    if comando != "/start":
+        return ""
+    if len(partes) < 2:
+        return ""
+    return partes[1].strip()
+
+
+def fluxo_do_telegram(telegram_user_id, session=None):
+    """Classifica o Telegram em PUBLICO, USUARIO ou OPERACIONAL.
+
+    USUARIO/OPERACIONAL exigem ``Usuario`` vinculado e ativo. Sem vínculo, só o
+    operador legado (``modules.seguranca.eh_admin``) entra em OPERACIONAL.
+    Desativado e VISITOR permanecem PUBLICO. Não cria usuário nem sessão.
+    """
+    usuario = usuario_do_telegram(telegram_user_id, session=session)
+    if usuario is not None:
+        papel = autorizacao.papel_de(usuario)
+        if papel in (autorizacao.SUPERADMIN, autorizacao.ADMIN):
+            return FLUXO_OPERACIONAL, usuario
+        if papel == autorizacao.USER:
+            return FLUXO_USUARIO, usuario
+        return FLUXO_PUBLICO, usuario
+    try:
+        from modules import seguranca
+
+        if seguranca.eh_admin(telegram_user_id):
+            return FLUXO_OPERACIONAL, None
+    except Exception as e:
+        logger.warning(
+            "Falha ao resolver operador legado (%s); tratando como publico.",
+            type(e).__name__,
+        )
+    return FLUXO_PUBLICO, None
+
+
+def comando_permitido(telegram_user_id, fluxo_minimo, session=None):
+    """True quando o Telegram atende o fluxo mínimo (sem enumerar usuários)."""
+    fluxo, _usuario = fluxo_do_telegram(telegram_user_id, session=session)
+    if fluxo_minimo == FLUXO_PUBLICO:
+        return True
+    if fluxo_minimo == FLUXO_USUARIO:
+        return fluxo in (FLUXO_USUARIO, FLUXO_OPERACIONAL)
+    if fluxo_minimo == FLUXO_OPERACIONAL:
+        return fluxo == FLUXO_OPERACIONAL
+    return False
+
+
+def recurso_visivel_para_telegram(
+    telegram_user_id, recurso, permissao_administrativa=None, session=None
+):
+    """Devolve ``recurso`` só se o Usuario vinculado puder acessá-lo.
+
+    Sem vínculo, recurso inexistente ou acesso negado: ``None`` (anti-IDOR).
+    Reutiliza ``services.escopo``.
+    """
+    usuario = usuario_do_telegram(telegram_user_id, session=session)
+    if usuario is None:
+        return None
+    if not escopo.usuario_pode_acessar(usuario, recurso, permissao_administrativa):
+        return None
+    return recurso
+
+
+def vincular_telegram_por_sessao(
+    token, telegram_user_id, telegram_chat_id=None, session=None, ip=None
+):
+    """Vincula o Telegram ao Usuario da sessão web/API já autenticada.
+
+    Falhas (token inválido, sessão expirada, Telegram/usuário já vinculados a
+    outra conta) retornam ``None`` com a mesma auditoria genérica — sem revelar
+    qual etapa falhou e sem registrar o token. Não cria Usuario. Não usa a
+    permissão administrativa: o dono da sessão só vincula a si mesmo.
+    """
+    def _negar(motivo, usuario_id=None):
+        auditoria.registrar_evento(
+            acao=ACAO_VINCULO_SESSAO_NEGADO,
+            detalhe=f"motivo={motivo}",
+            usuario_id=usuario_id,
+            ip=ip,
+            sucesso=False,
+            session=session,
+        )
+        return None
+
+    if telegram_user_id is None:
+        return _negar("telegram_ausente")
+    usuario = sessoes.validar_sessao(token, session=session)
+    if usuario is None:
+        return _negar("sessao_invalida")
+
+    existente = usuarios.buscar_usuario_por_telegram(telegram_user_id, session=session)
+    if existente is not None and existente.id != usuario.id:
+        return _negar("telegram_em_uso", usuario_id=usuario.id)
+
+    vinculado = getattr(usuario, "telegram_user_id", None)
+    if vinculado is not None and vinculado != telegram_user_id:
+        return _negar("usuario_ja_vinculado", usuario_id=usuario.id)
+
+    try:
+        usuarios.vincular_telegram(
+            usuario,
+            telegram_user_id,
+            telegram_chat_id=telegram_chat_id,
+            session=session,
+            ip=ip,
+        )
+    except ValueError:
+        return _negar("vinculo_rejeitado", usuario_id=usuario.id)
+    return usuario
+
+
+def webhook_secret_configurado():
+    """True quando ``TELEGRAM_WEBHOOK_SECRET`` está definido no ambiente."""
+    return bool((getattr(config, "TELEGRAM_WEBHOOK_SECRET", None) or "").strip())
+
+
+def webhook_secret_valido(header_value):
+    """Compara o header do Telegram com o segredo do ambiente (constant-time).
+
+    Sem segredo configurado, retorna True (compatibilidade com o webhook legado
+    autenticado só pelo path). Nunca registra o valor recebido ou o esperado.
+    """
+    esperado = (getattr(config, "TELEGRAM_WEBHOOK_SECRET", None) or "").strip()
+    if not esperado:
+        return True
+    recebido = header_value if isinstance(header_value, str) else ""
+    try:
+        return hmac.compare_digest(recebido, esperado)
+    except (TypeError, ValueError):
+        return False
+
+
+def webhook_autorizado(content_type, secret_header):
+    """True somente para JSON com secret_token válido (quando configurado)."""
+    if content_type != "application/json":
+        return False
+    return webhook_secret_valido(secret_header)
+
+
+def parametros_set_webhook(url):
+    """Kwargs de ``set_webhook``: inclui ``secret_token`` só se configurado."""
+    params = {"url": url}
+    secret = (getattr(config, "TELEGRAM_WEBHOOK_SECRET", None) or "").strip()
+    if secret:
+        params["secret_token"] = secret
+    return params
+

@@ -22,8 +22,8 @@ Decisões de modelagem (verificadas no schema real, NÃO inventadas):
   que na verdade contém valor de mercado, vacância que mistura física e
   financeira, Qtd de cotas estimada, sharesOutstanding).
 - O Sheets não possui coluna de CNPJ nem data de referência (o "carimbo" é
-  "%d/%m %H:%M", sem ano). CNPJ é resolvido via catálogo (config.MAPA_CNPJ_B3)
-  ou placeholder "PENDENTE-{ticker}" (mesmo padrão de atualizador_documentos).
+  "%d/%m %H:%M", sem ano). CNPJ é resolvido via catálogo (config.MAPA_CNPJ_B3);
+  ausência permanece ``None`` — nunca se inventa placeholder.
 - Reutiliza pipeline_dados.normalizacao e pipeline_dados.qualidade_dados
   (parsear_numero), preservando None quando o valor não puder ser interpretado
   (NUNCA converte erro de coleta em 0.0).
@@ -32,6 +32,8 @@ from dataclasses import dataclass
 
 import config
 from pipeline_dados.banco_dados import TipoAtivo
+from pipeline_dados.catalogo_ativos import cnpj_real
+from pipeline_dados.numerico import parsear_percentual
 from pipeline_dados.qualidade_dados import parsear_numero
 
 ORIGEM_GOOGLE_SHEETS = "Google Sheets"
@@ -55,9 +57,8 @@ CONSTRAINT_DADOS_ACOES = "uix_dados_acoes (ativo_id, data_referencia, tipo_doc)"
 CONSTRAINT_DADOS_FIIS = "uix_dados_fiis (ativo_id, data_referencia)"
 
 # CNPJ nunca participa da identidade espelhada: o Sheets não tem coluna de CNPJ.
-# Para ações usa-se o catálogo config.MAPA_CNPJ_B3; demais ativos usam o mesmo
-# placeholder já adotado por atualizador_documentos ("PENDENTE-{ticker}").
-_PLACEHOLDER_PREFIXO = "PENDENTE-"
+# Para ações usa-se o catálogo config.MAPA_CNPJ_B3; FIIs e tickers desconhecidos
+# devolvem None (Fase 8.3: ausência ≠ identificador inventado).
 _TICKER_PARA_CNPJ = {ticker: cnpj for cnpj, ticker in config.MAPA_CNPJ_B3.items()}
 
 
@@ -237,7 +238,7 @@ MAPA_POR_ABA = {
 # tabelas financeiras (dados_financeiros_fiis/acoes exigem data_referencia).
 LACUNAS_GERAIS = (
     "data_referencia (sem coluna de data no Sheets; o carimbo não contém ano)",
-    "cnpj (Sheets sem coluna de CNPJ; resolvido via catálogo/placeholder)",
+    "cnpj (Sheets sem coluna de CNPJ; resolvido via catálogo ou None)",
 )
 
 
@@ -250,16 +251,16 @@ def tipo_ativo_da_aba(nome_aba) -> TipoAtivo | None:
     return None
 
 
-def resolver_cnpj(ticker, tipo_ativo) -> str:
-    """Resolve o CNPJ do ativo: catálogo MAPA_CNPJ_B3 ou placeholder.
+def resolver_cnpj(ticker, tipo_ativo) -> str | None:
+    """CNPJ do ativo via MAPA_CNPJ_B3 (ações) ou None.
 
-    Placeholder no mesmo formato já usado por atualizador_documentos
-    (``PENDENTE-{ticker}``); é preenchido depois pelos coletores CVM.
+    Offline, sem sessão de catálogo. Nunca inventa placeholder; FIIs e
+    tickers desconhecidos devolvem ``None``.
     """
     ticker_limpo = str(ticker).strip().upper()
     if tipo_ativo is TipoAtivo.ACAO:
-        return _TICKER_PARA_CNPJ.get(ticker_limpo, f"{_PLACEHOLDER_PREFIXO}{ticker_limpo}")
-    return f"{_PLACEHOLDER_PREFIXO}{ticker_limpo}"
+        return cnpj_real(_TICKER_PARA_CNPJ.get(ticker_limpo))
+    return None
 
 
 def _celula(linha, indice):
@@ -286,7 +287,9 @@ def parsear_valor_market(valor) -> float | None:
     """Converte valor do Sheets em float, preservando None quando ilegível.
 
     Diferente de modules/utils.formatar(), NUNCA converte erro em 0.0. Trata
-    prefixos monetários (R$/%), separadores BR e marcadores vazios ("-", "N/A").
+    prefixos monetários (R$), percentuais com ``%`` (viram fração) e marcadores
+    vazios ("-", "N/A"). Sem o símbolo ``%``, não inventa escala: ``12.0``
+    permanece ``12.0``.
     """
     if valor is None:
         return None
@@ -295,12 +298,12 @@ def parsear_valor_market(valor) -> float | None:
     texto = str(valor).strip()
     if not texto:
         return None
-    texto = texto.replace("R$", "").replace("$", "").replace("%", "").replace(" ", "").strip()
     if texto in ("-", "N/A", "N/D", "NA", "—", "--"):
         return None
-    if "," in texto and "." in texto:
-        texto = texto.replace(".", "").replace(",", ".")
-    return parsear_numero(texto)
+    texto = texto.replace("R$", "").replace("$", "").replace(" ", "").strip()
+    if not texto or texto in ("-", "N/A", "N/D", "NA", "—", "--"):
+        return None
+    return parsear_percentual(texto)
 
 
 def _num(linha, indice) -> float | None:

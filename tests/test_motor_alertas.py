@@ -4,8 +4,8 @@ Cobre (Ações e FIIs de forma genérica): primeira observação sem histórico;
 valor inalterado não regrava nem alerta; alteração acima do limiar gera alerta
 de mercado; alteração pequena não alerta; variação crítica vira alerta crítico;
 negativo legítimo não alerta; preço negativo gera alerta de qualidade; ausência
-de Telegram não falha; notificação Telegram marca telegram_enviado; mensagem
-formatada; dados originais nunca são mutados; alerta persistido no banco.
+de Telegram não falha; alerta individual não faz fan-out para TELEGRAM_CHAT_ID;
+mensagem formatada; dados originais nunca são mutados; alerta persistido no banco.
 """
 from datetime import date
 from unittest.mock import patch
@@ -259,13 +259,23 @@ def test_processar_indicadores_sem_telegram_nao_falha(db_session, fii):
     assert alertas[0].telegram_enviado is False
 
 
-def test_notificacao_telegram_marca_enviado(db_session, fii):
+def test_notificar_telegram_nao_faz_fanout_para_chat_legado(db_session, fii):
     alerta = _criar_alerta(db_session, fii)
-    sentinela = object()
-    with patch("bot.loader.enviar_mensagem", return_value=sentinela) as mock_env:
-        assert notificar_telegram(alerta, fii.ticker) is True
-    mock_env.assert_called_once()
-    assert alerta.telegram_enviado is True
+    with patch("bot.loader.enviar_mensagem") as mock_env:
+        assert notificar_telegram(alerta, fii.ticker) is False
+    mock_env.assert_not_called()
+    assert alerta.telegram_enviado is False
+
+
+def test_processar_indicadores_nao_envia_telegram_chat_id(db_session, fii):
+    processar_indicadores_ativo(db_session, fii, _dados_fii(), "FII", REF, notificar=False)
+    with patch("bot.loader.enviar_mensagem") as mock_env:
+        alertas = processar_indicadores_ativo(
+            db_session, fii, _dados_fii(preco=11.50), "FII", REF, notificar=True
+        )
+    mock_env.assert_not_called()
+    assert len(alertas) == 1
+    assert alertas[0].telegram_enviado is False
 
 
 # ===========================================================================

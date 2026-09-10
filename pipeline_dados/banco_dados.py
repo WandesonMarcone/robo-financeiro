@@ -37,7 +37,7 @@ class Ativo(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     ticker: Mapped[str] = mapped_column(String(10), unique=True, nullable=False)
-    cnpj: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    cnpj: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True)
     tipo: Mapped[TipoAtivo] = mapped_column(Enum(TipoAtivo), nullable=False)
 
     dados_acoes: Mapped[list["DadosFinanceirosAcoes"]] = relationship(back_populates="ativo", cascade="all, delete-orphan")
@@ -69,6 +69,10 @@ class DadosFinanceirosAcoes(Base):
     ativo_id: Mapped[int] = mapped_column(ForeignKey('ativos.id'), nullable=False)
     data_referencia: Mapped[date] = mapped_column(Date, nullable=False)
     tipo_doc: Mapped[str] = mapped_column(String(10), nullable=False) # Ex: 'ITR', 'DFP'
+    data_coleta: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    fonte: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    fonte_primaria: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    url_origem: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # --- BALANÇO PATRIMONIAL ---
     ativo_total: Mapped[float | None] = mapped_column(Float)
@@ -99,12 +103,18 @@ class DadosFinanceirosFiis(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     ativo_id: Mapped[int] = mapped_column(ForeignKey('ativos.id'), nullable=False)
     data_referencia: Mapped[date] = mapped_column(Date, nullable=False)
+    data_coleta: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    fonte: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    fonte_primaria: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    url_origem: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # --- INDICADORES FINANCEIROS (XML Mensal/Trimestral) ---
     patrimonio_liquido: Mapped[float | None] = mapped_column(Float)
     ativo_total: Mapped[float | None] = mapped_column(Float)
     disponibilidades_caixa: Mapped[float | None] = mapped_column(Float)
     rendimento_por_cota: Mapped[float | None] = mapped_column(Float)
+    valor_patrimonial_cotas: Mapped[float | None] = mapped_column(Float)
+    percentual_dividend_yield_mes: Mapped[float | None] = mapped_column(Float)
 
     # --- NOVOS INDICADORES DE MERCADO E OPERACIONAIS ---
     cotistas: Mapped[int | None] = mapped_column(Integer)                # Quantidade total de cotistas
@@ -186,6 +196,8 @@ class SnapshotFii(Base):
     data_coleta: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, nullable=False)
     data_publicacao: Mapped[date | None] = mapped_column(Date, nullable=True)
     fonte: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    fonte_primaria: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    fonte_intermediaria: Mapped[str | None] = mapped_column(String(60), nullable=True)
     url_origem: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     preco: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
@@ -219,6 +231,8 @@ class SnapshotAcao(Base):
     data_coleta: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, nullable=False)
     data_publicacao: Mapped[date | None] = mapped_column(Date, nullable=True)
     fonte: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    fonte_primaria: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    fonte_intermediaria: Mapped[str | None] = mapped_column(String(60), nullable=True)
     url_origem: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     preco: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
@@ -701,6 +715,117 @@ def garantir_coluna_plano(engine):
     with engine.begin() as conexao:
         conexao.execute(text("ALTER TABLE usuarios ADD COLUMN plano VARCHAR(30)"))
     return True
+
+
+def garantir_cnpj_nullable(engine):
+    """Migration aditiva: ``ativos.cnpj`` aceita NULL (CNPJ ausente).
+
+    Fase 8.3: ticker é a identidade operacional; CNPJ é atributo externo
+    somente quando tem 14 dígitos reais. Bancos criados antes desta etapa
+    tinham ``NOT NULL`` (e placeholders ``PENDENTE-*``). PostgreSQL recebe
+    ``ALTER COLUMN ... DROP NOT NULL``; em seguida placeholders viram NULL.
+    SQLite novo já nasce anulável via ORM; não recria tabela.
+
+    Retorna ``True`` quando o ALTER foi aplicado. Nunca apaga linhas.
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if "ativos" not in insp.get_table_names():
+        return False
+    colunas = {c["name"]: c for c in insp.get_columns("ativos")}
+    if "cnpj" not in colunas:
+        return False
+    ja_nullable = bool(colunas["cnpj"]["nullable"])
+    dialecto = engine.dialect.name
+    alterou = False
+    with engine.begin() as conexao:
+        if not ja_nullable and dialecto == "postgresql":
+            conexao.execute(text("ALTER TABLE ativos ALTER COLUMN cnpj DROP NOT NULL"))
+            alterou = True
+            ja_nullable = True
+        if ja_nullable:
+            conexao.execute(
+                text("UPDATE ativos SET cnpj = NULL WHERE cnpj LIKE 'PENDENTE-%'")
+            )
+    return alterou
+
+
+def garantir_colunas_freshness(engine):
+    """Migration aditiva Fase 8.4: proveniência e data_coleta sem DROP.
+
+    Acrescenta ``fonte_primaria``/``fonte_intermediaria`` nos snapshots e
+    ``data_coleta``/``fonte``/``fonte_primaria``/``url_origem`` nas tabelas
+    contábeis. Nunca altera o significado de ``data_referencia``. SQLite e
+    PostgreSQL. Idempotente. Retorna a quantidade de colunas adicionadas.
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    existentes = set(insp.get_table_names())
+    adicionadas = 0
+    alvos = {
+        "snapshots_fiis": (
+            ("fonte_primaria", "VARCHAR(60)"),
+            ("fonte_intermediaria", "VARCHAR(60)"),
+        ),
+        "snapshots_acoes": (
+            ("fonte_primaria", "VARCHAR(60)"),
+            ("fonte_intermediaria", "VARCHAR(60)"),
+        ),
+        "dados_financeiros_acoes": (
+            ("data_coleta", "TIMESTAMP"),
+            ("fonte", "VARCHAR(60)"),
+            ("fonte_primaria", "VARCHAR(60)"),
+            ("url_origem", "VARCHAR(500)"),
+        ),
+        "dados_financeiros_fiis": (
+            ("data_coleta", "TIMESTAMP"),
+            ("fonte", "VARCHAR(60)"),
+            ("fonte_primaria", "VARCHAR(60)"),
+            ("url_origem", "VARCHAR(500)"),
+        ),
+    }
+    with engine.begin() as conexao:
+        for tabela, colunas in alvos.items():
+            if tabela not in existentes:
+                continue
+            nomes = {c["name"] for c in insp.get_columns(tabela)}
+            for nome, ddl in colunas:
+                if nome in nomes:
+                    continue
+                conexao.execute(text(f"ALTER TABLE {tabela} ADD COLUMN {nome} {ddl}"))
+                adicionadas += 1
+    return adicionadas
+
+
+def garantir_colunas_cvm_fii(engine):
+    """Migration aditiva Fase 9: VPA e DY mensal oficiais da CVM.
+
+    Acrescenta ``valor_patrimonial_cotas`` e ``percentual_dividend_yield_mes``
+    em ``dados_financeiros_fiis``. Nao altera colunas existentes nem mistura
+    com snapshots de mercado. Idempotente. SQLite e PostgreSQL.
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if "dados_financeiros_fiis" not in insp.get_table_names():
+        return 0
+    nomes = {c["name"] for c in insp.get_columns("dados_financeiros_fiis")}
+    alvos = (
+        ("valor_patrimonial_cotas", "FLOAT"),
+        ("percentual_dividend_yield_mes", "FLOAT"),
+    )
+    adicionadas = 0
+    with engine.begin() as conexao:
+        for nome, ddl in alvos:
+            if nome in nomes:
+                continue
+            conexao.execute(
+                text(f"ALTER TABLE dados_financeiros_fiis ADD COLUMN {nome} {ddl}")
+            )
+            adicionadas += 1
+    return adicionadas
 
 
 # ==========================================

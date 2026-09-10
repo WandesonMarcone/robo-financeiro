@@ -29,7 +29,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 import config
-from pipeline_dados.banco_dados import Base
+from pipeline_dados.banco_dados import (
+    Base,
+    garantir_cnpj_nullable,
+    garantir_colunas_cvm_fii,
+    garantir_colunas_freshness,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +61,9 @@ def criar_tabelas() -> None:
     garantir o schema antes de usar a sessão (ex.: espelhamentos legados).
     """
     Base.metadata.create_all(engine)
+    garantir_cnpj_nullable(engine)
+    garantir_colunas_freshness(engine)
+    garantir_colunas_cvm_fii(engine)
 
 
 @contextmanager

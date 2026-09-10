@@ -18,6 +18,7 @@ from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import func, insert, literal, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import joinedload
 
 from pipeline_dados.banco_dados import Ativo, PosicaoCarteira
 from services import auditoria, autorizacao, escopo, planos
@@ -182,17 +183,30 @@ def adicionar_posicao(usuario, ativo_id, quantidade, preco_medio, session=None, 
 # ==========================================
 
 
-def listar_posicoes(usuario, session=None):
-    """Lista as posições do próprio ``usuario``, em ordem de criação."""
+def listar_posicoes(usuario, session=None, limite=None, offset=0):
+    """Lista as posições do próprio ``usuario``, em ordem de criação.
+
+    Sem ``limite``, devolve a lista completa. Com ``limite``, devolve
+    ``(registros, total)`` já recortado no SQL.
+    """
     if usuario is None or getattr(usuario, "id", None) is None:
-        return []
+        return ([], 0) if limite is not None else []
     with _sessao(session) as s:
-        return (
+        query = (
             s.query(PosicaoCarteira)
             .filter(PosicaoCarteira.usuario_id == usuario.id)
             .order_by(PosicaoCarteira.id)
+        )
+        if limite is None:
+            return query.options(joinedload(PosicaoCarteira.ativo)).all()
+        total = query.count()
+        registros = (
+            query.options(joinedload(PosicaoCarteira.ativo))
+            .offset(int(offset or 0))
+            .limit(int(limite))
             .all()
         )
+        return registros, total
 
 
 def buscar_posicao(usuario, posicao_id, session=None):

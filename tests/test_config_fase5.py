@@ -15,6 +15,8 @@ _VARIAVEIS_FASE5 = (
     "PRIMEIRO_ADMIN_TELEGRAM_ID",
     "AUDITORIA_ATIVA",
     "API_ENABLED",
+    "TELEGRAM_WEBHOOK_SECRET",
+    "API_CORS_ORIGINS",
 )
 
 
@@ -35,6 +37,9 @@ def test_padroes_seguros():
     assert config.PRIMEIRO_ADMIN_TELEGRAM_ID == ""
     assert config.AUDITORIA_ATIVA is True
     assert config.API_ENABLED is False
+    assert config.RATE_LIMIT_API_POR_MINUTO == 120
+    assert config.RATE_LIMIT_AUTH_POR_MINUTO == 10
+    assert config.API_CORS_ORIGINS == ()
 
 
 def test_sessao_ttl_lida_do_ambiente(monkeypatch):
@@ -63,6 +68,34 @@ def test_flags_booleanas_lidas_do_ambiente(monkeypatch):
     assert config.API_ENABLED is True
 
 
+def test_telegram_webhook_secret_lido_do_ambiente(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "segredo-teste-ambiente")
+    importlib.reload(config)
+    assert config.TELEGRAM_WEBHOOK_SECRET == "segredo-teste-ambiente"
+
+
+def test_telegram_webhook_secret_padrao_vazio():
+    assert config.TELEGRAM_WEBHOOK_SECRET == ""
+
+
+def test_cors_origens_lidas_do_ambiente(monkeypatch):
+    monkeypatch.setenv(
+        "API_CORS_ORIGINS",
+        "https://app.exemplo.com, http://localhost:5173/, *",
+    )
+    importlib.reload(config)
+    assert config.API_CORS_ORIGINS == (
+        "https://app.exemplo.com",
+        "http://localhost:5173",
+    )
+
+
+def test_cors_origens_wildcard_isolado_e_ignorado(monkeypatch):
+    monkeypatch.setenv("API_CORS_ORIGINS", "*")
+    importlib.reload(config)
+    assert config.API_CORS_ORIGINS == ()
+
+
 def test_variaveis_existentes_nao_removidas():
     for var in (
         "TELEGRAM_BOT_TOKEN",
@@ -73,6 +106,7 @@ def test_variaveis_existentes_nao_removidas():
         "DATABASE_URL",
         "ESPELHAMENTO_PG_ATIVO",
         "WEBHOOK_URL_BASE",
+        "TELEGRAM_WEBHOOK_SECRET",
         "MAPA_ISCAS_MASTER",
         "FILTROS_FIXOS",
     ):

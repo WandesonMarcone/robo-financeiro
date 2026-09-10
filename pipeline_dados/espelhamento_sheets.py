@@ -20,7 +20,7 @@ import logging
 from sqlalchemy.orm import Session
 
 from pipeline_dados.banco_dados import Ativo, TipoAtivo
-from pipeline_dados.catalogo_ativos import resolver_cnpj as resolver_cnpj_catalogo
+from pipeline_dados.catalogo_ativos import cnpj_real, resolver_cnpj as resolver_cnpj_catalogo
 from pipeline_dados.mapeamento_sheets import (
     ABAS_ESPELHAVEIS,
     ORIGEM_GOOGLE_SHEETS,
@@ -81,11 +81,10 @@ def espelhar_ativo(session: Session, ticker, tipo_ativo: TipoAtivo, cnpj=None, l
     são aceitos e não bloqueiam a persistência.
 
     A identidade do ativo segue o catálogo da Fase 7, Etapa 7.2
-    (``pipeline_dados.catalogo_ativos``): o CNPJ é resolvido no PostgreSQL
-    primeiro (``ativos_catalogo``) e apenas como fallback nos mapas de config
-    (a mesma base de seed do catálogo). O placeholder ``PENDENTE-{ticker}`` é
-    usado apenas quando o CNPJ não é conhecido por nenhuma das duas fontes —
-    exigido pela constraint ``NOT NULL`` de ``ativos.cnpj``.
+    (``pipeline_dados.catalogo_ativos``): ticker é a chave operacional; o CNPJ
+    é atributo externo resolvido no PostgreSQL (``ativos_catalogo``) e, se
+    ausente, nos mapas de config. Sem 14 dígitos reais o CNPJ fica ``None``
+    — nunca se inventa placeholder ``PENDENTE-*``.
     """
     resultado = validar_registro(
         {"ticker": ticker}, "sheets_ativo", origem=ORIGEM_GOOGLE_SHEETS, ativo=ticker
@@ -95,16 +94,11 @@ def espelhar_ativo(session: Session, ticker, tipo_ativo: TipoAtivo, cnpj=None, l
         return None, resultado, STATUS_INVALIDO
 
     ticker_limpo = str(ticker).strip().upper()
-    cnpj_resolvido = cnpj
+    cnpj_resolvido = cnpj_real(cnpj)
     if cnpj_resolvido is None:
         cnpj_resolvido = resolver_cnpj_catalogo(session, ticker_limpo, tipo_ativo)
-    if cnpj_resolvido is None:
-        cnpj_resolvido = f"PENDENTE-{ticker_limpo}"
 
-    # CNPJ do catálogo (MAPA_CNPJ_B3) é identidade confiável, mas dígitos
-    # inválidos geram WARNING (aceito). Placeholder é marcador interno e não
-    # participa da validação.
-    if cnpj_resolvido and not cnpj_resolvido.startswith("PENDENTE-"):
+    if cnpj_resolvido is not None:
         achado = regra_cnpj("cnpj", cnpj_resolvido)
         if achado is not None:
             resultado.achados.append(_rebaixar_para_warning(achado))
@@ -116,13 +110,10 @@ def espelhar_ativo(session: Session, ticker, tipo_ativo: TipoAtivo, cnpj=None, l
         session.flush()
         status = STATUS_CRIADO
     else:
-        # Preserva dados existentes; apenas troca placeholder por CNPJ real.
         status = STATUS_INALTERADO
-        if (
-            ativo.cnpj
-            and ativo.cnpj.startswith("PENDENTE-")
-            and not cnpj_resolvido.startswith("PENDENTE-")
-        ):
+        cnpj_atual = cnpj_real(ativo.cnpj)
+        placeholder = bool(ativo.cnpj) and str(ativo.cnpj).upper().startswith("PENDENTE-")
+        if cnpj_atual is None and (cnpj_resolvido is not None or placeholder):
             ativo.cnpj = cnpj_resolvido
             status = STATUS_ATUALIZADO
 

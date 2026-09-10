@@ -442,16 +442,13 @@ def test_admin_acessa_recursos_previstos(ambiente):
     for rota in (
         "/api/v1/ativos",
         "/api/v1/indicadores",
+        "/api/v1/alertas",
         "/api/v1/documentos",
         "/api/v1/relatorios",
         "/api/v1/me",
     ):
         resposta = ambiente["cliente"].get(rota, headers=_cabecalho(ambiente, "admin"))
         assert resposta.status_code == 200, rota
-    resposta = ambiente["cliente"].get(
-        "/api/v1/alertas", headers=_cabecalho(ambiente, "admin")
-    )
-    assert resposta.status_code == 403
 
 
 def test_user_acessa_endpoints_de_consulta(ambiente):
@@ -533,8 +530,9 @@ def test_filtro_de_ativos(ambiente):
         item["ticker"] for item in cliente.get("/api/v1/ativos?tipo=ACAO", headers=base).get_json()["data"]
     } == {"PETR4"}
     assert {
-        item["ticker"] for item in cliente.get("/api/v1/ativos?ticker=GAR", headers=base).get_json()["data"]
+        item["ticker"] for item in cliente.get("/api/v1/ativos?ticker=GARE11", headers=base).get_json()["data"]
     } == {"GARE11"}
+    assert cliente.get("/api/v1/ativos?ticker=GAR", headers=base).get_json()["data"] == []
     assert cliente.get("/api/v1/ativos?tipo=INVALIDO", headers=base).status_code == 400
 
 
@@ -578,6 +576,7 @@ def test_historico_do_ativo(ambiente):
     assert resposta.status_code == 200
     dados = resposta.get_json()
     assert dados["meta"]["ticker"] == "GARE11"
+    assert dados["meta"]["serie_temporal"] is False
     assert dados["data"][0]["indicador"] == "pvp"
     assert dados["data"][0]["valor_atual"] == 0.95
     assert dados["data"][0]["valor_anterior"] == 0.90
@@ -714,3 +713,51 @@ def test_filtro_invalido_de_ativos_nao_revela_informacao(ambiente):
     )
     assert resposta.status_code == 400
     assert "tipo" in resposta.get_json()["meta"]["error"]
+
+
+# ==========================================
+# FASE 9.2 — PAGINAÇÃO, RBAC ADMIN E SEMÂNTICA
+# ==========================================
+
+
+def test_admin_consulta_alertas(ambiente):
+    resposta = ambiente["cliente"].get(
+        "/api/v1/alertas", headers=_cabecalho(ambiente, "admin")
+    )
+    assert resposta.status_code == 200
+    dados = resposta.get_json()
+    assert dados["status"] == "success"
+    assert dados["meta"]["total"] == 2
+    assert dados["meta"]["page"] == 1
+    assert dados["meta"]["page_size"] == 100
+    assert dados["meta"]["has_next"] is False
+
+
+def test_paginacao_de_ativos(ambiente):
+    base = _cabecalho(ambiente, "user")
+    cliente = ambiente["cliente"]
+    pagina1 = cliente.get("/api/v1/ativos?page=1&page_size=1", headers=base).get_json()
+    assert pagina1["meta"]["total"] == 2
+    assert pagina1["meta"]["page"] == 1
+    assert pagina1["meta"]["page_size"] == 1
+    assert pagina1["meta"]["has_next"] is True
+    assert pagina1["meta"]["next_page"] == 2
+    assert pagina1["meta"]["retornados"] == 1
+    assert len(pagina1["data"]) == 1
+    pagina2 = cliente.get("/api/v1/ativos?page=2&page_size=1", headers=base).get_json()
+    assert pagina2["meta"]["has_next"] is False
+    assert pagina2["meta"]["next_page"] is None
+    tickers = {pagina1["data"][0]["ticker"], pagina2["data"][0]["ticker"]}
+    assert tickers == {"GARE11", "PETR4"}
+
+
+def test_indicador_expoe_semantica_8_5(ambiente):
+    resposta = ambiente["cliente"].get(
+        "/api/v1/indicadores", headers=_cabecalho(ambiente, "user")
+    )
+    item = resposta.get_json()["data"][0]
+    assert item["valor_atual"] == 0.95
+    assert item["semantica"] == "PRESENTE"
+    assert item["unidade"] == "x"
+    assert item["escala"] == "multiplo"
+    assert item["aplicavel"] is True

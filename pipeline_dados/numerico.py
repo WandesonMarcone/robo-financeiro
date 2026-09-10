@@ -22,6 +22,7 @@ Este módulo não importa ``qualidade_dados`` (nem ``modules``): é a base reuti
 e offline sobre a qual a camada de validação e os consumidores seguros se apoiam.
 """
 import math
+from decimal import Decimal
 
 NAO_NUMERO = "NAO_NUMERO"
 NAO_FINITO = "NAO_FINITO"
@@ -38,7 +39,11 @@ def coerir_numero(valor) -> tuple[float | None, str | None]:
         return None, None
     if isinstance(valor, bool):
         return None, NAO_NUMERO
-    if isinstance(valor, (int, float)):
+    if isinstance(valor, Decimal):
+        if not valor.is_finite():
+            return None, NAO_FINITO
+        numero = float(valor)
+    elif isinstance(valor, (int, float)):
         numero = float(valor)
     elif isinstance(valor, str):
         texto = valor.strip()
@@ -66,3 +71,73 @@ def parsear_numero(valor) -> float | None:
     """
     numero, _ = coerir_numero(valor)
     return numero
+
+
+def parsear_percentual(valor) -> float | None:
+    """Converte percentual em fração. Erro/ausência → ``None``; zero real → ``0.0``.
+
+    ``"12,5%"`` → ``0.125``. Sem o símbolo ``%``, delega a ``parsear_numero``
+    (não inventa escala). ``"0%"`` e ``0`` permanecem zero legítimo.
+    """
+    if valor is None:
+        return None
+    if isinstance(valor, str):
+        texto = valor.strip()
+        if not texto:
+            return None
+        tem_percentual = "%" in texto
+        texto = texto.replace("%", "").strip()
+        numero = parsear_numero(texto)
+        if numero is None:
+            return None
+        return numero / 100.0 if tem_percentual else numero
+    return parsear_numero(valor)
+
+
+def campo_numerico(fonte, chave, *, percentual=False) -> float | None:
+    """Lê ``fonte[chave]`` sem default ``0``. Chave ausente → ``None``.
+
+    Não usa ``.get(chave, 0)``: zero só aparece se a fonte informar zero.
+    """
+    if fonte is None:
+        return None
+    getter = getattr(fonte, "get", None)
+    if getter is not None:
+        valor = getter(chave)
+    else:
+        try:
+            valor = fonte[chave]
+        except (KeyError, TypeError, IndexError):
+            return None
+    if percentual:
+        return parsear_percentual(valor)
+    return parsear_numero(valor)
+
+
+def primeiro_numero(*valores) -> float | None:
+    """Primeiro valor numérico presente (inclui ``0.0``). Não trata zero como ausência."""
+    for valor in valores:
+        numero = parsear_numero(valor)
+        if numero is not None:
+            return numero
+    return None
+
+
+def derivar_divisao(numerador, denominador) -> float | None:
+    """``numerador / denominador``. Qualquer ausência ou denominador 0 → ``None``."""
+    num = parsear_numero(numerador)
+    den = parsear_numero(denominador)
+    if num is None or den is None or den == 0:
+        return None
+    return num / den
+
+
+def derivar_produto(*fatores) -> float | None:
+    """Produto dos fatores. Qualquer ausência → ``None``. Zero real permanece zero."""
+    total = 1.0
+    for fator in fatores:
+        numero = parsear_numero(fator)
+        if numero is None:
+            return None
+        total *= numero
+    return total

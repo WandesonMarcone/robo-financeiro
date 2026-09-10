@@ -3,9 +3,9 @@ de notificações (Fase 6) sem quebrar o fluxo nem o Telegram legado.
 
 Cobre: alerta real detectado gera ``Notificacao`` individual para quem
 acompanha o ativo; idempotência (reprocessar os mesmos dados não duplica);
-isolamento entre usuários (quem não acompanha não recebe); o envio legado ao
-Telegram continua intacto; uma falha no motor individual nunca derruba o
-pipeline de detecção.
+isolamento entre usuários (quem não acompanha não recebe); alerta individual
+não faz fan-out para TELEGRAM_CHAT_ID; uma falha no motor individual nunca
+derruba o pipeline de detecção.
 """
 from datetime import date
 from unittest.mock import patch
@@ -133,13 +133,12 @@ def test_quem_nao_acompanha_o_ativo_nao_recebe_notificacao(db_session, fii):
     assert notificacoes[0].usuario_id == alice.id
 
 
-def test_telegram_legado_continua_sendo_notificado(db_session, fii):
-    sentinela = object()
-    with patch("bot.loader.enviar_mensagem", return_value=sentinela) as mock_envio:
+def test_alerta_individual_nao_usa_telegram_chat_id(db_session, fii):
+    with patch("bot.loader.enviar_mensagem") as mock_envio:
         _primeira_observacao(db_session, fii)
         alertas = _disparar_alerta(db_session, fii)
-    mock_envio.assert_called_once()
-    assert alertas[0].telegram_enviado is True
+    mock_envio.assert_not_called()
+    assert alertas[0].telegram_enviado is False
 
 
 def test_falha_no_motor_individual_nao_derruba_pipeline(db_session, fii):

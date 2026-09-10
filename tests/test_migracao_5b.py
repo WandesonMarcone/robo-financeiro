@@ -167,7 +167,7 @@ def test_snapshots_tem_metadados_de_coleta(engine):
 def test_unicidade_snapshot_fii(engine):
     aplicar(engine)
     sess = _session(engine)
-    ativo = Ativo(ticker="MXRF11", cnpj="PENDENTE-MXRF11", tipo=TipoAtivo.FII)
+    ativo = Ativo(ticker="MXRF11", cnpj=None, tipo=TipoAtivo.FII)
     sess.add(ativo)
     sess.flush()
     sess.add(SnapshotFii(ativo_id=ativo.id, data_referencia=date(2026, 8, 1), preco=Decimal("9.87")))
@@ -195,7 +195,7 @@ def test_unicidade_snapshot_acao(engine):
 def test_perfil_e_1para1(engine):
     aplicar(engine)
     sess = _session(engine)
-    ativo = Ativo(ticker="GARE11", cnpj="PENDENTE-GARE11", tipo=TipoAtivo.FII)
+    ativo = Ativo(ticker="GARE11", cnpj=None, tipo=TipoAtivo.FII)
     sess.add(ativo)
     sess.flush()
     sess.add(AtivoPerfil(ativo_id=ativo.id, setor="Logística"))
@@ -209,7 +209,7 @@ def test_perfil_e_1para1(engine):
 def test_unicidade_inquilino_por_periodo(engine):
     aplicar(engine)
     sess = _session(engine)
-    ativo = Ativo(ticker="GARE11", cnpj="PENDENTE-GARE11", tipo=TipoAtivo.FII)
+    ativo = Ativo(ticker="GARE11", cnpj=None, tipo=TipoAtivo.FII)
     sess.add(ativo)
     sess.flush()
     ref = date(2026, 7, 31)
@@ -224,7 +224,7 @@ def test_unicidade_inquilino_por_periodo(engine):
 def test_inquilinos_periodos_diferentes_sao_aceitos(engine):
     aplicar(engine)
     sess = _session(engine)
-    ativo = Ativo(ticker="GARE11", cnpj="PENDENTE-GARE11", tipo=TipoAtivo.FII)
+    ativo = Ativo(ticker="GARE11", cnpj=None, tipo=TipoAtivo.FII)
     sess.add(ativo)
     sess.flush()
     sess.add(AtivoInquilino(ativo_id=ativo.id, nome="Inquilino A", participacao=Decimal("0.5"), data_referencia=date(2026, 6, 30)))
@@ -282,7 +282,7 @@ def test_constraints_legadas_preservadas(engine):
 def test_relacionamentos_orm_retornam_filhos(engine):
     aplicar(engine)
     sess = _session(engine)
-    ativo = Ativo(ticker="GARE11", cnpj="PENDENTE-GARE11", tipo=TipoAtivo.FII)
+    ativo = Ativo(ticker="GARE11", cnpj=None, tipo=TipoAtivo.FII)
     sess.add(ativo)
     sess.flush()
     sess.add(AtivoPerfil(ativo_id=ativo.id, setor="Logística", tipo_fii="Tijolo"))
@@ -315,7 +315,7 @@ def test_valores_numeric_sao_decimal(engine):
 def test_deletar_ativo_remove_filhos_5b(engine):
     aplicar(engine)
     sess = _session(engine)
-    ativo = Ativo(ticker="MXRF11", cnpj="PENDENTE-MXRF11", tipo=TipoAtivo.FII)
+    ativo = Ativo(ticker="MXRF11", cnpj=None, tipo=TipoAtivo.FII)
     sess.add(ativo)
     sess.flush()
     sess.add(AtivoPerfil(ativo_id=ativo.id, setor="Papel"))

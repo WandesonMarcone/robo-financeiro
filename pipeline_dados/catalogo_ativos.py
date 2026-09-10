@@ -14,10 +14,11 @@ seed é idempotente (insert-only por ticker).
 """
 
 import logging
+import re
 
 import config
-from pipeline_dados.banco_dados import AtivoCatalogo, TipoAtivo
-from pipeline_dados.normalizacao import formatar_cnpj, normalizar_cnpj
+from pipeline_dados.banco_dados import Ativo, AtivoCatalogo, TipoAtivo
+from pipeline_dados.normalizacao import formatar_cnpj, normalizar_cnpj, normalizar_texto
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +151,7 @@ def registrar_no_catalogo(
         registro = AtivoCatalogo(ticker=ticker_norm, tipo=tipo_norm)
         session.add(registro)
     registro.tipo = tipo_norm
-    registro.cnpj = _cnpj_normalizado(cnpj) if cnpj is not None else None
+    registro.cnpj = cnpj_real(cnpj)
     registro.nome_emissor = nome_emissor
     registro.setor = setor
     if fonte is not None:
@@ -182,6 +183,38 @@ def consultar_por_cnpj(session, cnpj) -> AtivoCatalogo | None:
     )
 
 
+_PREFIXOS_FAMILIA = frozenset({
+    "XP",
+    "KINEA",
+    "BTG",
+    "BTG PACTUAL",
+    "VINCI",
+    "VBI",
+    "HEDGE",
+    "SUNO",
+    "CSHG",
+    "HSI",
+    "RBR",
+    "REC",
+})
+
+_TICKER_TOKEN = re.compile(r"^[A-Z]{4}\d{1,2}$")
+
+
+def cnpj_real(cnpj) -> str | None:
+    """CNPJ canônico (14 dígitos formatados) ou None. Nunca inventa valor."""
+    if cnpj is None:
+        return None
+    texto = str(cnpj).strip()
+    if not texto:
+        return None
+    if texto.upper().startswith("PENDENTE-"):
+        return None
+    if _TICKER_TOKEN.match(texto.upper()):
+        return None
+    return _cnpj_normalizado(texto)
+
+
 def resolver_cnpj(session, ticker, tipo=None) -> str | None:
     """CNPJ do ativo: catálogo PostgreSQL primeiro; config como fallback.
 
@@ -190,10 +223,188 @@ def resolver_cnpj(session, ticker, tipo=None) -> str | None:
     """
     registro = consultar_por_ticker(session, ticker)
     if registro is not None:
-        return registro.cnpj
+        return cnpj_real(registro.cnpj)
     if tipo is None or _normalizar_tipo(tipo) == TipoAtivo.ACAO.value:
         return _cnpj_normalizado(_TICKER_PARA_CNPJ.get(str(ticker).strip().upper()))
     return None
+
+
+def _nome_catalogo_normalizado(nome) -> str:
+    """Nome de fundo para casamento: acentos, pontuação e espaços colapsados."""
+    texto = normalizar_texto(nome).strip().upper()
+    if not texto:
+        return ""
+    texto = re.sub(r"[^A-Z0-9]+", " ", texto)
+    return re.sub(r"\s+", " ", texto).strip()
+
+
+def _isca_casa_nome(isca_norm: str, nome_norm: str) -> bool:
+    """True se a isca casa o nome sem substring solta (famílias XP/Kinea/BTG)."""
+    if not isca_norm or not nome_norm:
+        return False
+    if isca_norm in _PREFIXOS_FAMILIA:
+        return False
+    if isca_norm == nome_norm:
+        return True
+    padrao = r"(?:^|\s)" + re.escape(isca_norm) + r"(?:\s|$)"
+    return re.search(padrao, nome_norm) is not None
+
+
+def _iscas_fii():
+    """Iscas de FII ordenadas da mais específica para a mais genérica."""
+    pares = []
+    for ticker, isca in config.MAPA_ISCAS_MASTER.items():
+        isca_norm = _nome_catalogo_normalizado(isca)
+        if isca_norm:
+            pares.append((isca_norm, str(ticker).strip().upper()))
+    pares.sort(key=lambda item: (-len(item[0]), item[1]))
+    return pares
+
+
+def consultar_por_nome_fii(session, nome) -> AtivoCatalogo | None:
+    """FII do catálogo pelo nome normalizado; None se vazio, 0 ou 2+ colisões."""
+    nome_norm = _nome_catalogo_normalizado(nome)
+    if not nome_norm:
+        return None
+    _garantir_catalogo_semeado(session)
+    fiis = (
+        session.query(AtivoCatalogo)
+        .filter(AtivoCatalogo.tipo == TipoAtivo.FII.value)
+        .all()
+    )
+    candidatos = []
+    for registro in fiis:
+        isca_norm = _nome_catalogo_normalizado(registro.nome_emissor)
+        if _isca_casa_nome(isca_norm, nome_norm):
+            candidatos.append(registro)
+    if len(candidatos) == 1:
+        return candidatos[0]
+    return None
+
+
+def ticker_por_nome_fii(nome, session=None) -> str | None:
+    """Ticker FII pelo nome: catálogo (se houver sessão) senão MAPA_ISCAS_MASTER.
+
+    Último recurso, com validação de colisão. Substring solta é rejeitada.
+    """
+    nome_norm = _nome_catalogo_normalizado(nome)
+    if not nome_norm:
+        return None
+    if session is not None:
+        registro = consultar_por_nome_fii(session, nome)
+        if registro is not None:
+            return registro.ticker
+        return None
+    candidatos = []
+    for isca_norm, ticker in _iscas_fii():
+        if _isca_casa_nome(isca_norm, nome_norm):
+            candidatos.append(ticker)
+    if len(candidatos) == 1:
+        return candidatos[0]
+    return None
+
+
+def _tickers_fii_conhecidos(session=None) -> set[str]:
+    """Tickers FII do catálogo (sessão) ou do mapa de config."""
+    if session is not None:
+        try:
+            return {t.upper() for t in listar_tickers_catalogo(session, TipoAtivo.FII)}
+        except Exception:
+            logger.exception("Falha ao listar tickers FII do catálogo.")
+    return {str(t).strip().upper() for t in config.MAPA_ISCAS_MASTER}
+
+
+def ticker_token_em_nome(nome, session=None) -> str | None:
+    """Ticker FII presente como token no nome; None se ausente ou ambíguo."""
+    nome_norm = _nome_catalogo_normalizado(nome)
+    if not nome_norm:
+        return None
+    conhecidos = _tickers_fii_conhecidos(session)
+    if not conhecidos:
+        return None
+    encontrados = []
+    for token in nome_norm.split():
+        if _TICKER_TOKEN.match(token) and token in conhecidos and token not in encontrados:
+            encontrados.append(token)
+    if len(encontrados) == 1:
+        return encontrados[0]
+    return None
+
+
+def resolver_ticker_fii(session, ticker=None, cnpj=None, nome=None) -> str | None:
+    """Identidade operacional do FII: CNPJ, depois ticker, nome único por último."""
+    cnpj_canonico = cnpj_real(cnpj)
+    if cnpj_canonico:
+        catalogo = consultar_por_cnpj(session, cnpj_canonico) if session is not None else None
+        if catalogo is not None:
+            return catalogo.ticker
+        if session is not None:
+            chaves_cnpj = [cnpj_canonico]
+            digitos = normalizar_cnpj(cnpj_canonico)
+            if digitos and digitos not in chaves_cnpj:
+                chaves_cnpj.append(digitos)
+            ativo = session.query(Ativo).filter(Ativo.cnpj.in_(chaves_cnpj)).first()
+            if ativo is not None:
+                return ativo.ticker
+    if ticker:
+        ticker_limpo = str(ticker).strip().upper()
+        if ticker_limpo:
+            return ticker_limpo
+    if nome:
+        ticker_nome = ticker_token_em_nome(nome, session)
+        if ticker_nome:
+            return ticker_nome
+        return ticker_por_nome_fii(nome, session=session)
+    return None
+
+
+def identificar_ativo_fii(session, ticker=None, cnpj=None, nome=None) -> Ativo | None:
+    """Resolve FII já persistido: CNPJ oficial, depois ticker, nome por último."""
+    cnpj_canonico = cnpj_real(cnpj)
+    if cnpj_canonico:
+        chaves_cnpj = [cnpj_canonico]
+        digitos = normalizar_cnpj(cnpj_canonico)
+        if digitos and digitos not in chaves_cnpj:
+            chaves_cnpj.append(digitos)
+        ativo = session.query(Ativo).filter(Ativo.cnpj.in_(chaves_cnpj)).first()
+        if ativo is not None:
+            return ativo
+        catalogo = consultar_por_cnpj(session, cnpj_canonico)
+        if catalogo is not None:
+            ativo = session.query(Ativo).filter(Ativo.ticker == catalogo.ticker).first()
+            if ativo is not None:
+                if cnpj_real(ativo.cnpj) is None:
+                    ativo.cnpj = cnpj_canonico
+                return ativo
+    ticker_resolvido = resolver_ticker_fii(session, ticker=ticker, cnpj=None, nome=nome)
+    if ticker_resolvido:
+        ativo = session.query(Ativo).filter(Ativo.ticker == ticker_resolvido).first()
+        if ativo is not None:
+            if cnpj_canonico and cnpj_real(ativo.cnpj) is None:
+                ativo.cnpj = cnpj_canonico
+            return ativo
+    return None
+
+
+def garantir_ativo(session, ticker, tipo, cnpj=None) -> Ativo:
+    """Garante ``Ativo`` por ticker. CNPJ só entra se for real; senão NULL."""
+    ticker_limpo = str(ticker).strip().upper()
+    tipo_norm = _normalizar_tipo(tipo)
+    if not ticker_limpo or tipo_norm is None:
+        raise ValueError(f"ticker/tipo inválidos: {ticker!r}, {tipo!r}")
+    tipo_enum = TipoAtivo(tipo_norm)
+    cnpj_canonico = cnpj_real(cnpj)
+    if cnpj_canonico is None:
+        cnpj_canonico = resolver_cnpj(session, ticker_limpo, tipo_enum)
+    ativo = session.query(Ativo).filter(Ativo.ticker == ticker_limpo).first()
+    if ativo is None:
+        ativo = Ativo(ticker=ticker_limpo, cnpj=cnpj_canonico, tipo=tipo_enum)
+        session.add(ativo)
+        session.flush()
+        return ativo
+    if cnpj_real(ativo.cnpj) is None:
+        ativo.cnpj = cnpj_canonico
+    return ativo
 
 
 def listar_tickers_catalogo(session, tipo) -> list[str]:

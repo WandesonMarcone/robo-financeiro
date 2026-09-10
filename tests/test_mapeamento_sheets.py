@@ -96,12 +96,12 @@ def test_resolver_cnpj_acao_pelo_catalogo():
     assert resolver_cnpj("PETR4", TipoAtivo.ACAO) == "33.000.167/0001-01"
 
 
-def test_resolver_cnpj_acao_fora_do_catalogo_usa_placeholder():
-    assert resolver_cnpj("ZZZZ3", TipoAtivo.ACAO) == "PENDENTE-ZZZZ3"
+def test_resolver_cnpj_acao_fora_do_catalogo_retorna_none():
+    assert resolver_cnpj("ZZZZ3", TipoAtivo.ACAO) is None
 
 
-def test_resolver_cnpj_fii_usa_placeholder():
-    assert resolver_cnpj("MXRF11", TipoAtivo.FII) == "PENDENTE-MXRF11"
+def test_resolver_cnpj_fii_sem_cnpj_retorna_none():
+    assert resolver_cnpj("MXRF11", TipoAtivo.FII) is None
 
 
 # ==========================================
@@ -153,7 +153,7 @@ def test_transformar_linha_vazia_retorna_ticker_none():
 def test_parsear_valor_market_formato_br():
     assert parsear_valor_market("R$ 1.234,56") == 1234.56
     assert parsear_valor_market("R$ 1,50") == 1.5
-    assert parsear_valor_market("11,5%") == 11.5
+    assert parsear_valor_market("11,5%") == 0.115
     assert parsear_valor_market("0") == 0.0
     assert parsear_valor_market(0) == 0.0
 

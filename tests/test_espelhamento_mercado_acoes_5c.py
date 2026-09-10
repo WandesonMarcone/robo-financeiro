@@ -177,6 +177,25 @@ def test_div_liq_ebit_nao_persistido(db_session):
     assert snap.div_liq_patrimonio == Decimal("0.8")
 
 
+def test_celula_vazia_persiste_none_zero_real_persiste(db_session):
+    matriz = matriz_acoes()
+    matriz.append([
+        "WEGE3", "Bens Industriais", 0.0, "", 0.0,
+        "", 0.0, "", 0.0, "", "", "", "", "", 0.0, "", "", "",
+        "", 0.0, "", "", "", "", "", "", "", "",
+        0.0, "", "", 0.0, "02/09 10:00",
+    ])
+    espelhar_mercado_acoes(db_session, matriz, data_referencia=date(2026, 8, 20))
+    snap = db_session.query(SnapshotAcao).join(Ativo).filter(Ativo.ticker == "WEGE3").one()
+    assert snap.preco == Decimal("0.0")
+    assert snap.dy is None
+    assert snap.pl is None
+    assert snap.pvp == Decimal("0.0")
+    assert snap.roe == Decimal("0.0")
+    assert snap.vpa == Decimal("0.0")
+    assert snap.valor_mercado == Decimal("0.0")
+
+
 def test_fonte_e_data_coleta_registradas(db_session):
     espelhar_mercado_acoes(db_session, matriz_acoes(), data_referencia=date(2026, 8, 20))
     snap = db_session.query(SnapshotAcao).first()

@@ -86,6 +86,7 @@ PERMISSOES_ADMIN = {
     "relatorios.consultar",
     "indicadores.consultar",
     "historico.consultar",
+    "alertas.consultar",
     "alertas.gerenciar",
     "telegram.administrar",
     "conta.propria",
@@ -166,6 +167,13 @@ def test_user_nao_consulta_alertas_gerenciaveis():
     user = _usuario(USER)
     assert tem_permissao(user, "alertas.consultar") is True
     assert tem_permissao(user, "alertas.gerenciar") is False
+
+
+def test_admin_consulta_alertas_sem_perder_gerenciar():
+    admin = _usuario(ADMIN)
+    assert tem_permissao(admin, "alertas.consultar") is True
+    assert tem_permissao(admin, "alertas.gerenciar") is True
+    assert tem_permissao(admin, "*") is False
 
 
 # ==========================================

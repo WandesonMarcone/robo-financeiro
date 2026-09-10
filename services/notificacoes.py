@@ -14,8 +14,9 @@ Reutiliza exclusivamente (nenhuma regra paralela, nenhuma segunda tabela):
   permissão ``notificacoes.consultar`` — USER e SUPERADMIN recebem; usuário
   desativado, VISITOR e ADMIN (sem a permissão) não recebem;
 - ``services/preferencias.py``: o tipo de evento mapeia para a preferência
-  correspondente e os canais dependem de ``web_ativo``/``telegram_ativo``
-  (com o mestre ``notificacoes_ativas``);
+  correspondente; os canais dependem de ``web_ativo``/``telegram_ativo``
+  (com o mestre ``notificacoes_ativas``); ``frequencia_notificacoes`` e
+  ``mercado_acoes``/``mercado_fiis`` filtram elegibilidade e volume;
 - ``services/ativos_acompanhados.py``: ``origem=ACOMPANHAMENTO`` exige o vínculo;
 - ``services/carteira.py``: ``origem=CARTEIRA`` exige posição no ativo;
 - ``services/escopo.py``: isolamento por usuário (anti-IDOR/BOLA) nas consultas;
@@ -33,11 +34,12 @@ Garantias:
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import func
+from sqlalchemy.orm import joinedload
 
-from pipeline_dados.banco_dados import Notificacao, Usuario
+from pipeline_dados.banco_dados import Ativo, Notificacao, TipoAtivo, Usuario
 from services import (
     ativos_acompanhados,
     auditoria,
@@ -125,6 +127,14 @@ CAMPOS_EVENTO = frozenset(
 _PADRAO_SENSIVEL = re.compile(
     r"(?i)(senha|password|passwd|token|api[_-]?key|secret|chave|credential)"
 )
+
+# Janela de volume por ``frequencia_notificacoes`` (sem tabela nova).
+JANELA_FREQUENCIA = {
+    "diaria": timedelta(days=1),
+    "semanal": timedelta(days=7),
+}
+FREQUENCIA_DESATIVADA = "desativada"
+FREQUENCIA_IMEDIATA = "imediata"
 
 
 # ===========================================================================
@@ -237,28 +247,132 @@ def _pref(preferencias_registro, nome, padrao=True):
     return getattr(preferencias_registro, nome, padrao)
 
 
+def _prefs_do_usuario(usuario, session):
+    """Preferências do ``usuario`` ou defaults seguros (sem criar linha)."""
+    prefs = preferencias.buscar_preferencias(usuario, session=session)
+    if prefs is None:
+        return preferencias.preferencias_padrao()
+    return prefs
+
+
+def _frequencia_notificacoes(prefs):
+    """Frequência normalizada; valor desconhecido cai em ``imediata``."""
+    valor = str(_pref(prefs, "frequencia_notificacoes", FREQUENCIA_IMEDIATA) or "").strip().lower()
+    if valor in preferencias.FREQUENCIAS_NOTIFICACOES:
+        return valor
+    return FREQUENCIA_IMEDIATA
+
+
+def _tipo_mercado_do_ativo(sessao, ativo_id):
+    """``TipoAtivo`` do ativo, ou ``None`` quando ausente/sem ``ativo_id``."""
+    if ativo_id is None:
+        return None
+    ativo = sessao.get(Ativo, ativo_id)
+    if ativo is None:
+        return None
+    return ativo.tipo
+
+
+def _mercado_permitido(prefs, tipo_ativo):
+    """True quando o filtro de mercado da Fase 6 permite o ``tipo_ativo``.
+
+    Sem ativo (evento de sistema) o filtro não bloqueia. ETF/CRIPTO e tipos
+    desconhecidos não usam ``mercado_acoes``/``mercado_fiis``.
+    """
+    if tipo_ativo is None:
+        return True
+    if tipo_ativo == TipoAtivo.ACAO:
+        return bool(_pref(prefs, "mercado_acoes"))
+    if tipo_ativo == TipoAtivo.FII:
+        return bool(_pref(prefs, "mercado_fiis"))
+    return True
+
+
+def _dentro_da_janela_frequencia(sessao, usuario_id, janela):
+    """True quando já existe notificação do usuário criada na ``janela``."""
+    limite = datetime.now() - janela
+    return (
+        sessao.query(Notificacao.id)
+        .filter(
+            Notificacao.usuario_id == usuario_id,
+            Notificacao.criado_em >= limite,
+        )
+        .first()
+        is not None
+    )
+
+
 # ===========================================================================
 # DECISÃO: ELEGIBILIDADE
 # ===========================================================================
 
 
-def _preferencia_ativa(usuario, tipo, session):
+def _preferencia_ativa(usuario, tipo, session, ativo_id=None):
     """True quando as preferências do ``usuario`` permitem notificar o ``tipo``.
 
-    O mestre ``notificacoes_ativas`` bloqueia tudo; o tipo de evento mapeia
-    para a preferência específica (``PREFERENCIA_POR_EVENTO``). Ausência de
-    preferências usa os defaults seguros (todos ativos) — nenhuma linha é
-    criada durante a varredura.
+    O mestre ``notificacoes_ativas`` bloqueia tudo; ``frequencia_notificacoes``
+    ``desativada`` também; o tipo de evento mapeia para a preferência específica
+    (``PREFERENCIA_POR_EVENTO``); ``mercado_acoes``/``mercado_fiis`` filtram
+    pelo tipo do ativo. Ausência de preferências usa os defaults seguros
+    (todos ativos) — nenhuma linha é criada durante a varredura.
     """
-    prefs = preferencias.buscar_preferencias(usuario, session=session)
-    if prefs is None:
-        prefs = preferencias.preferencias_padrao()
+    prefs = _prefs_do_usuario(usuario, session)
     if not _pref(prefs, "notificacoes_ativas"):
         return False
+    if _frequencia_notificacoes(prefs) == FREQUENCIA_DESATIVADA:
+        return False
     campo = PREFERENCIA_POR_EVENTO.get(tipo)
-    if campo is None:
+    if campo is not None and not _pref(prefs, campo):
+        return False
+    tipo_ativo = _tipo_mercado_do_ativo(session, ativo_id)
+    if not _mercado_permitido(prefs, tipo_ativo):
+        return False
+    return True
+
+
+def _prioridade_do_evento(evento):
+    """Prioridade 10.4 persistida em ``evento['dados']``, ou ``None``."""
+    dados = (evento or {}).get("dados")
+    if not isinstance(dados, dict):
+        return None
+    valor = dados.get("prioridade")
+    if valor is None:
+        return None
+    return str(valor).strip().upper() or None
+
+
+def _volume_frequencia_ok(usuario, prefs, sessao, evento=None):
+    """True quando a frequência ainda permite gerar nesta janela.
+
+    ``imediata`` e valores desconhecidos não atrasam. ``desativada`` já foi
+    recusada em ``_preferencia_ativa``. ``diaria``/``semanal`` recusam se já
+    houver notificação do mesmo usuário na janela (controle de volume na
+    camada de notificação, sem alterar a geração financeira).
+    Prioridade ``CRITICO`` (Etapa 10.4) não é silenciada pelo teto de volume;
+    opt-out explícito (``desativada``, flags de tipo, mercado) permanece.
+    """
+    if _prioridade_do_evento(evento) == "CRITICO":
         return True
-    return bool(_pref(prefs, campo))
+    frequencia = _frequencia_notificacoes(prefs)
+    janela = JANELA_FREQUENCIA.get(frequencia)
+    if janela is None:
+        return True
+    return not _dentro_da_janela_frequencia(sessao, usuario.id, janela)
+
+
+def frequencia_efetiva(prefs):
+    """Frequência normalizada das preferências da Fase 6."""
+    return _frequencia_notificacoes(prefs)
+
+
+def tipo_mercado_do_ativo(sessao, ativo_id):
+    """``TipoAtivo`` do ativo, ou ``None`` quando ausente."""
+    return _tipo_mercado_do_ativo(sessao, ativo_id)
+
+
+def mercado_permitido(prefs, tipo_ativo):
+    """True quando ``mercado_acoes``/``mercado_fiis`` permitem o tipo."""
+    return _mercado_permitido(prefs, tipo_ativo)
 
 
 def _canais_disponiveis(usuario, session):
@@ -316,11 +430,15 @@ def _usuarios_elegiveis(sessao, evento):
     3. vínculo com o ativo conforme ``origem``: ACOMPANHAMENTO exige
        acompanhamento; CARTEIRA exige posição na carteira (reusa
        ``carteira.buscar_posicao_por_ativo``);
-    4. preferência correspondente ao tipo de evento ativa;
-    5. limite de notificações ativas do plano (Fase 6, Etapa 9): usuário no
+    4. preferência correspondente ao tipo de evento ativa, frequência
+       diferente de ``desativada`` e filtro de mercado (``mercado_acoes`` /
+       ``mercado_fiis``) quando o evento tem ativo;
+    5. volume da ``frequencia_notificacoes`` (``diaria``/``semanal``): já
+       notificado na janela não recebe de novo;
+    6. limite de notificações ativas do plano (Fase 6, Etapa 9): usuário no
        limite não recebe novas notificações — a contagem usa a mesma sessão da
        varredura;
-    6. ao menos um canal disponível.
+    7. ao menos um canal disponível.
     """
     ativo_id = evento.get("ativo_id")
     origem = evento.get("origem", ORIGEM_ACOMPANHAMENTO)
@@ -336,7 +454,12 @@ def _usuarios_elegiveis(sessao, evento):
                 usuario, ativo_id, session=sessao
             ):
                 continue
-        if not _preferencia_ativa(usuario, evento["tipo"], session=sessao):
+        if not _preferencia_ativa(
+            usuario, evento["tipo"], session=sessao, ativo_id=ativo_id
+        ):
+            continue
+        prefs = _prefs_do_usuario(usuario, sessao)
+        if not _volume_frequencia_ok(usuario, prefs, sessao, evento=evento):
             continue
         if _notificacoes_ativas_restantes(usuario, sessao) == 0:
             continue
@@ -457,10 +580,16 @@ def _canais_efetivos(usuario, evento, session):
 # ===========================================================================
 
 
-def listar_notificacoes(usuario, session=None, tipo=None, status=None, nao_lidas=False):
-    """Lista as notificações do próprio ``usuario``, com filtros opcionais seguros."""
+def listar_notificacoes(
+    usuario, session=None, tipo=None, status=None, nao_lidas=False, limite=None, offset=0
+):
+    """Lista as notificações do próprio ``usuario``, com filtros opcionais seguros.
+
+    Sem ``limite``, devolve a lista completa. Com ``limite``, devolve
+    ``(registros, total)`` já recortado no SQL.
+    """
     if usuario is None or getattr(usuario, "id", None) is None:
-        return []
+        return ([], 0) if limite is not None else []
     with _sessao(session) as s:
         query = s.query(Notificacao).filter(Notificacao.usuario_id == usuario.id)
         if tipo:
@@ -479,9 +608,17 @@ def listar_notificacoes(usuario, session=None, tipo=None, status=None, nao_lidas
             query = query.filter(Notificacao.status == normalizado)
         if nao_lidas:
             query = query.filter(Notificacao.status != STATUS_LIDA)
-        return (
-            query.order_by(Notificacao.criado_em.desc(), Notificacao.id.desc()).all()
+        query = query.order_by(Notificacao.criado_em.desc(), Notificacao.id.desc())
+        if limite is None:
+            return query.options(joinedload(Notificacao.ativo)).all()
+        total = query.count()
+        registros = (
+            query.options(joinedload(Notificacao.ativo))
+            .offset(int(offset or 0))
+            .limit(int(limite))
+            .all()
         )
+        return registros, total
 
 
 def buscar_notificacao(usuario, notificacao_id, session=None):

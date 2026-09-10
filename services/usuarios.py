@@ -175,13 +175,22 @@ def buscar_usuario_por_telegram(telegram_user_id, session=None):
         )
 
 
-def listar_usuarios(apenas_ativos=False, session=None):
-    """Lista os usuários, opcionalmente apenas os ativos, em ordem de criação."""
+def listar_usuarios(apenas_ativos=False, session=None, limite=None, offset=0):
+    """Lista os usuários, opcionalmente apenas os ativos, em ordem de criação.
+
+    Sem ``limite``, devolve a lista completa (compatível com chamadores
+    existentes). Com ``limite``, devolve ``(registros, total)`` já recortado.
+    """
     with _sessao(session) as s:
         query = s.query(Usuario)
         if apenas_ativos:
             query = query.filter(Usuario.ativo.is_(True))
-        return query.order_by(Usuario.id).all()
+        query = query.order_by(Usuario.id)
+        if limite is None:
+            return query.all()
+        total = query.count()
+        registros = query.offset(int(offset or 0)).limit(int(limite)).all()
+        return registros, total
 
 
 # ==========================================

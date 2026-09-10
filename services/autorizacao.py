@@ -11,7 +11,8 @@ Princípios da política:
   administradores, configurações, dados, alertas e recursos do sistema.
 - ``ADMIN`` gerencia usuários e recursos, mas NUNCA assume poderes de
   SUPERADMIN: não promove ninguém a SUPERADMIN e não altera/remove o
-  SUPERADMIN protegido (regra explícita de proteção).
+  SUPERADMIN protegido (regra explícita de proteção). Consulta de alertas
+  (``alertas.consultar``) acompanha ``alertas.gerenciar`` sem criar RBAC paralelo.
 - ``USER`` consulta dados/documentos/relatórios/indicadores/histórico/alertas e
   gerencia apenas o próprio escopo (conta/ativos/preferências/notificações).
 - ``VISITOR`` acessa somente recursos explicitamente públicos; ``usuario=None``
@@ -57,6 +58,7 @@ PAPEL_PERMISSOES = {
             "relatorios.consultar",
             "indicadores.consultar",
             "historico.consultar",
+            "alertas.consultar",
             "alertas.gerenciar",
             "telegram.administrar",
             "conta.propria",

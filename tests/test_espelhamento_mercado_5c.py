@@ -149,7 +149,7 @@ def test_perfil_guardado_com_setor_e_tipo_fii(db_session):
 
 
 def test_perfil_nao_apaga_valores_existentes(db_session):
-    ativo = Ativo(ticker="MXRF11", cnpj="PENDENTE-MXRF11", tipo=TipoAtivo.FII)
+    ativo = Ativo(ticker="MXRF11", cnpj=None, tipo=TipoAtivo.FII)
     db_session.add(ativo)
     db_session.flush()
     db_session.add(AtivoPerfil(ativo_id=ativo.id, setor="Papel"))
@@ -176,8 +176,8 @@ def test_valores_numeric_e_strings_persistidos(db_session):
     assert snap.lucro_12m == Decimal("576000000.0")
     assert snap.dividendo_mensal == Decimal("0.0987")
     assert snap.qtd_imoveis == 0
-    assert snap.walt == "Pendente de IA"
-    assert snap.alavancagem == "Pendente de IA"
+    assert snap.walt is None
+    assert snap.alavancagem is None
     assert snap.fonte == ORIGEM_GOOGLE_SHEETS
     assert snap.url_origem is None
     assert snap.data_coleta is not None
@@ -187,6 +187,25 @@ def test_qtd_imoveis_decimal_nao_persistido(db_session):
     espelhar_mercado_fiis(db_session, matriz_com_qtd_imoveis_decimal(), data_referencia=date(2026, 8, 20))
     snap = db_session.query(SnapshotFii).join(Ativo).filter(Ativo.ticker == "BTLG11").one()
     assert snap.qtd_imoveis is None
+
+
+def test_celula_vazia_persiste_none_zero_real_persiste(db_session):
+    matriz = matriz_fiis()
+    matriz.append([
+        "HGLG11", "Tijolo", "Logística", 0.0, "", 0.0, "", "", 0,
+        "Não informado", "Pendente de IA", "Pendente de IA", "",
+        "", 0.0, "", 0.0, "02/09 10:00",
+    ])
+    espelhar_mercado_fiis(db_session, matriz, data_referencia=date(2026, 8, 20))
+    snap = db_session.query(SnapshotFii).join(Ativo).filter(Ativo.ticker == "HGLG11").one()
+    assert snap.preco == Decimal("0.0")
+    assert snap.pvp == Decimal("0.0")
+    assert snap.dy is None
+    assert snap.qtd_imoveis == 0
+    assert snap.liquidez is None
+    assert snap.vpa == Decimal("0.0")
+    assert snap.lucro_12m is None
+    assert snap.dividendo_mensal == Decimal("0.0")
 
 
 # ==========================================

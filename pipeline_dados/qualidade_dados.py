@@ -311,6 +311,8 @@ ESPECIFICACOES: dict[str, dict[str, Any]] = {
             "disponibilidades_caixa": [regra_numero, _nao_negativo_invalido],
             "cotistas": [regra_numero, _nao_negativo_invalido, _inteiro_aviso],
             "cotas_emitidas": [regra_numero, _nao_negativo_invalido],
+            "valor_patrimonial_cotas": [regra_numero, _nao_negativo_aviso],
+            "percentual_dividend_yield_mes": [regra_numero, _nao_negativo_aviso],
             "rendimento_por_cota": [regra_numero, _nao_negativo_invalido],
             "vacancia_fisica": [regra_numero, regra_vacancia],
             "vacancia_financeira": [regra_numero, regra_vacancia],
@@ -360,8 +362,8 @@ ESPECIFICACOES: dict[str, dict[str, Any]] = {
     },
     # Espelhamento Google Sheets -> PostgreSQL (Fase 3, Bloco 4): a identidade
     # do ativo (ticker) é o único campo obrigatório do espelho. O CNPJ é
-    # resolvido via catálogo (MAPA_CNPJ_B3) ou placeholder "PENDENTE-{ticker}",
-    # e não participa desta validação (placeholders nunca são CNPJ válidos).
+    # resolvido via catálogo (MAPA_CNPJ_B3) ou permanece ausente (None); não
+    # participa desta validação. Fase 8.3: placeholders nunca são inventados.
     "sheets_ativo": {
         "campos": {
             "ticker": [regra_texto_obrigatorio],

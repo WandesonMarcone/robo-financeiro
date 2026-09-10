@@ -15,6 +15,7 @@ from datetime import datetime
 
 from sqlalchemy import func, insert, literal, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import joinedload
 
 from pipeline_dados.banco_dados import Ativo, AtivoAcompanhado
 from services import auditoria, autorizacao, escopo, planos
@@ -125,17 +126,30 @@ def adicionar_acompanhamento(usuario, ativo_id, session=None, ip=None):
 # ==========================================
 
 
-def listar_acompanhamentos(usuario, session=None):
-    """Lista os acompanhamentos do próprio ``usuario``, em ordem de criação."""
+def listar_acompanhamentos(usuario, session=None, limite=None, offset=0):
+    """Lista os acompanhamentos do próprio ``usuario``, em ordem de criação.
+
+    Sem ``limite``, devolve a lista completa. Com ``limite``, devolve
+    ``(registros, total)`` já recortado no SQL.
+    """
     if usuario is None or getattr(usuario, "id", None) is None:
-        return []
+        return ([], 0) if limite is not None else []
     with _sessao(session) as s:
-        return (
+        query = (
             s.query(AtivoAcompanhado)
             .filter(AtivoAcompanhado.usuario_id == usuario.id)
             .order_by(AtivoAcompanhado.id)
+        )
+        if limite is None:
+            return query.options(joinedload(AtivoAcompanhado.ativo)).all()
+        total = query.count()
+        registros = (
+            query.options(joinedload(AtivoAcompanhado.ativo))
+            .offset(int(offset or 0))
+            .limit(int(limite))
             .all()
         )
+        return registros, total
 
 
 def buscar_acompanhamento(usuario, acompanhamento_id, session=None):

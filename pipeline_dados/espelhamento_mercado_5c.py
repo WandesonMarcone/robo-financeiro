@@ -22,9 +22,10 @@ Garantias da rotina:
   dia atualiza em vez de duplicar; data_referencia diferente cria nova linha.
 - ``data_referencia`` = data da coleta em São Paulo (o Sheets não possui coluna
   de data válida; o carimbo não contém ano e não é usado como referência).
-- Rastreável: ``fonte="Google Sheets"``, ``data_coleta`` preenchido e
-  ``url_origem=None`` (o Sheets não transporta URL de origem; não se inventa
-  esse dado).
+  - Rastreável: ``fonte="Google Sheets"`` (contrato legado da fonte intermediária),
+    ``fonte_intermediaria="Google Sheets"``, ``fonte_primaria`` quando o scraper
+    informar a origem real (yfinance/Fundamentus/StatusInvest). ``url_origem``
+    permanece ``None`` se o Sheets não transportar URL — nunca se inventa.
 - Inquilinos: parser 100% determinístico da coluna J (``parsear_inquilinos``),
   nenhuma IA. Participação é persistida como fração (0–1): ``"12,3%"`` vira
   ``Decimal("0.123")``; ``"0,5"`` (sem ``%``) é preservado como está (não se
@@ -55,6 +56,7 @@ from pipeline_dados.espelhamento_sheets import (
     _criar_sessao,
     espelhar_ativo,
 )
+from pipeline_dados.freshness import FONTE_SHEETS, url_origem_segura
 from pipeline_dados.mapeamento_sheets import (
     ORIGEM_GOOGLE_SHEETS,
     transformar_linha_acao,
@@ -89,6 +91,19 @@ def _decimal(valor) -> Decimal | None:
     if valor is None:
         return None
     return Decimal(str(valor))
+
+
+def _texto_real_fii(valor) -> str | None:
+    """Texto utilizável de WALT/alavancagem. Placeholder e vazio permanecem None."""
+    if valor is None:
+        return None
+    texto = str(valor).strip()
+    if not texto:
+        return None
+    normalizado = normalizar_texto(texto).strip().lower()
+    if normalizado in ("pendente de ia", "pendente", "n/a", "n/d", "na", "-", "--"):
+        return None
+    return texto
 
 
 def _qtd_imoveis(valor) -> int | None:
@@ -319,8 +334,8 @@ def gravar_snapshot_fii(
             "vpa": dados.get("vpa"),
             "lucro_12m": dados.get("lucro_12m"),
             "dividendo_mensal": dados.get("dividendo_mensal"),
-            "walt": dados.get("walt"),
-            "alavancagem": dados.get("alavancagem"),
+            "walt": _texto_real_fii(dados.get("walt")),
+            "alavancagem": _texto_real_fii(dados.get("alavancagem")),
         },
         "snapshot_fii_mercado",
         origem=ORIGEM_GOOGLE_SHEETS,
@@ -345,6 +360,9 @@ def gravar_snapshot_fii(
 
     snapshot.data_coleta = datetime.now()
     snapshot.fonte = ORIGEM_GOOGLE_SHEETS
+    snapshot.fonte_intermediaria = FONTE_SHEETS
+    snapshot.fonte_primaria = dados.get("fonte_primaria") or None
+    snapshot.url_origem = url_origem_segura(dados.get("url_origem"))
     snapshot.preco = _decimal(dados.get("preco"))
     snapshot.pvp = _decimal(dados.get("pvp"))
     snapshot.dy = _decimal(dados.get("dy"))
@@ -352,8 +370,8 @@ def gravar_snapshot_fii(
     snapshot.vpa = _decimal(dados.get("vpa"))
     snapshot.lucro_12m = _decimal(dados.get("lucro_12m"))
     snapshot.dividendo_mensal = _decimal(dados.get("dividendo_mensal"))
-    snapshot.walt = dados.get("walt")
-    snapshot.alavancagem = dados.get("alavancagem")
+    snapshot.walt = _texto_real_fii(dados.get("walt"))
+    snapshot.alavancagem = _texto_real_fii(dados.get("alavancagem"))
     snapshot.qtd_imoveis = _qtd_imoveis(dados.get("qtd_imoveis"))
 
     return snapshot, resultado, status
@@ -585,6 +603,9 @@ def gravar_snapshot_acao(
 
     snapshot.data_coleta = datetime.now()
     snapshot.fonte = ORIGEM_GOOGLE_SHEETS
+    snapshot.fonte_intermediaria = FONTE_SHEETS
+    snapshot.fonte_primaria = dados.get("fonte_primaria") or None
+    snapshot.url_origem = url_origem_segura(dados.get("url_origem"))
     snapshot.preco = _decimal(dados.get("preco"))
     snapshot.dy = _decimal(dados.get("dy"))
     snapshot.pl = _decimal(dados.get("pl"))
