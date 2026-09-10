@@ -47,6 +47,7 @@ from apscheduler.triggers.cron import CronTrigger
 from flask import Flask, request
 
 from bot.loader import bot as tele_bot
+from services import telegram as telegram_svc
 
 # 1. Configurações Globais
 
@@ -59,11 +60,11 @@ for problema in problemas:
     logger.error("Configuração ausente (obrigatória): %s", problema)
 
 # 2. O Loader (Coração do bot - NÃO instanciar o bot novamente!)
-import bot.callbacks_menus  # noqa: F401 (registra handlers por efeito colateral)
-import bot.callbacks_revisao
+import bot.callbacks_revisao  # noqa: F401 (registra handlers por efeito colateral)
 import bot.comandos
 import bot.confirmacoes  # Confirmação explícita de operações destrutivas
 import bot.handlers
+import bot.callbacks_menus  # catch-all por último para não interceptar handlers dedicados
 
 # ==========================================
 # ⚙️ CONFIGURAÇÃO INICIAL DO BANCO
@@ -75,7 +76,13 @@ from atualizador_documentos import engine
 from bot.loader import bot  # noqa: F401 (garante que o bot do loader é usado, sem nova instância)
 
 # 5. Banco de Dados (Garantir a criação das tabelas)
-from pipeline_dados.banco_dados import Base, garantir_coluna_plano
+from pipeline_dados.banco_dados import (
+    Base,
+    garantir_cnpj_nullable,
+    garantir_coluna_plano,
+    garantir_colunas_cvm_fii,
+    garantir_colunas_freshness,
+)
 
 # 4. Serviços (Orquestrador)
 from services.orquestrador import varredura_diaria
@@ -94,6 +101,27 @@ try:
         logger.info("Coluna 'plano' adicionada em 'usuarios' (usuários existentes mantidos).")
 except Exception as e:  # pragma: no cover - defesa extra (não bloqueia o bot)
     logger.error("Migration da coluna 'plano' falhou (não bloqueia o bot): %s", e)
+
+try:
+    _cnpj_nullable = garantir_cnpj_nullable(engine)
+    if _cnpj_nullable:
+        logger.info("Coluna ativos.cnpj agora aceita NULL (placeholders PENDENTE-* viram NULL).")
+except Exception as e:  # pragma: no cover - defesa extra (não bloqueia o bot)
+    logger.error("Migration de ativos.cnpj nullable falhou (não bloqueia o bot): %s", e)
+
+try:
+    _freshness_cols = garantir_colunas_freshness(engine)
+    if _freshness_cols:
+        logger.info("Colunas de freshness/proveniência adicionadas (%s).", _freshness_cols)
+except Exception as e:  # pragma: no cover - defesa extra (não bloqueia o bot)
+    logger.error("Migration de freshness falhou (não bloqueia o bot): %s", e)
+
+try:
+    _cvm_fii_cols = garantir_colunas_cvm_fii(engine)
+    if _cvm_fii_cols:
+        logger.info("Colunas CVM FII (VPA/DY mensal) adicionadas (%s).", _cvm_fii_cols)
+except Exception as e:  # pragma: no cover - defesa extra (não bloqueia o bot)
+    logger.error("Migration CVM FII falhou (não bloqueia o bot): %s", e)
 logger.info("Groq Key presente: %s", "SIM" if os.environ.get('GROQ_API_KEY') else "NÃO")
 
 # ==========================================
@@ -131,15 +159,14 @@ else:
 if config.TELEGRAM_BOT_TOKEN:
     @app.route('/' + config.TELEGRAM_BOT_TOKEN, methods=['POST'])
     def webhook_handler():
-        if request.headers.get('content-type') == 'application/json':
-            json_string = request.get_data().decode('utf-8')
-            update = telebot.types.Update.de_json(json_string)
-
-            # CORREÇÃO: Usamos tele_bot para processar as mensagens, e não a pasta 'bot'
-            tele_bot.process_new_updates([update])
-
-            return "OK", 200
-        return "Erro", 403
+        content_type = request.headers.get('content-type')
+        secret_header = request.headers.get(telegram_svc.HEADER_WEBHOOK_SECRET)
+        if not telegram_svc.webhook_autorizado(content_type, secret_header):
+            return "Erro", 403
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        tele_bot.process_new_updates([update])
+        return "OK", 200
 else:
     logger.warning("[Telegram] TELEGRAM = SKIPPED: webhook não registrado (TELEGRAM_BOT_TOKEN ausente).")
 
@@ -191,8 +218,10 @@ if config.TELEGRAM_BOT_TOKEN:
     tele_bot.remove_webhook()
     time.sleep(1)
     nova_url_render = config.WEBHOOK_URL_BASE + "/" + config.TELEGRAM_BOT_TOKEN
-    tele_bot.set_webhook(url=nova_url_render)
+    tele_bot.set_webhook(**telegram_svc.parametros_set_webhook(nova_url_render))
     logger.info("Webhook configurado para o endpoint do bot (URL truncada por segurança).")
+    if telegram_svc.webhook_secret_configurado():
+        logger.info("Webhook secret_token ativo (valor omitido).")
 else:
     logger.warning("[Telegram] TELEGRAM = SKIPPED: webhook não registrado (TELEGRAM_BOT_TOKEN ausente).")
 

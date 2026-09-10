@@ -9,14 +9,14 @@ import PyPDF2
 import requests
 
 import config
-from config import MAPA_ISCAS_MASTER, TIPOS_DOC_FII
+from config import TIPOS_DOC_FII
 from fnet_scraper import FnetDownloader
 from modules.GoogleDriveManager import GoogleDriveManager
 from modules.utils import conectar_gspread
-from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos, TipoAtivo
-from pipeline_dados.catalogo_ativos import obter_tickers_com_fallback
+from pipeline_dados.banco_dados import DocumentosQualitativos, TipoAtivo
+from pipeline_dados.catalogo_ativos import garantir_ativo, obter_tickers_com_fallback, resolver_ticker_fii
 from pipeline_dados.deduplicacao import marcar_duplicado, verificar_duplicidade
-from pipeline_dados.normalizacao import normalizar_data, normalizar_texto
+from pipeline_dados.normalizacao import normalizar_data
 from pipeline_dados.qualidade_dados import INVALID, registrar_diagnostico, validar_registro
 from services import llm
 from services.db import SessionDB as SessionDB
@@ -154,59 +154,53 @@ def rotina_de_coleta_b3():
     data_busca = (datetime.now() - timedelta(days=60)).strftime("%d/%m/%Y")
     todos_documentos = b3.capturar_tudo(data_busca)
 
+    monitorados = {str(t).strip().upper() for t in lista_de_fiis if t}
     novos = 0
     for doc in todos_documentos:
-        nome_fundo_b3 = normalizar_texto(doc['nome_fundo'])
         id_doc = str(doc['id'])
+        ticker = resolver_ticker_fii(session, nome=doc.get('nome_fundo'))
+        if not ticker or ticker not in monitorados:
+            continue
 
-        for ticker in lista_de_fiis:
-            isca = normalizar_texto(MAPA_ISCAS_MASTER.get(ticker, ticker))
-            if isca in nome_fundo_b3:
-                existe = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.id_b3 == id_doc).first()
-                if not existe:
-                    # DATA QUALITY (Fase 3, Bloco 3): regras determinísticas antes
-                    # de criar o ativo/documento. INVALID -> não persiste (a data
-                    # de referência inválida deixa de ser mascarada com a data de
-                    # hoje); WARNING -> persiste, mas o alerta é registrado.
-                    data_publicacao = normalizar_data(doc['data_ref'])
-                    resultado = validar_registro(
-                        {
-                            "data_publicacao": data_publicacao,
-                            "tipo_documento": doc['tipo_doc'],
-                            "url_pdf": None,
-                            "id_b3": id_doc,
-                        },
-                        "documento_fnet",
-                        origem="FNET/B3",
-                        ativo=ticker,
-                        documento=id_doc,
-                    )
-                    registrar_diagnostico(resultado, logger)
-                    if resultado.status == INVALID:
-                        print(
-                            f"Qualidade: documento de {ticker} (id {id_doc}) "
-                            "rejeitado por violação de qualidade."
-                        )
-                        break
+        existe = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.id_b3 == id_doc).first()
+        if existe:
+            continue
 
-                    ativo_db = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-                    if not ativo_db:
-                        ativo_db = Ativo(ticker=ticker, cnpj=f"PENDENTE-{ticker}", tipo="FII")
-                        session.add(ativo_db)
-                        session.commit()
+        data_publicacao = normalizar_data(doc['data_ref'])
+        resultado = validar_registro(
+            {
+                "data_publicacao": data_publicacao,
+                "tipo_documento": doc['tipo_doc'],
+                "url_pdf": None,
+                "id_b3": id_doc,
+            },
+            "documento_fnet",
+            origem="FNET/B3",
+            ativo=ticker,
+            documento=id_doc,
+        )
+        registrar_diagnostico(resultado, logger)
+        if resultado.status == INVALID:
+            print(
+                f"Qualidade: documento de {ticker} (id {id_doc}) "
+                "rejeitado por violação de qualidade."
+            )
+            continue
 
-                    novo_doc = DocumentosQualitativos(
-                        ativo_id=ativo_db.id,
-                        id_b3=id_doc,
-                        data_publicacao=data_publicacao,
-                        tipo_documento=doc['tipo_doc'],
-                        assunto=doc['data_ref'],
-                        status_processamento="PENDENTE"
-                    )
-                    session.add(novo_doc)
-                    session.commit()
-                    novos += 1
-                break
+        ativo_db = garantir_ativo(session, ticker, TipoAtivo.FII)
+        session.commit()
+
+        novo_doc = DocumentosQualitativos(
+            ativo_id=ativo_db.id,
+            id_b3=id_doc,
+            data_publicacao=data_publicacao,
+            tipo_documento=doc['tipo_doc'],
+            assunto=doc['data_ref'],
+            status_processamento="PENDENTE"
+        )
+        session.add(novo_doc)
+        session.commit()
+        novos += 1
     session.close()
     return novos
 

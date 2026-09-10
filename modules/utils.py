@@ -1,15 +1,18 @@
-import os
 import json
+import os
+import time
+from datetime import datetime
+
 import gspread
 import pandas as pd
 import pytz
-import telebot
-from datetime import datetime
-import config
-import time
 import requests
+import telebot
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+import config
+
 
 def get_request_with_retry(url, headers):
     """Uma requisição blindada que tenta 3 vezes antes de desistir."""
@@ -26,15 +29,28 @@ def get_request_with_retry(url, headers):
 
 
 def formatar(val):
+    """Converte valor de mercado. Erro/ausência/NaN → None; zero real → 0.0.
+
+    Delegado a ``pipeline_dados.numerico`` (Fase 8.2). Não mascara coleta
+    falha como zero. Percentual com ``%`` vira fração (``12,5%`` → ``0.125``).
+    """
+    from pipeline_dados.numerico import parsear_numero, parsear_percentual
+
+    if val is None:
+        return None
     try:
-        if isinstance(val, str):
-            is_percent = '%' in val
-            val = val.replace('%', '').replace('.', '').replace(',', '.')
-            numero = float(val)
-            return numero / 100 if is_percent else numero
-        return float(val) if val is not None and not pd.isna(val) else 0.0
-    except:
-        return 0.0
+        if pd.isna(val):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(val, str) and "%" in val:
+        return parsear_percentual(val)
+    return parsear_numero(val)
+
+
+def celula_planilha(valor):
+    """Ausência (None) vira célula vazia no Sheets; zero real permanece 0.0."""
+    return "" if valor is None else valor
 
 def disparar_alertas(msg):
     """Garante a entrega da notificação via Telegram."""

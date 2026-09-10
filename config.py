@@ -38,6 +38,9 @@ JSON_KEY = os.environ.get("GOOGLE_CREDS_FILE", "credenciais.json")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 # Chat principal de alertas (operador/dono). Configurado via ambiente, sem IDs no código.
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+# Segredo do webhook Telegram (header X-Telegram-Bot-Api-Secret-Token).
+# Vazio = legado (só o token no path). Nunca hardcodar valor.
+TELEGRAM_WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip()
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY") # CONFIG IA(GROQ)
 # URL do banco normalizada e única para todo o projeto.
 DATABASE_URL = obter_database_url()
@@ -59,6 +62,15 @@ def bool_ambiente(nome, padrao=False):
 # false (padrão) -> comportamento legado, somente Google Sheets.
 # true           -> Sheets primeiro; depois espelhamento PostgreSQL.
 ESPELHAMENTO_PG_ATIVO = bool_ambiente("ESPELHAMENTO_PG_ATIVO", padrao=False)
+
+# ==========================================
+# FRESHNESS / SLA (Fase 8, Etapa 8.4)
+# ==========================================
+# Política canônica em pipeline_dados.freshness.SLA_POR_CATEGORIA.
+# Mercado/preço e indicadores: 2h — mesma janela de precisa_atualizar (7200s)
+# e do cron GitHub Actions (5x em dias úteis). Contábil ITR: 120d. Informe
+# mensal FII: 45d. Documentos FNET: 60d (lookback já usado na varredura).
+# Esta etapa mede freshness/cobertura; não reescreve o scheduler.
 
 # Base da URL pública do Render usada no webhook do Telegram.
 # Mantém o valor atual como padrão para não quebrar o deploy, mas passa a ser
@@ -93,7 +105,39 @@ AUDITORIA_ATIVA = bool_ambiente("AUDITORIA_ATIVA", padrao=True)
 
 # Habilita a API de integração. Desabilitada por padrão: a API é uma superfície
 # de ataque e só será exposta quando explicitamente ativada.
+# Fail-closed: ausente/vazio/inválido = False. Nunca hardcodar True.
+# Produção: definir API_ENABLED=true somente no ambiente de deploy.
 API_ENABLED = bool_ambiente("API_ENABLED", padrao=False)
+
+# Rate limit in-process (por worker, janela de 60s). 0 desliga o teto.
+# Auth (login/register) tem teto próprio, mais restrito.
+RATE_LIMIT_API_POR_MINUTO = _int_ambiente("RATE_LIMIT_API_POR_MINUTO", 120)
+RATE_LIMIT_AUTH_POR_MINUTO = _int_ambiente("RATE_LIMIT_AUTH_POR_MINUTO", 10)
+
+# ==========================================
+# CORS DO WEBSITE (Fase 11, Etapa 11.2)
+# ==========================================
+# Allowlist explícita de origens do Website separado. Lista vazia (padrão) =
+# nenhum Access-Control-Allow-Origin (fail-closed). Nunca aceita "*".
+# Ex.: API_CORS_ORIGINS=https://app.exemplo.com,http://localhost:5173
+
+def origens_cors_permitidas(bruto=None):
+    """Parseia API_CORS_ORIGINS: origens exatas, sem wildcard, sem duplicata."""
+    if bruto is None:
+        bruto = os.environ.get("API_CORS_ORIGINS", "")
+    if bruto is None:
+        return ()
+    vistas = []
+    for item in str(bruto).split(","):
+        origem = item.strip().rstrip("/")
+        if not origem or origem == "*":
+            continue
+        if origem not in vistas:
+            vistas.append(origem)
+    return tuple(vistas)
+
+
+API_CORS_ORIGINS = origens_cors_permitidas()
 
 # ==========================================
 # DISPATCHER DE NOTIFICAÇÕES (Fase 6, Etapa 7)
@@ -130,6 +174,11 @@ def verificar_configuracao():
 
     if not TELEGRAM_CHAT_ID:
         avisos.append("TELEGRAM_CHAT_ID (alertas do operador não serão enviados)")
+
+    if TELEGRAM_BOT_TOKEN and not TELEGRAM_WEBHOOK_SECRET:
+        avisos.append(
+            "TELEGRAM_WEBHOOK_SECRET (webhook sem secret_token extra)"
+        )
 
     if not SPREADSHEET_URL:
         avisos.append("SPREADSHEET_URL (garimpo em Google Sheets não será executado)")

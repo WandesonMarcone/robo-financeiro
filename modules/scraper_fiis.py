@@ -1,14 +1,32 @@
 import io
 import random
-import requests
-import pandas as pd
-import yfinance as yf
 from datetime import datetime
-import pytz
-import config
-import json
-from modules.utils import formatar, precisa_atualizar, get_request_with_retry
+
+import pandas as pd
+import requests
+import yfinance as yf
 from bs4 import BeautifulSoup
+
+import config
+from modules.utils import celula_planilha, formatar, get_request_with_retry, precisa_atualizar
+from pipeline_dados.numerico import (
+    derivar_divisao,
+    derivar_produto,
+    parsear_numero,
+    parsear_percentual,
+    primeiro_numero,
+)
+
+
+def interpretar_vacancia_html(valor):
+    """Vacância do HTML: só fração com ``%``. Sem ``%``, não inventa escala."""
+    if valor is None:
+        return None
+    texto = str(valor).strip()
+    if not texto or texto in ("-", "--", "—"):
+        return None
+    return parsear_percentual(texto)
+
 
 def classificar_fii_e_emoji(setor, ticker):
     """
@@ -31,14 +49,67 @@ def classificar_fii_e_emoji(setor, ticker):
 
     return "Tijolo", "🧱"
 
+
+def _fmt_num(valor, casas=2):
+    if valor is None:
+        return "N/D"
+    return f"{valor:.{casas}f}"
+
+
+def _fmt_pct(valor):
+    if valor is None:
+        return "N/D"
+    return f"{valor * 100:.1f}%"
+
+
+def _bloco_telegram_fii(ticker, tipo, emoji, preco, preco_velho, pvp, dy, txt_vacancia):
+    if preco_velho is not None and preco is not None and preco_velho != preco:
+        linha_preco = f"   R$ {_fmt_num(preco_velho)} -> R$ {_fmt_num(preco)}"
+    else:
+        linha_preco = f"   R$ {_fmt_num(preco)}"
+    return (
+        f"{emoji} *{ticker}* ({tipo})\n"
+        f"{linha_preco}\n"
+        f"   P/VP: {_fmt_num(pvp)} | DY: {_fmt_pct(dy)}{txt_vacancia}"
+    )
+
+
+def montar_linha_fii(
+    ticker, tipo, setor, preco, numero_cotas, pvp, dy, vacancia,
+    qtd_imoveis, inquilinos, liquidez, valor_mercado, vpa, lucro_12m,
+    media_div_mensal, agora_sp,
+):
+    """Linha A..R do BD_FIIs. None vira celula vazia; zero real permanece 0.0."""
+    return [
+        ticker,
+        tipo,
+        setor,
+        celula_planilha(preco),
+        celula_planilha(numero_cotas),
+        celula_planilha(pvp),
+        celula_planilha(dy),
+        celula_planilha(vacancia),
+        celula_planilha(qtd_imoveis),
+        inquilinos,
+        "Pendente de IA",
+        "Pendente de IA",
+        celula_planilha(liquidez),
+        celula_planilha(valor_mercado),
+        celula_planilha(vpa),
+        celula_planilha(lucro_12m),
+        celula_planilha(media_div_mensal),
+        f"{agora_sp}",
+    ]
+
+
 def buscar_dados_profundos_fii(ticker):
     """
     Busca 1: O Setor e Porcentagem exata via API JSON (StatusInvest)
     Busca 2: A Vacância, Imóveis e Inquilinos via HTML
     """
     resultado = {
-        "imoveis_reais": 0,
-        "vacancia_real": 0.0,
+        "imoveis_reais": None,
+        "vacancia_real": None,
         "principais_inquilinos": "Não informado / Não aplicável",
         "segmento_real": None
     }
@@ -96,15 +167,13 @@ def buscar_dados_profundos_fii(ticker):
                     valor = valor_tag.text.strip()
 
                     if 'vacância' in titulo:
-                        valor_limpo = valor.replace('%', '').replace(',', '.').strip()
-                        if valor_limpo and valor_limpo != '-':
-                            resultado["vacancia_real"] = float(valor_limpo) / 100
+                        vacancia = interpretar_vacancia_html(valor)
+                        if vacancia is not None:
+                            resultado["vacancia_real"] = vacancia
                     elif 'imóveis' in titulo or 'ativos' in titulo:
-                        if valor != '-':
-                            try:
-                                resultado["imoveis_reais"] = int(valor)
-                            except ValueError:
-                                pass
+                        imoveis = parsear_numero(valor)
+                        if imoveis is not None:
+                            resultado["imoveis_reais"] = int(imoveis)
 
             # Busca Inquilinos
             tabelas = soup.find_all('table')
@@ -148,7 +217,8 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
         df['Papel'] = df['Papel'].str.strip().str.upper()
         df = df.set_index('Papel')
         for col in ['Cotação', 'P/VP', 'Dividend Yield', 'Liquidez', 'Vacância Média', 'Valor de Mercado', 'Qtd de imóveis']:
-            if col in df.columns: df[col] = df[col].apply(formatar)
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col].apply(formatar), errors="coerce")
     except Exception:
         df = pd.DataFrame()
 
@@ -161,12 +231,12 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
         if row and row[0].strip():
             t = row[0].strip().upper()
             tickers_planilha.append(t)
-            try:
-                if len(row) > 3 and str(row[3]).strip():
-                    raw_val = str(row[3]).replace('R$', '').replace('.', '').replace(',', '.').strip()
-                    precos_antigos[t] = float(raw_val) if raw_val else 0.0
-                else: precos_antigos[t] = 0.0
-            except: precos_antigos[t] = 0.0
+            if len(row) > 3:
+                precos_antigos[t] = parsear_numero(
+                    str(row[3]).replace("R$", "").replace(".", "").replace(",", ".").strip()
+                )
+            else:
+                precos_antigos[t] = None
             mapa_atualizacao[t] = row[17] if len(row) > 17 else ""
 
     cat_fixas = [f for f in config.FIXAS_FIIS if f in tickers_planilha and precisa_atualizar(f, mapa_atualizacao, agora_dt, sp_tz)]
@@ -201,58 +271,43 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     for ticker in fila_total:
         try:
             yf_info = yf.Ticker(f"{ticker}.SA").info
-            preco_yf = formatar(yf_info.get('currentPrice') or yf_info.get('regularMarketPrice') or 0)
+            preco_yf = primeiro_numero(yf_info.get("currentPrice"), yf_info.get("regularMarketPrice"))
 
             if not df.empty and ticker in df.index:
                 f = df.loc[ticker]
-                if isinstance(f, pd.DataFrame): f = f.iloc[0]
-            else: f = {}
+                if isinstance(f, pd.DataFrame):
+                    f = f.iloc[0]
+            else:
+                f = {}
 
-            preco_fundamentus = formatar(f.get('Cotação', 0))
-            preco = preco_yf if preco_yf > 0 else preco_fundamentus
+            preco_fundamentus = formatar(f.get("Cotação"))
+            preco = primeiro_numero(preco_yf, preco_fundamentus)
 
-            pvp = formatar(f.get('P/VP', 0))
-            dy = formatar(f.get('Dividend Yield', 0))
-            liquidez = formatar(f.get('Liquidez', 0))
-            valor_mercado = formatar(f.get('Valor de Mercado', 0))
+            pvp = formatar(f.get("P/VP"))
+            dy = formatar(f.get("Dividend Yield"))
+            liquidez = formatar(f.get("Liquidez"))
+            valor_mercado = formatar(f.get("Valor de Mercado"))
 
-            # API JSON
             dados_profundos = buscar_dados_profundos_fii(ticker)
-            setor = dados_profundos["segmento_real"] if dados_profundos["segmento_real"] else f.get('Segmento', 'N/D')
-            vacancia = dados_profundos["vacancia_real"] if dados_profundos["vacancia_real"] > 0 else formatar(f.get('Vacância Média', 0))
-            qtd_imoveis = dados_profundos["imoveis_reais"] if dados_profundos["imoveis_reais"] > 0 else formatar(f.get('Qtd de imóveis', 0))
+            setor = dados_profundos["segmento_real"] or f.get("Segmento", "N/D")
+            vacancia = primeiro_numero(dados_profundos["vacancia_real"], formatar(f.get("Vacância Média")))
+            qtd_imoveis = primeiro_numero(dados_profundos["imoveis_reais"], formatar(f.get("Qtd de imóveis")))
+            if qtd_imoveis is not None:
+                qtd_imoveis = int(qtd_imoveis)
             inquilinos_planilha = dados_profundos["principais_inquilinos"]
 
             tipo, emoji = classificar_fii_e_emoji(setor, ticker)
 
-            vpa = (preco / pvp) if pvp > 0 else 0
-            numero_cotas = (valor_mercado / preco) if preco > 0 else 0
-            media_div_mensal = (preco * dy) / 12
-            lucro_12m = valor_mercado * dy
+            vpa = derivar_divisao(preco, pvp)
+            numero_cotas = derivar_divisao(valor_mercado, preco)
+            media_div_mensal = derivar_divisao(derivar_produto(preco, dy), 12)
+            lucro_12m = derivar_produto(valor_mercado, dy)
 
-            # =========================================================================
-            # 🗺️ MAPEAMENTO COMPLETO (Agora com 18 Colunas: Distribuição de A até R)
-            # =========================================================================
-            row_update_completo = [
-                ticker,                 # 00 | Coluna A: Ticker do Fundo
-                tipo,                   # 01 | Coluna B: Tipo de FII (Ex: Tijolo, Papel)
-                setor,                  # 02 | Coluna C: Segmento Específico
-                preco,                  # 03 | Coluna D: Cotação Atualizada
-                numero_cotas,           # 04 | Coluna E: Quantidade Total de Cotas
-                pvp,                    # 05 | Coluna F: P/VP
-                dy,                     # 06 | Coluna G: Dividend Yield
-                vacancia,               # 07 | Coluna H: Vacância Física/Financeira Média
-                qtd_imoveis,            # 08 | Coluna I: Quantidade Física de Imóveis
-                inquilinos_planilha,     # 09 | Coluna J: LISTA DE INQUILINOS
-                "Pendente de IA",       # 10 | Coluna K: WALT
-                "Pendente de IA",       # 11 | Coluna L: Alavancagem / Dívida
-                liquidez,               # 12 | Coluna M: Liquidez Média Diária Negociada
-                valor_mercado,          # 13 | Coluna N: Patrimônio Líquido Total
-                vpa,                    # 14 | Coluna O: Valor Patrimonial Justo da Cota
-                lucro_12m,              # 15 | Coluna P: Montante de Lucro Distribuído (12M)
-                media_div_mensal,       # 16 | Coluna Q: Projeção de Dividendo Mensal
-                f"{agora_sp}"             # 17 | Coluna R: Carimbo de Conclusão da Carga
-            ]
+            row_update_completo = montar_linha_fii(
+                ticker, tipo, setor, preco, numero_cotas, pvp, dy, vacancia,
+                qtd_imoveis, inquilinos_planilha, liquidez, valor_mercado,
+                vpa, lucro_12m, media_div_mensal, agora_sp,
+            )
 
             row_update_parcial = row_update_completo[1:]
 
@@ -264,19 +319,20 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
                 proxima_linha_vazia += 1
 
             preco_velho = precos_antigos.get(ticker, preco)
-            icone_variacao = "📈" if preco > preco_velho else ("📉" if preco < preco_velho else "➖")
-            txt_vacancia = f" | 🏚️ Vacância: {vacancia*100:.1f}%" if tipo == "Tijolo" else ""
+            txt_vacancia = (
+                f" | Vacancia: {_fmt_pct(vacancia)}" if tipo == "Tijolo" and vacancia is not None else ""
+            )
+            bloco = _bloco_telegram_fii(ticker, tipo, emoji, preco, preco_velho, pvp, dy, txt_vacancia)
 
             if ticker in novatos_garimpados:
-                relatorio_opps.append(f"{emoji} *{ticker}* ({tipo})\n   R$ {preco:.2f}\n   P/VP: {pvp:.2f} | DY: {dy*100:.1f}%{txt_vacancia}")
+                relatorio_opps.append(bloco)
             elif ticker in config.FIXAS_FIIS:
-                texto_ativo = f"{emoji} *{ticker}* ({tipo})\n   R$ {preco_velho:.2f} ➔ R$ {preco:.2f} {icone_variacao}\n   P/VP: {pvp:.2f} | DY: {dy*100:.1f}%{txt_vacancia}"
                 if ticker in oportunidades_gerais:
-                    relatorio_fixas_opps.append(f"🚨 *{ticker} ENTROU EM DESCONTO!* 🚨\n   {texto_ativo}")
+                    relatorio_fixas_opps.append(f"*ALERTA* {ticker} ENTROU EM DESCONTO!\n   {bloco}")
                 else:
-                    relatorio_fixas.append(texto_ativo)
+                    relatorio_fixas.append(bloco)
             else:
-                relatorio_atualizados.append(f"{emoji} *{ticker}* ({tipo})\n   R$ {preco_velho:.2f} ➔ R$ {preco:.2f} {icone_variacao}\n   P/VP: {pvp:.2f} | DY: {dy*100:.1f}%{txt_vacancia}")
+                relatorio_atualizados.append(bloco)
 
             print(f"   ✅ [OK] {ticker} mapeado e processado.")
         except Exception as e:

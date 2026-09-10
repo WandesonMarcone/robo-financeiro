@@ -1,12 +1,17 @@
 import io
 import random
-import requests
+from datetime import datetime
+
 import pandas as pd
 import yfinance as yf
-from datetime import datetime
+
 import config
-from modules.utils import formatar, precisa_atualizar, get_request_with_retry
 from config import MAPA_SETORES_B3
+from modules.utils import celula_planilha, formatar, get_request_with_retry, precisa_atualizar
+from pipeline_dados.numerico import derivar_divisao, parsear_numero, parsear_percentual, primeiro_numero
+
+LIMIAR_ROE_OPORTUNIDADE = 0.08
+
 
 def classificar_setor_por_mapa(ticker):
     """
@@ -22,6 +27,105 @@ def classificar_setor_por_mapa(ticker):
 
     # Se a ação não estiver mapeada no config.py
     return "Outros", "Não Classificado"
+
+
+def limpar_porcentagem_df(val):
+    """Percentual do Fundamentus → fração só com ``%``. Erro/ausência → None; 0% → 0.0."""
+    if val is None:
+        return None
+    try:
+        if pd.isna(val):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(val, str) and "%" in val:
+        return parsear_percentual(val)
+    return parsear_numero(val)
+
+
+def _fmt_num(valor, casas=2):
+    if valor is None:
+        return "N/D"
+    return f"{valor:.{casas}f}"
+
+
+def _fmt_pct(valor):
+    if valor is None:
+        return "N/D"
+    return f"{valor * 100:.1f}%"
+
+
+def montar_linha_acao(
+    setor, preco, dy, qtd_acoes, pl, pvp, p_ativo, marg_bruta, marg_ebit,
+    marg_liquida, p_ebit, ev_ebit, div_liq_ebit, div_liq_patrimonio, psr,
+    p_cap_giro, p_at_circ_liq, liq_corrente, roe, roa, roic, cagr_rec_5a,
+    liq_media, vpa, lpa, peg_ratio, valor_mercado, agora_sp,
+):
+    """Linha B..AG do BD_Acoes. None vira celula vazia; slots reservados ficam vazios."""
+    vazio = ""
+    return [
+        setor,
+        celula_planilha(preco),
+        celula_planilha(dy),
+        celula_planilha(qtd_acoes),
+        celula_planilha(pl),
+        celula_planilha(pvp),
+        celula_planilha(p_ativo),
+        celula_planilha(marg_bruta),
+        celula_planilha(marg_ebit),
+        celula_planilha(marg_liquida),
+        celula_planilha(p_ebit),
+        celula_planilha(ev_ebit),
+        celula_planilha(div_liq_ebit),
+        celula_planilha(div_liq_patrimonio),
+        celula_planilha(psr),
+        celula_planilha(p_cap_giro),
+        celula_planilha(p_at_circ_liq),
+        celula_planilha(liq_corrente),
+        celula_planilha(roe),
+        celula_planilha(roa),
+        celula_planilha(roic),
+        vazio,
+        vazio,
+        vazio,
+        celula_planilha(cagr_rec_5a),
+        vazio,
+        celula_planilha(liq_media),
+        celula_planilha(vpa),
+        celula_planilha(lpa),
+        celula_planilha(peg_ratio),
+        celula_planilha(valor_mercado),
+        f"{agora_sp}",
+    ]
+
+
+def derivar_pl(pl_fonte, preco, lpa):
+    """P/L da fonte; se ausente, preco/lpa. Dependência ausente ou lpa=0 → None."""
+    pl = parsear_numero(pl_fonte)
+    if pl is not None:
+        return pl
+    return derivar_divisao(preco, lpa)
+
+
+def derivar_pvp(pvp_fonte, preco, vpa):
+    """P/VP da fonte; se ausente, preco/vpa. Dependência ausente ou vpa=0 → None."""
+    pvp = parsear_numero(pvp_fonte)
+    if pvp is not None:
+        return pvp
+    return derivar_divisao(preco, vpa)
+
+
+def _bloco_telegram_acao(ticker, preco, preco_velho, pl, pvp, roe):
+    if preco_velho is not None and preco is not None and preco_velho != preco:
+        linha_preco = f"   R$ {_fmt_num(preco_velho)} -> R$ {_fmt_num(preco)}"
+    else:
+        linha_preco = f"   R$ {_fmt_num(preco)}"
+    return (
+        f"*{ticker}*\n"
+        f"{linha_preco}\n"
+        f"   P/L: {_fmt_num(pl, 1)} | P/VP: {_fmt_num(pvp)} | ROE: {_fmt_pct(roe)}"
+    )
+
 
 def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     print("📈 [1/5] Iniciando auditoria completa de Ações...")
@@ -41,22 +145,13 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
         df['Papel'] = df['Papel'].str.strip().str.upper()
         df = df.set_index('Papel')
 
-        # 🟢 ALTERAÇÃO 2: Limpeza dos símbolos '%' antes de formatar
-        def limpar_porcentagem_df(val):
-            if isinstance(val, str):
-                val = val.replace('%', '').replace('.', '').replace(',', '.')
-                try:
-                    return float(val) / 100
-                except ValueError:
-                    return 0.0
-            return val
-
         for col_perc in ['Div.Yield', 'ROE', 'Mrg Bruta', 'Mrg Ebit', 'Mrg. Líq.', 'Cresc. Rec.5a', 'ROIC']:
             if col_perc in df.columns:
-                df[col_perc] = df[col_perc].apply(limpar_porcentagem_df)
+                df[col_perc] = pd.to_numeric(df[col_perc].apply(limpar_porcentagem_df), errors="coerce")
 
-        for col in ['P/L', 'P/VP', 'Div.Yield', 'ROE', 'Liq.2meses']:
-            if col in df.columns: df[col] = df[col].apply(formatar)
+        for col in ['P/L', 'P/VP', 'Liq.2meses']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col].apply(formatar), errors="coerce")
 
     except Exception as e:
         print(f"⚠️ Fundamentus indisponível: {e}. Alternando para Yahoo.")
@@ -71,13 +166,12 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
             t = row[0].strip().upper()
             todas_originais.append(t)
 
-            # Lógica de limpeza para o preço na Coluna C (índice 2)
-            try:
-                # Remove "R$", tira o ponto de milhar, troca vírgula por ponto
-                raw_val = str(row[2]).replace('R$', '').replace('.', '').replace(',', '.').strip()
-                precos_antigos[t] = float(raw_val) if raw_val else 0.0
-            except:
-                precos_antigos[t] = 0.0
+            if len(row) > 2:
+                precos_antigos[t] = parsear_numero(
+                    str(row[2]).replace("R$", "").replace(".", "").replace(",", ".").strip()
+                )
+            else:
+                precos_antigos[t] = None
 
             # Mapeamento da Coluna AG (índice 32)
             mapa_atualizacao[t] = row[32] if len(row) > 32 else ""
@@ -87,7 +181,7 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
 
     opps_brutas, cat_novatas = [], []
     if not df.empty:
-        opps_brutas = df[(df['P/L'] > 0) & (df['P/L'] < 12) & (df['P/VP'] < 1.5) & (df['ROE'] >= 8.0)].index.tolist() # O ROE agora é um decimal pequeno (ex: 0.08)
+        opps_brutas = df[(df['P/L'] > 0) & (df['P/L'] < 12) & (df['P/VP'] < 1.5) & (df['ROE'] >= LIMIAR_ROE_OPORTUNIDADE)].index.tolist()
         cat_opps = [o for o in opps_brutas if o in todas_originais and o not in cat_fixas and precisa_atualizar(o, mapa_atualizacao, agora_dt, sp_tz)][:5]
         # Adequação dos filtros matemáticos pois as porcentagens viraram decimais puros (Ex: 6.0% agora é 0.06)
         candidatas = df[(df['P/L']>=2)&(df['P/L']<=15)&(df['P/VP']>=0.2)&(df['P/VP']<=1.5)&(df['Div.Yield']>=0.06)&(df['ROE']>=0.10)].index.tolist()
@@ -127,77 +221,50 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
             # Se a sua planilha também tiver uma coluna para Subsetor no futuro,
             # a variável 'sub_setor' já está pronta para ser enviada (Ex: "Mineração").
 
-            preco_yf = formatar(yf_info.get('currentPrice') or yf_info.get('regularMarketPrice') or 0)
+            preco_yf = primeiro_numero(yf_info.get("currentPrice"), yf_info.get("regularMarketPrice"))
             f = df.loc[ticker] if (not df.empty and ticker in df.index) else {}
-            preco = preco_yf if preco_yf > 0 else formatar(f.get('Cotação', 0))
+            preco = primeiro_numero(preco_yf, formatar(f.get("Cotação")))
 
-            # 🔥 Correção da Divisão por Zero
-            lpa_yf = formatar(yf_info.get('trailingEps', 0))
-            vpa_yf = formatar(yf_info.get('bookValue', 0))
+            lpa_yf = formatar(yf_info.get("trailingEps"))
+            vpa_yf = formatar(yf_info.get("bookValue"))
 
-            pl = formatar(f.get('P/L', 0)) if f.get('P/L') else ((preco / lpa_yf) if lpa_yf > 0 else 0)
-            pvp = formatar(f.get('P/VP', 0)) if f.get('P/VP') else ((preco / vpa_yf) if vpa_yf > 0 else 0)
-            roe = formatar(f.get('ROE', 0))
+            pl = derivar_pl(f.get("P/L"), preco, lpa_yf)
+            pvp = derivar_pvp(f.get("P/VP"), preco, vpa_yf)
+            roe = formatar(f.get("ROE"))
+            dy = formatar(f.get("Div.Yield"))
+            div_liq_patrimonio = formatar(f.get("Dív.Líq/ Patrim."))
 
-            # =========================================================================
-            # 🗺️ MAPEAMENTO COMPLETO (32 Colunas: B até AG)
-            # =========================================================================
-            row_base = [
-                setor,                                    # 00 | B: Setor
-                preco,                                    # 01 | C: Preço
-                formatar(f.get('Div.Yield', 0)),          # 02 | D: DY
-                formatar(yf_info.get('sharesOutstanding', 0)), # 03 | E: Qtd Ações
-                pl,                                       # 04 | F: P/L
-                pvp,                                      # 05 | G: P/VP
-                formatar(f.get('P/Ativo', 0)),            # 06 | H: P/Ativo
-                formatar(f.get('Mrg Bruta', 0)),          # 07 | I: Marg. Bruta
-                formatar(f.get('Mrg Ebit', 0)),           # 08 | J: Marg. EBIT
-                formatar(f.get('Mrg. Líq.', 0)),          # 09 | K: Marg. Líq
-                formatar(f.get('P/EBIT', 0)),             # 10 | L: P/EBIT
-                formatar(f.get('EV/EBIT', 0)),            # 11 | M: EV/EBIT
-                formatar(f.get('Dív.Líq/ Patrim.', 0)),   # 12 | N: Dív.Liq/EBIT
-                formatar(f.get('Dív.Líq/ Patrim.', 0)),   # 13 | O: Dív.Liq/Patri
-                formatar(f.get('PSR', 0)),                # 14 | P: PSR
-                formatar(f.get('P/Cap.Giro', 0)),         # 15 | Q: P/Cap.Giro
-                formatar(f.get('P/Ativ Circ.Liq', 0)),    # 16 | R: P/At.Circ.Liq
-                formatar(f.get('Liq. Corr.', 0)),         # 17 | S: Liq. Corr
-                roe,                                      # 18 | T: ROE
-                formatar(yf_info.get('returnOnAssets', 0)),# 19 | U: ROA
-                formatar(f.get('ROIC', 0)),               # 20 | V: ROIC
-                0,                                        # 21 | W: Reservado
-                0,                                        # 22 | X: Reservado
-                0,                                        # 23 | Y: Reservado
-                formatar(f.get('Cresc. Rec.5a', 0)),      # 24 | Z: CAGR Rec. 5a
-                0,                                        # 25 | AA: Reservado
-                formatar(f.get('Liq.2meses', 0)),         # 26 | AB: Liq. Média
-                vpa_yf,                                   # 27 | AC: VPA
-                lpa_yf,                                   # 28 | AD: LPA
-                formatar(yf_info.get('trailingPegRatio', 0)),# 29 | AE: PEG Ratio
-                formatar(yf_info.get('marketCap', 0)),    # 30 | AF: Valor Mercado
-                f"{agora_sp}"                             # 31 | AG: Carimbo Atualização
-            ]
+            row_base = montar_linha_acao(
+                setor, preco, dy, formatar(yf_info.get("sharesOutstanding")),
+                pl, pvp, formatar(f.get("P/Ativo")), formatar(f.get("Mrg Bruta")),
+                formatar(f.get("Mrg Ebit")), formatar(f.get("Mrg. Líq.")),
+                formatar(f.get("P/EBIT")), formatar(f.get("EV/EBIT")),
+                None, div_liq_patrimonio, formatar(f.get("PSR")),
+                formatar(f.get("P/Cap.Giro")), formatar(f.get("P/Ativ Circ.Liq")),
+                formatar(f.get("Liq. Corr.")), roe, formatar(yf_info.get("returnOnAssets")),
+                formatar(f.get("ROIC")), formatar(f.get("Cresc. Rec.5a")),
+                formatar(f.get("Liq.2meses")), vpa_yf, lpa_yf,
+                formatar(yf_info.get("trailingPegRatio")), formatar(yf_info.get("marketCap")),
+                agora_sp,
+            )
 
-            if ticker in cat_novatas: batch_updates.append({'range': f'A{linha_idx}:AG{linha_idx}', 'values': [[ticker] + row_base]})
-            else: batch_updates.append({'range': f'B{linha_idx}:AG{linha_idx}', 'values': [row_base]})
+            if ticker in cat_novatas:
+                batch_updates.append({"range": f"A{linha_idx}:AG{linha_idx}", "values": [[ticker] + row_base]})
+            else:
+                batch_updates.append({"range": f"B{linha_idx}:AG{linha_idx}", "values": [row_base]})
 
-            # --- CONSTRUÇÃO DO TELEGRAM ---
             p_v = precos_antigos.get(ticker, preco)
-            ico = "📈" if preco > p_v else ("📉" if preco < p_v else "➖")
-
+            txt = _bloco_telegram_acao(ticker, preco, p_v, pl, pvp, roe)
             if ticker in config.FIXAS_ACOES:
-                txt = f"🏭 *{ticker}*\n   R$ {p_v:.2f} ➔ R$ {preco:.2f} {ico}\n   P/L: {pl:.1f} | P/VP: {pvp:.2f} | ROE: {roe*100:.1f}%"
                 if ticker in opps_brutas:
-                    relatorio_fixas_opps.append(f"🚨 *{ticker} EM OPORTUNIDADE!* 🚨\n{txt}")
+                    relatorio_fixas_opps.append(f"*ALERTA* {ticker} EM OPORTUNIDADE!\n{txt}")
                 else:
                     relatorio_fixas.append(txt)
             elif ticker in opps_brutas:
-                txt = f"🏭 *{ticker}* (Oportunidade)\n   R$ {preco:.2f}\n   P/L: {pl:.1f} | P/VP: {pvp:.2f} | ROE: {roe*100:.1f}%"
                 relatorio_opps.append(txt)
             elif ticker in cat_novatas:
-                txt = f"🏭 *{ticker}* (Nova Garimpada)\n   R$ {preco:.2f}\n   P/L: {pl:.1f} | P/VP: {pvp:.2f} | ROE: {roe*100:.1f}%"
                 relatorio_novatas.append(txt)
             else:
-                txt = f"🏭 *{ticker}*\n   R$ {p_v:.2f} ➔ R$ {preco:.2f} {ico}\n   P/L: {pl:.1f} | P/VP: {pvp:.2f} | ROE: {roe*100:.1f}%"
                 relatorio_atualizados.append(txt)
 
             print(f"   ✅ [OK] {ticker} mapeado e processado.")
