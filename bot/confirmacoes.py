@@ -1,6 +1,7 @@
 import logging
 
 from atualizador_documentos import SessionDB
+from bot import identidade
 from bot.loader import bot
 from modules import seguranca
 from pipeline_dados.banco_dados import DocumentosQualitativos
@@ -17,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 @bot.callback_query_handler(func=lambda call: call.data == "reset_confirmar")
 def confirmar_reset(call):
+    if not identidade.exigir_fluxo_callback(call, identidade.FLUXO_OPERACIONAL):
+        return
     user_id = call.from_user.id
     if not seguranca.eh_superadmin(user_id):
         logger.warning(
@@ -54,6 +57,8 @@ def confirmar_reset(call):
 
 @bot.callback_query_handler(func=lambda call: call.data == "reset_cancelar")
 def cancelar_reset(call):
+    if not identidade.exigir_fluxo_callback(call, identidade.FLUXO_OPERACIONAL):
+        return
     try:
         bot.edit_message_text(
             "✅ Exclusão cancelada. Nenhum registro foi alterado.",

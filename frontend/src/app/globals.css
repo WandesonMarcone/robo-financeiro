@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-sand: #f4f1ea;
+  --color-olive: #1b2e1c;
+  --color-gold: #c5a059;
+  --color-white: #ffffff;
+  --color-ink: #1a1a1a;
+}
+
+html,
+body {
+  background: var(--color-sand);
+  color: var(--color-ink);
+}
+
+.ticker {
+  font-family: var(--font-ticker), system-ui, sans-serif;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}

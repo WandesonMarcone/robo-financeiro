@@ -1,4 +1,5 @@
 import config
+from bot import identidade
 from bot.loader import bot
 from services.planilhas import buscar_dados_planilha_com_cache
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -10,6 +11,8 @@ from pipeline_dados.banco_dados import DocumentosQualitativos
 @bot.callback_query_handler(func=lambda call: call.data.startswith('tipo_fii_'))
 def callback_selecionar_segmento(call):
     """Lê a planilha, quebra as barras e cria os botões de segmentos únicos"""
+    if not identidade.exigir_fluxo_callback(call, identidade.FLUXO_USUARIO):
+        return
     tipo_selecionado = call.data.split('_')[2]
     matriz = buscar_dados_planilha_com_cache("BD_FIIs")
 
@@ -37,6 +40,8 @@ def callback_selecionar_segmento(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('setor_fii_'))
 def callback_listar_ativos_fii(call):
     """Lista os FIIs do segmento e adiciona os marcadores visuais avançados"""
+    if not identidade.exigir_fluxo_callback(call, identidade.FLUXO_USUARIO):
+        return
 
     # CORREÇÃO: Extração segura do nome do setor, garantindo que espaços (como "Renda Urbana") não quebrem a string
     nome_setor = call.data.replace('setor_fii_', '').strip()
@@ -97,6 +102,8 @@ def callback_listar_ativos_fii(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('setor_acao_'))
 def callback_listar_ativos_acao(call):
     """Lê a aba BD_Acoes e lista as empresas que pertencem ao setor clicado"""
+    if not identidade.exigir_fluxo_callback(call, identidade.FLUXO_USUARIO):
+        return
 
     # CORREÇÃO: Extração segura do setor (idêntica à lógica que corrigimos para os FIIs)
     nome_setor = call.data.replace('setor_acao_', '').strip()
@@ -165,6 +172,8 @@ def callback_ajuda_comandos(call):
 @bot.callback_query_handler(func=lambda call: call.data == "ver_raiox_docs")
 def callback_raiox_docs(call):
     """Gera e exibe a lista completa de documentos e estatísticas sob demanda."""
+    if not identidade.exigir_fluxo_callback(call, identidade.FLUXO_OPERACIONAL):
+        return
     try:
         bot.answer_callback_query(call.id, "Carregando Raio-X...")
 
@@ -270,6 +279,8 @@ def callback_raiox_docs(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("ia_"))
 def callback_menu_inteligencia(call):
     """Gerencia o menu interativo de IA dividindo a análise em botões menores."""
+    if not identidade.exigir_fluxo_callback(call, identidade.FLUXO_USUARIO):
+        return
     # Desempacota os dados (Exemplo de call.data: ia_PETR4_acao_dividendos)
     partes = call.data.split("_")
     ticker = partes[1]
@@ -372,6 +383,8 @@ def callback_menu_inteligencia(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("ajuda_cvm_"))
 def menu_duvidas_cvm(call):
     """Sistema de dicionário financeiro interativo para o painel da CVM."""
+    if not identidade.exigir_fluxo_callback(call, identidade.FLUXO_USUARIO):
+        return
     partes = call.data.split("_")
     ticker = partes[2]
     tela = partes[3] # Pode ser: menu, bp, dre, fco

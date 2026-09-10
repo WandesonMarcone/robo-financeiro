@@ -9,6 +9,7 @@ permissão ``ativos.proprios`` da matriz central e a política de escopo.
 """
 from flask import Blueprint, g, request
 
+from api import dependencias
 from api.auth import rota_protegida
 from api.respostas import resposta_erro, resposta_ok
 from api.serializadores import serializar_acompanhamento
@@ -43,12 +44,13 @@ def _interpretar_ativo_id(valor):
 @rota_protegida("ativos.proprios")
 def listar_acompanhamentos():
     """Lista os ativos acompanhados pelo usuário autenticado."""
-    registros = ativos_acompanhados.listar_acompanhamentos(
-        g.usuario, session=g.sessao
+    page, page_size, offset = dependencias.obter_paginacao()
+    registros, total = ativos_acompanhados.listar_acompanhamentos(
+        g.usuario, session=g.sessao, limite=page_size, offset=offset
     )
     return resposta_ok(
         [serializar_acompanhamento(registro) for registro in registros],
-        meta={"total": len(registros)},
+        meta=dependencias.meta_paginacao(total, page, page_size, len(registros)),
     )
 
 

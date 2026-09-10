@@ -22,6 +22,7 @@ from datetime import datetime
 
 from flask import Blueprint, g, request
 
+from api import dependencias
 from api.auth import rota_protegida
 from api.respostas import resposta_erro, resposta_ok
 from api.serializadores import serializar_chave_api
@@ -96,12 +97,17 @@ def criar_api_key():
 @rota_protegida(PERMISSAO_PROPRIA)
 def listar_api_keys():
     """Lista os metadados das próprias API Keys (nunca a chave nem o hash)."""
-    registros = chaves_api.listar_chaves_api(
-        g.usuario, autor=g.usuario, session=g.sessao
+    page, page_size, offset = dependencias.obter_paginacao()
+    registros, total = chaves_api.listar_chaves_api(
+        g.usuario,
+        autor=g.usuario,
+        session=g.sessao,
+        limite=page_size,
+        offset=offset,
     )
     return resposta_ok(
         [serializar_chave_api(registro) for registro in registros],
-        meta={"total": len(registros)},
+        meta=dependencias.meta_paginacao(total, page, page_size, len(registros)),
     )
 
 

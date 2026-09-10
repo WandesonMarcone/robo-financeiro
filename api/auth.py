@@ -31,7 +31,11 @@ from services import auditoria, autorizacao, chaves_api, sessoes
 
 
 def _extrair_credenciais():
-    """Retorna ``(api_key, token_sessao)`` limpos dos cabeçalhos."""
+    """Retorna ``(api_key, token_sessao)`` limpos dos cabeçalhos.
+
+    Credenciais vêm somente de ``X-API-Key`` e ``X-Session-Token``. Query
+    string, path, corpo JSON e cookies NÃO autenticam (token nunca na URL).
+    """
     api_key = (request.headers.get("X-API-Key") or "").strip() or None
     token_sessao = (request.headers.get("X-Session-Token") or "").strip() or None
     return api_key, token_sessao

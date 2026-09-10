@@ -13,6 +13,7 @@ nunca desta API.
 """
 from flask import Blueprint, g, request
 
+from api import dependencias
 from api.auth import rota_protegida
 from api.respostas import resposta_erro, resposta_ok
 from api.serializadores import serializar_notificacao
@@ -39,19 +40,22 @@ def listar_notificacoes():
     nao_lidas = request.args.get("nao_lidas")
     if nao_lidas is not None and str(nao_lidas).strip().lower() not in ("1", "true"):
         return resposta_erro("O parâmetro 'nao_lidas' deve ser '1' ou 'true'.", 400)
+    page, page_size, offset = dependencias.obter_paginacao()
     try:
-        registros = notificacoes.listar_notificacoes(
+        registros, total = notificacoes.listar_notificacoes(
             g.usuario,
             session=g.sessao,
             tipo=tipo,
             status=status,
             nao_lidas=bool(nao_lidas),
+            limite=page_size,
+            offset=offset,
         )
     except ValueError as exc:
         return resposta_erro(str(exc), 400)
     return resposta_ok(
         [serializar_notificacao(registro) for registro in registros],
-        meta={"total": len(registros)},
+        meta=dependencias.meta_paginacao(total, page, page_size, len(registros)),
     )
 
 

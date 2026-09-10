@@ -2,6 +2,7 @@ import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Imports base e configurações
+from bot import identidade
 from bot.loader import bot
 from config import SPREADSHEET_URL, MAPA_SETORES_B3
 
@@ -18,21 +19,33 @@ logger = logging.getLogger(__name__)
 # ==========================================
 # ----- BOTÕES PRINCIPAIS -----
 # ==========================================
-@bot.callback_query_handler(func=lambda call: True)
+@bot.callback_query_handler(func=identidade.callback_pertence_ao_menu)
 def callback_geral(call):
     try:
         dados = call.data
         chat_id = call.message.chat.id
         msg_id = call.message.message_id
+        if not identidade.exigir_fluxo_callback(call, identidade.FLUXO_USUARIO):
+            return
 
         # --- NAVEGAÇÃO BÁSICA ---
         if dados == "voltar_menu":
-            markup = InlineKeyboardMarkup()
-            markup.row(InlineKeyboardButton("🏢 FIIs (Imobiliários)", callback_data="menu_fiis"),
-                       InlineKeyboardButton("📈 Ações (Empresas)", callback_data="menu_acoes"))
-            markup.row(InlineKeyboardButton("🌍 Visão Macro & Notícias", callback_data="menu_macro"))
-            markup.row(InlineKeyboardButton("ℹ️ Ajuda / Sobre", callback_data="menu_ajuda"))
-            bot.edit_message_text("🤖 *Terminal Institucional* 🤖\nSelecione o módulo de análise abaixo:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            fluxo, _usuario = identidade.fluxo_evento(call)
+            texto = (
+                identidade._MSG_OPERACIONAL
+                if fluxo == identidade.FLUXO_OPERACIONAL
+                else identidade._MSG_USUARIO
+                if fluxo == identidade.FLUXO_USUARIO
+                else identidade._MSG_PUBLICO
+            )
+            parse = "Markdown" if fluxo == identidade.FLUXO_OPERACIONAL else None
+            bot.edit_message_text(
+                texto,
+                chat_id,
+                msg_id,
+                reply_markup=identidade.markup_inicio(fluxo),
+                parse_mode=parse,
+            )
 
         elif dados == "menu_ajuda":
             markup = InlineKeyboardMarkup(row_width=1)

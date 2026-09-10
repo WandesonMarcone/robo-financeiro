@@ -15,7 +15,12 @@ from flask import Blueprint, g, request
 from api import dependencias
 from api.auth import rota_protegida
 from api.respostas import resposta_erro, resposta_ok
-from api.serializadores import serializar_dados_financeiros, serializar_snapshot
+from api.serializadores import (
+    serializar_cobertura_fii,
+    serializar_dados_financeiros,
+    serializar_freshness,
+    serializar_snapshot,
+)
 from services import mercado
 
 bp = Blueprint("api_mercado", __name__)
@@ -59,19 +64,22 @@ def listar_snapshots():
     sessao = g.sessao
     try:
         ticker, ativo_id, tipo_ativo, data_referencia = _argumentos_snapshot()
-        registros = mercado.obter_snapshots(
+        page, page_size, offset = dependencias.obter_paginacao()
+        registros, total = mercado.obter_snapshots(
             ticker=ticker,
             ativo_id=ativo_id,
             tipo=tipo_ativo,
             data_referencia=data_referencia,
-            limite=dependencias.obter_limite(),
+            limite=page_size,
+            offset=offset,
             session=sessao,
+            com_total=True,
         )
     except ValueError as exc:
         return resposta_erro(str(exc), 400)
     return resposta_ok(
         [serializar_snapshot(registro) for registro in registros],
-        meta={"total": len(registros)},
+        meta=dependencias.meta_paginacao(total, page, page_size, len(registros)),
     )
 
 
@@ -103,18 +111,90 @@ def listar_dados_financeiros():
     try:
         ticker, ativo_id, tipo_ativo, data_referencia = _argumentos_snapshot()
         tipo_doc = request.args.get("tipo_doc")
-        registros = mercado.obter_dados_financeiros(
+        page, page_size, offset = dependencias.obter_paginacao()
+        registros, total = mercado.obter_dados_financeiros(
             ticker=ticker,
             ativo_id=ativo_id,
             tipo=tipo_ativo,
             tipo_doc=tipo_doc,
             data_referencia=data_referencia,
-            limite=dependencias.obter_limite(),
+            limite=page_size,
+            offset=offset,
             session=sessao,
+            com_total=True,
         )
     except ValueError as exc:
         return resposta_erro(str(exc), 400)
     return resposta_ok(
         [serializar_dados_financeiros(registro) for registro in registros],
-        meta={"total": len(registros)},
+        meta=dependencias.meta_paginacao(total, page, page_size, len(registros)),
+    )
+
+
+@bp.get("/freshness")
+@rota_protegida("dados.consultar")
+def consultar_freshness():
+    """FRESH/STALE/MISSING por categoria do ativo filtrado (ou 404)."""
+    sessao = g.sessao
+    try:
+        ticker, ativo_id, tipo_ativo, _ = _argumentos_snapshot()
+        estado = mercado.obter_freshness(
+            ticker=ticker,
+            ativo_id=ativo_id,
+            tipo=tipo_ativo,
+            session=sessao,
+        )
+    except ValueError as exc:
+        return resposta_erro(str(exc), 400)
+    if estado is None:
+        return resposta_erro("Ativo não encontrado para freshness.", 404)
+    return resposta_ok(serializar_freshness(estado))
+
+
+@bp.get("/cobertura")
+@rota_protegida("dados.consultar")
+def consultar_cobertura():
+    """Universo cadastrado vs coletados vs fora (execução parcial visível).
+
+    Paginação no catálogo (teto 100/500): avalia só a página. Totais do
+    universo permanecem no payload.
+    """
+    sessao = g.sessao
+    page, page_size, offset = dependencias.obter_paginacao()
+    relatorio = mercado.obter_cobertura(
+        session=sessao, limite=page_size, offset=offset
+    )
+    total = int(relatorio.get("total_paginavel") or 0)
+    avaliados = relatorio.get("avaliados_total") or 0
+    return resposta_ok(
+        relatorio,
+        meta=dependencias.meta_paginacao(total, page, page_size, avaliados),
+    )
+
+
+@bp.get("/cobertura-fii")
+@rota_protegida("dados.consultar")
+def consultar_cobertura_fii():
+    """Cobertura por campo dos FIIs cadastrados (8.6). Não expande o universo."""
+    sessao = g.sessao
+    ticker = request.args.get("ticker")
+    if ticker is not None:
+        ticker = str(ticker).strip() or None
+    page, page_size, offset = dependencias.obter_paginacao()
+    relatorio = mercado.obter_cobertura_fii(
+        ticker=ticker,
+        session=sessao,
+        limite=page_size,
+        offset=offset,
+    )
+    payload = serializar_cobertura_fii(relatorio)
+    total = int(relatorio.get("total_paginavel") or relatorio.get("universo_total") or 0)
+    if ticker:
+        total = payload.get("avaliados_total") or total
+        page = 1
+    return resposta_ok(
+        payload,
+        meta=dependencias.meta_paginacao(
+            total, page, page_size, payload.get("avaliados_total") or 0
+        ),
     )

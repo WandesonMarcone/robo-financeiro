@@ -9,6 +9,7 @@ permissão ``carteira.propria`` da matriz central e a política de escopo.
 """
 from flask import Blueprint, g, request
 
+from api import dependencias
 from api.auth import rota_protegida
 from api.respostas import resposta_erro, resposta_ok
 from api.serializadores import serializar_posicao
@@ -43,10 +44,13 @@ def _interpretar_ativo_id(valor):
 @rota_protegida("carteira.propria")
 def listar_posicoes():
     """Lista as posições da carteira do usuário autenticado."""
-    registros = carteira.listar_posicoes(g.usuario, session=g.sessao)
+    page, page_size, offset = dependencias.obter_paginacao()
+    registros, total = carteira.listar_posicoes(
+        g.usuario, session=g.sessao, limite=page_size, offset=offset
+    )
     return resposta_ok(
         [serializar_posicao(registro) for registro in registros],
-        meta={"total": len(registros)},
+        meta=dependencias.meta_paginacao(total, page, page_size, len(registros)),
     )
 
 

@@ -2,9 +2,11 @@
 
 - ``GET /api/v1/indicadores`` — permissão ``indicadores.consultar``;
 - ``GET /api/v1/indicadores/<ativo_id>/historico`` — permissão
-  ``historico.consultar`` (expõe o estado histórico já armazenado).
+  ``historico.consultar`` (estado mais recente por indicador; não é série
+  temporal — ``meta.serie_temporal = false``).
 """
 from flask import Blueprint, g, request
+from sqlalchemy.orm import joinedload
 
 from api import dependencias
 from api.auth import rota_protegida
@@ -25,8 +27,9 @@ def _filtros(query):
 
     ticker = request.args.get("ticker")
     if ticker:
-        termo = f"%{str(ticker).strip().upper()}%"
-        query = query.join(Ativo).filter(Ativo.ticker.like(termo))
+        query = query.filter(
+            IndicadorHistorico.ativo.has(Ativo.ticker == str(ticker).strip().upper())
+        )
 
     indicador = request.args.get("indicador")
     if indicador:
@@ -54,22 +57,25 @@ def listar_indicadores():
     except ValueError as exc:
         return resposta_erro(str(exc), 400)
 
-    limite = dependencias.obter_limite()
+    page, page_size, offset = dependencias.obter_paginacao()
+    total = query.count()
     registros = (
-        query.order_by(IndicadorHistorico.tipo_ativo, IndicadorHistorico.indicador)
-        .limit(limite)
+        query.options(joinedload(IndicadorHistorico.ativo))
+        .order_by(IndicadorHistorico.tipo_ativo, IndicadorHistorico.indicador)
+        .offset(offset)
+        .limit(page_size)
         .all()
     )
     return resposta_ok(
         [serializar_indicador(registro) for registro in registros],
-        meta={"total": len(registros)},
+        meta=dependencias.meta_paginacao(total, page, page_size, len(registros)),
     )
 
 
 @bp.get("/<int:ativo_id>/historico")
 @rota_protegida("historico.consultar")
 def historico_do_ativo(ativo_id):
-    """Histórico existente de um ativo (somente leitura, dados não alterados)."""
+    """Estado atual dos indicadores do ativo (não é série temporal)."""
     sessao = g.sessao
     ativo = sessao.get(Ativo, ativo_id)
     if ativo is None:
@@ -78,13 +84,20 @@ def historico_do_ativo(ativo_id):
     query = sessao.query(IndicadorHistorico).filter(
         IndicadorHistorico.ativo_id == ativo_id
     )
-    limite = dependencias.obter_limite()
-    registros = query.order_by(IndicadorHistorico.indicador).limit(limite).all()
+    page, page_size, offset = dependencias.obter_paginacao()
+    total = query.count()
+    registros = (
+        query.options(joinedload(IndicadorHistorico.ativo))
+        .order_by(IndicadorHistorico.indicador)
+        .offset(offset)
+        .limit(page_size)
+        .all()
+    )
+    meta = dependencias.meta_paginacao(total, page, page_size, len(registros))
+    meta["ativo_id"] = ativo_id
+    meta["ticker"] = ativo.ticker
+    meta["serie_temporal"] = False
     return resposta_ok(
         [serializar_indicador(registro) for registro in registros],
-        meta={
-            "ativo_id": ativo_id,
-            "ticker": ativo.ticker,
-            "total": len(registros),
-        },
+        meta=meta,
     )

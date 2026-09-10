@@ -11,6 +11,8 @@ from flask import request
 
 import config
 from api.blueprint import criar_blueprint_api
+from api.cors import registrar_cors
+from api.rate_limit import registrar_rate_limit
 from api.respostas import resposta_erro
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,8 @@ def integrar_api(app, habilitada=None):
         return False
 
     app.register_blueprint(criar_blueprint_api(), url_prefix=PREFIXO_API)
+    registrar_cors(app)
+    registrar_rate_limit(app)
     _registrar_handlers_escopados(app)
     logger.info("API HTTP %s habilitada e integrada.", PREFIXO_API)
     return True

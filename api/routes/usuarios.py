@@ -36,6 +36,7 @@ restrito ao SUPERADMIN (``services/planos.py``).
 """
 from flask import Blueprint, g, request
 
+from api import dependencias
 from api.auth import rota_protegida
 from api.respostas import resposta_erro, resposta_ok
 from api.serializadores import serializar_usuario
@@ -143,12 +144,16 @@ def listar_usuarios():
     """Lista usuários conforme a autorização da matriz central."""
     sessao = g.sessao
     apenas_ativos = request.args.get("ativos") == "true"
-    registros = usuarios.listar_usuarios(
-        apenas_ativos=apenas_ativos, session=sessao
+    page, page_size, offset = dependencias.obter_paginacao()
+    registros, total = usuarios.listar_usuarios(
+        apenas_ativos=apenas_ativos,
+        session=sessao,
+        limite=page_size,
+        offset=offset,
     )
     return resposta_ok(
         [serializar_usuario(registro) for registro in registros],
-        meta={"total": len(registros)},
+        meta=dependencias.meta_paginacao(total, page, page_size, len(registros)),
     )
 
 

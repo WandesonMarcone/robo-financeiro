@@ -7,6 +7,7 @@ from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 import config
 from atualizador_documentos import SessionDB
+from bot import identidade
 from bot.loader import bot
 from modules import seguranca
 from modules.utils import conectar_gspread
@@ -14,20 +15,47 @@ from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from pipeline_dados.coletor_fiis import processar_informes_fiis_cvm
 
 
+def _exige_operacional(message):
+    return identidade.exigir_fluxo_mensagem(message, identidade.FLUXO_OPERACIONAL)
+
+
 # ==========================================
 # 🧭 MENUS DE NAVEGAÇÃO E INTERFACE (UI)
 # ==========================================
-@bot.message_handler(commands=['menu', 'start'])
+@bot.message_handler(commands=['start'])
+def comando_start(message):
+    fluxo, _usuario, texto, vinculo_ok = identidade.processar_start(message)
+    parse = "Markdown" if fluxo == identidade.FLUXO_OPERACIONAL and vinculo_ok is None else None
+    bot.send_message(
+        message.chat.id,
+        texto,
+        reply_markup=identidade.markup_inicio(fluxo),
+        parse_mode=parse,
+    )
+
+
+@bot.message_handler(commands=['menu'])
 def enviar_menu(message):
-    markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("🏢 FIIs (Imobiliários)", callback_data="menu_fiis"),
-               InlineKeyboardButton("📈 Ações (Empresas)", callback_data="menu_acoes"))
-    markup.row(InlineKeyboardButton("🌍 Visão Macro & Notícias", callback_data="menu_macro"))
-    markup.row(InlineKeyboardButton("ℹ️ Ajuda / Sobre", callback_data="menu_ajuda"))
-    bot.send_message(message.chat.id, "🤖 *Terminal Institucional* 🤖\nSelecione o módulo de análise abaixo:", reply_markup=markup, parse_mode="Markdown")
+    fluxo, _usuario = identidade.fluxo_evento(message)
+    texto = (
+        identidade._MSG_OPERACIONAL
+        if fluxo == identidade.FLUXO_OPERACIONAL
+        else identidade._MSG_USUARIO
+        if fluxo == identidade.FLUXO_USUARIO
+        else identidade._MSG_PUBLICO
+    )
+    parse = "Markdown" if fluxo == identidade.FLUXO_OPERACIONAL else None
+    bot.send_message(
+        message.chat.id,
+        texto,
+        reply_markup=identidade.markup_inicio(fluxo),
+        parse_mode=parse,
+    )
 
 @bot.message_handler(commands=['status'])
 def status_banco(message):
+    if not _exige_operacional(message):
+        return
     session = SessionDB()
     try:
         total_ativos = session.query(Ativo).count()
@@ -51,6 +79,8 @@ def status_banco(message):
 
 @bot.message_handler(commands=['relatorios', 'docs'])
 def enviar_ultimos_relatorios(message):
+    if not _exige_operacional(message):
+        return
     bot.reply_to(message, "🔎 Buscando os últimos documentos no cofre...")
     session = SessionDB()
     try:
@@ -84,8 +114,7 @@ def enviar_ultimos_relatorios(message):
 # ==========================================
 @bot.message_handler(commands=['adicionar'])
 def comando_adicionar(message):
-    if not seguranca.eh_admin(message.from_user.id):
-        seguranca.negar_acesso(bot, message, "ADMIN")
+    if not _exige_operacional(message):
         return
 
     try:
@@ -112,8 +141,7 @@ def comando_adicionar(message):
 
 @bot.message_handler(commands=['forcar_varredura'])
 def acionar_varredura_manual(message):
-    if not seguranca.eh_admin(message.from_user.id):
-        seguranca.negar_acesso(bot, message, "ADMIN")
+    if not _exige_operacional(message):
         return
 
     bot.reply_to(message, "⚙️ *Iniciando varredura na B3 e CVM...*\nIsso pode levar alguns minutos. Buscando apenas documentos novos!", parse_mode="Markdown")
@@ -184,8 +212,7 @@ def acionar_varredura_manual(message):
 
 @bot.message_handler(commands=['forcar_docs_acoes'])
 def rodar_docs_acoes(message):
-    if not seguranca.eh_admin(message.from_user.id):
-        seguranca.negar_acesso(bot, message, "ADMIN")
+    if not _exige_operacional(message):
         return
 
     from datetime import datetime
@@ -231,8 +258,7 @@ def rodar_docs_acoes(message):
 
 @bot.message_handler(commands=['processar_acoes_ia'])
 def rodar_ia_acoes(message):
-    if not seguranca.eh_admin(message.from_user.id):
-        seguranca.negar_acesso(bot, message, "ADMIN")
+    if not _exige_operacional(message):
         return
 
     bot.send_message(message.chat.id, "🧠 *Iniciando motor de IA para Ações...*\nLendo PDFs da CVM, classificando e enviando ao Drive em segundo plano. Isso pode levar alguns minutos.", parse_mode="Markdown")
@@ -256,8 +282,7 @@ def rodar_ia_acoes(message):
 
 @bot.message_handler(commands=['forcar_cvm'])
 def rodar_cvm(message):
-    if not seguranca.eh_admin(message.from_user.id):
-        seguranca.negar_acesso(bot, message, "ADMIN")
+    if not _exige_operacional(message):
         return
 
     from datetime import datetime
@@ -294,8 +319,7 @@ def rodar_cvm(message):
 
 @bot.message_handler(commands=['forcar_fiis'])
 def cmd_forcar_fiis(message):
-    if not seguranca.eh_admin(message.from_user.id):
-        seguranca.negar_acesso(bot, message, "ADMIN")
+    if not _exige_operacional(message):
         return
 
     chat_id = message.chat.id
@@ -303,10 +327,9 @@ def cmd_forcar_fiis(message):
 
     def background_coleta():
         try:
-            # Roda para o ano atual (2026)
-            sucesso = processar_informes_fiis_cvm(ano=2026)
+            sucesso = processar_informes_fiis_cvm()
             if sucesso:
-                bot.send_message(chat_id, "✅ **Coleta de FIIs (2026) Concluída!**\nIndicadores contábeis e operacionais atualizados no banco de dados.", parse_mode="Markdown")
+                bot.send_message(chat_id, "✅ **Coleta de FIIs Concluída!**\nIndicadores contábeis e operacionais atualizados no banco de dados.", parse_mode="Markdown")
             else:
                 bot.send_message(chat_id, "⚠️ A coleta rodou, mas nenhum informe válido foi processado. Verifique os logs.")
         except Exception as e:
@@ -317,8 +340,7 @@ def cmd_forcar_fiis(message):
 
 @bot.message_handler(commands=['alimentar_ia'])
 def alimentar_ia_passado(message):
-    if not seguranca.eh_admin(message.from_user.id):
-        seguranca.negar_acesso(bot, message, "ADMIN")
+    if not _exige_operacional(message):
         return
 
     bot.send_message(message.chat.id, "⏳ *Iniciando a Varredura Profunda!* Procurando PDFs antigos...", parse_mode="Markdown")
@@ -397,8 +419,7 @@ def alimentar_ia_passado(message):
 
 @bot.message_handler(commands=['mapear_nomes'])
 def comando_mapear_nomes_b3(message):
-    if not seguranca.eh_admin(message.from_user.id):
-        seguranca.negar_acesso(bot, message, "ADMIN")
+    if not _exige_operacional(message):
         return
 
     bot.send_message(message.chat.id, "🕵️‍♂️ Comando recebido! Como a B3 é lenta, enviei essa tarefa para o segundo plano. Pode continuar usando o Telegram normalmente, te enviarei o arquivo TXT assim que estiver pronto.")
@@ -456,6 +477,8 @@ def comando_mapear_nomes_b3(message):
 @bot.message_handler(commands=['resetar_docs'])
 def limpar_banco_documentos(message):
     """Operação destrutiva: exige SUPERADMIN e confirmação explícita em dois passos."""
+    if not _exige_operacional(message):
+        return
     if not seguranca.eh_superadmin(message.from_user.id):
         seguranca.negar_acesso(bot, message, "SUPERADMIN")
         return

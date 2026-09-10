@@ -1,9 +1,10 @@
 """Endpoints de leitura de ativos (Fase 5, Etapa 10).
 
 ``GET /api/v1/ativos`` — permissão ``dados.consultar``. Filtros básicos
-seguros: ``tipo`` (ACAO/FII) e ``ticker`` (busca parcial).
+seguros: ``tipo`` (ACAO/FII) e ``ticker`` (igualdade exata, identificador).
 """
 from flask import Blueprint, g, request
+from sqlalchemy.orm import joinedload
 
 from api import dependencias
 from api.auth import rota_protegida
@@ -32,12 +33,18 @@ def listar_ativos():
 
     ticker = request.args.get("ticker")
     if ticker:
-        termo = f"%{str(ticker).strip().upper()}%"
-        query = query.filter(Ativo.ticker.like(termo))
+        query = query.filter(Ativo.ticker == str(ticker).strip().upper())
 
-    limite = dependencias.obter_limite()
-    registros = query.order_by(Ativo.ticker).limit(limite).all()
+    page, page_size, offset = dependencias.obter_paginacao()
+    total = query.count()
+    registros = (
+        query.options(joinedload(Ativo.perfil))
+        .order_by(Ativo.ticker)
+        .offset(offset)
+        .limit(page_size)
+        .all()
+    )
     return resposta_ok(
         [serializar_ativo(registro) for registro in registros],
-        meta={"total": len(registros)},
+        meta=dependencias.meta_paginacao(total, page, page_size, len(registros)),
     )

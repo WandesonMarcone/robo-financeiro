@@ -5,6 +5,7 @@ seguros: ``ativo_id``, ``ticker``, ``tipo`` (tipo de alerta), ``severidade`` e
 ``tipo_ativo``. Somente leitura: nenhum alerta é alterado nesta etapa.
 """
 from flask import Blueprint, g, request
+from sqlalchemy.orm import joinedload
 
 from api import dependencias
 from api.auth import rota_protegida
@@ -35,8 +36,9 @@ def listar_alertas():
 
     ticker = request.args.get("ticker")
     if ticker:
-        termo = f"%{str(ticker).strip().upper()}%"
-        query = query.join(Ativo).filter(Ativo.ticker.like(termo))
+        query = query.filter(
+            AlertaEvento.ativo.has(Ativo.ticker == str(ticker).strip().upper())
+        )
 
     tipo = request.args.get("tipo")
     if tipo:
@@ -65,13 +67,16 @@ def listar_alertas():
             )
         query = query.filter(AlertaEvento.tipo_ativo == normalizado)
 
-    limite = dependencias.obter_limite()
+    page, page_size, offset = dependencias.obter_paginacao()
+    total = query.count()
     registros = (
-        query.order_by(AlertaEvento.data_evento.desc(), AlertaEvento.id.desc())
-        .limit(limite)
+        query.options(joinedload(AlertaEvento.ativo))
+        .order_by(AlertaEvento.data_evento.desc(), AlertaEvento.id.desc())
+        .offset(offset)
+        .limit(page_size)
         .all()
     )
     return resposta_ok(
         [serializar_alerta(registro) for registro in registros],
-        meta={"total": len(registros)},
+        meta=dependencias.meta_paginacao(total, page, page_size, len(registros)),
     )

@@ -5,6 +5,7 @@ seguros: ``ativo_id``, ``ticker``, ``tipo_documento`` e ``status``. A resposta
 nunca inclui ``texto_extraido``, ``resumo_ia``, ``log_erro`` nem arquivos.
 """
 from flask import Blueprint, g, request
+from sqlalchemy.orm import joinedload
 
 from api import dependencias
 from api.auth import rota_protegida
@@ -31,8 +32,9 @@ def listar_documentos():
 
     ticker = request.args.get("ticker")
     if ticker:
-        termo = f"%{str(ticker).strip().upper()}%"
-        query = query.join(Ativo).filter(Ativo.ticker.like(termo))
+        query = query.filter(
+            DocumentosQualitativos.ativo.has(Ativo.ticker == str(ticker).strip().upper())
+        )
 
     tipo_documento = request.args.get("tipo_documento")
     if tipo_documento:
@@ -46,13 +48,16 @@ def listar_documentos():
             DocumentosQualitativos.status_processamento == str(status).strip().upper()
         )
 
-    limite = dependencias.obter_limite()
+    page, page_size, offset = dependencias.obter_paginacao()
+    total = query.count()
     registros = (
-        query.order_by(DocumentosQualitativos.data_publicacao.desc())
-        .limit(limite)
+        query.options(joinedload(DocumentosQualitativos.ativo))
+        .order_by(DocumentosQualitativos.data_publicacao.desc())
+        .offset(offset)
+        .limit(page_size)
         .all()
     )
     return resposta_ok(
         [serializar_documento(registro) for registro in registros],
-        meta={"total": len(registros)},
+        meta=dependencias.meta_paginacao(total, page, page_size, len(registros)),
     )

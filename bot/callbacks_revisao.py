@@ -6,6 +6,7 @@ from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 from atualizador_documentos import SessionDB
 
 # Imports da nossa nova arquitetura
+from bot import identidade
 from bot.loader import bot
 from config import TIPOS_DOC_ACAO, TIPOS_DOC_FII
 from modules import seguranca
@@ -23,8 +24,7 @@ def extrair_file_id(url):
 # O comando e a tela de abertura moram aqui agora, pertinho dos callbacks!
 @bot.message_handler(commands=['revisao'])
 def comando_painel_revisao(message):
-    if not seguranca.eh_admin(message.from_user.id):
-        seguranca.negar_acesso(bot, message, "ADMIN")
+    if not identidade.exigir_fluxo_mensagem(message, identidade.FLUXO_OPERACIONAL):
         return
     enviar_painel_tickers(message.chat.id)
 
@@ -71,6 +71,8 @@ def enviar_painel_tickers(chat_id, message_id=None):
 # 🧠 O CÉREBRO DA REVISÃO (Lida com todos os cliques dos botões)
 @bot.callback_query_handler(func=lambda call: call.data.startswith('rev_'))
 def processar_revisao(call):
+    if not identidade.exigir_fluxo_callback(call, identidade.FLUXO_OPERACIONAL):
+        return
     partes = call.data.split('_')
     acao = partes[1]
     session = SessionDB()
