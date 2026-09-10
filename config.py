@@ -348,10 +348,12 @@ TIPOS_DOC_ACAO = {
 MAPA_CONTAS_CVM = {
     # --- BALANÇO PATRIMONIAL (ATIVO) ---
     '1': 'ativo_total',
+    '1.01': 'ativo_circulante',
     '1.01.01': 'caixa',                  # Conta analítica exata de Caixa e Equivalentes
 
     # --- BALANÇO PATRIMONIAL (PASSIVO E PL) ---
     '2': 'passivo_total',
+    '2.01': 'passivo_circulante',
     '2.01.04': 'divida_curto_prazo',     # Empréstimos a Curto Prazo
     '2.02.01': 'divida_longo_prazo',     # Empréstimos a Longo Prazo
     '2.03': 'patrimonio_liquido',

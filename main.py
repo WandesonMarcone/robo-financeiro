@@ -80,6 +80,7 @@ from pipeline_dados.banco_dados import (
     Base,
     garantir_cnpj_nullable,
     garantir_coluna_plano,
+    garantir_colunas_cvm_acoes,
     garantir_colunas_cvm_fii,
     garantir_colunas_freshness,
 )
@@ -122,6 +123,13 @@ try:
         logger.info("Colunas CVM FII (VPA/DY mensal) adicionadas (%s).", _cvm_fii_cols)
 except Exception as e:  # pragma: no cover - defesa extra (não bloqueia o bot)
     logger.error("Migration CVM FII falhou (não bloqueia o bot): %s", e)
+
+try:
+    _cvm_acoes_cols = garantir_colunas_cvm_acoes(engine)
+    if _cvm_acoes_cols:
+        logger.info("Colunas CVM acoes (ebit/circulante/versao) adicionadas (%s).", _cvm_acoes_cols)
+except Exception as e:  # pragma: no cover - defesa extra (não bloqueia o bot)
+    logger.error("Migration CVM acoes falhou (não bloqueia o bot): %s", e)
 logger.info("Groq Key presente: %s", "SIM" if os.environ.get('GROQ_API_KEY') else "NÃO")
 
 # ==========================================

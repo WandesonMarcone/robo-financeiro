@@ -32,6 +32,7 @@ import config
 from pipeline_dados.banco_dados import (
     Base,
     garantir_cnpj_nullable,
+    garantir_colunas_cvm_acoes,
     garantir_colunas_cvm_fii,
     garantir_colunas_freshness,
 )
@@ -64,6 +65,7 @@ def criar_tabelas() -> None:
     garantir_cnpj_nullable(engine)
     garantir_colunas_freshness(engine)
     garantir_colunas_cvm_fii(engine)
+    garantir_colunas_cvm_acoes(engine)
 
 
 @contextmanager

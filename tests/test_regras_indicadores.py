@@ -12,6 +12,7 @@ from pipeline_dados.regras_indicadores import (
     classificar_indicador,
     obter_regra,
 )
+from pipeline_dados.semantica_indicadores import AUSENTE, INVALIDO, NAO_APLICAVEL
 
 
 def test_obter_regra_por_tipo():
@@ -85,10 +86,17 @@ def test_valor_fora_da_faixa_critica_gera_critico():
 
 
 def test_valor_ausente_ou_ilegivel_ignorado():
-    for valor in (None, "abc", "", "N/A"):
+    for valor, regra, semantica in (
+        (None, "VALOR_AUSENTE", AUSENTE),
+        ("", "VALOR_AUSENTE", AUSENTE),
+        ("-", "VALOR_AUSENTE", AUSENTE),
+        ("abc", "VALOR_INVALIDO", INVALIDO),
+        ("N/A", "NAO_APLICAVEL", NAO_APLICAVEL),
+    ):
         resultado = classificar_indicador("FII", "preco", valor)
         assert resultado["severidade"] == "IGNORADO", valor
-        assert resultado["regra"] == "VALOR_AUSENTE"
+        assert resultado["regra"] == regra, valor
+        assert resultado["semantica"] == semantica, valor
 
 
 def test_indicador_sem_regra_e_ok():

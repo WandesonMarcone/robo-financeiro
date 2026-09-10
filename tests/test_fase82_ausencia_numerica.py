@@ -136,8 +136,8 @@ def test_cvm_zero_informado_preservado():
     assert reg["divida_bruta"] == 0.0
     assert reg["divida_liquida"] == 0.0
     assert reg["ebitda"] == 0.0
-    assert "ebit" not in reg
-    assert "depreciacao" not in reg
+    assert reg["ebit"] == 0.0
+    assert reg["depreciacao"] == 0.0
 
 
 def test_cvm_conta_ausente_nao_vira_zero():

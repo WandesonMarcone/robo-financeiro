@@ -348,6 +348,21 @@ def test_parsear_numero_preserva_zero_legitimo_e_formato_br():
     assert parsear_numero("1234,56") == 1234.56
 
 
+def test_zero_real_em_snapshot_e_aceito_ausencia_tambem():
+    zero = validar_registro(
+        {"ticker": "MXRF11", "data_referencia": date(2026, 8, 20), "preco": 0.0, "dy": 0.0, "qtd_imoveis": 0},
+        "snapshot_fii_mercado",
+    )
+    assert zero.status == VALID
+    assert zero.aceita is True
+    ausente = validar_registro(
+        {"ticker": "MXRF11", "data_referencia": date(2026, 8, 20), "preco": None, "dy": None},
+        "snapshot_fii_mercado",
+    )
+    assert ausente.status == VALID
+    assert ausente.aceita is True
+
+
 def test_ausencia_em_campo_obrigatorio_rejeita_em_vez_de_zero():
     registro = registro_fii_valido()
     registro["patrimonio_liquido"] = None
