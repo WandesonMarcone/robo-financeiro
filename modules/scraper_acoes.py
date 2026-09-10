@@ -55,11 +55,32 @@ def _fmt_pct(valor):
     return f"{valor * 100:.1f}%"
 
 
+def priorizar_cagr_cvm(valor_cvm, valor_fallback):
+    """CVM valido tem prioridade; ausencia/invalido recai no fallback (Fundamentus)."""
+    numero = parsear_numero(valor_cvm)
+    if numero is None:
+        return parsear_numero(valor_fallback)
+    return numero
+
+
+def cagr_cvm_para_tickers(tickers):
+    """Le CAGR CVM ja persistido. Falha de banco nao interrompe o fluxo legado."""
+    try:
+        from pipeline_dados.indicadores_cvm_acoes import mapa_cagr_cvm_producao
+        from services.db import sessao_db
+
+        with sessao_db() as session:
+            return mapa_cagr_cvm_producao(session, tickers)
+    except Exception:
+        return {}
+
+
 def montar_linha_acao(
     setor, preco, dy, qtd_acoes, pl, pvp, p_ativo, marg_bruta, marg_ebit,
     marg_liquida, p_ebit, ev_ebit, div_liq_ebit, div_liq_patrimonio, psr,
     p_cap_giro, p_at_circ_liq, liq_corrente, roe, roa, roic, cagr_rec_5a,
     liq_media, vpa, lpa, peg_ratio, valor_mercado, agora_sp,
+    cagr_lucro_5a=None,
 ):
     """Linha B..AG do BD_Acoes. None vira celula vazia; slots reservados ficam vazios."""
     vazio = ""
@@ -89,7 +110,7 @@ def montar_linha_acao(
         vazio,
         vazio,
         celula_planilha(cagr_rec_5a),
-        vazio,
+        celula_planilha(cagr_lucro_5a),
         celula_planilha(liq_media),
         celula_planilha(vpa),
         celula_planilha(lpa),
@@ -198,6 +219,7 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     if not fila: return [], "", aba_base
 
     print(f"-> Fila de Ações: {fila}")
+    cagr_cvm_por_ticker = cagr_cvm_para_tickers(fila)
 
     batch_updates = []
     relatorio_fixas = []
@@ -233,6 +255,11 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
             roe = formatar(f.get("ROE"))
             dy = formatar(f.get("Div.Yield"))
             div_liq_patrimonio = formatar(f.get("Dív.Líq/ Patrim."))
+            cagr_cvm = cagr_cvm_por_ticker.get(ticker, {})
+            cagr_rec_5a = priorizar_cagr_cvm(
+                cagr_cvm.get("cagr_rec_5a"), formatar(f.get("Cresc. Rec.5a")),
+            )
+            cagr_lucro_5a = parsear_numero(cagr_cvm.get("cagr_lucro_5a"))
 
             row_base = montar_linha_acao(
                 setor, preco, dy, formatar(yf_info.get("sharesOutstanding")),
@@ -242,10 +269,10 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
                 None, div_liq_patrimonio, formatar(f.get("PSR")),
                 formatar(f.get("P/Cap.Giro")), formatar(f.get("P/Ativ Circ.Liq")),
                 formatar(f.get("Liq. Corr.")), roe, formatar(yf_info.get("returnOnAssets")),
-                formatar(f.get("ROIC")), formatar(f.get("Cresc. Rec.5a")),
+                formatar(f.get("ROIC")), cagr_rec_5a,
                 formatar(f.get("Liq.2meses")), vpa_yf, lpa_yf,
                 formatar(yf_info.get("trailingPegRatio")), formatar(yf_info.get("marketCap")),
-                agora_sp,
+                agora_sp, cagr_lucro_5a=cagr_lucro_5a,
             )
 
             if ticker in cat_novatas:
