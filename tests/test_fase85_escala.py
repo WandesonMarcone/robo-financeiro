@@ -24,7 +24,7 @@ from pipeline_dados.semantica_indicadores import (
 def test_percentuais_persistidos_sao_fracao():
     for indicador in (
         "dy", "roe", "roa", "roic", "marg_bruta", "marg_ebit",
-        "marg_liquida", "cagr_rec_5a",
+        "marg_liquida", "cagr_rec_5a", "cagr_lucro_5a",
     ):
         assert escala_do_indicador(indicador) == FRACAO, indicador
         assert unidade_do_indicador(indicador) == UNIDADE_PCT, indicador

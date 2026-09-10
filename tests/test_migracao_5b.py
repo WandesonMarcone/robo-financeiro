@@ -41,6 +41,10 @@ TABELAS_FASE4 = ("indicadores_historico", "alertas_eventos")
 # ao deletar um ``Ativo`` (NULL em ``ativo_id``) — a tabela precisa existir.
 TABELAS_FASE6 = ("ativos_acompanhados", "posicoes_carteira", "notificacoes")
 
+# Fase 8, Etapa 8.9 (aditivo): cascade de ``Ativo.indicadores_cvm`` consulta
+# ``indicadores_cvm_acoes`` ao deletar um ``Ativo``.
+TABELAS_FASE8 = ("indicadores_cvm_acoes",)
+
 
 @pytest.fixture()
 def engine(tmp_path):
@@ -52,7 +56,7 @@ def engine(tmp_path):
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
-    Base.metadata.create_all(eng, tables=[Base.metadata.tables[n] for n in TABELAS_LEGADAS + TABELAS_FASE4 + TABELAS_FASE6])
+    Base.metadata.create_all(eng, tables=[Base.metadata.tables[n] for n in TABELAS_LEGADAS + TABELAS_FASE4 + TABELAS_FASE6 + TABELAS_FASE8])
     yield eng
     eng.dispose()
 

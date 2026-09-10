@@ -20,9 +20,11 @@ from pipeline_dados.indicadores_cvm_acoes import (
     calcular_cagr,
     calcular_indicadores_ticker,
     calcular_ltm,
+    cagr_lucro_5a,
     cagr_receita_5a,
     comparar_benchmark_externo,
     indicador_aplicavel_setor,
+    mapa_cagr_cvm_producao,
     natureza_financeira,
     persistir_indicadores_cvm,
 )
@@ -195,12 +197,12 @@ def test_divisao_por_zero_ausente():
 
 def test_cagr_5a_bbas3_usa_dfp():
     registros = [
-        _reg(date(2019, 12, 31), "DFP", receita=100.0),
-        _reg(date(2020, 12, 31), "DFP", receita=110.0),
-        _reg(date(2021, 12, 31), "DFP", receita=120.0),
-        _reg(date(2022, 12, 31), "DFP", receita=130.0),
-        _reg(date(2023, 12, 31), "DFP", receita=140.0),
-        _reg(date(2024, 12, 31), "DFP", receita=161.051, pl=50.0, ativo=200.0),
+        _reg(date(2019, 12, 31), "DFP", receita=100.0, lucro=50.0),
+        _reg(date(2020, 12, 31), "DFP", receita=110.0, lucro=55.0),
+        _reg(date(2021, 12, 31), "DFP", receita=120.0, lucro=60.0),
+        _reg(date(2022, 12, 31), "DFP", receita=130.0, lucro=65.0),
+        _reg(date(2023, 12, 31), "DFP", receita=140.0, lucro=70.0),
+        _reg(date(2024, 12, 31), "DFP", receita=161.051, lucro=80.526, pl=50.0, ativo=200.0),
     ]
     resultado = cagr_receita_5a(registros, "BBAS3", date(2024, 12, 31))
     esperado = calcular_cagr([100.0, 161.051], anos=5)
@@ -208,6 +210,13 @@ def test_cagr_5a_bbas3_usa_dfp():
     assert abs(resultado["valor"] - 0.10) < 1e-4
     assert resultado["fonte_primaria"] == "CVM/DFP"
     assert "CVM" in (resultado["observacao"] or "")
+    lucro = cagr_lucro_5a(registros, "BBAS3", date(2024, 12, 31))
+    esperado_lucro = calcular_cagr([50.0, 80.526], anos=5)
+    assert abs(lucro["valor"] - esperado_lucro) < 1e-9
+    assert lucro["indicador"] == "cagr_lucro_5a"
+    assert lucro["fonte_primaria"] == "CVM/DFP"
+    assert lucro["valor"] is not None
+    assert lucro["valor"] != 0
 
 
 def test_cagr_empresa_nova_ausente():

@@ -41,7 +41,7 @@ def test_qtd_imoveis_negativo_e_erro():
 def test_negativo_legitimo_e_ok():
     for indicador in (
         "roe", "roa", "roic", "marg_bruta", "marg_ebit", "marg_liquida",
-        "div_liq_patrimonio", "cagr_rec_5a", "lpa",
+        "div_liq_patrimonio", "cagr_rec_5a", "cagr_lucro_5a", "lpa",
     ):
         resultado = classificar_indicador("ACAO", indicador, -0.10)
         assert resultado["severidade"] == OK, indicador

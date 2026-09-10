@@ -48,6 +48,8 @@ _TABELAS_NOVAS = {
     "notificacoes",
     # Fase 7, Etapa 7.2 (aditivo): catálogo central de ativos no PostgreSQL.
     "ativos_catalogo",
+    # Fase 8, Etapa 8.9 (aditivo): indicadores CVM DFP/ITR de ações.
+    "indicadores_cvm_acoes",
 }
 
 

@@ -475,8 +475,8 @@ def test_atualizar_acoes_orquestra_itr_e_dfp(monkeypatch):
 
     monkeypatch.setattr(leitor, "_atualizar_documento", fake_atualizar)
     leitor.atualizar_acoes(2025)
-    assert [c[0] for c in chamadas] == ["ITR", "DFP"]
-    assert [c[1] for c in chamadas] == ["itr", "dfp"]
+    assert [c[0] for c in chamadas] == ["ITR", "DFP", "DFP"]
+    assert [c[1] for c in chamadas] == ["itr", "dfp", "dfp"]
     assert "ITR/DADOS" in chamadas[0][2]
     assert "DFP/DADOS" in chamadas[1][2]
     session.close()
