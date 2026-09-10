@@ -18,6 +18,7 @@ from pipeline_dados.semantica_indicadores import (
     AUSENTE,
     INVALIDO,
     NAO_APLICAVEL,
+    PRESENTE,
     ZERO,
     classificar_semantica,
     escala_do_indicador,
@@ -70,6 +71,7 @@ FORMULAS = {
     "div_liq_patrimonio": "divida_liquida / patrimonio_liquido",
     "div_liq_ebit": "divida_liquida / ebit_ltm",
     "cagr_rec_5a": "(receita_dfp_t / receita_dfp_t-5) ** (1/5) - 1",
+    "cagr_lucro_5a": "(lucro_dfp_t / lucro_dfp_t-5) ** (1/5) - 1",
     "lpa": "lucro_liquido_ltm / qtd_acoes",
     "vpa": "patrimonio_liquido / qtd_acoes",
     "pl": "valor_mercado / lucro_liquido_ltm",
@@ -248,46 +250,87 @@ def calcular_cagr(valores: Iterable[float], anos: int = 5) -> float | None:
     return (fim / inicio) ** (1.0 / anos) - 1.0
 
 
-def cagr_receita_5a(registros: list, ticker: str, data_ref: date) -> dict[str, Any]:
-    pontos = _pontos_anuais_dfp(registros, "receita")
-    if len(pontos) < 2:
-        return resultado_ausente(
-            "cagr_rec_5a", ticker, data_ref, PERIODO_CAGR_5A,
-            "NAO CALCULAVEL: serie DFP insuficiente (empresa nova ou historico ausente).",
-        )
-    por_ano = {data.year: valor for data, valor in pontos}
+def _anos_cagr_dfp(por_ano: dict[int, float], data_ref: date) -> tuple[int | None, str | None]:
     ano_fim = data_ref.year if data_ref.month == 12 else data_ref.year - 1
     if ano_fim not in por_ano:
         anos_disponiveis = [ano for ano in por_ano if ano <= data_ref.year]
         if not anos_disponiveis:
-            return resultado_ausente(
-                "cagr_rec_5a", ticker, data_ref, PERIODO_CAGR_5A,
-                "NAO CALCULAVEL: sem DFP anual de receita.",
-            )
+            return None, "sem_dfp_anual"
         ano_fim = max(anos_disponiveis)
     ano_ini = ano_fim - 5
     if ano_ini not in por_ano:
+        return None, "sem_t_menos_5"
+    return ano_fim, None
+
+
+def _cagr_dfp_5a(
+    registros: list,
+    ticker: str,
+    data_ref: date,
+    *,
+    indicador: str,
+    campo: str,
+    rotulo: str,
+    exigir_extremos_positivos: bool,
+) -> dict[str, Any]:
+    pontos = _pontos_anuais_dfp(registros, campo)
+    if len(pontos) < 2:
         return resultado_ausente(
-            "cagr_rec_5a", ticker, data_ref, PERIODO_CAGR_5A,
-            "NAO CALCULAVEL: sem DFP de receita ha 5 anos.",
+            indicador, ticker, data_ref, PERIODO_CAGR_5A,
+            "NAO CALCULAVEL: serie DFP insuficiente (empresa nova ou historico ausente).",
         )
+    por_ano = {data.year: valor for data, valor in pontos}
+    ano_fim, motivo = _anos_cagr_dfp(por_ano, data_ref)
+    if motivo == "sem_dfp_anual":
+        return resultado_ausente(
+            indicador, ticker, data_ref, PERIODO_CAGR_5A,
+            f"NAO CALCULAVEL: sem DFP anual de {rotulo}.",
+        )
+    if motivo == "sem_t_menos_5":
+        return resultado_ausente(
+            indicador, ticker, data_ref, PERIODO_CAGR_5A,
+            f"NAO CALCULAVEL: sem DFP de {rotulo} ha 5 anos.",
+        )
+    ano_ini = ano_fim - 5
     inicio = por_ano[ano_ini]
     fim = por_ano[ano_fim]
-    if inicio <= 0:
+    if exigir_extremos_positivos:
+        if inicio <= 0 or fim <= 0:
+            return resultado_ausente(
+                indicador, ticker, data_ref, PERIODO_CAGR_5A,
+                f"NAO CALCULAVEL: {rotulo} inicial/final nao positivo.",
+            )
+    elif inicio <= 0:
         return resultado_ausente(
-            "cagr_rec_5a", ticker, data_ref, PERIODO_CAGR_5A,
-            "NAO CALCULAVEL: receita inicial nao positiva.",
+            indicador, ticker, data_ref, PERIODO_CAGR_5A,
+            f"NAO CALCULAVEL: {rotulo} inicial nao positiva.",
         )
     valor = calcular_cagr([inicio, fim], anos=5)
     if valor is None:
         return resultado_ausente(
-            "cagr_rec_5a", ticker, data_ref, PERIODO_CAGR_5A,
+            indicador, ticker, data_ref, PERIODO_CAGR_5A,
             "NAO CALCULAVEL: CAGR indefinido.",
         )
     return montar_resultado(
-        "cagr_rec_5a", valor, ticker=ticker, data_referencia=data_ref,
+        indicador, valor, ticker=ticker, data_referencia=data_ref,
         periodo=PERIODO_CAGR_5A, fonte_primaria="CVM/DFP",
         observacao=f"DFP {ano_ini} -> {ano_fim}; fonte CVM.",
+    )
+
+
+def cagr_receita_5a(registros: list, ticker: str, data_ref: date) -> dict[str, Any]:
+    return _cagr_dfp_5a(
+        registros, ticker, data_ref,
+        indicador="cagr_rec_5a", campo="receita", rotulo="receita",
+        exigir_extremos_positivos=False,
+    )
+
+
+def cagr_lucro_5a(registros: list, ticker: str, data_ref: date) -> dict[str, Any]:
+    return _cagr_dfp_5a(
+        registros, ticker, data_ref,
+        indicador="cagr_lucro_5a", campo="lucro_liquido", rotulo="lucro",
+        exigir_extremos_positivos=True,
     )
 
 
@@ -494,6 +537,7 @@ def calcular_indicadores_ticker(
             ebit_ltm, ticker, data_ref, PERIODO_LTM,
         )),
         cagr_receita_5a(registros, ticker, data_ref),
+        cagr_lucro_5a(registros, ticker, data_ref),
     ]
 
     snap = mercado if mercado is not None else _mercado_mais_recente(session, ativo_id)
@@ -598,3 +642,35 @@ def persistir_indicadores_cvm(session: Session, tickers: Iterable[str] | None = 
             gravados += 1
         session.commit()
     return gravados
+
+
+def mapa_cagr_cvm_producao(
+    session: Session | None,
+    tickers: Iterable[str] | None = None,
+) -> dict[str, dict[str, float]]:
+    """CAGR CVM calculavel para o fluxo de producao. Sem valor valido -> omitido."""
+    if session is None:
+        return {}
+    alvos = {str(t).strip().upper() for t in (tickers or []) if t}
+    indicadores = ("cagr_rec_5a", "cagr_lucro_5a")
+    query = session.query(IndicadorCvmAcao).filter(
+        IndicadorCvmAcao.indicador.in_(indicadores),
+        IndicadorCvmAcao.periodo == PERIODO_CAGR_5A,
+    )
+    if alvos:
+        query = query.filter(IndicadorCvmAcao.ticker.in_(alvos))
+    linhas = query.order_by(IndicadorCvmAcao.data_referencia.desc()).all()
+    saida: dict[str, dict[str, float]] = {}
+    vistos: set[tuple[str, str]] = set()
+    for linha in linhas:
+        chave = (linha.ticker, linha.indicador)
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+        if linha.semantica != PRESENTE:
+            continue
+        numero = parsear_numero(linha.valor)
+        if numero is None:
+            continue
+        saida.setdefault(linha.ticker, {})[linha.indicador] = numero
+    return saida

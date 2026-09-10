@@ -219,7 +219,11 @@ CATALOGO: dict[str, DefinicaoIndicador] = {
     ),
     "cagr_rec_5a": _def(
         "cagr_rec_5a", "CAGR Rec. 5a", FRACAO, UNIDADE_PCT, (ACAO,),
-        "snapshots_acoes.cagr_rec_5a", "fracao 0-1",
+        "snapshots_acoes.cagr_rec_5a", "fracao 0-1; producao: CVM com fallback Fundamentus",
+    ),
+    "cagr_lucro_5a": _def(
+        "cagr_lucro_5a", "CAGR Lucro 5a", FRACAO, UNIDADE_PCT, (ACAO,),
+        "indicadores_cvm_acoes.cagr_lucro_5a", "fracao 0-1; DFP CVM; coluna AA BD_Acoes",
     ),
     "liq_media": _def("liq_media", "Liquidez Media", MONETARIO, UNIDADE_BRL, (ACAO,), "snapshots_acoes.liq_media"),
     "lpa": _def("lpa", "LPA", MONETARIO, UNIDADE_BRL, (ACAO,), "snapshots_acoes.lpa"),

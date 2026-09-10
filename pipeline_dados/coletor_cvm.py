@@ -2,7 +2,7 @@ import io
 import logging
 import math
 import zipfile
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 import pandas as pd
@@ -144,6 +144,7 @@ class AcoesCVMReader:
         logger.info(f"Iniciando atualização de Ações (ITR/DFP) para o ano {ano}")
         self._atualizar_documento(ano, tipo_doc="ITR", url_template=self.base_url_itr, prefixo="itr")
         self._atualizar_documento(ano, tipo_doc="DFP", url_template=self.base_url_dfp, prefixo="dfp")
+        self._garantir_dfp_cagr_5a(ano)
         self._persistir_indicadores_calculados()
         logger.info("Atualização de Ações concluída.")
 
@@ -328,6 +329,48 @@ class AcoesCVMReader:
             except Exception as e:
                 self.session.rollback()
                 logger.error(f"Erro ao salvar/atualizar CVM de {ticker_real}: {e}")
+
+    def _precisa_dfp_ano(self, ano: int) -> bool:
+        """True se algum ticker monitorado ainda nao tem DFP anual daquele ano."""
+        from sqlalchemy import or_
+
+        from pipeline_dados.banco_dados import Ativo
+
+        tickers = {str(t).strip().upper() for t in self.meus_tickers if t}
+        if not tickers:
+            return False
+        data_ref = date(ano, 12, 31)
+        presentes = {
+            ticker
+            for (ticker,) in (
+                self.session.query(Ativo.ticker)
+                .join(DadosFinanceirosAcoes, DadosFinanceirosAcoes.ativo_id == Ativo.id)
+                .filter(
+                    Ativo.ticker.in_(tickers),
+                    DadosFinanceirosAcoes.tipo_doc == "DFP",
+                    DadosFinanceirosAcoes.data_referencia == data_ref,
+                    or_(
+                        DadosFinanceirosAcoes.receita.isnot(None),
+                        DadosFinanceirosAcoes.lucro_liquido.isnot(None),
+                    ),
+                )
+                .all()
+            )
+        }
+        return len(presentes) < len(tickers)
+
+    def _garantir_dfp_cagr_5a(self, ano: int) -> None:
+        """Baixa so o DFP de T-5 se ainda nao estiver persistido. Reutiliza o resto."""
+        ano_ini = ano - 5
+        if ano_ini < 2000:
+            return
+        if not self._precisa_dfp_ano(ano_ini):
+            logger.info("DFP %s ja persistido; CAGR 5a reutiliza historico CVM.", ano_ini)
+            return
+        logger.info("DFP %s ausente para CAGR 5a; baixando somente esse ano.", ano_ini)
+        self._atualizar_documento(
+            ano_ini, tipo_doc="DFP", url_template=self.base_url_dfp, prefixo="dfp"
+        )
 
     def _persistir_indicadores_calculados(self) -> None:
         try:
