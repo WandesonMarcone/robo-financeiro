@@ -8,6 +8,7 @@ export const colors = {
 
 export const navItems = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/carteira", label: "Carteira" },
   { href: "/ativos", label: "Ativos" },
   { href: "/indicadores", label: "Indicadores" },
   { href: "/documentos", label: "Documentos" },

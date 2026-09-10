@@ -41,6 +41,7 @@ class Ativo(Base):
     tipo: Mapped[TipoAtivo] = mapped_column(Enum(TipoAtivo), nullable=False)
 
     dados_acoes: Mapped[list["DadosFinanceirosAcoes"]] = relationship(back_populates="ativo", cascade="all, delete-orphan")
+    indicadores_cvm: Mapped[list["IndicadorCvmAcao"]] = relationship(back_populates="ativo", cascade="all, delete-orphan")
     dados_fiis: Mapped[list["DadosFinanceirosFiis"]] = relationship(back_populates="ativo", cascade="all, delete-orphan")
     documentos: Mapped[list["DocumentosQualitativos"]] = relationship(back_populates="ativo", cascade="all, delete-orphan")
 
@@ -90,11 +91,51 @@ class DadosFinanceirosAcoes(Base):
     ebitda: Mapped[float | None] = mapped_column(Float)
     resultado_financeiro: Mapped[float | None] = mapped_column(Float)
     lucro_liquido: Mapped[float | None] = mapped_column(Float)
+    ebit: Mapped[float | None] = mapped_column(Float)
+    depreciacao: Mapped[float | None] = mapped_column(Float)
+    ativo_circulante: Mapped[float | None] = mapped_column(Float)
+    passivo_circulante: Mapped[float | None] = mapped_column(Float)
+    dt_ini_exerc: Mapped[date | None] = mapped_column(Date, nullable=True)
+    versao: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # --- FLUXO DE CAIXA ---
     fco: Mapped[float | None] = mapped_column(Float) # Caixa Operacional
 
     ativo: Mapped["Ativo"] = relationship(back_populates="dados_acoes")
+
+
+class IndicadorCvmAcao(Base):
+    """Indicadores calculados a partir de DFP/ITR (aditivo; nao substitui snapshots)."""
+
+    __tablename__ = "indicadores_cvm_acoes"
+    __table_args__ = (
+        UniqueConstraint(
+            "ativo_id", "indicador", "data_referencia", "periodo",
+            name="uix_indicadores_cvm_acoes",
+        ),
+        Index("ix_indicadores_cvm_acoes_ticker", "ticker"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ativo_id: Mapped[int] = mapped_column(ForeignKey("ativos.id"), nullable=False, index=True)
+    ticker: Mapped[str] = mapped_column(String(10), nullable=False)
+    indicador: Mapped[str] = mapped_column(String(40), nullable=False)
+    valor: Mapped[float | None] = mapped_column(Float, nullable=True)
+    semantica: Mapped[str] = mapped_column(String(20), nullable=False)
+    unidade: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    escala: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    fonte: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    fonte_primaria: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    periodo: Mapped[str] = mapped_column(String(20), nullable=False)
+    formula: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    data_referencia: Mapped[date] = mapped_column(Date, nullable=False)
+    data_coleta: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    origem: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    observacao: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    ativo: Mapped["Ativo"] = relationship(back_populates="indicadores_cvm")
+
 
 class DadosFinanceirosFiis(Base):
     __tablename__ = 'dados_financeiros_fiis'
@@ -823,6 +864,38 @@ def garantir_colunas_cvm_fii(engine):
                 continue
             conexao.execute(
                 text(f"ALTER TABLE dados_financeiros_fiis ADD COLUMN {nome} {ddl}")
+            )
+            adicionadas += 1
+    return adicionadas
+
+
+def garantir_colunas_cvm_acoes(engine):
+    """Migration aditiva: contas CVM extras em dados_financeiros_acoes.
+
+    Acrescenta ebit, depreciacao, ativo_circulante, passivo_circulante,
+    dt_ini_exerc e versao. Idempotente. Nao altera colunas existentes.
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if "dados_financeiros_acoes" not in insp.get_table_names():
+        return 0
+    nomes = {c["name"] for c in insp.get_columns("dados_financeiros_acoes")}
+    alvos = (
+        ("ebit", "FLOAT"),
+        ("depreciacao", "FLOAT"),
+        ("ativo_circulante", "FLOAT"),
+        ("passivo_circulante", "FLOAT"),
+        ("dt_ini_exerc", "DATE"),
+        ("versao", "INTEGER"),
+    )
+    adicionadas = 0
+    with engine.begin() as conexao:
+        for nome, ddl in alvos:
+            if nome in nomes:
+                continue
+            conexao.execute(
+                text(f"ALTER TABLE dados_financeiros_acoes ADD COLUMN {nome} {ddl}")
             )
             adicionadas += 1
     return adicionadas

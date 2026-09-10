@@ -6,11 +6,13 @@ describe("protecao de rotas", () => {
     expect(isPublicPath("/login")).toBe(true);
     expect(isPublicPath("/dashboard")).toBe(false);
     expect(isPublicPath("/ativos")).toBe(false);
+    expect(isPublicPath("/carteira")).toBe(false);
   });
 
   it("nao autenticado e enviado ao login", () => {
     expect(authRedirect("unauthenticated", "/dashboard")).toBe(LOGIN_PATH);
     expect(authRedirect("unauthenticated", "/ativos")).toBe(LOGIN_PATH);
+    expect(authRedirect("unauthenticated", "/carteira")).toBe(LOGIN_PATH);
     expect(authRedirect("unauthenticated", "/login")).toBeNull();
   });
 

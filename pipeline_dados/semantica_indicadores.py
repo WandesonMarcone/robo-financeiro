@@ -13,7 +13,8 @@ Esta camada nao inventa valor nem converte escala por heuristica: um 12.0
 sem o simbolo % permanece 12.0; a faixa de plausibilidade (Fase 4)
 e quem sinaliza inconsistencia de fonte/escala.
 
-Nao implementa WALT, alavancagem, bancos/seguradoras, ETF/cripto.
+Nao implementa WALT, alavancagem, ETF/cripto.
+Bancos/seguradoras: aplicabilidade setorial em indicadores_cvm_acoes.
 """
 from __future__ import annotations
 

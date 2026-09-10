@@ -1,5 +1,6 @@
 import io
 import logging
+import math
 import zipfile
 from datetime import datetime
 from typing import Any
@@ -14,10 +15,51 @@ from config import MAPA_CNPJ_B3, MAPA_CONTAS_CVM
 from modules.utils import conectar_gspread
 from pipeline_dados.banco_dados import DadosFinanceirosAcoes, TipoAtivo
 from pipeline_dados.catalogo_ativos import cnpj_real, garantir_ativo, obter_tickers_com_fallback
-from pipeline_dados.normalizacao import normalizar_cnpj, normalizar_data
-from pipeline_dados.qualidade_dados import INVALID, registrar_diagnostico, validar_registro
+from pipeline_dados.normalizacao import formatar_cnpj, normalizar_cnpj, normalizar_data
+from pipeline_dados.numerico import parsear_numero
+from pipeline_dados.qualidade_dados import (
+    INVALID,
+    registrar_diagnostico,
+    regra_coerencia_dfp_itr,
+    validar_registro,
+)
 
 logger = logging.getLogger(__name__)
+
+_CAMPOS_CONTABEIS = (
+    "ativo_total", "patrimonio_liquido", "caixa", "passivo_total",
+    "divida_curto_prazo", "divida_longo_prazo", "divida_bruta", "divida_liquida",
+    "receita", "lucro_bruto", "resultado_financeiro", "lucro_liquido",
+    "ebitda", "fco", "ebit", "depreciacao", "ativo_circulante", "passivo_circulante",
+)
+
+
+def _ticker_por_cnpj(cnpj) -> str | None:
+    formatado = formatar_cnpj(cnpj)
+    if formatado in MAPA_CNPJ_B3:
+        return MAPA_CNPJ_B3[formatado]
+    bruto = str(cnpj).strip() if cnpj is not None else ""
+    return MAPA_CNPJ_B3.get(bruto)
+
+
+def _versao_linha(row) -> int:
+    if "VERSAO" not in getattr(row, "index", []):
+        valor = row.get("VERSAO") if hasattr(row, "get") else None
+    else:
+        valor = row["VERSAO"]
+    numero = parsear_numero(valor)
+    if numero is None:
+        return 0
+    return int(numero)
+
+
+def _valor_conta(valor) -> float | None:
+    numero = parsear_numero(valor)
+    if numero is None:
+        return None
+    if not math.isfinite(numero):
+        return None
+    return float(numero) * 1000.0
 
 
 def derivar_indicadores_cvm(reg: dict[str, Any]) -> dict[str, Any]:
@@ -25,6 +67,7 @@ def derivar_indicadores_cvm(reg: dict[str, Any]) -> dict[str, Any]:
 
     Conta ausente permanece None; zero informado e preservado. Resultado
     derivado so e calculado quando as contas necessarias existem.
+    ebit e depreciacao permanecem no registro (contas-fonte persistidas).
     """
     cp = reg.get("divida_curto_prazo")
     lp = reg.get("divida_longo_prazo")
@@ -45,9 +88,6 @@ def derivar_indicadores_cvm(reg: dict[str, Any]) -> dict[str, Any]:
         reg["ebitda"] = ebit + abs(dep)
     else:
         reg["ebitda"] = None
-
-    reg.pop("ebit", None)
-    reg.pop("depreciacao", None)
     return reg
 
 
@@ -104,6 +144,7 @@ class AcoesCVMReader:
         logger.info(f"Iniciando atualização de Ações (ITR/DFP) para o ano {ano}")
         self._atualizar_documento(ano, tipo_doc="ITR", url_template=self.base_url_itr, prefixo="itr")
         self._atualizar_documento(ano, tipo_doc="DFP", url_template=self.base_url_dfp, prefixo="dfp")
+        self._persistir_indicadores_calculados()
         logger.info("Atualização de Ações concluída.")
 
     def _atualizar_documento(self, ano: int, tipo_doc: str, url_template: str, prefixo: str) -> None:
@@ -117,6 +158,7 @@ class AcoesCVMReader:
         self, ano: int, url_template=None, prefixo="itr"
     ) -> dict[str, pd.DataFrame]:
         url = (url_template or self.base_url_itr).format(ano)
+        response = None
         try:
             response = requests.get(url, timeout=30)
             response.raise_for_status()
@@ -136,12 +178,29 @@ class AcoesCVMReader:
         except Exception as e:
             logger.error(f"Erro ao baixar/extrair CVM: {e}")
             return {}
+        finally:
+            if response is not None:
+                response.close()
+
+    def _registro_vazio(self, cnpj_formatado, data_ref, tipo_doc, versao=0, dt_ini=None) -> dict[str, Any]:
+        registro = {
+            "cnpj": cnpj_formatado,
+            "data_referencia": data_ref,
+            "tipo_doc": tipo_doc,
+            "versao": versao,
+            "dt_ini_exerc": dt_ini,
+        }
+        for campo in _CAMPOS_CONTABEIS:
+            registro[campo] = None
+        return registro
 
     def _processar_itr_dfp(
         self, dfs: dict[str, pd.DataFrame], tipo_doc: str = "ITR"
     ) -> list[dict[str, Any]]:
-        registros = {}
+        por_chave: dict[str, dict[int, dict[str, Any]]] = {}
         for df in dfs.values():
+            if "ORDEM_EXERC" not in df.columns or "CD_CONTA" not in df.columns:
+                continue
             df_filtrado = df[(df['ORDEM_EXERC'] == 'ÚLTIMO') & (df['CD_CONTA'].isin(MAPA_CONTAS_CVM.keys()))].copy()
             for _, row in df_filtrado.iterrows():
                 cnpj_formatado = str(row['CNPJ_CIA']).strip()
@@ -149,30 +208,35 @@ class AcoesCVMReader:
                 if not cnpj_norm or cnpj_norm not in self.cnpjs_alvo:
                     continue
 
-                data_ref_str = row['DT_REFER']
                 conta = row['CD_CONTA']
-                valor = row['VL_CONTA'] * 1000
+                valor = _valor_conta(row['VL_CONTA'])
+                if valor is None:
+                    continue
 
-                data_ref = normalizar_data(data_ref_str)
+                data_ref = normalizar_data(row['DT_REFER'])
                 if data_ref is None:
                     continue
 
-                chave = f"{cnpj_formatado}_{data_ref_str}_{tipo_doc}"
-                if chave not in registros:
-                    registros[chave] = {
-                        'cnpj': cnpj_formatado, 'data_referencia': data_ref, 'tipo_doc': tipo_doc,
-                        'ativo_total': None, 'patrimonio_liquido': None, 'caixa': None,
-                        'passivo_total': None, 'divida_curto_prazo': None, 'divida_longo_prazo': None,
-                        'divida_bruta': None, 'divida_liquida': None, 'receita': None,
-                        'lucro_bruto': None, 'resultado_financeiro': None, 'lucro_liquido': None,
-                        'ebitda': None, 'fco': None, 'ebit': None, 'depreciacao': None
-                    }
-                registros[chave][MAPA_CONTAS_CVM[conta]] = float(valor)
+                versao = _versao_linha(row)
+                dt_ini = None
+                if "DT_INI_EXERC" in row.index:
+                    dt_ini = normalizar_data(row["DT_INI_EXERC"])
+                chave = f"{cnpj_norm}_{data_ref.isoformat()}_{tipo_doc}"
+                bucket = por_chave.setdefault(chave, {})
+                if versao not in bucket:
+                    bucket[versao] = self._registro_vazio(
+                        formatar_cnpj(cnpj_formatado), data_ref, tipo_doc, versao, dt_ini
+                    )
+                bucket[versao][MAPA_CONTAS_CVM[conta]] = valor
+                if dt_ini is not None and bucket[versao].get("dt_ini_exerc") is None:
+                    bucket[versao]["dt_ini_exerc"] = dt_ini
 
-        for reg in registros.values():
-            derivar_indicadores_cvm(reg)
-
-        return list(registros.values())
+        registros = []
+        for bucket in por_chave.values():
+            melhor = bucket[max(bucket)]
+            derivar_indicadores_cvm(melhor)
+            registros.append(melhor)
+        return registros
 
     def _salvar_no_banco(self, dados: list[dict[str, Any]], url_origem=None) -> None:
         from pipeline_dados.freshness import FONTE_CVM, url_origem_segura
@@ -181,7 +245,10 @@ class AcoesCVMReader:
         url_cvm = url_origem_segura(url_origem)
         for dado in dados:
             cnpj_alvo = dado.pop('cnpj')
-            ticker_real = MAPA_CNPJ_B3[cnpj_alvo]
+            ticker_real = _ticker_por_cnpj(cnpj_alvo)
+            if not ticker_real:
+                logger.warning("CNPJ %s fora do catalogo MAPA_CNPJ_B3; registro ignorado.", cnpj_alvo)
+                continue
 
             # DATA QUALITY (Fase 3, Bloco 3): regras determinísticas antes de
             # persistir/atualizar. INVALID -> não persiste; WARNING -> persiste,
@@ -219,6 +286,26 @@ class AcoesCVMReader:
             dado['fonte_primaria'] = f"CVM/{tipo_doc}"
             dado['url_origem'] = url_cvm
 
+            outro_tipo = "DFP" if tipo_doc == "ITR" else "ITR"
+            par = self.session.query(DadosFinanceirosAcoes).filter_by(
+                ativo_id=ativo.id,
+                data_referencia=dado['data_referencia'],
+                tipo_doc=outro_tipo,
+            ).first()
+            if par is not None:
+                par_dict = {
+                    "ativo_total": par.ativo_total,
+                    "patrimonio_liquido": par.patrimonio_liquido,
+                    "receita": par.receita,
+                    "lucro_liquido": par.lucro_liquido,
+                }
+                itr_dict, dfp_dict = (dado, par_dict) if tipo_doc == "ITR" else (par_dict, dado)
+                for achado in regra_coerencia_dfp_itr(itr_dict, dfp_dict):
+                    logger.warning(
+                        "QUALIDADE origem=CVM/%s ativo=%s documento=%s campo=%s regra=%s mensagem=%s",
+                        tipo_doc, ticker_real, data_ref, achado.campo, achado.regra, achado.mensagem,
+                    )
+
             registro_existente = self.session.query(DadosFinanceirosAcoes).filter_by(
                 ativo_id=ativo.id,
                 data_referencia=dado['data_referencia'],
@@ -241,3 +328,12 @@ class AcoesCVMReader:
             except Exception as e:
                 self.session.rollback()
                 logger.error(f"Erro ao salvar/atualizar CVM de {ticker_real}: {e}")
+
+    def _persistir_indicadores_calculados(self) -> None:
+        try:
+            from pipeline_dados.indicadores_cvm_acoes import persistir_indicadores_cvm
+
+            gravados = persistir_indicadores_cvm(self.session, self.meus_tickers)
+            logger.info("Indicadores CVM calculados persistidos: %s.", gravados)
+        except Exception as e:
+            logger.error("Falha ao persistir indicadores CVM calculados: %s", e)

@@ -286,6 +286,26 @@ def regra_consistencia_balanco(registro: dict[str, Any]) -> list[AchadoQualidade
     return achados
 
 
+def regra_coerencia_dfp_itr(
+    registro_itr: dict[str, Any], registro_dfp: dict[str, Any],
+) -> list[AchadoQualidade]:
+    """Compara ITR e DFP do mesmo periodo. WARNING; nunca sobrescreve CVM."""
+    achados = []
+    campos = ("ativo_total", "patrimonio_liquido", "receita", "lucro_liquido")
+    for campo in campos:
+        itr = parsear_numero(registro_itr.get(campo))
+        dfp = parsear_numero(registro_dfp.get(campo))
+        if itr is None or dfp is None or dfp == 0:
+            continue
+        if abs(itr - dfp) / abs(dfp) > 0.15:
+            achados.append(_achado(
+                campo, WARNING, "INCOERENCIA_DFP_ITR",
+                {"itr": itr, "dfp": dfp},
+                "ITR diverge do DFP em mais de 15% no mesmo periodo (CVM preservada).",
+            ))
+    return achados
+
+
 # ==========================================
 # ESPECIFICAÇÕES POR CONTEXTO
 # ==========================================
@@ -336,6 +356,10 @@ ESPECIFICACOES: dict[str, dict[str, Any]] = {
             "receita": [regra_numero, _nao_negativo_aviso],
             "lucro_bruto": [regra_numero],
             "ebitda": [regra_numero],
+            "ebit": [regra_numero],
+            "depreciacao": [regra_numero],
+            "ativo_circulante": [regra_numero, _nao_negativo_invalido],
+            "passivo_circulante": [regra_numero, _nao_negativo_invalido],
             "resultado_financeiro": [regra_numero],
             "lucro_liquido": [regra_numero],
             "fco": [regra_numero],
