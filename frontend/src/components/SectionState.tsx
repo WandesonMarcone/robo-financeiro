@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { EmptyState } from "./EmptyState";
 import { ErrorState } from "./ErrorState";
 import { Loading } from "./Loading";
-import type { ResourceState } from "@/lib/dashboard";
+import type { ResourceState } from "@/lib/resource";
 
 export function SectionState<T>({
   state,

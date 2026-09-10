@@ -8,6 +8,7 @@ import {
 import type {
   Acompanhamento,
   AlertaEvento,
+  AtivoCatalogo,
   FreshnessEstado,
   Indicador,
   LoginPayload,
@@ -185,6 +186,25 @@ export async function getMePlano(): Promise<PlanoResumo> {
   return envelope.data;
 }
 
+export async function getAtivos(query?: {
+  ticker?: string;
+  tipo?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<ListResult<AtivoCatalogo>> {
+  const envelope = await apiFetch<AtivoCatalogo[]>(
+    "/ativos",
+    {},
+    {
+      ticker: query?.ticker,
+      tipo: query?.tipo,
+      page: query?.page ?? 1,
+      page_size: query?.page_size ?? 100,
+    },
+  );
+  return { items: asList(envelope.data), meta: asMeta(envelope.meta) };
+}
+
 export async function getCarteira(pageSize = 100): Promise<ListResult<PosicaoCarteira>> {
   const envelope = await apiFetch<PosicaoCarteira[]>("/carteira", {}, { page: 1, page_size: pageSize });
   return { items: asList(envelope.data), meta: asMeta(envelope.meta) };
@@ -228,17 +248,38 @@ export async function getPreferencias(): Promise<Preferencias> {
   return envelope.data;
 }
 
-export async function getSnapshots(pageSize = 100): Promise<ListResult<SnapshotMercado>> {
+export async function getSnapshots(
+  pageSize = 100,
+  query?: { ticker?: string; tipo_ativo?: string },
+): Promise<ListResult<SnapshotMercado>> {
   const envelope = await apiFetch<SnapshotMercado[]>(
     "/mercado/snapshots",
     {},
-    { page: 1, page_size: pageSize },
+    { page: 1, page_size: pageSize, ticker: query?.ticker, tipo_ativo: query?.tipo_ativo },
   );
   return { items: asList(envelope.data), meta: asMeta(envelope.meta) };
 }
 
-export async function getIndicadores(pageSize = 100): Promise<ListResult<Indicador>> {
-  const envelope = await apiFetch<Indicador[]>("/indicadores", {}, { page: 1, page_size: pageSize });
+export async function getSnapshotMaisRecente(ticker: string): Promise<SnapshotMercado | null> {
+  const envelope = await apiFetch<SnapshotMercado>("/mercado/snapshots/mais-recente", {}, { ticker });
+  return envelope.data;
+}
+
+export async function getIndicadores(
+  pageSize = 100,
+  query?: { ticker?: string; ativo_id?: number; tipo_ativo?: string },
+): Promise<ListResult<Indicador>> {
+  const envelope = await apiFetch<Indicador[]>(
+    "/indicadores",
+    {},
+    {
+      page: 1,
+      page_size: pageSize,
+      ticker: query?.ticker,
+      ativo_id: query?.ativo_id,
+      tipo_ativo: query?.tipo_ativo,
+    },
+  );
   return { items: asList(envelope.data), meta: asMeta(envelope.meta) };
 }
 

@@ -22,6 +22,15 @@ describe("cliente API", () => {
     expect(() => buildApiUrl("/me", { token: "abc" })).toThrow();
   });
 
+  it("pesquisa de ativos usa igualdade exata do ticker", () => {
+    const exato = buildApiUrl("/ativos", { ticker: "PETR4" });
+    const parcial = buildApiUrl("/ativos", { ticker: "PETR" });
+    expect(exato).toBe("/api/v1/ativos?ticker=PETR4");
+    expect(parcial).toBe("/api/v1/ativos?ticker=PETR");
+    expect(exato).not.toContain("like");
+    expect(parcial).not.toContain("PETR4");
+  });
+
   it("envia X-Session-Token no header e nunca na URL", async () => {
     setSessionToken("tok-user-a");
     vi.stubGlobal(

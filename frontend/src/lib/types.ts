@@ -36,6 +36,15 @@ export type PaginationMeta = {
   retornados?: number;
 };
 
+export type AtivoCatalogo = {
+  id: number;
+  ticker: string | null;
+  cnpj: string | null;
+  tipo: string | null;
+  setor: string | null;
+  tipo_fii: string | null;
+};
+
 export type CampoSemantico = {
   semantica?: string | null;
   unidade?: string | null;
@@ -132,10 +141,14 @@ export type SnapshotMercado = {
   data_coleta: string | null;
   data_publicacao: string | null;
   fonte: string | null;
+  fonte_primaria?: string | null;
+  fonte_intermediaria?: string | null;
+  url_origem?: string | null;
   preco: number | null;
   dy: number | null;
   pvp: number | null;
   vpa: number | null;
+  proveniencia?: Record<string, string> | null;
   campos?: Record<string, CampoSemantico>;
   [key: string]: unknown;
 };
@@ -167,6 +180,10 @@ export type FreshnessCategoria = {
   data_coleta: string | null;
   data_publicacao: string | null;
   fonte: string | null;
+  fonte_primaria?: string | null;
+  fonte_intermediaria?: string | null;
+  url_origem?: string | null;
+  sla_segundos?: number | null;
 };
 
 export type FreshnessEstado = {

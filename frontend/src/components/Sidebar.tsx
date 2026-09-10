@@ -23,7 +23,10 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       >
         <nav className="flex flex-col gap-1 p-4">
           {navItems.map((item) => {
-            const active = pathname === item.href;
+            const active =
+              item.href === "/ativos"
+                ? pathname === "/ativos" || pathname.startsWith("/ativos/")
+                : pathname === item.href;
             return (
               <Link
                 key={item.href}
