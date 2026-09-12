@@ -1,9 +1,7 @@
-from datetime import datetime
-
 import config
-from atualizador_documentos import SessionDB, rotina_de_atualizacao_em_massa
+from atualizador_documentos import rotina_de_atualizacao_em_massa
 from bot.loader import enviar_mensagem
-from pipeline_dados.coletor_cvm import AcoesCVMReader
+from pipeline_dados.coletor_cvm import coletar_cvm_acoes_producao
 
 
 def varredura_diaria():
@@ -17,13 +15,19 @@ def varredura_diaria():
     except Exception as e:
         enviar_mensagem(config.TELEGRAM_CHAT_ID, f"❌ Erro na varredura B3: {e}")
 
-    # 2. Rotina CVM (Ações)
+    # 2. Rotina CVM (Ações) — mesmo ponto de coleta do job app.py
     try:
-        session = SessionDB()
-        coletor = AcoesCVMReader(session)
-        coletor.atualizar_acoes(datetime.now().year)
-        session.close()
-        enviar_mensagem(config.TELEGRAM_CHAT_ID, "✅ Coleta CVM finalizada com sucesso!")
+        ano_cvm = coletar_cvm_acoes_producao()
+        if ano_cvm:
+            enviar_mensagem(
+                config.TELEGRAM_CHAT_ID,
+                f"✅ Coleta CVM finalizada (DFP {ano_cvm})!",
+            )
+        else:
+            enviar_mensagem(
+                config.TELEGRAM_CHAT_ID,
+                "⚠️ Coleta CVM: nenhum DFP anual disponível.",
+            )
     except Exception as e:
         enviar_mensagem(config.TELEGRAM_CHAT_ID, f"❌ Erro na varredura CVM: {e}")
 
