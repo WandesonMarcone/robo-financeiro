@@ -173,6 +173,7 @@ class _GcFake:
 
 def _preparar_app(monkeypatch, planilha):
     monkeypatch.setattr(app_module, "conectar_gspread", lambda: _GcFake(planilha))
+    monkeypatch.setattr(app_module, "coletar_cvm_acoes_producao", lambda: 2025)
     monkeypatch.setattr(
         app_module,
         "rodar_garimpo_fiis",
