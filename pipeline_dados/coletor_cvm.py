@@ -26,6 +26,76 @@ from pipeline_dados.qualidade_dados import (
 
 logger = logging.getLogger(__name__)
 
+_URL_DFP_ZIP = "https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/DFP/DADOS/dfp_cia_aberta_{}.zip"
+
+
+def _dfp_zip_existe(ano: int, url_template: str | None = None) -> bool:
+    """True se o ZIP DFP do exercicio anual existir. Nao inventa dados."""
+    url = (url_template or _URL_DFP_ZIP).format(ano)
+    response = None
+    try:
+        response = requests.head(url, timeout=15, allow_redirects=True)
+        if response.status_code == 200:
+            return True
+        if response.status_code not in (403, 405, 501):
+            return False
+        response.close()
+        response = requests.get(url, timeout=15, stream=True)
+        return response.status_code == 200
+    except Exception as e:
+        logger.warning("Falha ao verificar DFP %s: %s", ano, e)
+        return False
+    finally:
+        if response is not None:
+            response.close()
+
+
+def ano_dfp_cagr_producao(
+    hoje: date | None = None,
+    *,
+    verificar=None,
+    recuo_max: int = 5,
+) -> int | None:
+    """Ultimo exercicio DFP anual consolidado disponivel.
+
+    Nao usa ``datetime.now().year`` cegamente: se o exercicio corrente ainda
+    nao foi publicado, recua ate o ultimo ZIP DFP valido.
+    """
+    referencia = hoje or date.today()
+    checar = verificar or _dfp_zip_existe
+    for ano in range(referencia.year, referencia.year - recuo_max - 1, -1):
+        if ano < 2000:
+            break
+        try:
+            if checar(ano):
+                return ano
+        except Exception as e:
+            logger.warning("Falha ao verificar DFP %s: %s", ano, e)
+    return None
+
+
+def coletar_cvm_acoes_producao(
+    session: Session | None = None,
+    *,
+    hoje: date | None = None,
+    verificar_dfp=None,
+) -> int | None:
+    """Coleta CVM DFP/ITR + T-5 e persiste indicadores. Idempotente.
+
+    Retorna o ano T usado no CAGR, ou None se nao houver DFP anual disponivel.
+    """
+    from services.db import sessao_db
+
+    ano = ano_dfp_cagr_producao(hoje=hoje, verificar=verificar_dfp)
+    if ano is None:
+        logger.warning("Nenhum DFP anual CVM disponivel; producao segue com fallback.")
+        return None
+    with sessao_db(session) as sess:
+        coletor = AcoesCVMReader(sess)
+        coletor.atualizar_acoes(ano)
+    logger.info("Coleta CVM de producao concluida para DFP %s (T-5=%s).", ano, ano - 5)
+    return ano
+
 _CAMPOS_CONTABEIS = (
     "ativo_total", "patrimonio_liquido", "caixa", "passivo_total",
     "divida_curto_prazo", "divida_longo_prazo", "divida_bruta", "divida_liquida",
