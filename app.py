@@ -7,6 +7,7 @@ import config
 from modules.scraper_acoes import rodar_garimpo_acoes
 from modules.scraper_fiis import rodar_garimpo_fiis  # <--- Importação Corrigida
 from modules.utils import conectar_gspread, disparar_alertas
+from pipeline_dados.coletor_cvm import coletar_cvm_acoes_producao
 from pipeline_dados.espelhamento_mercado_5c import espelhar_mercado_se_ativo
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,17 @@ def executar_auditoria_carteira():
     # --- TURBO DE FIIS ---
     print("\n⚡ Acionando Motor de Fundos Imobiliários...")
     batch_updates_fiis, msg_fiis, aba_fiis = rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz)
+
+    # --- CVM AÇÕES (antes do garimpo; fallback Fundamentus permanece) ---
+    print("\n⚡ Coletando CVM (DFP/ITR) para indicadores de ações...")
+    try:
+        ano_cvm = coletar_cvm_acoes_producao()
+        if ano_cvm:
+            print(f"CVM Ações: DFP {ano_cvm} (T-5={ano_cvm - 5}) persistido.")
+        else:
+            print("CVM Ações: nenhum DFP anual disponível; garimpo usa fallback.")
+    except Exception as e:
+        logger.exception("Coleta CVM falhou (garimpo segue com fallback): %s", e)
 
     # --- TURBO DE AÇÕES ---
     print("\n⚡ Acionando Motor de Ações Estruturais...")
