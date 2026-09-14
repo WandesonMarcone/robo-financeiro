@@ -71,4 +71,3 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ESPELHAMENTO_PG_ATIVO: ${{ secrets.ESPELHAMENTO_PG_ATIVO }}
         run: python app.py
-
