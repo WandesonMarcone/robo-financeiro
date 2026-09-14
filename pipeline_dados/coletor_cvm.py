@@ -50,19 +50,86 @@ def _dfp_zip_existe(ano: int, url_template: str | None = None) -> bool:
             response.close()
 
 
+def _baixar_dre_dfp(ano: int, url_template: str | None = None) -> pd.DataFrame | None:
+    """Baixa a DRE consolidada do DFP do ano. None quando indisponivel."""
+    url = (url_template or _URL_DFP_ZIP).format(ano)
+    response = None
+    try:
+        response = requests.get(url, timeout=60)
+        if response.status_code != 200:
+            return None
+        nome = f"dfp_cia_aberta_DRE_con_{ano}.csv"
+        with zipfile.ZipFile(io.BytesIO(response.content)) as z:
+            if nome not in z.namelist():
+                return None
+            with z.open(nome) as f:
+                return pd.read_csv(f, sep=";", encoding="latin1")
+    except Exception as e:
+        logger.warning("Falha ao baixar DRE do DFP %s: %s", ano, e)
+        return None
+    finally:
+        if response is not None:
+            response.close()
+
+
+def _dfp_tem_exercicio_anual(
+    ano: int,
+    *,
+    cnpjs_alvo=None,
+    url_template: str | None = None,
+    baixar=None,
+    existe=None,
+) -> bool:
+    """True se o DFP do ano tiver exercicio ANUAL (encerrado em 31/12).
+
+    Um ZIP DFP pode existir (HTTP 200) contendo apenas periodos parciais do
+    ano corrente (ex.: DFP 2026 com datas 2026-02/03/06), invalido para o CAGR.
+    A checagem exige ao menos um registro 31/12 de conta mapeada; quando
+    ``cnpjs_alvo`` e informado, exige que seja de uma companhia monitorada.
+    """
+    checar_existencia = existe or _dfp_zip_existe
+    if not checar_existencia(ano, url_template):
+        return False
+    baixador = baixar or _baixar_dre_dfp
+    df = baixador(ano, url_template=url_template)
+    if df is None or df.empty:
+        return False
+    if not {"DT_REFER", "CD_CONTA", "ORDEM_EXERC"}.issubset(df.columns):
+        return False
+    filtro = df[df["ORDEM_EXERC"] == "ÚLTIMO"]
+    alvos = {normalizar_cnpj(c) for c in (cnpjs_alvo or [])}
+    alvos.discard(None)
+    if alvos and "CNPJ_CIA" in filtro.columns:
+        filtro = filtro[filtro["CNPJ_CIA"].map(normalizar_cnpj).isin(alvos)]
+    filtro = filtro[filtro["CD_CONTA"].isin(MAPA_CONTAS_CVM.keys())]
+    for valor in filtro["DT_REFER"]:
+        data = normalizar_data(valor)
+        if data is not None and data.month == 12 and data.day == 31:
+            return True
+    return False
+
+
 def ano_dfp_cagr_producao(
     hoje: date | None = None,
     *,
     verificar=None,
+    cnpjs_alvo=None,
     recuo_max: int = 5,
 ) -> int | None:
-    """Ultimo exercicio DFP anual consolidado disponivel.
+    """Ultimo exercicio DFP ANUAL valido disponivel para o CAGR.
 
-    Nao usa ``datetime.now().year`` cegamente: se o exercicio corrente ainda
-    nao foi publicado, recua ate o ultimo ZIP DFP valido.
+    Nao usa ``datetime.now().year`` cegamente: um ZIP DFP do ano corrente pode
+    existir com apenas periodos parciais (sem 31/12) e nao servir ao CAGR.
+    Recua ate o ultimo exercicio com DFP anual de fato (31/12) e, quando
+    ``cnpjs_alvo`` e informado, de uma companhia monitorada.
     """
     referencia = hoje or date.today()
-    checar = verificar or _dfp_zip_existe
+    if verificar is not None:
+        checar = verificar
+    else:
+        def checar(ano):
+            return _dfp_tem_exercicio_anual(ano, cnpjs_alvo=cnpjs_alvo)
+
     for ano in range(referencia.year, referencia.year - recuo_max - 1, -1):
         if ano < 2000:
             break
@@ -86,12 +153,16 @@ def coletar_cvm_acoes_producao(
     """
     from services.db import sessao_db
 
-    ano = ano_dfp_cagr_producao(hoje=hoje, verificar=verificar_dfp)
-    if ano is None:
-        logger.warning("Nenhum DFP anual CVM disponivel; producao segue com fallback.")
-        return None
     with sessao_db(session) as sess:
         coletor = AcoesCVMReader(sess)
+        ano = ano_dfp_cagr_producao(
+            hoje=hoje,
+            verificar=verificar_dfp,
+            cnpjs_alvo=getattr(coletor, "cnpjs_alvo", None),
+        )
+        if ano is None:
+            logger.warning("Nenhum DFP anual CVM disponivel; producao segue com fallback.")
+            return None
         coletor.atualizar_acoes(ano)
     logger.info("Coleta CVM de producao concluida para DFP %s (T-5=%s).", ano, ano - 5)
     return ano

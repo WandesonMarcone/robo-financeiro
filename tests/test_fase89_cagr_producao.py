@@ -1,6 +1,7 @@
 """Etapa 8.9: CAGR CVM no fluxo de producao (BD_Acoes Z/AA) sem pipeline paralelo."""
 from datetime import date
 
+import pandas as pd
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -14,10 +15,10 @@ from pipeline_dados.banco_dados import (
 from pipeline_dados.catalogo_ativos import garantir_ativo, registrar_no_catalogo
 from pipeline_dados.coletor_cvm import AcoesCVMReader
 from pipeline_dados.indicadores_cvm_acoes import (
-    calcular_cagr,
-    calcular_indicadores_ticker,
     cagr_lucro_5a,
     cagr_receita_5a,
+    calcular_cagr,
+    calcular_indicadores_ticker,
     mapa_cagr_cvm_producao,
     persistir_indicadores_cvm,
 )
@@ -359,3 +360,93 @@ def test_sem_cvm_valido_fundamentus_permanece_em_z():
     )
     assert linha[24] == -0.0961
     assert linha[25] == ""
+
+
+def _dfp_linha(cnpj, dt_refer, conta="3.01", valor=1.0):
+    return {
+        "CNPJ_CIA": cnpj,
+        "DT_REFER": dt_refer,
+        "ORDEM_EXERC": "ÚLTIMO",
+        "CD_CONTA": conta,
+        "VL_CONTA": valor,
+    }
+
+
+def test_dfp_parcial_ano_corrente_recua_para_2025(monkeypatch):
+    from pipeline_dados import coletor_cvm as modulo_cvm
+
+    def fake_baixar(ano, url_template=None):
+        if ano == 2026:
+            return pd.DataFrame([_dfp_linha("00.000.000/0001-91", "2026-06-30")])
+        if ano == 2025:
+            return pd.DataFrame([_dfp_linha("00.000.000/0001-91", "2025-12-31")])
+        return pd.DataFrame()
+
+    monkeypatch.setattr(modulo_cvm, "_dfp_zip_existe", lambda ano, url_template=None: ano in (2025, 2026))
+    monkeypatch.setattr(modulo_cvm, "_baixar_dre_dfp", fake_baixar)
+    assert modulo_cvm.ano_dfp_cagr_producao(hoje=date(2026, 9, 14)) == 2025
+
+
+def test_dfp_anual_de_outra_companhia_e_rejeitado(monkeypatch):
+    from pipeline_dados import coletor_cvm as modulo_cvm
+
+    def fake_baixar(ano, url_template=None):
+        cnpj = "11.111.111/1111-11" if ano == 2026 else "00.000.000/0001-91"
+        return pd.DataFrame([_dfp_linha(cnpj, f"{ano}-12-31")])
+
+    monkeypatch.setattr(modulo_cvm, "_dfp_zip_existe", lambda ano, url_template=None: True)
+    monkeypatch.setattr(modulo_cvm, "_baixar_dre_dfp", fake_baixar)
+    assert modulo_cvm.ano_dfp_cagr_producao(
+        hoje=date(2026, 9, 14), cnpjs_alvo={"00000000000191"}
+    ) == 2025
+
+
+def test_t_2025_exige_dfp_t_menos_5_2020(monkeypatch):
+    session, _ = _sessao()
+    registrar_no_catalogo(session, "BBAS3", TipoAtivo.ACAO, cnpj="00.000.000/0001-91")
+    garantir_ativo(session, "BBAS3", TipoAtivo.ACAO, cnpj="00.000.000/0001-91")
+    session.commit()
+    leitor = AcoesCVMReader(session)
+    leitor.meus_tickers = ["BBAS3"]
+    leitor.cnpjs_alvo = {"00000000000191"}
+    chamadas = []
+
+    def fake_atualizar(ano, tipo_doc, url_template, prefixo):
+        chamadas.append((ano, tipo_doc))
+
+    monkeypatch.setattr(leitor, "_atualizar_documento", fake_atualizar)
+    monkeypatch.setattr(leitor, "_persistir_indicadores_calculados", lambda: None)
+    leitor.atualizar_acoes(2025)
+    assert (2025, "DFP") in chamadas
+    assert (2020, "DFP") in chamadas
+    session.close()
+
+
+def test_coletar_cvm_producao_usa_verificacao_anual_nao_ano_corrente(monkeypatch):
+    from pipeline_dados import coletor_cvm as modulo_cvm
+
+    chamadas = []
+
+    class _LeitorFake:
+        def __init__(self, session):
+            self.session = session
+            self.cnpjs_alvo = {"00000000000191"}
+
+        def atualizar_acoes(self, ano):
+            chamadas.append(ano)
+
+    def fake_baixar(ano, url_template=None):
+        if ano == 2026:
+            return pd.DataFrame([_dfp_linha("00.000.000/0001-91", "2026-03-31")])
+        if ano == 2025:
+            return pd.DataFrame([_dfp_linha("00.000.000/0001-91", "2025-12-31")])
+        return pd.DataFrame()
+
+    monkeypatch.setattr(modulo_cvm, "AcoesCVMReader", _LeitorFake)
+    monkeypatch.setattr(modulo_cvm, "_dfp_zip_existe", lambda ano, url_template=None: ano in (2025, 2026))
+    monkeypatch.setattr(modulo_cvm, "_baixar_dre_dfp", fake_baixar)
+    session, _ = _sessao()
+    ano = modulo_cvm.coletar_cvm_acoes_producao(session, hoje=date(2026, 9, 14))
+    assert ano == 2025
+    assert chamadas == [2025]
+    session.close()
