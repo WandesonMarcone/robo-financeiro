@@ -8,6 +8,7 @@ import yfinance as yf
 import config
 from config import MAPA_SETORES_B3
 from modules.utils import celula_planilha, formatar, get_request_with_retry, precisa_atualizar
+from pipeline_dados.matriz_aplicabilidade import blank_se_nao_aplicavel
 from pipeline_dados.numerico import derivar_divisao, parsear_numero, parsear_percentual, primeiro_numero
 
 LIMIAR_ROE_OPORTUNIDADE = 0.08
@@ -81,41 +82,49 @@ def montar_linha_acao(
     p_cap_giro, p_at_circ_liq, liq_corrente, roe, roa, roic, cagr_rec_5a,
     liq_media, vpa, lpa, peg_ratio, valor_mercado, agora_sp,
     cagr_lucro_5a=None,
+    ticker=None,
 ):
-    """Linha B..AG do BD_Acoes. None vira celula vazia; slots reservados ficam vazios."""
+    """Linha B..AG do BD_Acoes. None vira celula vazia; slots reservados ficam vazios.
+
+    NAO_APLICAVEL (matriz F.1) vira celula vazia, nunca 0.
+    """
     vazio = ""
+
+    def _cel(indicador, valor):
+        return celula_planilha(blank_se_nao_aplicavel(indicador, valor, ticker=ticker))
+
     return [
         setor,
-        celula_planilha(preco),
-        celula_planilha(dy),
+        _cel("preco", preco),
+        _cel("dy", dy),
         celula_planilha(qtd_acoes),
-        celula_planilha(pl),
-        celula_planilha(pvp),
-        celula_planilha(p_ativo),
-        celula_planilha(marg_bruta),
-        celula_planilha(marg_ebit),
-        celula_planilha(marg_liquida),
-        celula_planilha(p_ebit),
-        celula_planilha(ev_ebit),
-        celula_planilha(div_liq_ebit),
-        celula_planilha(div_liq_patrimonio),
-        celula_planilha(psr),
-        celula_planilha(p_cap_giro),
-        celula_planilha(p_at_circ_liq),
-        celula_planilha(liq_corrente),
-        celula_planilha(roe),
-        celula_planilha(roa),
-        celula_planilha(roic),
+        _cel("pl", pl),
+        _cel("pvp", pvp),
+        _cel("p_ativo", p_ativo),
+        _cel("marg_bruta", marg_bruta),
+        _cel("marg_ebit", marg_ebit),
+        _cel("marg_liquida", marg_liquida),
+        _cel("p_ebit", p_ebit),
+        _cel("ev_ebit", ev_ebit),
+        _cel("div_liq_ebit", div_liq_ebit),
+        _cel("div_liq_patrimonio", div_liq_patrimonio),
+        _cel("psr", psr),
+        _cel("p_cap_giro", p_cap_giro),
+        _cel("p_at_circ_liq", p_at_circ_liq),
+        _cel("liq_corrente", liq_corrente),
+        _cel("roe", roe),
+        _cel("roa", roa),
+        _cel("roic", roic),
         vazio,
         vazio,
         vazio,
-        celula_planilha(cagr_rec_5a),
-        celula_planilha(cagr_lucro_5a),
-        celula_planilha(liq_media),
-        celula_planilha(vpa),
-        celula_planilha(lpa),
-        celula_planilha(peg_ratio),
-        celula_planilha(valor_mercado),
+        _cel("cagr_rec_5a", cagr_rec_5a),
+        _cel("cagr_lucro_5a", cagr_lucro_5a),
+        _cel("liq_media", liq_media),
+        _cel("vpa", vpa),
+        _cel("lpa", lpa),
+        _cel("peg_ratio", peg_ratio),
+        _cel("valor_mercado", valor_mercado),
         f"{agora_sp}",
     ]
 
@@ -272,7 +281,7 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
                 formatar(f.get("ROIC")), cagr_rec_5a,
                 formatar(f.get("Liq.2meses")), vpa_yf, lpa_yf,
                 formatar(yf_info.get("trailingPegRatio")), formatar(yf_info.get("marketCap")),
-                agora_sp, cagr_lucro_5a=cagr_lucro_5a,
+                agora_sp, cagr_lucro_5a=cagr_lucro_5a, ticker=ticker,
             )
 
             if ticker in cat_novatas:
