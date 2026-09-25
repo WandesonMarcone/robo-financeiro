@@ -347,10 +347,11 @@ def obter_cobertura_fii(
         }
 
 
-def interpretar_indicador(tipo_ativo, indicador, valor) -> dict:
+def interpretar_indicador(tipo_ativo, indicador, valor, *, ticker=None, setor=None) -> dict:
     """Semântica 8.5 do valor já coletado. Não inventa número nem escala.
 
     Distingue ZERO / AUSENTE / NAO_APLICAVEL / INVALIDO / PRESENTE. Indicador
     não aplicável ao tipo (ex.: ROE de FII) permanece N/A, nunca 0.
+    Matriz F.1 (ticker) preserva NAO_APLICAVEL setorial.
     """
-    return interpretar_valor(tipo_ativo, indicador, valor)
+    return interpretar_valor(tipo_ativo, indicador, valor, ticker=ticker, setor=setor)

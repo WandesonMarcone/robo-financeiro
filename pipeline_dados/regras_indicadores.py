@@ -203,7 +203,14 @@ def _fora_da_faixa(valor: float, faixa: tuple[float | None, float | None] | None
     return False
 
 
-def classificar_indicador(tipo_ativo: str, indicador: str, valor) -> dict:
+def classificar_indicador(
+    tipo_ativo: str,
+    indicador: str,
+    valor,
+    *,
+    ticker=None,
+    setor=None,
+) -> dict:
     """Classifica uma ocorrência de um indicador (OK/WARNING/ERRO/CRITICO).
 
     Retorna um dict com chaves: ``regra``, ``severidade``, ``motivo``,
@@ -212,7 +219,9 @@ def classificar_indicador(tipo_ativo: str, indicador: str, valor) -> dict:
     N/A explícito e indicador não aplicável ao tipo não viram 0 nem ausência.
     A classificação NÃO altera o valor original.
     """
-    interpretacao = interpretar_valor(tipo_ativo, indicador, valor)
+    interpretacao = interpretar_valor(
+        tipo_ativo, indicador, valor, ticker=ticker, setor=setor,
+    )
     regra = obter_regra(tipo_ativo, indicador)
     nome = regra.nome_exibicao if regra else indicador
     semantica = interpretacao["semantica"]

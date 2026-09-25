@@ -237,13 +237,15 @@ def _freshness_do_historico(session, ativo, indicador: str, agora=None) -> str |
     )
 
 
-def avaliar_dado(tipo_ativo: str, indicador: str, valor) -> dict:
+def avaliar_dado(tipo_ativo: str, indicador: str, valor, *, ticker=None, setor=None) -> dict:
     """Valida o valor bruto sem inventar número nem evento financeiro.
 
     Distingue PRESENTE / ZERO / AUSENTE / NAO_APLICAVEL / INVALIDO.
     AUSENTE e INVALIDO nunca viram evento financeiro positivo.
     """
-    classificacao = classificar_indicador(tipo_ativo, indicador, valor)
+    classificacao = classificar_indicador(
+        tipo_ativo, indicador, valor, ticker=ticker, setor=setor,
+    )
     semantica = classificacao.get("semantica") or classificar_semantica(valor)
     utilizavel = semantica in (PRESENTE, ZERO)
     recusar = semantica in (AUSENTE, INVALIDO, NAO_APLICAVEL)
@@ -375,7 +377,10 @@ def decidir_alerta(
     ``freshness`` deve ser lido ANTES de ``detectar_mudanca`` atualizar
     ``ultima_coleta``; se omitido, é consultado no histórico atual.
     """
-    avaliacao = avaliar_dado(tipo_ativo, indicador, valor)
+    avaliacao = avaliar_dado(
+        tipo_ativo, indicador, valor,
+        ticker=getattr(ativo, "ticker", None),
+    )
     classificacao = avaliacao["classificacao"]
     tipo_alerta = _tipo_alerta_candidato(classificacao, mudanca)
     if freshness is None:
@@ -702,7 +707,10 @@ def processar_indicadores_ativo(
         if valor is None:
             continue
         try:
-            avaliacao = avaliar_dado(tipo_ativo, indicador, valor)
+            avaliacao = avaliar_dado(
+                tipo_ativo, indicador, valor,
+                ticker=getattr(ativo, "ticker", None),
+            )
             if avaliacao["recusar"]:
                 logger_efetivo.info(
                     "FASE4 dado recusado semantica=%s ativo=%s indicador=%s",

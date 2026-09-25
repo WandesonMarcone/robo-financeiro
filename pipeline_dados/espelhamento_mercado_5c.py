@@ -62,6 +62,7 @@ from pipeline_dados.mapeamento_sheets import (
     transformar_linha_acao,
     transformar_linha_fii,
 )
+from pipeline_dados.matriz_aplicabilidade import blank_se_nao_aplicavel
 from pipeline_dados.motor_alertas import processar_indicadores_ativo
 from pipeline_dados.normalizacao import normalizar_texto
 from pipeline_dados.qualidade_dados import (
@@ -549,36 +550,41 @@ def gravar_snapshot_acao(
     preenchida com Dív.Líq/Patrimônio (duplicação da origem — ver mapeamento);
     por isso o valor é persistido apenas em ``div_liq_patrimonio`` e
     ``div_liq_ebit`` permanece NULL (não se inventa significado). Retorna
-    ``(snapshot, resultado, status)``.
+    ``(snapshot, resultado, status)``. NAO_APLICAVEL persiste None, nunca 0.
     """
+    ticker = dados.get("ticker") or getattr(ativo, "ticker", None)
+
+    def _num(indicador):
+        return blank_se_nao_aplicavel(indicador, dados.get(indicador), ticker=ticker)
+
     resultado = validar_registro(
         {
             "ticker": dados.get("ticker"),
             "data_referencia": data_referencia,
-            "preco": dados.get("preco"),
-            "dy": dados.get("dy"),
-            "pl": dados.get("pl"),
-            "pvp": dados.get("pvp"),
-            "p_ativo": dados.get("p_ativo"),
-            "marg_bruta": dados.get("marg_bruta"),
-            "marg_ebit": dados.get("marg_ebit"),
-            "marg_liquida": dados.get("marg_liquida"),
-            "p_ebit": dados.get("p_ebit"),
-            "ev_ebit": dados.get("ev_ebit"),
-            "div_liq_patrimonio": dados.get("div_liq_patrimonio"),
-            "psr": dados.get("psr"),
-            "p_cap_giro": dados.get("p_cap_giro"),
-            "p_at_circ_liq": dados.get("p_at_circ_liq"),
-            "liq_corrente": dados.get("liq_corrente"),
-            "roe": dados.get("roe"),
-            "roa": dados.get("roa"),
-            "roic": dados.get("roic"),
-            "cagr_rec_5a": dados.get("cagr_rec_5a"),
-            "liq_media": dados.get("liq_media"),
-            "vpa": dados.get("vpa"),
-            "lpa": dados.get("lpa"),
-            "peg_ratio": dados.get("peg_ratio"),
-            "valor_mercado": dados.get("valor_mercado"),
+            "preco": _num("preco"),
+            "dy": _num("dy"),
+            "pl": _num("pl"),
+            "pvp": _num("pvp"),
+            "p_ativo": _num("p_ativo"),
+            "marg_bruta": _num("marg_bruta"),
+            "marg_ebit": _num("marg_ebit"),
+            "marg_liquida": _num("marg_liquida"),
+            "p_ebit": _num("p_ebit"),
+            "ev_ebit": _num("ev_ebit"),
+            "div_liq_patrimonio": _num("div_liq_patrimonio"),
+            "psr": _num("psr"),
+            "p_cap_giro": _num("p_cap_giro"),
+            "p_at_circ_liq": _num("p_at_circ_liq"),
+            "liq_corrente": _num("liq_corrente"),
+            "roe": _num("roe"),
+            "roa": _num("roa"),
+            "roic": _num("roic"),
+            "cagr_rec_5a": _num("cagr_rec_5a"),
+            "liq_media": _num("liq_media"),
+            "vpa": _num("vpa"),
+            "lpa": _num("lpa"),
+            "peg_ratio": _num("peg_ratio"),
+            "valor_mercado": _num("valor_mercado"),
         },
         "snapshot_acao_mercado",
         origem=ORIGEM_GOOGLE_SHEETS,
@@ -606,30 +612,30 @@ def gravar_snapshot_acao(
     snapshot.fonte_intermediaria = FONTE_SHEETS
     snapshot.fonte_primaria = dados.get("fonte_primaria") or None
     snapshot.url_origem = url_origem_segura(dados.get("url_origem"))
-    snapshot.preco = _decimal(dados.get("preco"))
-    snapshot.dy = _decimal(dados.get("dy"))
-    snapshot.pl = _decimal(dados.get("pl"))
-    snapshot.pvp = _decimal(dados.get("pvp"))
-    snapshot.p_ativo = _decimal(dados.get("p_ativo"))
-    snapshot.marg_bruta = _decimal(dados.get("marg_bruta"))
-    snapshot.marg_ebit = _decimal(dados.get("marg_ebit"))
-    snapshot.marg_liquida = _decimal(dados.get("marg_liquida"))
-    snapshot.p_ebit = _decimal(dados.get("p_ebit"))
-    snapshot.ev_ebit = _decimal(dados.get("ev_ebit"))
-    snapshot.div_liq_patrimonio = _decimal(dados.get("div_liq_patrimonio"))
-    snapshot.psr = _decimal(dados.get("psr"))
-    snapshot.p_cap_giro = _decimal(dados.get("p_cap_giro"))
-    snapshot.p_at_circ_liq = _decimal(dados.get("p_at_circ_liq"))
-    snapshot.liq_corrente = _decimal(dados.get("liq_corrente"))
-    snapshot.roe = _decimal(dados.get("roe"))
-    snapshot.roa = _decimal(dados.get("roa"))
-    snapshot.roic = _decimal(dados.get("roic"))
-    snapshot.cagr_rec_5a = _decimal(dados.get("cagr_rec_5a"))
-    snapshot.liq_media = _decimal(dados.get("liq_media"))
-    snapshot.vpa = _decimal(dados.get("vpa"))
-    snapshot.lpa = _decimal(dados.get("lpa"))
-    snapshot.peg_ratio = _decimal(dados.get("peg_ratio"))
-    snapshot.valor_mercado = _decimal(dados.get("valor_mercado"))
+    snapshot.preco = _decimal(_num("preco"))
+    snapshot.dy = _decimal(_num("dy"))
+    snapshot.pl = _decimal(_num("pl"))
+    snapshot.pvp = _decimal(_num("pvp"))
+    snapshot.p_ativo = _decimal(_num("p_ativo"))
+    snapshot.marg_bruta = _decimal(_num("marg_bruta"))
+    snapshot.marg_ebit = _decimal(_num("marg_ebit"))
+    snapshot.marg_liquida = _decimal(_num("marg_liquida"))
+    snapshot.p_ebit = _decimal(_num("p_ebit"))
+    snapshot.ev_ebit = _decimal(_num("ev_ebit"))
+    snapshot.div_liq_patrimonio = _decimal(_num("div_liq_patrimonio"))
+    snapshot.psr = _decimal(_num("psr"))
+    snapshot.p_cap_giro = _decimal(_num("p_cap_giro"))
+    snapshot.p_at_circ_liq = _decimal(_num("p_at_circ_liq"))
+    snapshot.liq_corrente = _decimal(_num("liq_corrente"))
+    snapshot.roe = _decimal(_num("roe"))
+    snapshot.roa = _decimal(_num("roa"))
+    snapshot.roic = _decimal(_num("roic"))
+    snapshot.cagr_rec_5a = _decimal(_num("cagr_rec_5a"))
+    snapshot.liq_media = _decimal(_num("liq_media"))
+    snapshot.vpa = _decimal(_num("vpa"))
+    snapshot.lpa = _decimal(_num("lpa"))
+    snapshot.peg_ratio = _decimal(_num("peg_ratio"))
+    snapshot.valor_mercado = _decimal(_num("valor_mercado"))
 
     return snapshot, resultado, status
 

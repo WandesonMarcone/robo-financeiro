@@ -4,6 +4,8 @@ Camada unica para distinguir:
 
 - ZERO -> valor realmente zero (0 / 0.0);
 - AUSENTE -> dado nao encontrado/indisponivel (NULL);
+- NAO_CALCULAVEL -> dados existem, mas a formula nao produz numero valido
+  (ex.: divisor zero, P/L nao positivo, CAGR <= 0 no PEG);
 - NAO_APLICAVEL -> indicador nao se aplica ao ativo (N/A);
 - INVALIDO -> valor presente e ilegivel/nao-finito (NaN, Inf, texto);
 - PRESENTE -> valor numerico utilizavel diferente de zero.
@@ -30,11 +32,12 @@ from pipeline_dados.numerico import (
 
 ZERO = "ZERO"
 AUSENTE = "AUSENTE"
+NAO_CALCULAVEL = "NAO_CALCULAVEL"
 NAO_APLICAVEL = "NAO_APLICAVEL"
 INVALIDO = "INVALIDO"
 PRESENTE = "PRESENTE"
 
-STATUS_VALIDOS = (ZERO, AUSENTE, NAO_APLICAVEL, INVALIDO, PRESENTE)
+STATUS_VALIDOS = (ZERO, AUSENTE, NAO_CALCULAVEL, NAO_APLICAVEL, INVALIDO, PRESENTE)
 
 FRACAO = "fracao"
 MULTIPLO = "multiplo"
@@ -223,11 +226,29 @@ CATALOGO: dict[str, DefinicaoIndicador] = {
     ),
     "cagr_lucro_5a": _def(
         "cagr_lucro_5a", "CAGR Lucro 5a", FRACAO, UNIDADE_PCT, (ACAO,),
-        "indicadores_cvm_acoes.cagr_lucro_5a", "fracao 0-1; DFP CVM; coluna AA BD_Acoes",
+        "snapshots_acoes.cagr_lucro_5a", "fracao 0-1; DFP CVM; coluna AA BD_Acoes",
+    ),
+    "patrimonio_ativos": _def(
+        "patrimonio_ativos", "Patrimonio/Ativos", FRACAO, UNIDADE_PCT, (ACAO,),
+        "snapshots_acoes.patrimonio_ativos",
+        "fracao 0-1; CVM: patrimonio_liquido / ativo_total; coluna W BD_Acoes",
+    ),
+    "passivos_ativos": _def(
+        "passivos_ativos", "Passivos/Ativos", FRACAO, UNIDADE_PCT, (ACAO,),
+        "snapshots_acoes.passivos_ativos",
+        "fracao 0-1; CVM: passivo_total / ativo_total; coluna X BD_Acoes",
+    ),
+    "giro_ativos": _def(
+        "giro_ativos", "Giro do Ativo", RAZAO, UNIDADE_X, (ACAO,),
+        "snapshots_acoes.giro_ativos",
+        "x; CVM: receita_ltm / ativo_total; coluna Y BD_Acoes",
     ),
     "liq_media": _def("liq_media", "Liquidez Media", MONETARIO, UNIDADE_BRL, (ACAO,), "snapshots_acoes.liq_media"),
     "lpa": _def("lpa", "LPA", MONETARIO, UNIDADE_BRL, (ACAO,), "snapshots_acoes.lpa"),
-    "peg_ratio": _def("peg_ratio", "PEG Ratio", MULTIPLO, UNIDADE_X, (ACAO,), "snapshots_acoes.peg_ratio"),
+    "peg_ratio": _def(
+        "peg_ratio", "PEG Ratio", MULTIPLO, UNIDADE_X, (ACAO,), "snapshots_acoes.peg_ratio",
+        "x; deterministico (pl / (cagr_lucro_5a * 100)); Yahoo so auxiliar",
+    ),
     "valor_mercado": _def(
         "valor_mercado", "Valor de Mercado", MONETARIO, UNIDADE_BRL, (ACAO,),
         "snapshots_acoes.valor_mercado",
@@ -278,11 +299,21 @@ def indicadores_pendentes() -> tuple[str, ...]:
     )
 
 
-def interpretar_valor(tipo_ativo, indicador, valor) -> dict:
+def interpretar_valor(
+    tipo_ativo,
+    indicador,
+    valor,
+    *,
+    ticker=None,
+    setor=None,
+    classificacao=None,
+) -> dict:
     """Interpreta um valor ja coletado. Nao inventa numero nem escala.
 
     valor_numerico e o parse canonico (zero real permanece 0.0). N/A e
     INVALID nunca viram 0. Indicador nao aplicavel ignora o valor recebido.
+    Matriz F.1 (ticker/setor) preserva NAO_APLICAVEL; classificacao ausente
+    nao presume inaplicavel.
     """
     definicao = obter_definicao(indicador)
     tipo = tipo_canonico(tipo_ativo)
@@ -297,8 +328,29 @@ def interpretar_valor(tipo_ativo, indicador, valor) -> dict:
             "aplicavel": False,
         }
 
+    if ticker is not None or setor is not None or classificacao is not None:
+        from pipeline_dados.matriz_aplicabilidade import consultar_aplicabilidade
+
+        status = consultar_aplicabilidade(
+            indicador,
+            classificacao,
+            tipo=tipo,
+            setor=setor,
+            ticker=ticker,
+        )
+        if status == NAO_APLICAVEL:
+            return {
+                "indicador": indicador,
+                "tipo": tipo,
+                "semantica": NAO_APLICAVEL,
+                "valor_numerico": None,
+                "unidade": definicao.unidade if definicao else None,
+                "escala": definicao.escala if definicao else None,
+                "aplicavel": False,
+            }
+
     semantica = classificar_semantica(valor)
-    numero = None if semantica in (AUSENTE, NAO_APLICAVEL, INVALIDO) else parsear_percentual(valor)
+    numero = None if semantica in (AUSENTE, NAO_CALCULAVEL, NAO_APLICAVEL, INVALIDO) else parsear_percentual(valor)
     if semantica == ZERO:
         numero = 0.0
     return {

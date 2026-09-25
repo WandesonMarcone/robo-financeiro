@@ -13,11 +13,13 @@ from sqlalchemy.orm import Session
 
 from pipeline_dados.banco_dados import DadosFinanceirosAcoes, IndicadorCvmAcao, SnapshotAcao
 from pipeline_dados.catalogo_ativos import consultar_por_ticker
+from pipeline_dados.matriz_aplicabilidade import consultar_aplicabilidade
 from pipeline_dados.numerico import derivar_divisao, parsear_numero
 from pipeline_dados.semantica_indicadores import (
     AUSENTE,
     INVALIDO,
     NAO_APLICAVEL,
+    NAO_CALCULAVEL,
     PRESENTE,
     ZERO,
     classificar_semantica,
@@ -31,6 +33,7 @@ ORIGEM_CALCULO = "CVM/CALCULADO"
 PERIODO_LTM = "LTM"
 PERIODO_PONTO = "PONTO"
 PERIODO_CAGR_5A = "CAGR_5A"
+PERIODO_PEG = "PEG"
 
 SETORES_BANCO = frozenset({"Bancos"})
 SETORES_SEGURO = frozenset({"Seguros e Resseguros"})
@@ -66,6 +69,9 @@ FORMULAS = {
     "marg_liquida": "lucro_liquido_ltm / receita_ltm",
     "roe": "lucro_liquido_ltm / patrimonio_liquido",
     "roa": "lucro_liquido_ltm / ativo_total",
+    "patrimonio_ativos": "patrimonio_liquido / ativo_total",
+    "passivos_ativos": "passivo_total / ativo_total",
+    "giro_ativos": "receita_ltm / ativo_total",
     "roic": "ebit_ltm / (patrimonio_liquido + divida_bruta - caixa)",
     "liq_corrente": "ativo_circulante / passivo_circulante",
     "div_liq_patrimonio": "divida_liquida / patrimonio_liquido",
@@ -80,6 +86,7 @@ FORMULAS = {
     "p_ebit": "valor_mercado / ebit_ltm",
     "p_ativo": "valor_mercado / ativo_total",
     "ev_ebit": "(valor_mercado + divida_liquida) / ebit_ltm",
+    "peg_ratio": "pl / (cagr_lucro_5a * 100)",
 }
 
 
@@ -117,11 +124,26 @@ def natureza_financeira(ticker, session=None) -> str:
     return "INDUSTRIAL"
 
 
+def _setor_catalogo(ticker, session=None) -> str | None:
+    if session is None or not ticker:
+        return None
+    registro = consultar_por_ticker(session, ticker)
+    if registro is None:
+        return None
+    return registro.setor
+
+
 def indicador_aplicavel_setor(ticker, indicador, session=None) -> bool:
-    natureza = natureza_financeira(ticker, session=session)
-    if natureza in ("BANCO", "SEGURADORA") and indicador in INDICADORES_NAO_APLICAVEIS_FINANCEIRO:
-        return False
-    return True
+    """Compatibilidade: False só quando a matriz F.1 retorna NAO_APLICAVEL.
+
+    AUSENTE/indeterminado não presume inaplicável (continua calculável).
+    """
+    status = consultar_aplicabilidade(
+        indicador,
+        _setor_catalogo(ticker, session),
+        ticker=ticker,
+    )
+    return status != NAO_APLICAVEL
 
 
 def eh_ytd(registro) -> bool:
@@ -171,7 +193,7 @@ def montar_resultado(
     definicao = obter_definicao(indicador)
     if semantica is None:
         semantica = classificar_semantica(valor)
-    numero = None if semantica in (AUSENTE, NAO_APLICAVEL, INVALIDO) else parsear_numero(valor)
+    numero = None if semantica in (AUSENTE, NAO_CALCULAVEL, NAO_APLICAVEL, INVALIDO) else parsear_numero(valor)
     if semantica == ZERO:
         numero = 0.0
     return {
@@ -214,6 +236,32 @@ def resultado_ausente(indicador, ticker, data_referencia, periodo, observacao, *
         data_referencia=data_referencia,
         periodo=periodo,
         semantica=AUSENTE,
+        observacao=observacao,
+        **kwargs,
+    )
+
+
+def resultado_nao_calculavel(indicador, ticker, data_referencia, periodo, observacao, **kwargs) -> dict[str, Any]:
+    return montar_resultado(
+        indicador,
+        None,
+        ticker=ticker,
+        data_referencia=data_referencia,
+        periodo=periodo,
+        semantica=NAO_CALCULAVEL,
+        observacao=observacao,
+        **kwargs,
+    )
+
+
+def resultado_invalido(indicador, ticker, data_referencia, periodo, observacao, **kwargs) -> dict[str, Any]:
+    return montar_resultado(
+        indicador,
+        None,
+        ticker=ticker,
+        data_referencia=data_referencia,
+        periodo=periodo,
+        semantica=INVALIDO,
         observacao=observacao,
         **kwargs,
     )
@@ -331,6 +379,83 @@ def cagr_lucro_5a(registros: list, ticker: str, data_ref: date) -> dict[str, Any
         registros, ticker, data_ref,
         indicador="cagr_lucro_5a", campo="lucro_liquido", rotulo="lucro",
         exigir_extremos_positivos=True,
+    )
+
+
+def calcular_peg(
+    pl_result: dict[str, Any],
+    cagr_lucro_result: dict[str, Any],
+    ticker: str,
+    data_ref: date,
+    **kwargs,
+) -> dict[str, Any]:
+    """PEG deterministico: P/L dividido pelo CAGR do lucro em percentual.
+
+    Yahoo ``trailingPegRatio`` e apenas benchmark externo; nunca substitui
+    este valor. Regras explicitas de semantica:
+
+    - CAGR do lucro ausente/nao calculavel -> AUSENTE;
+    - P/L ausente -> AUSENTE;
+    - P/L nao positivo -> NAO_CALCULAVEL;
+    - CAGR do lucro nao positivo -> NAO_CALCULAVEL;
+    - valor ilegivel -> INVALIDO.
+    """
+    sem_pl = pl_result.get("semantica")
+    sem_cagr = cagr_lucro_result.get("semantica")
+    if sem_pl == INVALIDO or sem_cagr == INVALIDO:
+        return resultado_invalido(
+            "peg_ratio", ticker, data_ref, PERIODO_PEG,
+            "PEG INVALIDO: P/L ou CAGR do lucro ilegivel.", **kwargs,
+        )
+    if sem_cagr == NAO_APLICAVEL:
+        return resultado_nao_aplicavel(
+            "peg_ratio", ticker, data_ref, PERIODO_PEG,
+            observacao="PEG NAO APLICAVEL: CAGR do lucro nao aplicavel.",
+            **kwargs,
+        )
+    if sem_cagr in (AUSENTE, NAO_CALCULAVEL):
+        return resultado_ausente(
+            "peg_ratio", ticker, data_ref, PERIODO_PEG,
+            "PEG AUSENTE: CAGR do lucro 5a indisponivel.",
+            **kwargs,
+        )
+    if sem_pl in (AUSENTE, NAO_CALCULAVEL, NAO_APLICAVEL):
+        return resultado_ausente(
+            "peg_ratio", ticker, data_ref, PERIODO_PEG,
+            "PEG AUSENTE: P/L indisponivel.",
+            **kwargs,
+        )
+    pl = parsear_numero(pl_result.get("valor"))
+    cagr = parsear_numero(cagr_lucro_result.get("valor"))
+    if pl is None or cagr is None:
+        return resultado_ausente(
+            "peg_ratio", ticker, data_ref, PERIODO_PEG,
+            "PEG AUSENTE: P/L ou CAGR do lucro sem valor.",
+            **kwargs,
+        )
+    if pl <= 0:
+        return resultado_nao_calculavel(
+            "peg_ratio", ticker, data_ref, PERIODO_PEG,
+            "PEG NAO CALCULAVEL: P/L nao positivo.",
+            **kwargs,
+        )
+    if cagr <= 0:
+        return resultado_nao_calculavel(
+            "peg_ratio", ticker, data_ref, PERIODO_PEG,
+            "PEG NAO CALCULAVEL: CAGR do lucro 5a nao positivo.",
+            **kwargs,
+        )
+    valor = derivar_divisao(pl, cagr * 100.0)
+    if valor is None:
+        return resultado_nao_calculavel(
+            "peg_ratio", ticker, data_ref, PERIODO_PEG,
+            "PEG NAO CALCULAVEL: razao indefinida.", **kwargs,
+        )
+    return montar_resultado(
+        "peg_ratio", valor, ticker=ticker, data_referencia=data_ref,
+        periodo=PERIODO_PEG, fonte_primaria=ORIGEM_CALCULO,
+        observacao="PEG = P/L / (CAGR Lucro 5a em %); CVM.",
+        **kwargs,
     )
 
 
@@ -464,8 +589,11 @@ def calcular_indicadores_ticker(
     coletado = data_coleta or datetime.now()
     extras = {"data_coleta": coletado}
 
+    classificacao = _setor_catalogo(ticker, session)
+
     def na_ou_calc(indicador, periodo, factory):
-        if not indicador_aplicavel_setor(ticker, indicador, session=session):
+        status = consultar_aplicabilidade(indicador, classificacao, ticker=ticker)
+        if status == NAO_APLICAVEL:
             return resultado_nao_aplicavel(indicador, ticker, data_ref, periodo, **extras)
         return factory()
 
@@ -486,6 +614,8 @@ def calcular_indicadores_ticker(
         return montar_resultado(nome, valor, ticker=ticker, data_referencia=data_ref,
                                 periodo=PERIODO_LTM, **extras)
 
+    cagr_lucro_result = cagr_lucro_5a(registros, ticker, data_ref)
+
     resultados = [
         _ltm_res("receita_ltm", receita_ltm),
         _ltm_res("lucro_liquido_ltm", lucro_ltm),
@@ -505,6 +635,20 @@ def calcular_indicadores_ticker(
         _divisao_indicador(
             "roa", lucro_ltm, _numero_campo(ultimo, "ativo_total"),
             ticker, data_ref, PERIODO_LTM, FORMULAS["roa"],
+        ),
+        _divisao_indicador(
+            "patrimonio_ativos", _numero_campo(ultimo, "patrimonio_liquido"),
+            _numero_campo(ultimo, "ativo_total"),
+            ticker, data_ref, PERIODO_PONTO, FORMULAS["patrimonio_ativos"],
+        ),
+        _divisao_indicador(
+            "passivos_ativos", _numero_campo(ultimo, "passivo_total"),
+            _numero_campo(ultimo, "ativo_total"),
+            ticker, data_ref, PERIODO_PONTO, FORMULAS["passivos_ativos"],
+        ),
+        _divisao_indicador(
+            "giro_ativos", receita_ltm, _numero_campo(ultimo, "ativo_total"),
+            ticker, data_ref, PERIODO_LTM, FORMULAS["giro_ativos"],
         ),
         na_ou_calc("roic", PERIODO_LTM, lambda: _divisao_indicador(
             "roic", ebit_ltm,
@@ -537,7 +681,7 @@ def calcular_indicadores_ticker(
             ebit_ltm, ticker, data_ref, PERIODO_LTM,
         )),
         cagr_receita_5a(registros, ticker, data_ref),
-        cagr_lucro_5a(registros, ticker, data_ref),
+        cagr_lucro_result,
     ]
 
     snap = mercado if mercado is not None else _mercado_mais_recente(session, ativo_id)
@@ -555,9 +699,10 @@ def calcular_indicadores_ticker(
         "vpa", _numero_campo(ultimo, "patrimonio_liquido"), qtd_acoes,
         ticker, data_ref, PERIODO_PONTO, FORMULAS["vpa"],
     ))
-    resultados.append(_divisao_indicador(
+    pl_result = _divisao_indicador(
         "pl", valor_mercado, lucro_ltm, ticker, data_ref, PERIODO_LTM, FORMULAS["pl"],
-    ))
+    )
+    resultados.append(pl_result)
     resultados.append(_divisao_indicador(
         "pvp", valor_mercado, _numero_campo(ultimo, "patrimonio_liquido"),
         ticker, data_ref, PERIODO_PONTO, FORMULAS["pvp"],
@@ -578,6 +723,7 @@ def calcular_indicadores_ticker(
     resultados.append(na_ou_calc("ev_ebit", PERIODO_LTM, lambda: _divisao_indicador(
         "ev_ebit", ev, ebit_ltm, ticker, data_ref, PERIODO_LTM, FORMULAS["ev_ebit"],
     )))
+    resultados.append(calcular_peg(pl_result, cagr_lucro_result, ticker, data_ref, **extras))
 
     for item in resultados:
         item.setdefault("data_coleta", coletado)
@@ -649,13 +795,48 @@ def mapa_cagr_cvm_producao(
     tickers: Iterable[str] | None = None,
 ) -> dict[str, dict[str, float]]:
     """CAGR CVM calculavel para o fluxo de producao. Sem valor valido -> omitido."""
+    return _mapa_indicadores_producao(session, tickers, ("cagr_rec_5a", "cagr_lucro_5a"))
+
+
+# Indicadores deterministicos calculados pela CVM que entram no fluxo de
+# producao (BD_Acoes -> snapshot -> API). Yahoo/Fundamentus continuam como
+# fallback/benchmark, nunca substituindo o valor CVM quando calculavel.
+INDICADORES_CVM_PRODUCAO = (
+    "cagr_rec_5a",
+    "cagr_lucro_5a",
+    "patrimonio_ativos",
+    "passivos_ativos",
+    "giro_ativos",
+    "peg_ratio",
+)
+
+
+def mapa_indicadores_cvm_producao(
+    session: Session | None,
+    tickers: Iterable[str] | None = None,
+) -> dict[str, dict[str, float]]:
+    """Indicadores CVM deterministicos para o fluxo de producao.
+
+    Inclui os dois CAGR, os tres indicadores contabeis (patrimonio/ativos,
+    passivos/ativos, giro do ativo) e o PEG deterministico. Semantica
+    diferente de PRESENTE nunca e transportada (ausencia nunca vira zero).
+    """
+    return _mapa_indicadores_producao(session, tickers, INDICADORES_CVM_PRODUCAO)
+
+
+def _mapa_indicadores_producao(
+    session: Session | None,
+    tickers: Iterable[str] | None,
+    indicadores: Iterable[str],
+) -> dict[str, dict[str, float]]:
     if session is None:
         return {}
     alvos = {str(t).strip().upper() for t in (tickers or []) if t}
-    indicadores = ("cagr_rec_5a", "cagr_lucro_5a")
+    nomes = tuple(indicadores)
+    if not nomes:
+        return {}
     query = session.query(IndicadorCvmAcao).filter(
-        IndicadorCvmAcao.indicador.in_(indicadores),
-        IndicadorCvmAcao.periodo == PERIODO_CAGR_5A,
+        IndicadorCvmAcao.indicador.in_(nomes),
     )
     if alvos:
         query = query.filter(IndicadorCvmAcao.ticker.in_(alvos))

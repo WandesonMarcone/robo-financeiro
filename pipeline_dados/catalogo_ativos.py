@@ -25,7 +25,23 @@ logger = logging.getLogger(__name__)
 # Origem dos registros semeado a partir dos mapas de config.py.
 FONTE_CONFIG = "config"
 
+# Sentinel interno: sem classificação econômica confiável. Não é setor B3.
+SETOR_NAO_CLASSIFICADO = "NAO_CLASSIFICADO"
+
 _TIPOS_VALIDOS = {t.value for t in TipoAtivo}
+
+# Rótulos legados/ausentes que nunca contam como setor econômico confiável.
+_SETORES_NAO_CONFIAVEIS = frozenset({
+    "",
+    "OUTROS",
+    "NAO CLASSIFICADO",
+    "NAO_CLASSIFICADO",
+    "AUSENTE",
+    "N/D",
+    "ND",
+    "N/A",
+    "NA",
+})
 
 # Mapa reverso ticker -> CNPJ (ACAO) usado como fallback offline do seed.
 _TICKER_PARA_CNPJ = {ticker.upper(): cnpj for cnpj, ticker in config.MAPA_CNPJ_B3.items()}
@@ -48,14 +64,114 @@ def _cnpj_normalizado(cnpj) -> str | None:
     return formatar_cnpj(cnpj)
 
 
+def _chave_setor(setor) -> str | None:
+    """Chave comparável (maiúsculas, sem acento) ou None se vazio."""
+    if setor is None:
+        return None
+    texto = str(setor).strip()
+    if not texto:
+        return None
+    return " ".join(normalizar_texto(texto).upper().replace("_", " ").replace("-", " ").split())
+
+
+def _rotulo_nao_confiavel(setor) -> bool:
+    """True para None/vazio/Outros/Não Classificado/NAO_CLASSIFICADO/AUSENTE."""
+    chave = _chave_setor(setor)
+    if chave is None:
+        return True
+    compacto = chave.replace(" ", "_")
+    return chave in _SETORES_NAO_CONFIAVEIS or compacto in _SETORES_NAO_CONFIAVEIS
+
+
+def _taxonomia_b3() -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    """Reutiliza config.MAPA_SETORES_B3. Não cria taxonomia paralela.
+
+    Retorna (ticker->macro, subsetor->macro, macros presentes).
+    """
+    ticker_para_macro = {}
+    subsetor_para_macro = {}
+    macros = {}
+    for macro, subsetores in config.MAPA_SETORES_B3.items():
+        macros[macro] = macro
+        for subsetor, tickers in subsetores.items():
+            subsetor_para_macro[subsetor] = macro
+            for ticker in tickers:
+                ticker_para_macro[str(ticker).strip().upper()] = macro
+    return ticker_para_macro, subsetor_para_macro, macros
+
+
+def setor_confiavel(setor) -> bool:
+    """True só se o rótulo for um macro/subsetor real de MAPA_SETORES_B3."""
+    if _rotulo_nao_confiavel(setor):
+        return False
+    texto = str(setor).strip()
+    _ticker_para_macro, subsetor_para_macro, macros = _taxonomia_b3()
+    return texto in macros or texto in subsetor_para_macro
+
+
+def setor_canonico(setor) -> str | None:
+    """Macro B3 correspondente, ou None se o rótulo não for confiável."""
+    if not setor_confiavel(setor):
+        return None
+    texto = str(setor).strip()
+    _ticker_para_macro, subsetor_para_macro, macros = _taxonomia_b3()
+    if texto in macros:
+        return texto
+    return subsetor_para_macro.get(texto)
+
+
+def classificar_setor_catalogo(ticker) -> str:
+    """Macro confiável do mapa B3, senão NAO_CLASSIFICADO. Não inventa setor."""
+    if not ticker:
+        return SETOR_NAO_CLASSIFICADO
+    ticker_norm = str(ticker).strip().upper()
+    ticker_para_macro, _subsetor_para_macro, _macros = _taxonomia_b3()
+    return ticker_para_macro.get(ticker_norm, SETOR_NAO_CLASSIFICADO)
+
+
+def inventario_mapa_setores_b3() -> dict:
+    """Contagens da taxonomia existente em config.MAPA_SETORES_B3."""
+    ticker_para_macro, subsetor_para_macro, macros = _taxonomia_b3()
+    return {
+        "macrosetores": len(macros),
+        "subsetores": len(subsetor_para_macro),
+        "tickers": len(ticker_para_macro),
+    }
+
+
+def _resolver_setor_catalogo(existente, setor_informado, ticker, tipo) -> str | None:
+    """Aplica a regra de persistência de setor no catálogo.
+
+    Confiável informado substitui. Ausência/Outros nunca apaga setor confiável.
+    Ação nova ou sem setor confiável usa o mapa B3 automaticamente.
+    """
+    informado_canonico = setor_canonico(setor_informado)
+    if informado_canonico is not None:
+        return informado_canonico
+
+    informado_ausente = _rotulo_nao_confiavel(setor_informado)
+
+    if tipo == TipoAtivo.ACAO.value:
+        if setor_confiavel(existente):
+            return existente
+        automatico = classificar_setor_catalogo(ticker)
+        if setor_confiavel(automatico):
+            return automatico
+        return SETOR_NAO_CLASSIFICADO
+
+    if not informado_ausente:
+        return str(setor_informado).strip()
+    if not _rotulo_nao_confiavel(existente):
+        return existente
+    if existente is not None and str(existente).strip() == SETOR_NAO_CLASSIFICADO:
+        return SETOR_NAO_CLASSIFICADO
+    return None
+
+
 def _setor_por_ticker() -> dict[str, str]:
     """Mapa reverso ticker -> setor macro a partir de config.MAPA_SETORES_B3."""
-    mapa = {}
-    for setor, sub_setores in config.MAPA_SETORES_B3.items():
-        for tickers in sub_setores.values():
-            for ticker in tickers:
-                mapa[ticker.upper()] = setor
-    return mapa
+    ticker_para_macro, _subsetor_para_macro, _macros = _taxonomia_b3()
+    return ticker_para_macro
 
 
 def _entradas_acao() -> list[dict]:
@@ -69,7 +185,7 @@ def _entradas_acao() -> list[dict]:
             "tipo": TipoAtivo.ACAO.value,
             "cnpj": _cnpj_normalizado(cnpj),
             "nome_emissor": None,
-            "setor": setor_por_ticker.get(ticker_norm),
+            "setor": setor_por_ticker.get(ticker_norm) or SETOR_NAO_CLASSIFICADO,
             "fonte": FONTE_CONFIG,
         })
     return entradas
@@ -140,6 +256,10 @@ def registrar_no_catalogo(
 
     ``cnpj`` é armazenado apenas quando tem 14 dígitos; caso contrário vira
     NULL (nunca se inventa identificador).
+
+    ``setor`` de ação usa ``MAPA_SETORES_B3`` quando confiável. None/vazio/
+    ``Outros``/``Não Classificado`` nunca sobrescrevem um setor econômico
+    existente; sem classificação o catálogo grava ``NAO_CLASSIFICADO``.
     """
     ticker_norm = str(ticker).strip().upper()
     tipo_norm = _normalizar_tipo(tipo)
@@ -153,7 +273,7 @@ def registrar_no_catalogo(
     registro.tipo = tipo_norm
     registro.cnpj = cnpj_real(cnpj)
     registro.nome_emissor = nome_emissor
-    registro.setor = setor
+    registro.setor = _resolver_setor_catalogo(registro.setor, setor, ticker_norm, tipo_norm)
     if fonte is not None:
         registro.fonte = fonte
     session.commit()

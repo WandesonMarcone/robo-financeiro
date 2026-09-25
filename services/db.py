@@ -35,6 +35,7 @@ from pipeline_dados.banco_dados import (
     garantir_colunas_cvm_acoes,
     garantir_colunas_cvm_fii,
     garantir_colunas_freshness,
+    garantir_colunas_indicadores_acoes,
 )
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,7 @@ def criar_tabelas() -> None:
     garantir_colunas_freshness(engine)
     garantir_colunas_cvm_fii(engine)
     garantir_colunas_cvm_acoes(engine)
+    garantir_colunas_indicadores_acoes(engine)
 
 
 @contextmanager

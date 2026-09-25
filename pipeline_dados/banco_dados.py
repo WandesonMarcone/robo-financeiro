@@ -296,6 +296,10 @@ class SnapshotAcao(Base):
     roa: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
     roic: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
     cagr_rec_5a: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    cagr_lucro_5a: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    patrimonio_ativos: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    passivos_ativos: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    giro_ativos: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
     liq_media: Mapped[Decimal | None] = mapped_column(Numeric(24, 4))
     vpa: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
     lpa: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
@@ -896,6 +900,38 @@ def garantir_colunas_cvm_acoes(engine):
                 continue
             conexao.execute(
                 text(f"ALTER TABLE dados_financeiros_acoes ADD COLUMN {nome} {ddl}")
+            )
+            adicionadas += 1
+    return adicionadas
+
+
+def garantir_colunas_indicadores_acoes(engine):
+    """Migration aditiva: indicadores CVM deterministicos em snapshots_acoes.
+
+    Acrescenta ``cagr_lucro_5a``, ``patrimonio_ativos``, ``passivos_ativos`` e
+    ``giro_ativos`` (o PEG ja usa a coluna existente ``peg_ratio``). Idempotente.
+    Nunca altera dado existente nem remove coluna. SQLite e PostgreSQL.
+    Retorna a quantidade de colunas adicionadas.
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if "snapshots_acoes" not in insp.get_table_names():
+        return 0
+    nomes = {c["name"] for c in insp.get_columns("snapshots_acoes")}
+    alvos = (
+        ("cagr_lucro_5a", "NUMERIC(18, 6)"),
+        ("patrimonio_ativos", "NUMERIC(18, 6)"),
+        ("passivos_ativos", "NUMERIC(18, 6)"),
+        ("giro_ativos", "NUMERIC(18, 6)"),
+    )
+    adicionadas = 0
+    with engine.begin() as conexao:
+        for nome, ddl in alvos:
+            if nome in nomes:
+                continue
+            conexao.execute(
+                text(f"ALTER TABLE snapshots_acoes ADD COLUMN {nome} {ddl}")
             )
             adicionadas += 1
     return adicionadas
