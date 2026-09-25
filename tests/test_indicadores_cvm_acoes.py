@@ -238,9 +238,11 @@ def test_banco_marca_nao_aplicavel():
     mapa = _por_indicador(calcular_indicadores_ticker("BBAS3", registros))
     assert mapa["ebitda_ltm"]["semantica"] == NAO_APLICAVEL
     assert mapa["ebitda_ltm"]["valor"] is None
-    assert mapa["marg_bruta"]["semantica"] == NAO_APLICAVEL
+    assert mapa["marg_ebit"]["semantica"] == NAO_APLICAVEL
+    assert mapa["p_ebit"]["semantica"] == NAO_APLICAVEL
     assert mapa["div_liq_ebit"]["semantica"] == NAO_APLICAVEL
     assert mapa["roe"]["valor"] == 0.4
+    assert mapa["roa"]["valor"] == 0.1
 
 
 def test_seguradora_nao_aplicavel():

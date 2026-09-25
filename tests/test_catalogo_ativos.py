@@ -13,13 +13,18 @@ from sqlalchemy.orm import sessionmaker
 import config
 from pipeline_dados.banco_dados import AtivoCatalogo, Base, TipoAtivo
 from pipeline_dados.catalogo_ativos import (
+    SETOR_NAO_CLASSIFICADO,
+    classificar_setor_catalogo,
     consultar_por_cnpj,
     consultar_por_ticker,
+    inventario_mapa_setores_b3,
     listar_tickers_catalogo,
     obter_tickers_com_fallback,
     registrar_no_catalogo,
     resolver_cnpj,
     seed_catalogo,
+    setor_canonico,
+    setor_confiavel,
 )
 from pipeline_dados.normalizacao import normalizar_cnpj
 
@@ -225,6 +230,95 @@ def test_registrar_no_catalogo_cria_e_atualiza(db_session):
 def test_registrar_no_catalogo_cnpj_invalido_vira_none(db_session):
     registro = registrar_no_catalogo(db_session, "YYAX11", "ETF", cnpj="123")
     assert registro.cnpj is None
+
+
+# ==========================================
+# CLASSIFICAÇÃO DE SETORES (PARTE E)
+# ==========================================
+
+def test_mapa_setores_b3_taxonomia_ampla_reutilizada():
+    inventario = inventario_mapa_setores_b3()
+    assert inventario["macrosetores"] == len(config.MAPA_SETORES_B3)
+    assert inventario["macrosetores"] == 10
+    assert inventario["subsetores"] == 32
+    assert inventario["tickers"] == 186
+    assert "Outros" not in config.MAPA_SETORES_B3
+    assert "Não Classificado" not in config.MAPA_SETORES_B3
+
+
+def test_classificacao_conhecida_pelo_mapa():
+    assert classificar_setor_catalogo("petr4") == "Petróleo, Gás & Biocombustíveis"
+    assert classificar_setor_catalogo("ITUB4") == "Financeiro"
+    assert classificar_setor_catalogo("VALE3") == "Materiais Básicos"
+    assert setor_canonico("Exploração e Refino") == "Petróleo, Gás & Biocombustíveis"
+    assert setor_confiavel("Financeiro")
+
+
+def test_classificacao_ausente_nao_inventa_setor():
+    assert classificar_setor_catalogo("EMBR3") == SETOR_NAO_CLASSIFICADO
+    assert classificar_setor_catalogo("ZZZZ3") == SETOR_NAO_CLASSIFICADO
+    assert classificar_setor_catalogo("") == SETOR_NAO_CLASSIFICADO
+    assert setor_canonico(None) is None
+    assert setor_canonico("") is None
+
+
+def test_outros_nao_e_setor_confiavel():
+    assert setor_confiavel("Outros") is False
+    assert setor_confiavel("Não Classificado") is False
+    assert setor_confiavel("NAO_CLASSIFICADO") is False
+    assert setor_confiavel("AUSENTE") is False
+    assert setor_canonico("Outros") is None
+    assert setor_canonico("Não Classificado") is None
+
+
+def test_registrar_classifica_novo_ativo_automaticamente(db_session):
+    registro = registrar_no_catalogo(db_session, "PRIO3", TipoAtivo.ACAO)
+    assert registro.setor == "Petróleo, Gás & Biocombustíveis"
+
+
+def test_registrar_ativo_sem_classificacao_permanece_nao_classificado(db_session):
+    registro = registrar_no_catalogo(db_session, "EMBR3", TipoAtivo.ACAO)
+    assert registro.setor == SETOR_NAO_CLASSIFICADO
+    assert setor_confiavel(registro.setor) is False
+
+
+def test_ausencia_nao_sobrescreve_setor_existente(db_session):
+    registrar_no_catalogo(db_session, "PETR4", TipoAtivo.ACAO, setor="Petróleo, Gás & Biocombustíveis")
+    atualizado = registrar_no_catalogo(db_session, "PETR4", TipoAtivo.ACAO, setor=None)
+    assert atualizado.setor == "Petróleo, Gás & Biocombustíveis"
+
+    atualizado = registrar_no_catalogo(db_session, "PETR4", TipoAtivo.ACAO, setor="")
+    assert atualizado.setor == "Petróleo, Gás & Biocombustíveis"
+
+    atualizado = registrar_no_catalogo(db_session, "PETR4", TipoAtivo.ACAO, setor="Outros")
+    assert atualizado.setor == "Petróleo, Gás & Biocombustíveis"
+
+    atualizado = registrar_no_catalogo(db_session, "PETR4", TipoAtivo.ACAO, setor="Não Classificado")
+    assert atualizado.setor == "Petróleo, Gás & Biocombustíveis"
+
+
+def test_setor_confiavel_existente_preservado_quando_mapa_ausente(db_session):
+    registrar_no_catalogo(db_session, "EMBR3", TipoAtivo.ACAO, setor="Bens Industriais")
+    atualizado = registrar_no_catalogo(db_session, "EMBR3", TipoAtivo.ACAO)
+    assert atualizado.setor == "Bens Industriais"
+
+
+def test_seed_marca_acoes_sem_mapa_como_nao_classificado(db_session):
+    seed_catalogo(db_session)
+    petr4 = consultar_por_ticker(db_session, "PETR4")
+    embr3 = consultar_por_ticker(db_session, "EMBR3")
+    hapv3 = consultar_por_ticker(db_session, "HAPV3")
+    viva3 = consultar_por_ticker(db_session, "VIVA3")
+    assert petr4.setor == "Petróleo, Gás & Biocombustíveis"
+    assert embr3.setor == SETOR_NAO_CLASSIFICADO
+    assert hapv3.setor == SETOR_NAO_CLASSIFICADO
+    assert viva3.setor == SETOR_NAO_CLASSIFICADO
+
+    acoes = db_session.query(AtivoCatalogo).filter(AtivoCatalogo.tipo == "ACAO").all()
+    classificados = [a for a in acoes if setor_confiavel(a.setor)]
+    nao_classificados = [a for a in acoes if not setor_confiavel(a.setor)]
+    assert len(classificados) == 57
+    assert len(nao_classificados) == 3
 
 
 # ==========================================
