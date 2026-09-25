@@ -65,9 +65,11 @@ _UNIDADES_API = {
 }
 
 
-def _campo_semantico(tipo_ativo, indicador, valor):
+def _campo_semantico(tipo_ativo, indicador, valor, *, ticker=None, setor=None):
     """Contrato 8.5 ao lado do número persistido, sem alterar o valor armazenado."""
-    interpretacao = mercado.interpretar_indicador(tipo_ativo, indicador, valor)
+    interpretacao = mercado.interpretar_indicador(
+        tipo_ativo, indicador, valor, ticker=ticker, setor=setor,
+    )
     unidade = interpretacao.get("unidade")
     escala = interpretacao.get("escala")
     if unidade is None and indicador in _UNIDADES_API:
@@ -80,13 +82,15 @@ def _campo_semantico(tipo_ativo, indicador, valor):
     }
 
 
-def _anexar_semantica(payload, tipo_ativo, campos):
+def _anexar_semantica(payload, tipo_ativo, campos, *, ticker=None, setor=None):
     """Acrescenta bloco ``campos`` com semantica/unidade/escala por indicador."""
     semantica = {}
     for indicador in campos:
         if indicador not in payload:
             continue
-        semantica[indicador] = _campo_semantico(tipo_ativo, indicador, payload.get(indicador))
+        semantica[indicador] = _campo_semantico(
+            tipo_ativo, indicador, payload.get(indicador), ticker=ticker, setor=setor,
+        )
     if semantica:
         payload["campos"] = semantica
     return payload
@@ -110,7 +114,8 @@ def serializar_indicador(registro):
     ativo = getattr(registro, "ativo", None)
     valor_atual = _numero(registro.valor_atual)
     interpretacao = mercado.interpretar_indicador(
-        registro.tipo_ativo, registro.indicador, registro.valor_atual
+        registro.tipo_ativo, registro.indicador, registro.valor_atual,
+        ticker=ativo.ticker if ativo is not None else None,
     )
     return {
         "id": registro.id,
@@ -433,6 +438,7 @@ def serializar_snapshot_fii(snapshot):
         payload,
         "FII",
         ("preco", "dy", "pvp", "vpa", "liquidez", "lucro_12m", "dividendo_mensal", "qtd_imoveis"),
+        ticker=payload.get("ticker"),
     )
 
 
@@ -476,6 +482,7 @@ def serializar_snapshot_acao(snapshot):
             "psr", "p_cap_giro", "p_at_circ_liq", "liq_corrente", "roe", "roa", "roic",
             "cagr_rec_5a", "liq_media", "lpa", "peg_ratio", "valor_mercado",
         ),
+        ticker=payload.get("ticker"),
     )
 
 
@@ -539,6 +546,7 @@ def serializar_dados_financeiros_acoes(registro):
             "divida_bruta", "divida_liquida", "receita", "lucro_bruto",
             "ebitda", "ebit", "lucro_liquido", "fco",
         ),
+        ticker=payload.get("ticker"),
     )
 
 
@@ -580,6 +588,7 @@ def serializar_dados_financeiros_fiis(registro):
             "resultado_ligado_venda", "vacancia_fisica", "vacancia_financeira",
             "despesas_taxas",
         ),
+        ticker=payload.get("ticker"),
     )
 
 

@@ -191,3 +191,16 @@ export type FreshnessEstado = {
   tipo: string | null;
   categorias: Record<string, FreshnessCategoria | null>;
 };
+
+export type Documento = {
+  id: number;
+  ativo_id: number | null;
+  ticker: string | null;
+  data_publicacao: string | null;
+  tipo_documento: string | null;
+  url_pdf: string | null;
+  assunto: string | null;
+  id_b3: string | null;
+  status_processamento: string | null;
+  data_atualizacao: string | null;
+};

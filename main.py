@@ -83,6 +83,7 @@ from pipeline_dados.banco_dados import (
     garantir_colunas_cvm_acoes,
     garantir_colunas_cvm_fii,
     garantir_colunas_freshness,
+    garantir_colunas_indicadores_acoes,
 )
 
 # 4. Serviços (Orquestrador)

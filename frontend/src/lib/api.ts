@@ -9,6 +9,7 @@ import type {
   Acompanhamento,
   AlertaEvento,
   AtivoCatalogo,
+  Documento,
   FreshnessEstado,
   Indicador,
   LoginPayload,
@@ -221,18 +222,35 @@ export async function getAcompanhados(pageSize = 100): Promise<ListResult<Acompa
 
 export async function getNotificacoes(query?: {
   nao_lidas?: boolean;
+  page?: number;
   page_size?: number;
 }): Promise<ListResult<Notificacao>> {
   const envelope = await apiFetch<Notificacao[]>(
     "/notificacoes",
     {},
     {
-      page: 1,
+      page: query?.page ?? 1,
       page_size: query?.page_size ?? 20,
       nao_lidas: query?.nao_lidas ? "true" : undefined,
     },
   );
   return { items: asList(envelope.data), meta: asMeta(envelope.meta) };
+}
+
+export async function marcarNotificacaoLida(id: number): Promise<Notificacao> {
+  const envelope = await apiFetch<Notificacao>(`/notificacoes/${id}/lida`, { method: "POST" });
+  if (!envelope.data) {
+    throw new ApiError("Resposta de leitura invalida", 500, null);
+  }
+  return envelope.data;
+}
+
+export async function marcarTodasNotificacoesLidas(): Promise<number> {
+  const envelope = await apiFetch<{ marcadas: number }>("/notificacoes/ler-todas", { method: "POST" });
+  if (typeof envelope.meta?.total === "number") {
+    return envelope.meta.total;
+  }
+  return typeof envelope.data?.marcadas === "number" ? envelope.data.marcadas : 0;
 }
 
 export async function getAlertas(pageSize = 20): Promise<ListResult<AlertaEvento>> {
@@ -286,4 +304,27 @@ export async function getIndicadores(
 export async function getFreshness(ticker: string): Promise<FreshnessEstado | null> {
   const envelope = await apiFetch<FreshnessEstado>("/mercado/freshness", {}, { ticker });
   return envelope.data;
+}
+
+export async function getDocumentos(query?: {
+  ticker?: string;
+  tipo_documento?: string;
+  status?: string;
+  ativo_id?: number;
+  page?: number;
+  page_size?: number;
+}): Promise<ListResult<Documento>> {
+  const envelope = await apiFetch<Documento[]>(
+    "/documentos",
+    {},
+    {
+      ticker: query?.ticker,
+      tipo_documento: query?.tipo_documento,
+      status: query?.status,
+      ativo_id: query?.ativo_id,
+      page: query?.page ?? 1,
+      page_size: query?.page_size ?? 20,
+    },
+  );
+  return { items: asList(envelope.data), meta: asMeta(envelope.meta) };
 }

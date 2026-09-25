@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiFetch, isForbidden, isUnauthorized } from "./api";
+import { apiFetch, isForbidden, isUnauthorized, marcarNotificacaoLida } from "./api";
 import { getSessionToken, setSessionToken, tokenNeverInUrl } from "./session";
 import { buildApiUrl } from "./api";
 
@@ -29,6 +29,13 @@ describe("cliente API", () => {
     expect(parcial).toBe("/api/v1/ativos?ticker=PETR");
     expect(exato).not.toContain("like");
     expect(parcial).not.toContain("PETR4");
+  });
+
+  it("pesquisa de documentos usa igualdade exata do ticker", () => {
+    const url = buildApiUrl("/documentos", { ticker: "HGLG11", tipo_documento: "Relatorio Gerencial", status: "SALVO" });
+    expect(url).toBe("/api/v1/documentos?ticker=HGLG11&tipo_documento=Relatorio+Gerencial&status=SALVO");
+    expect(url).not.toContain("token");
+    expect(url).not.toContain("like");
   });
 
   it("envia X-Session-Token no header e nunca na URL", async () => {
@@ -98,5 +105,30 @@ describe("cliente API", () => {
     await apiFetch("/me");
     expect(seen).toEqual(["tok-a", "tok-b"]);
     expect(getSessionToken()).toBe("tok-b");
+  });
+
+  it("marca notificacao lida no endpoint existente", async () => {
+    setSessionToken("tok-user-a");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        expect(url).toBe("/api/v1/notificacoes/51/lida");
+        expect(String(init?.method)).toBe("POST");
+        const headers = new Headers(init?.headers);
+        expect(headers.get("X-Session-Token")).toBe("tok-user-a");
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: "success",
+            data: { id: 51, lida_em: "2026-09-12T10:00:00" },
+            meta: { lida: true },
+          }),
+        };
+      }),
+    );
+    const item = await marcarNotificacaoLida(51);
+    expect(item.id).toBe(51);
+    expect(item.lida_em).toBe("2026-09-12T10:00:00");
   });
 });

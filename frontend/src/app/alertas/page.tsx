@@ -1,10 +1,5 @@
-import { PlaceholderPage } from "@/components/PlaceholderPage";
+import { AlertasView } from "@/components/AlertasView";
 
 export default function AlertasPage() {
-  return (
-    <PlaceholderPage
-      title="Alertas"
-      contract="GET /alertas (eventos de mercado, somente leitura). Inbox pessoal em /notificacoes. Motor gera; website nao cria alerta."
-    />
-  );
+  return <AlertasView />;
 }
