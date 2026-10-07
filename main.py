@@ -1,23 +1,10 @@
-import logging
-import os
 import sqlite3
-
-import config
-
-logger = logging.getLogger(__name__)
+import os
 
 def garantir_banco_atualizado():
-    # Migração legada exclusiva do SQLite local (banco de desenvolvimento).
-    # Só tem efeito quando a conexão ativa é o SQLite padrão, ou seja, quando
-    # DATABASE_URL não foi definida. Em produção (PostgreSQL/Neon) a coluna já
-    # faz parte do modelo ORM e não existe arquivo SQLite operacional.
-    url = config.obter_database_url()
-    if not url.startswith("sqlite:///"):
-        logger.info("Conexão ativa não é SQLite local; migração legada ignorada.")
-        return
-
-    db_path = url.replace("sqlite:///", "", 1)
-
+    # Caminho do seu banco
+    db_path = "pipeline_dados/banco_institucional.db"
+    
     # Se o banco existe, verificamos a coluna
     if os.path.exists(db_path):
         try:
@@ -28,9 +15,9 @@ def garantir_banco_atualizado():
             conn.commit()
             conn.close()
             print("✅ Banco atualizado com sucesso na inicialização!")
-        except Exception:
+        except Exception as e:
             # Se der erro (provavelmente porque a coluna já existe), apenas continuamos
-            print("ℹ️ Verificação do banco concluída.")
+            print(f"ℹ️ Verificação do banco concluída.")
 
 # CHAME ESSA FUNÇÃO ANTES DE INICIAR O BOT
 garantir_banco_atualizado()
@@ -38,146 +25,63 @@ garantir_banco_atualizado()
 # ... resto do seu código (bot.polling, etc) ...
 
 
+import os
 import time
-
 import pytz
 import telebot
+from flask import Flask, request
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from flask import Flask, request
-
+from sqlalchemy import create_engine
 from bot.loader import bot as tele_bot
-from services import telegram as telegram_svc
 
 # 1. Configurações Globais
-
-# Logging estruturado + validação de configuração no startup
-config.configurar_logging()
-problemas, avisos = config.verificar_configuracao()
-for aviso in avisos:
-    logger.warning("Configuração incompleta: %s", aviso)
-for problema in problemas:
-    logger.error("Configuração ausente (obrigatória): %s", problema)
+import config
 
 # 2. O Loader (Coração do bot - NÃO instanciar o bot novamente!)
-import bot.callbacks_revisao  # noqa: F401 (registra handlers por efeito colateral)
+from bot.loader import bot
+
+# 3. Registrando os Comandos e Menus (Essencial para o bot "ouvir" o Telegram)
 import bot.comandos
-import bot.confirmacoes  # Confirmação explícita de operações destrutivas
 import bot.handlers
-import bot.callbacks_menus  # catch-all por último para não interceptar handlers dedicados
-
-# ==========================================
-# ⚙️ CONFIGURAÇÃO INICIAL DO BANCO
-# ==========================================
-# Engine único e centralizado (Fase 2): o create_engine vive em
-# atualizador_documentos.py com pool settings; aqui apenas reutilizamos o
-# mesmo engine para criar as tabelas, sem duplicar a configuração da conexão.
-from atualizador_documentos import engine
-from bot.loader import bot  # noqa: F401 (garante que o bot do loader é usado, sem nova instância)
-
-# 5. Banco de Dados (Garantir a criação das tabelas)
-from pipeline_dados.banco_dados import (
-    Base,
-    garantir_cnpj_nullable,
-    garantir_coluna_plano,
-    garantir_colunas_cvm_acoes,
-    garantir_colunas_cvm_fii,
-    garantir_colunas_freshness,
-    garantir_colunas_indicadores_acoes,
-)
+import bot.callbacks_revisao
+import bot.callbacks_menus
 
 # 4. Serviços (Orquestrador)
 from services.orquestrador import varredura_diaria
 
-# 4.1 Seed do SUPERADMIN (Fase 5, Etapa 5): roda após a criação das tabelas.
-from services.seed import garantir_superadmin_inicial
+# 5. Banco de Dados (Garantir a criação das tabelas)
+from pipeline_dados.banco_dados import Base
 
+# ==========================================
+# ⚙️ CONFIGURAÇÃO INICIAL DO BANCO
+# ==========================================
+url_banco = os.environ.get('DATABASE_URL', 'sqlite:///pipeline_dados/banco_institucional.db')
+
+if url_banco.startswith("postgres://"):
+    url_banco = url_banco.replace("postgres://", "postgresql://", 1)
+
+engine = create_engine(url_banco)
 Base.metadata.create_all(engine)
-logger.info("Banco de dados verificado e tabelas criadas com sucesso.")
-
-# Fase 6, Etapa 8: migration aditiva e idempotente da coluna ``plano`` em
-# ``usuarios`` (bancos criados antes desta etapa). Nunca destrói dados.
-try:
-    _coluna_adicionada = garantir_coluna_plano(engine)
-    if _coluna_adicionada:
-        logger.info("Coluna 'plano' adicionada em 'usuarios' (usuários existentes mantidos).")
-except Exception as e:  # pragma: no cover - defesa extra (não bloqueia o bot)
-    logger.error("Migration da coluna 'plano' falhou (não bloqueia o bot): %s", e)
-
-try:
-    _cnpj_nullable = garantir_cnpj_nullable(engine)
-    if _cnpj_nullable:
-        logger.info("Coluna ativos.cnpj agora aceita NULL (placeholders PENDENTE-* viram NULL).")
-except Exception as e:  # pragma: no cover - defesa extra (não bloqueia o bot)
-    logger.error("Migration de ativos.cnpj nullable falhou (não bloqueia o bot): %s", e)
-
-try:
-    _freshness_cols = garantir_colunas_freshness(engine)
-    if _freshness_cols:
-        logger.info("Colunas de freshness/proveniência adicionadas (%s).", _freshness_cols)
-except Exception as e:  # pragma: no cover - defesa extra (não bloqueia o bot)
-    logger.error("Migration de freshness falhou (não bloqueia o bot): %s", e)
-
-try:
-    _cvm_fii_cols = garantir_colunas_cvm_fii(engine)
-    if _cvm_fii_cols:
-        logger.info("Colunas CVM FII (VPA/DY mensal) adicionadas (%s).", _cvm_fii_cols)
-except Exception as e:  # pragma: no cover - defesa extra (não bloqueia o bot)
-    logger.error("Migration CVM FII falhou (não bloqueia o bot): %s", e)
-
-try:
-    _cvm_acoes_cols = garantir_colunas_cvm_acoes(engine)
-    if _cvm_acoes_cols:
-        logger.info("Colunas CVM acoes (ebit/circulante/versao) adicionadas (%s).", _cvm_acoes_cols)
-except Exception as e:  # pragma: no cover - defesa extra (não bloqueia o bot)
-    logger.error("Migration CVM acoes falhou (não bloqueia o bot): %s", e)
-logger.info("Groq Key presente: %s", "SIM" if os.environ.get('GROQ_API_KEY') else "NÃO")
-
-# ==========================================
-# 🚀 SEED DO PRIMEIRO SUPERADMIN (FASE 5)
-# ==========================================
-# Idempotente: cria/eleva o administrador de referência (PRIMEIRO_ADMIN_TELEGRAM_ID
-# ou TELEGRAM_CHAT_ID legado) sem duplicar usuários e sem sobrescrever dados.
-# Qualquer falha é apenas registrada — nunca derruba o bot/webhook/agendador.
-try:
-    _resultado_seed = garantir_superadmin_inicial()
-    logger.info("Seed do SUPERADMIN: status=%s", _resultado_seed.get("status"))
-except Exception as e:  # pragma: no cover - defesa extra (o seed nunca lança)
-    logger.error("Seed do SUPERADMIN falhou (não bloqueia o bot): %s", e)
+print("✅ Banco de dados verificado e tabelas criadas com sucesso!")
+print(f"DEBUG: Groq Key encontrada: {'SIM' if os.environ.get('GROQ_API_KEY') else 'NÃO'}")
 
 # ==========================================
 # 🌐 SERVIDOR WEB E WEBHOOK (RENDER)
 # ==========================================
 app = Flask(__name__)
 
-# ==========================================
-# 🌐 API HTTP /api/v1 (Fase 5, Etapa 10)
-# ==========================================
-# Integração aditiva: respeita API_ENABLED. Desabilitada (padrão) -> nenhuma
-# rota/handler é registrado e o comportamento legado permanece intacto.
-from api import integrar_api
-
-if config.API_ENABLED:
-    integrar_api(app)
-    logger.info("API HTTP /api/v1 habilitada.")
-else:
-    logger.info("API HTTP /api/v1 desabilitada (API_ENABLED).")
-
-# A rota do webhook só existe quando TELEGRAM_BOT_TOKEN está definido.
-# Sem token, não registramos a rota (evita rota inválida '/' + None).
-if config.TELEGRAM_BOT_TOKEN:
-    @app.route('/' + config.TELEGRAM_BOT_TOKEN, methods=['POST'])
-    def webhook_handler():
-        content_type = request.headers.get('content-type')
-        secret_header = request.headers.get(telegram_svc.HEADER_WEBHOOK_SECRET)
-        if not telegram_svc.webhook_autorizado(content_type, secret_header):
-            return "Erro", 403
+@app.route('/' + config.TELEGRAM_BOT_TOKEN, methods=['POST'])
+def webhook_handler():
+    if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
         update = telebot.types.Update.de_json(json_string)
+        
+        # CORREÇÃO: Usamos tele_bot para processar as mensagens, e não a pasta 'bot'
         tele_bot.process_new_updates([update])
+        
         return "OK", 200
-else:
-    logger.warning("[Telegram] TELEGRAM = SKIPPED: webhook não registrado (TELEGRAM_BOT_TOKEN ausente).")
+    return "Erro", 403
 
 
 @app.route('/')
@@ -192,47 +96,18 @@ scheduler = BackgroundScheduler(timezone=fuso_horario)
 
 # Agenda a varredura (que agora está protegida no services/orquestrador.py)
 scheduler.add_job(varredura_diaria, CronTrigger(day_of_week='mon-fri', hour=8, minute=0))
-
-# ==========================================
-# 📨 DISPATCHER DE NOTIFICAÇÕES (Fase 6, Etapa 7)
-# ==========================================
-# Aditivo e desativável (DISPATCHER_NOTIFICACOES_ATIVO). Reutiliza o scheduler
-# já existente acima — não cria um segundo agendador, não duplica jobs (id
-# fixo) e não altera os jobs legados. O job roda em thread própria do
-# APScheduler com max_instances=1/coalesce (nunca dois dispatchers
-# concorrentes); o ciclo seguro nunca levanta e respeita retry/proxima_tentativa.
-from services.dispatcher_notificacoes import registrar_dispatcher_no_scheduler
-
-if registrar_dispatcher_no_scheduler(
-    scheduler,
-    interval_minutos=config.DISPATCHER_NOTIFICACOES_INTERVALO_MINUTOS,
-    ativo=config.DISPATCHER_NOTIFICACOES_ATIVO,
-):
-    logger.info(
-        "Dispatcher automático de notificações ativo (intervalo=%s min).",
-        config.DISPATCHER_NOTIFICACOES_INTERVALO_MINUTOS,
-    )
-else:
-    logger.info(
-        "Dispatcher automático de notificações desativado ou já registrado."
-    )
-
 scheduler.start()
 
 # ==========================================
 # 🚀 INICIALIZAÇÃO DO WEBHOOK (CORRIGIDO)
 # ==========================================
 
-if config.TELEGRAM_BOT_TOKEN:
-    tele_bot.remove_webhook()
-    time.sleep(1)
-    nova_url_render = config.WEBHOOK_URL_BASE + "/" + config.TELEGRAM_BOT_TOKEN
-    tele_bot.set_webhook(**telegram_svc.parametros_set_webhook(nova_url_render))
-    logger.info("Webhook configurado para o endpoint do bot (URL truncada por segurança).")
-    if telegram_svc.webhook_secret_configurado():
-        logger.info("Webhook secret_token ativo (valor omitido).")
-else:
-    logger.warning("[Telegram] TELEGRAM = SKIPPED: webhook não registrado (TELEGRAM_BOT_TOKEN ausente).")
+tele_bot.remove_webhook()
+time.sleep(1)
+
+nova_url_render = "https://robo-fii-v2.onrender.com/" + config.TELEGRAM_BOT_TOKEN
+tele_bot.set_webhook(url=nova_url_render)
+print(f"✅ Webhook configurado com sucesso para: {nova_url_render[:35]}...")
 
 if __name__ == "__main__":
     porta = int(os.environ.get("PORT", 10000))

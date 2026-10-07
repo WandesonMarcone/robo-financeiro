@@ -1,0 +1,476 @@
+import threading
+import time
+import requests
+import config
+import fitz
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from sqlalchemy import func, or_
+from bot.loader import bot
+from atualizador_documentos import SessionDB 
+from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
+from modules.utils import conectar_gspread
+
+from modules.scraper_fiis import rodar_garimpo_fiis # <--- Importe o arquivo que corrigimos
+
+# ==========================================
+# 🔒 UTILITÁRIOS DE SEGURANÇA
+# ==========================================
+def sanitizar_valor_planilha(valor):
+    """Neutraliza formula injection (ex.: =SUM, +cmd, -x, @x) antes de gravar no Google Sheets."""
+    texto = str(valor or "").strip()
+    if texto.startswith(("=", "+", "-", "@")):
+        return "'" + texto
+    return texto
+
+# ==========================================
+# 🧭 MENUS DE NAVEGAÇÃO E INTERFACE (UI)
+# ==========================================
+@bot.message_handler(commands=['menu', 'start'])
+def enviar_menu(message):
+    markup = InlineKeyboardMarkup()
+    markup.row(InlineKeyboardButton("🏢 FIIs (Imobiliários)", callback_data="menu_fiis"),
+               InlineKeyboardButton("📈 Ações (Empresas)", callback_data="menu_acoes"))
+    markup.row(InlineKeyboardButton("🌍 Visão Macro & Notícias", callback_data="menu_macro"))
+    markup.row(InlineKeyboardButton("ℹ️ Ajuda / Sobre", callback_data="menu_ajuda"))
+    bot.send_message(message.chat.id, "🤖 *Terminal Institucional* 🤖\nSelecione o módulo de análise abaixo:", reply_markup=markup, parse_mode="Markdown")
+
+@bot.message_handler(commands=['status'])
+def status_banco(message):
+    session = SessionDB() 
+    try:
+        total_ativos = session.query(Ativo).count()
+        total_docs = session.query(DocumentosQualitativos).count()
+        ultimos = session.query(Ativo.ticker).order_by(Ativo.id.desc()).limit(5).all()
+        lista_tickers = ", ".join([a[0] for a in ultimos])
+        ultima_data = session.query(func.max(DocumentosQualitativos.data_publicacao)).scalar()
+
+        resposta = (
+            f"📊 **Painel de Controle do Motor de Dados**\n\n"
+            f"🏢 **Ativos monitorados:** {total_ativos}\n"
+            f"📄 **Documentos salvos:** {total_docs}\n"
+            f"📅 **Última atualização:** {ultima_data}\n\n"
+            f"🚀 **Últimos ativos:**\n{lista_tickers}"
+        )
+        bot.reply_to(message, resposta)
+    except Exception as e:
+        bot.reply_to(message, f"❌ Erro ao consultar banco: {e}")
+    finally:
+        session.close() 
+
+@bot.message_handler(commands=['relatorios', 'docs'])
+def enviar_ultimos_relatorios(message):
+    bot.reply_to(message, "🔎 Buscando os últimos documentos no cofre...")
+    session = SessionDB()
+    try:
+        ultimos_docs = session.query(DocumentosQualitativos, Ativo)\
+            .join(Ativo, DocumentosQualitativos.ativo_id == Ativo.id)\
+            .order_by(DocumentosQualitativos.data_publicacao.desc())\
+            .limit(10).all()
+
+        if not ultimos_docs:
+            bot.send_message(message.chat.id, "📭 Nenhum documento encontrado no banco ainda.")
+            return
+
+        resposta = "📄 **Últimos Relatórios Capturados:**\n\n"
+        for doc, ativo in ultimos_docs:
+            data_formatada = doc.data_publicacao.strftime('%d/%m/%Y')
+            resposta += f"🏢 **{ativo.ticker}** - {data_formatada}\n"
+            resposta += f"🏷️ Tipo: {doc.tipo_documento}\n"
+            if doc.assunto and doc.assunto.strip():
+                resposta += f"📌 Assunto: {doc.assunto}\n"
+            resposta += f"🔗 [Acessar PDF]({doc.url_pdf})\n"
+            resposta += "➖➖➖➖➖➖➖➖➖➖\n"
+
+        bot.send_message(message.chat.id, resposta, parse_mode='Markdown', disable_web_page_preview=True)
+    except Exception as e:
+        bot.send_message(message.chat.id, "❌ Ops! Deu um erro ao tentar ler o banco de dados.")
+    finally:
+        session.close()
+
+# ==========================================
+# 📊 COMANDOS DE PLANILHA DO GOOGLE E GESTÃO
+# ==========================================
+@bot.message_handler(commands=['adicionar'])
+def comando_adicionar(message):
+    try:
+        partes = message.text.split()
+        if len(partes) < 2:
+            bot.reply_to(message, "⚠️ Uso correto: `/adicionar TICKER` (ex: /adicionar BBAS3)", parse_mode="Markdown")
+            return
+
+        ticker = partes[1].strip().upper()
+        ticker = sanitizar_valor_planilha(ticker)
+
+        if not ticker or not ticker.isalnum() or len(ticker) > 10:
+            bot.reply_to(message, "❌ Ticker inválido. Use apenas letras e números (ex: BBAS3, MXRF11).")
+            return
+
+        bot.reply_to(message, f"A procurar {ticker} e a injetar na Planilha do Google...")
+
+        planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
+        is_fii = True if ticker.endswith('11') else False
+        nome_aba = "BD_FIIs" if is_fii else "BD_Acoes"
+        aba = planilha.worksheet(nome_aba)
+
+        dados = aba.get_all_values()
+        proxima_linha = len(dados) + 1
+        aba.update(f'A{proxima_linha}', [[ticker]])
+
+        bot.send_message(message.chat.id, f"✅ *{ticker}* adicionado com sucesso na aba `{nome_aba}`!", parse_mode="Markdown")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Erro ao adicionar ativo: {e}")
+
+@bot.message_handler(commands=['forcar_varredura'])
+def acionar_varredura_manual(message):
+    bot.reply_to(message, "⚙️ *Iniciando varredura na B3 e CVM...*\nIsso pode levar alguns minutos. Buscando apenas documentos novos!", parse_mode="Markdown")
+
+    def tarefa_pesada_background():
+        try:
+            from atualizador_documentos import rotina_de_atualizacao_em_massa, SessionDB
+            from pipeline_dados.banco_dados import DocumentosQualitativos
+            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+            session_antes = SessionDB()
+
+            # --- FOTO DO BANCO ANTES DA VARREDURA ---
+            total_antes = session_antes.query(DocumentosQualitativos).count()
+            salvos_antes = session_antes.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")).count()
+            revisao_antes = session_antes.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO").count()
+            erros_antes = session_antes.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.in_(["ERRO_DOWNLOAD", "ERRO_DRIVE"])).count()
+
+            session_antes.close()
+
+            # --- A VARREDURA ACONTECE AQUI ---
+            rotina_de_atualizacao_em_massa()
+
+            # --- FOTO DO BANCO DEPOIS DA VARREDURA ---
+            session = SessionDB()
+            total_depois = session.query(DocumentosQualitativos).count()
+            salvos_depois = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")).count()
+            revisao_depois = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO").count()
+            erros_depois = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.in_(["ERRO_DOWNLOAD", "ERRO_DRIVE"])).count()
+            session.close()
+
+            # --- CÁLCULO ESPECÍFICO DESTA SESSÃO (O DELTA) ---
+            novos_capturados = total_depois - total_antes 
+            salvos_agora = salvos_depois - salvos_antes
+            revisao_agora = revisao_depois - revisao_antes
+            erros_agora = erros_depois - erros_antes
+
+            # --- ESTATÍSTICA DESTA VARREDURA ---
+            processados_agora = salvos_agora + revisao_agora + erros_agora
+            eficiencia_agora = (salvos_agora / processados_agora * 100) if processados_agora > 0 else 0
+
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(
+                InlineKeyboardButton("📊 Ver Raio-X Global", callback_data="ver_raiox_docs"),
+                InlineKeyboardButton("📥 Iniciar Revisão Manual", callback_data="iniciar_revisao_pendencias")
+            )
+
+            # Relatório APENAS da Sessão (Varredura Atual)
+            resposta_final = (
+                f"✅ **Varredura Concluída!**\n\n"
+                f"📥 **Resumo desta Sessão:**\n"
+                f" ├ Documentos novos encontrados: `{novos_capturados}`\n"
+                f" ├ Processados (Auto-salvos): `{salvos_agora}`\n"
+                f" ├ Enviados para Revisão: `{revisao_agora}`\n"
+                f" ├ Falhas (Links corrompidos): `{erros_agora}`\n"
+                f" └ Eficiência nesta busca: `{eficiencia_agora:.1f}%`\n\n"
+                f"💡 _Dica: Para ver a cobertura completa de datas e o volume total de todos os fundos, acesse o botão de Raio-X abaixo._"
+            )
+
+            bot.send_message(message.chat.id, resposta_final, parse_mode="Markdown", reply_markup=markup)
+
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ Erro na varredura: {str(e)[:200]}") 
+
+    import threading
+    threading.Thread(target=tarefa_pesada_background).start()
+
+@bot.message_handler(commands=['forcar_docs_acoes'])
+def rodar_docs_acoes(message):
+    from datetime import datetime
+
+    # Verifica se você digitou um ano (Ex: /forcar_docs_acoes 2025). Se não, usa o atual.
+    texto = message.text.split()
+    ano_escolhido = datetime.now().year
+    if len(texto) > 1 and texto[1].isdigit():
+        ano_escolhido = int(texto[1])
+
+    bot.send_message(message.chat.id, f"⏳ *Iniciando varredura de PDFs (Ações) para {ano_escolhido}...*\nBuscando Fatos Relevantes na CVM em segundo plano.", parse_mode="Markdown")
+
+    def tarefa_docs_background(ano):
+        try:
+            # Importa o novo módulo que criamos
+            from pipeline_dados.coletor_docs_acoes import RelatoriosAcoesCVM
+            from atualizador_documentos import SessionDB
+
+            session = SessionDB()
+            coletor = RelatoriosAcoesCVM(session)
+
+            # Roda a função que vasculha a base IPE da CVM
+            docs_baixados = coletor.vasculhar_documentos(ano)
+            session.close()
+
+            bot.send_message(message.chat.id, f"✅ *Varredura de Ações ({ano}) Concluída!*\n📥 Documentos novos enviados para a fila do Drive: {docs_baixados}", parse_mode="Markdown")
+
+            # 🔴 GATILHO AUTOMÁTICO: Aciona o motor da IA logo após a varredura
+            # A IA só será ligada se o robô encontrou 1 ou mais documentos novos.
+            if isinstance(docs_baixados, int) and docs_baixados > 0:
+                bot.send_message(message.chat.id, "🔄 *Gatilho Automático:* Repassando a fila para a Inteligência Artificial classificar...", parse_mode="Markdown")
+                rodar_ia_acoes(message) # Chama a função da IA passando a mensagem original
+            else:
+                bot.send_message(message.chat.id, "📭 Nenhum documento novo foi baixado agora. A IA foi dispensada.", parse_mode="Markdown")
+
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ Erro ao baixar docs de ações: {str(e)}")
+
+    # Inicia a tarefa em segundo plano
+    import threading
+    thread_docs = threading.Thread(target=tarefa_docs_background, args=(ano_escolhido,))
+    thread_docs.start()
+
+@bot.message_handler(commands=['processar_acoes_ia'])
+def rodar_ia_acoes(message):
+    bot.send_message(message.chat.id, "🧠 *Iniciando motor de IA para Ações...*\nLendo PDFs da CVM, classificando e enviando ao Drive em segundo plano. Isso pode levar alguns minutos.", parse_mode="Markdown")
+    
+    def tarefa_ia_background():
+        try:
+            # Importa a nova função que criamos no atualizador
+            from atualizador_documentos import rotina_processar_acoes
+            
+            # Dá a partida no motor
+            rotina_processar_acoes()
+            
+            bot.send_message(message.chat.id, "✅ *Processamento de IA (Ações) Concluído!*\nTodos os documentos foram organizados nas pastas do Google Drive.", parse_mode="Markdown")
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ Erro fatal no processamento da IA: {str(e)}")
+            
+    # Roda em segundo plano (Thread) para não congelar o uso do bot no Telegram
+    import threading
+    thread_ia = threading.Thread(target=tarefa_ia_background)
+    thread_ia.start()
+
+@bot.message_handler(commands=['forcar_cvm'])
+def rodar_cvm(message):
+    from datetime import datetime
+    
+    # Verifica se você digitou um ano (Ex: /forcar_cvm 2025). Se não, usa o ano atual.
+    texto = message.text.split()
+    ano_escolhido = datetime.now().year
+    if len(texto) > 1 and texto[1].isdigit():
+        ano_escolhido = int(texto[1])
+
+    bot.send_message(message.chat.id, f"⏳ *Iniciando motor CVM para o ano {ano_escolhido}...*\nBaixando balanços em segundo plano. Aguarde o aviso de conclusão!", parse_mode="Markdown")
+    
+    def tarefa_cvm_background(ano):
+        try:
+            from pipeline_dados.coletor_cvm import AcoesCVMReader
+            from atualizador_documentos import SessionDB
+            
+            session = SessionDB()
+            coletor = AcoesCVMReader(session)
+            
+            # Executa a coleta com o ano que você escolheu
+            coletor.atualizar_acoes(ano) 
+            session.close()
+            
+            bot.send_message(message.chat.id, f"✅ *Coleta CVM ({ano}) Concluída!*\nBalanços atualizados no banco de dados.", parse_mode="Markdown")
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ Erro na CVM: {str(e)}")
+            
+    # Inicia a tarefa em segundo plano
+    import threading
+    thread_cvm = threading.Thread(target=tarefa_cvm_background, args=(ano_escolhido,))
+    thread_cvm.start()
+
+import threading
+from pipeline_dados.coletor_fiis import processar_informes_fiis_cvm
+
+@bot.message_handler(commands=['forcar_fiis'])
+def cmd_forcar_fiis(message):
+    chat_id = message.chat.id
+    bot.reply_to(message, "📥 Baixando informes mensais de FIIs em segundo plano. Aguarde o aviso de conclusão!")
+    
+    def background_coleta():
+        try:
+            # Roda para o ano atual (2026)
+            sucesso = processar_informes_fiis_cvm(ano=2026)
+            if sucesso:
+                bot.send_message(chat_id, "✅ **Coleta de FIIs (2026) Concluída!**\nIndicadores contábeis e operacionais atualizados no banco de dados.", parse_mode="Markdown")
+            else:
+                bot.send_message(chat_id, "⚠️ A coleta rodou, mas nenhum informe válido foi processado. Verifique os logs.")
+        except Exception as e:
+            bot.send_message(chat_id, f"❌ Erro crítico na coleta de FIIs: {str(e)}")
+
+    # Dispara a tarefa em segundo plano para não travar o Telegram
+    threading.Thread(target=background_coleta).start()
+
+@bot.message_handler(commands=['alimentar_ia'])
+def alimentar_ia_passado(message):
+    bot.send_message(message.chat.id, "⏳ *Iniciando a Varredura Profunda!* Procurando PDFs antigos...", parse_mode="Markdown")
+
+    def tarefa_leitura():
+        try:
+            from pipeline_dados.banco_dados import DocumentosQualitativos
+            from atualizador_documentos import SessionDB
+            from sqlalchemy import or_
+            import requests
+            import fitz
+            import io
+
+            session = SessionDB()
+            
+            # 🔴 CORREÇÃO 1: Pega documentos com coluna Nula (None) OU Vazia ("")
+            docs = session.query(DocumentosQualitativos).filter(
+                or_(DocumentosQualitativos.texto_extraido == None, DocumentosQualitativos.texto_extraido == ""),
+                DocumentosQualitativos.url_pdf != None
+            ).all()
+
+            lidos = 0
+            ignorados = 0
+            erros = 0
+            
+            for doc in docs:
+                nome_low = str(doc.tipo_documento).lower()
+                
+                # 🔴 CORREÇÃO 2: Inclusão de "apresenta" (MXRF11) e "informe"
+                if "gerencial" in nome_low or "fato" in nome_low or "release" in nome_low or "apresenta" in nome_low or "informe" in nome_low:
+                    try:
+                        resp = requests.get(doc.url_pdf, timeout=15)
+                        if resp.status_code == 200:
+                            pdf_mem = io.BytesIO(resp.content)
+                            doc_fitz = fitz.open(stream=pdf_mem, filetype="pdf")
+                            
+                            # Sugando o texto
+                            texto = "".join([pagina.get_text("text") + "\n" for pagina in doc_fitz[:12]])
+                            texto_limpo = " ".join(texto.split())[:15000]
+                            
+                            if texto_limpo:
+                                doc.texto_extraido = texto_limpo
+                                lidos += 1
+                                session.commit()
+                            else:
+                                erros += 1
+                            doc_fitz.close()
+                        else:
+                            erros += 1
+                    except Exception as e:
+                        erros += 1
+                        pass
+                else:
+                    ignorados += 1
+                    
+            session.close()
+            
+            # 🔴 RELATÓRIO CIRÚRGICO PARA O TELEGRAM
+            txt_final = (
+                f"✅ **Cérebro da IA Atualizado!**\n\n"
+                f"📄 Total de PDFs ocos encontrados: `{len(docs)}`\n"
+                f"🧠 Textos sugados com sucesso: `{lidos}`\n"
+                f"⏭️ Ignorados (Não são relatórios): `{ignorados}`\n"
+                f"❌ Falhas (Link quebrado/Scan): `{erros}`"
+            )
+            bot.send_message(message.chat.id, txt_final, parse_mode="Markdown")
+            
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ Erro fatal na tarefa: {e}")
+
+    import threading
+    threading.Thread(target=tarefa_leitura).start()
+
+@bot.message_handler(commands=['mapear_nomes'])
+def comando_mapear_nomes_b3(message):
+    bot.send_message(message.chat.id, "🕵️‍♂️ Comando recebido! Como a B3 é lenta, enviei essa tarefa para o segundo plano. Pode continuar usando o Telegram normalmente, te enviarei o arquivo TXT assim que estiver pronto.")
+
+    def tarefa_pesada():
+        url = "https://fnet.bmfbovespa.com.br/fnet/publico/pesquisarGerenciadorDocumentosDados"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'}
+        nomes_unicos = set()
+
+        try:
+            for start in range(0, 5000, 50):
+                params = {'d': '1', 's': str(start), 'l': '50', 'tipoFundo': '1'}
+                sucesso = False
+                for tentativa in range(3): 
+                    try:
+                        res = requests.get(url, params=params, headers=headers, timeout=45)
+                        res.raise_for_status() 
+                        data = res.json().get('data', [])
+                        sucesso = True
+                        break 
+                    except Exception as e:
+                        time.sleep(2) 
+
+                if not sucesso:
+                    bot.send_message(message.chat.id, f"⚠️ Aviso: A B3 travou na página {start}. O arquivo será gerado com o que consegui até agora.")
+                    break
+
+                if not data:
+                    break 
+
+                for item in data:
+                    descricao = item.get('descricaoFundo', '').upper().strip()
+                    if descricao:
+                        nomes_unicos.add(descricao)
+
+                time.sleep(1.5) 
+
+            lista_ordenada = sorted(list(nomes_unicos))
+            texto_final = "\n".join(lista_ordenada)
+            caminho_arquivo = "/tmp/nomes_b3_auditoria.txt"
+
+            with open(caminho_arquivo, "w", encoding="utf-8") as f:
+                f.write(f"--- CATÁLOGO DE NOMES DA B3 ({len(lista_ordenada)} fundos encontrados) ---\n\n")
+                f.write(texto_final)
+
+            with open(caminho_arquivo, "rb") as f:
+                bot.send_document(message.chat.id, f, caption="🎯 Auditoria concluída em segundo plano! Aqui está a lista exata da B3.")
+
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ Erro crítico na thread de mapeamento: {str(e)}")
+
+    thread = threading.Thread(target=tarefa_pesada)
+    thread.start()
+
+@bot.message_handler(commands=['resetar_docs'])
+def limpar_banco_documentos(message):
+    markup = InlineKeyboardMarkup()
+    markup.row(InlineKeyboardButton("💥 SIM, apagar tudo", callback_data="confirmar_reset"),
+               InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_reset"))
+    bot.send_message(
+        message.chat.id,
+        "💥 *ATENÇÃO:* isso apagará TODOS os registros de documentos do banco de dados. Essa ação é irreversível. Deseja continuar?",
+        parse_mode="Markdown",
+        reply_markup=markup,
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data in ("confirmar_reset", "cancelar_reset"))
+def tratar_reset_docs(call):
+    chat_id = call.message.chat.id
+    mensagem_id = call.message.message_id
+
+    if call.data == "cancelar_reset":
+        bot.answer_callback_query(call.id, "Operação cancelada.")
+        bot.edit_message_text("✅ Operação cancelada. Nenhum dado foi alterado.", chat_id, mensagem_id)
+        return
+
+    try:
+        from atualizador_documentos import SessionDB
+        from pipeline_dados.banco_dados import DocumentosQualitativos
+
+        session = SessionDB()
+        apagados = session.query(DocumentosQualitativos).delete()
+        session.commit()
+        session.close()
+
+        bot.answer_callback_query(call.id, "Limpeza concluída.")
+        bot.edit_message_text(
+            f"✅ **Limpeza Concluída!**\n`{apagados}` registros de PDFs antigos foram apagados.",
+            chat_id,
+            mensagem_id,
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        bot.answer_callback_query(call.id, "Erro ao apagar.")
+        bot.edit_message_text(f"❌ Erro ao apagar: {e}", chat_id, mensagem_id)

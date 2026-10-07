@@ -47,4 +47,3 @@ pdfplumber
 # ==========================================
 SQLAlchemy
 psycopg2-binary
-psycopg[binary]

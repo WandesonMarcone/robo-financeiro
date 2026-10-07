@@ -1,220 +1,19 @@
-import logging
 import os
 
-# ==========================================
-# LOGGING
-# ==========================================
-
-def configurar_logging(nivel=logging.INFO):
-    """Configura o logging estruturado do processo (formato unificado).
-
-    Deve ser chamado no início de cada entrypoint (main.py / app.py).
-    """
-    logging.basicConfig(
-        level=nivel,
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        force=True,
-    )
-
-def obter_database_url():
-    """Retorna a URL do banco de dados já normalizada.
-
-    Fonte única de inicialização do banco (Fase 2): evita múltiplas formas
-    concorrentes de montagem da URL entre os módulos.
-    """
-    url = os.environ.get("DATABASE_URL", "sqlite:///pipeline_dados/banco_institucional.db")
-    if url.startswith("postgres://"):
-        url = url.replace("postgres://", "postgresql://", 1)
-    return url
-
 # --- INFRAESTRUTURA DE BANCO DE DADOS ---
-# SPREADSHEET_URL sai do código e passa a ser configurável via ambiente.
-SPREADSHEET_URL = os.environ.get("SPREADSHEET_URL", "").strip()
-# Caminho do arquivo de credenciais do Google (service account).
-JSON_KEY = os.environ.get("GOOGLE_CREDS_FILE", "credenciais.json")
+SPREADSHEET_URL = 'https://docs.google.com/spreadsheets/d/1U8h3Hw2yBOmCbvBskP9zHyVVJf_3OkXtAopcFSebLvs/edit?usp=drivesdk' 
+JSON_KEY = 'credenciais.json' 
 
 # --- CONFIGURAÇÕES ---
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-# Chat principal de alertas (operador/dono). Configurado via ambiente, sem IDs no código.
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
-# Segredo do webhook Telegram (header X-Telegram-Bot-Api-Secret-Token).
-# Vazio = legado (só o token no path). Nunca hardcodar valor.
-TELEGRAM_WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip()
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") 
+TELEGRAM_CHAT_ID = "8867098987"
+CHATS_AUTORIZADOS = [
+    c.strip()
+    for c in os.environ.get("TELEGRAM_CHATS_AUTORIZADOS", TELEGRAM_CHAT_ID).split(",")
+    if c.strip()
+]
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY") # CONFIG IA(GROQ)
-# URL do banco normalizada e única para todo o projeto.
-DATABASE_URL = obter_database_url()
-
-# ==========================================
-# ESPELHAMENTO POSTGRESQL (Fase 3, Bloco 5C)
-# ==========================================
-# O Google Sheets continua sendo a fonte ativa. Quando ativado, após a escrita
-# bem-sucedida no Sheets (app.py) o espelhamento 5C roda de forma controlada;
-# quando desativado, o comportamento é 100% legado (somente Sheets).
-
-def bool_ambiente(nome, padrao=False):
-    """Interpreta variável de ambiente booleana de forma tolerante."""
-    valor = os.environ.get(nome)
-    if valor is None:
-        return padrao
-    return valor.strip().lower() in ("1", "true", "yes", "sim", "on")
-
-# false (padrão) -> comportamento legado, somente Google Sheets.
-# true           -> Sheets primeiro; depois espelhamento PostgreSQL.
-ESPELHAMENTO_PG_ATIVO = bool_ambiente("ESPELHAMENTO_PG_ATIVO", padrao=False)
-
-# ==========================================
-# FRESHNESS / SLA (Fase 8, Etapa 8.4)
-# ==========================================
-# Política canônica em pipeline_dados.freshness.SLA_POR_CATEGORIA.
-# Mercado/preço e indicadores: 2h — mesma janela de precisa_atualizar (7200s)
-# e do cron GitHub Actions (5x em dias úteis). Contábil ITR: 120d. Informe
-# mensal FII: 45d. Documentos FNET: 60d (lookback já usado na varredura).
-# Esta etapa mede freshness/cobertura; não reescreve o scheduler.
-
-# Base da URL pública do Render usada no webhook do Telegram.
-# Mantém o valor atual como padrão para não quebrar o deploy, mas passa a ser
-# sobrescrevível via WEBHOOK_URL_BASE.
-WEBHOOK_URL_BASE = os.environ.get("WEBHOOK_URL_BASE", "https://robo-fii-v2.onrender.com").rstrip("/")
-
-# ==========================================
-# AUTENTICAÇÃO E ADMINISTRAÇÃO (Fase 5)
-# ==========================================
-# Configurações aditivas para a futura camada de autenticação. Os padrões são
-# conservadores para não alterar o comportamento da V1.0.1: a API permanece
-# desabilitada e a auditoria é inerte até ser integrada.
-
-def _int_ambiente(nome, padrao):
-    """Interpreta variável de ambiente inteira de forma tolerante."""
-    try:
-        valor = os.environ.get(nome, "").strip()
-        return int(valor) if valor else padrao
-    except (TypeError, ValueError):
-        return padrao
-
-# TTL padrão de sessões autenticadas (em horas). Padrão seguro: 7 dias (168h).
-SESSAO_TTL_HORAS = _int_ambiente("SESSAO_TTL_HORAS", 168)
-
-# Telegram ID elevado a primeiro administrador (seed da Fase 5).
-# Vazio por padrão: nenhum usuário é criado/alterado automaticamente.
-PRIMEIRO_ADMIN_TELEGRAM_ID = os.environ.get("PRIMEIRO_ADMIN_TELEGRAM_ID", "").strip()
-
-# Trilha de auditoria de acesso. Habilitada por padrão; por ser aditiva, não
-# afeta nenhum fluxo da V1.0.1 até ser integrada.
-AUDITORIA_ATIVA = bool_ambiente("AUDITORIA_ATIVA", padrao=True)
-
-# Habilita a API de integração. Desabilitada por padrão: a API é uma superfície
-# de ataque e só será exposta quando explicitamente ativada.
-# Fail-closed: ausente/vazio/inválido = False. Nunca hardcodar True.
-# Produção: definir API_ENABLED=true somente no ambiente de deploy.
-API_ENABLED = bool_ambiente("API_ENABLED", padrao=False)
-
-# Rate limit in-process (por worker, janela de 60s). 0 desliga o teto.
-# Auth (login/register) tem teto próprio, mais restrito.
-RATE_LIMIT_API_POR_MINUTO = _int_ambiente("RATE_LIMIT_API_POR_MINUTO", 120)
-RATE_LIMIT_AUTH_POR_MINUTO = _int_ambiente("RATE_LIMIT_AUTH_POR_MINUTO", 10)
-
-# ==========================================
-# CORS DO WEBSITE (Fase 11, Etapa 11.2)
-# ==========================================
-# Allowlist explícita de origens do Website separado. Lista vazia (padrão) =
-# nenhum Access-Control-Allow-Origin (fail-closed). Nunca aceita "*".
-# Ex.: API_CORS_ORIGINS=https://app.exemplo.com,http://localhost:5173
-
-def origens_cors_permitidas(bruto=None):
-    """Parseia API_CORS_ORIGINS: origens exatas, sem wildcard, sem duplicata."""
-    if bruto is None:
-        bruto = os.environ.get("API_CORS_ORIGINS", "")
-    if bruto is None:
-        return ()
-    vistas = []
-    for item in str(bruto).split(","):
-        origem = item.strip().rstrip("/")
-        if not origem or origem == "*":
-            continue
-        if origem not in vistas:
-            vistas.append(origem)
-    return tuple(vistas)
-
-
-API_CORS_ORIGINS = origens_cors_permitidas()
-
-# ==========================================
-# DISPATCHER DE NOTIFICAÇÕES (Fase 6, Etapa 7)
-# ==========================================
-# Processamento automático das notificações pendentes (GERADA) via job aditivo
-# no BackgroundScheduler existente (main.py). Não duplica jobs nem cria um
-# segundo agendador. Desativar não remove nada do banco — apenas impede o job
-# agendado de rodar (a entrega continua disponível via função manual e via
-# ``processar_evento_e_despachar``).
-DISPATCHER_NOTIFICACOES_ATIVO = bool_ambiente("DISPATCHER_NOTIFICACOES_ATIVO", padrao=True)
-# Intervalo (em minutos) entre ciclos de processamento das pendentes. O retry
-# respeita ``proxima_tentativa`` dentro do próprio dispatcher, então o ciclo
-# nunca antecipa uma tentativa ainda agendada. Mínimo de 1 minuto.
-DISPATCHER_NOTIFICACOES_INTERVALO_MINUTOS = max(
-    1, _int_ambiente("DISPATCHER_NOTIFICACOES_INTERVALO_MINUTOS", 5)
-)
-
-# ==========================================
-# VALIDAÇÃO DE CONFIGURAÇÃO (STARTUP)
-# ==========================================
-
-def verificar_configuracao():
-    """Verifica variáveis críticas de ambiente no startup.
-
-    Retorna (problemas, avisos). Não lança exceção: o chamador decide como
-    reagir, permitindo que o sistema continue operando parcialmente quando
-    possível, em vez de falhar de forma obscura durante o import.
-    """
-    problemas = []
-    avisos = []
-
-    if not TELEGRAM_BOT_TOKEN:
-        problemas.append("TELEGRAM_BOT_TOKEN (obrigatório para o bot do Telegram)")
-
-    if not TELEGRAM_CHAT_ID:
-        avisos.append("TELEGRAM_CHAT_ID (alertas do operador não serão enviados)")
-
-    if TELEGRAM_BOT_TOKEN and not TELEGRAM_WEBHOOK_SECRET:
-        avisos.append(
-            "TELEGRAM_WEBHOOK_SECRET (webhook sem secret_token extra)"
-        )
-
-    if not SPREADSHEET_URL:
-        avisos.append("SPREADSHEET_URL (garimpo em Google Sheets não será executado)")
-
-    if not GROQ_API_KEY:
-        avisos.append("GROQ_API_KEY (classificação/análise via IA desabilitadas)")
-
-    if not (os.environ.get("GOOGLE_CREDS") or os.path.exists(JSON_KEY)):
-        avisos.append(f"GOOGLE_CREDS/JSON_KEY ({JSON_KEY}) (Google Sheets/Drive indisponíveis)")
-
-    for var in ("CLIENT_ID", "CLIENT_SECRET", "REFRESH_TOKEN", "DRIVE_ROOT_FOLDER_ID"):
-        if not os.environ.get(var):
-            avisos.append(f"{var} (Google Drive indisponível)")
-
-    return problemas, avisos
-
-# ==========================================
-# VALIDAÇÃO DA CONFIGURAÇÃO DO GOOGLE SHEETS
-# ==========================================
-
-def validar_configuracao_sheets():
-    """Retorna a lista de itens de configuração do Google Sheets ausentes.
-
-    Itens verificados: credenciais do service account (GOOGLE_CREDS ou
-    GOOGLE_CREDS_FILE) e a URL da planilha (SPREADSHEET_URL). A lista vazia
-    significa que a configuração está completa. O chamador decide como reagir
-    (mensagem clara + saída controlada), evitando exceções obscuras do gspread.
-    """
-    ausentes = []
-    if not os.environ.get("GOOGLE_CREDS") and not os.path.exists(JSON_KEY):
-        ausentes.append(
-            f"GOOGLE_CREDS (variável de ambiente) ou GOOGLE_CREDS_FILE ({JSON_KEY})"
-        )
-    if not SPREADSHEET_URL:
-        ausentes.append("SPREADSHEET_URL")
-    return ausentes
+DATABASE_URL = os.environ.get("DATABASE_URL") # CONFIG BASE DE DADOS
 
 # ==========================================
 # PREFERÊNCIAS DO MENU: ⭐ MEUS FAVORITOS
@@ -244,7 +43,7 @@ MAPA_ISCAS_MASTER = {
     'GARE11': 'GUARDIAN REAL ESTATE', # Ajustado pelo txt da B3
     'BTLG11': 'BTG PACTUAL LOGÍSTICA',
     'VILG11': 'VINCI LOGÍSTICA',
-    'CPSH11': 'CAPITÂNIA SHOPPINGS',
+    'CPSH11': 'CAPITÂNIA SHOPPINGS', 
     'HGCR11': 'CSHG RECEBIVEIS',
     'VGIR11': 'VALORA RENDA IMOBILIÁRIA',
     'RBRY11': 'RBR PRIVATE',
@@ -275,6 +74,7 @@ MAPA_ISCAS_MASTER = {
     'BRCR11': 'BTG PACTUAL CORPORATE',
     'BCIA11': 'BRADESCO CARTEIRA',
     'BTAL11': 'BTG PACTUAL AGRO',
+    'BTLG11': 'BTG PACTUAL LOGÍSTICA',
 
     # --- FAMÍLIA VINCI & VBI ---
     'VINO11': 'VINCI OFFICES',
@@ -348,12 +148,10 @@ TIPOS_DOC_ACAO = {
 MAPA_CONTAS_CVM = {
     # --- BALANÇO PATRIMONIAL (ATIVO) ---
     '1': 'ativo_total',
-    '1.01': 'ativo_circulante',
     '1.01.01': 'caixa',                  # Conta analítica exata de Caixa e Equivalentes
 
     # --- BALANÇO PATRIMONIAL (PASSIVO E PL) ---
     '2': 'passivo_total',
-    '2.01': 'passivo_circulante',
     '2.01.04': 'divida_curto_prazo',     # Empréstimos a Curto Prazo
     '2.02.01': 'divida_longo_prazo',     # Empréstimos a Longo Prazo
     '2.03': 'patrimonio_liquido',
@@ -460,7 +258,7 @@ MAPA_CNPJ_B3 = {
     # 🏥 Saúde e Educação
     # ==========================================
     '61.585.865/0001-51': 'RADL3',   # Raia Drogasil (RD Saúde)
-    '61.590.030/0001-56': 'HAPV3',   # Hapvida
+    '61.590.030/0001-56': 'HAPV3',   # Hapvida 
     '08.807.432/0001-10': 'YDUQ3',   # Yduqs (Estácio/Educação)
     '60.840.055/0001-31': 'FLRY3',   # Grupo Fleury (Medicina Diagnóstica) (NOVA)
     '06.047.087/0001-39': 'RDOR3',   # Rede D'Or São Luiz (Hospitais) (NOVA)
