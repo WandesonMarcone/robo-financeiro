@@ -76,7 +76,15 @@ def webhook_handler():
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
         update = telebot.types.Update.de_json(json_string)
-        
+
+        chat_id = None
+        if update.message:
+            chat_id = update.message.chat.id
+        elif update.callback_query and update.callback_query.message:
+            chat_id = update.callback_query.message.chat.id
+        if chat_id is not None:
+            print(f"TELEGRAM DIAGNOSTICO - chat_id recebido: {chat_id}")
+
         # CORREÇÃO: Usamos tele_bot para processar as mensagens, e não a pasta 'bot'
         tele_bot.process_new_updates([update])
         
