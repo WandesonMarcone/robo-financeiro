@@ -6,7 +6,7 @@ JSON_KEY = 'credenciais.json'
 
 # --- CONFIGURAÇÕES ---
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") 
-TELEGRAM_CHAT_ID = [8867098987]
+TELEGRAM_CHAT_ID = ["8867098987"]
 CHATS_AUTORIZADOS = [
     c.strip()
     for c in os.environ.get("TELEGRAM_CHATS_AUTORIZADOS", TELEGRAM_CHAT_ID).split(",")
