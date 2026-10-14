@@ -3,8 +3,10 @@ import logging
 import telebot
 
 import config
+from bot import permissoes
 from bot.telegram_utils import (
     NotificadorDeFalhas,
+    TEXTO_ACESSO_NEGADO,
     chat_autorizado,
     descrever_update,
 )
@@ -36,8 +38,12 @@ def obter_token_obrigatorio():
 class BotAutorizado(telebot.TeleBot):
     """Bot que descarta atualizações de chats não autorizados e registra a execução.
 
-    A execução é verificável pelos logs: cada update autorizado e o resultado
-    final dos handlers (sem falha / com falha) são registrados.
+    Além da allowlist de chats, cada update é submetido ao controle centralizado
+    de permissões (``bot.permissoes``): o usuário é identificado pelo Telegram ID,
+    seu papel é resolvido e a operação (comando ou callback) é liberada ou negada
+    antes de qualquer handler produzir efeito. A execução é verificável pelos
+    logs: cada update autorizado e o resultado final dos handlers são
+    registrados; tentativas negadas também são registradas, sem expor tokens.
     """
 
     def _chat_autorizado(self, update):
@@ -49,14 +55,27 @@ class BotAutorizado(telebot.TeleBot):
         autorizados = []
         for update in updates:
             descricao = descrever_update(update)
-            if self._chat_autorizado(update):
-                logger.info("TELEGRAM - update autorizado: %s", descricao)
-                autorizados.append(update)
-            else:
+            if not self._chat_autorizado(update):
                 logger.warning(
                     "TELEGRAM - update descartado (chat nao autorizado): %s",
                     descricao,
                 )
+                continue
+
+            try:
+                permitido, operacao = permissoes.verificar_update(update)
+            except Exception:
+                logger.exception(
+                    "TELEGRAM - falha ao verificar permissao: %s", descricao
+                )
+                permitido, operacao = False, None
+
+            if not permitido:
+                self._negar_acesso(update, operacao)
+                continue
+
+            logger.info("TELEGRAM - update autorizado: %s", descricao)
+            autorizados.append(update)
 
         logger.info(
             "TELEGRAM - enviando %d update(s) para os handlers", len(autorizados)
@@ -80,6 +99,28 @@ class BotAutorizado(telebot.TeleBot):
                     )
                 self._update_em_processamento = None
         return None
+
+    def _negar_acesso(self, update, operacao):
+        """Avisa o usuário que a operação não é permitida e registra a tentativa."""
+        usuario_id = permissoes.usuario_id_do_update(update)
+        papel = permissoes.obter_papel(usuario_id)
+        logger.warning(
+            "TELEGRAM - acesso negado: usuario=%s papel=%s operacao=%s",
+            usuario_id,
+            papel,
+            operacao,
+        )
+        try:
+            message = getattr(update, "message", None)
+            callback = getattr(update, "callback_query", None)
+            if message is not None:
+                self.send_message(message.chat.id, TEXTO_ACESSO_NEGADO)
+            elif callback is not None:
+                self.answer_callback_query(callback.id, text=TEXTO_ACESSO_NEGADO)
+        except Exception:
+            logger.debug(
+                "TELEGRAM - falha ao notificar acesso negado", exc_info=True
+            )
 
 
 # O objeto 'bot' nasce aqui e será importado pelos outros módulos

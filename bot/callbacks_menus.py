@@ -14,9 +14,6 @@ from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos, DadosFinan
 from services.dashboard_menus import buscar_oportunidades, gerar_painel_ativo, buscar_favoritos, filtrar_ativos_por_setor, extrair_data_real
 from services.planilhas import buscar_dados_planilha_com_cache, buscar_ativo_na_planilha
 
-# Validação de URLs de PDF (evita links falsos/genéricos)
-from modules.utils import url_pdf_valida
-
 logger = logging.getLogger(__name__)
 
 # ==========================================
@@ -702,12 +699,8 @@ def callback_geral(call):
                 txt += f"📅 **Data:** `{data_limpa}`\n"
                 txt += f"📝 _{resumo_texto}_\n\n"
 
-                # Só exibe o botão de PDF quando existe uma URL http/https válida.
-                # Nunca aponta para a página genérica do Google Drive como substituto.
-                if url_pdf_valida(doc.url_pdf):
-                    markup.add(InlineKeyboardButton(f"🔗 Abrir PDF ({data_limpa})", url=doc.url_pdf))
-                else:
-                    txt += "⚠️ _PDF indisponível para este documento._\n\n"
+                url = doc.url_pdf if (doc.url_pdf and str(doc.url_pdf).startswith("http")) else "https://drive.google.com"
+                markup.add(InlineKeyboardButton(f"🔗 Abrir PDF ({data_limpa})", url=url))
 
             markup.add(InlineKeyboardButton("🔙 Voltar aos Filtros", callback_data=f"dnav_{ticker}_{modo}"))
             session.close()
