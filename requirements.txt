@@ -46,4 +46,4 @@ pdfplumber
 # 🗄️ BANCO DE DADOS E ARMAZENAMENTO EXTRA
 # ==========================================
 SQLAlchemy
-psycopg[binary]
+psycopg2-binary

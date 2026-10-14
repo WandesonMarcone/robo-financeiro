@@ -15,8 +15,15 @@ class BotAutorizado(telebot.TeleBot):
         return str(chat_id) in config.CHATS_AUTORIZADOS
 
     def process_new_updates(self, updates):
+        print(f"TELEGRAM DIAGNOSTICO - updates recebidos: {len(updates)}")
         autorizados = [u for u in updates if self._chat_autorizado(u)]
-        return super().process_new_updates(autorizados)
+        print(f"TELEGRAM DIAGNOSTICO - updates autorizados: {len(autorizados)}")
+        print(f"TELEGRAM DIAGNOSTICO - enviando {len(autorizados)} update(s) para os handlers")
+        try:
+            return super().process_new_updates(autorizados)
+        except Exception as e:
+            print(f"TELEGRAM DIAGNOSTICO - erro nos handlers: {type(e).__name__}: {e}")
+            raise
 
 
 # O objeto 'bot' nasce aqui e será importado pelos outros módulos
