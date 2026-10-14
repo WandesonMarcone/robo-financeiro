@@ -3,6 +3,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Imports base e configurações
 from bot.loader import bot
+from bot.telegram_utils import responder_callback_desconhecido
 from config import SPREADSHEET_URL, MAPA_SETORES_B3
 
 # Banco de Dados
@@ -704,7 +705,12 @@ def callback_geral(call):
             markup.add(InlineKeyboardButton("🔙 Voltar aos Filtros", callback_data=f"dnav_{ticker}_{modo}"))
             session.close()
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-            
+
+        else:
+            # Callback desconhecido (botão antigo/removido): responder em vez de ficar em silêncio
+            logger.warning("TELEGRAM - callback nao reconhecido: %r", dados)
+            responder_callback_desconhecido(bot, call.id, logger=logger)
+
     except Exception as e:
         # 🛡️ Se o erro for apenas o clique duplo idêntico do Telegram, ignora silenciosamente
         if "message is not modified" in str(e):

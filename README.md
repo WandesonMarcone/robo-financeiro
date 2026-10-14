@@ -156,6 +156,19 @@ graph TD
 
  
 
+### 🔌 Ordem de registro dos handlers do Telegram
+
+O `main.py` importa os módulos que registram handlers nesta ordem:
+
+1. `bot.comandos` — comandos (`/...`).
+2. `bot.handlers` — callbacks específicos de tipo/setor.
+3. `bot.callbacks_revisao` — fluxo de revisão humana.
+4. `bot.callbacks_menus` — menus e o **callback catch-all**.
+
+O `pyTelegramBotAPI` avalia os handlers na ordem em que foram registrados e **para no primeiro que corresponder**. Por isso `bot.callbacks_menus`, que registra `@bot.callback_query_handler(func=lambda call: True)` (catch-all), deve ser importado **por último**: se fosse importado antes, capturaria todos os callbacks e impediria os handlers específicos de `bot.handlers` e `bot.callbacks_revisao` de executar.
+
+ 
+
 ### 🕵️ Motores de Busca e Auditoria (Scrapers)
 
 - `modules/scraper_fiis.py`: Motor focado em Fundos Imobiliários. Audita P/VP, Dividend Yield, **vacância física real**, quantidade de imóveis e inquilinos via StatusInvest (JSON + HTML), com preço do Fundamentus e fallback no Yahoo Finance.
@@ -242,6 +255,14 @@ graph TD
 
 | IA de fatos (`/ia`) e dashboard de oportunidades | ✅ Ativo |
 
+| Allowlist de chats autorizados (`CHATS_AUTORIZADOS`) | ✅ Ativo em `bot/telegram_utils.py` + `bot/loader.py` |
+
+| Estabilização de handlers/callbacks (falhas visíveis + callback desconhecido) | ✅ Ativo em `bot/telegram_utils.py` |
+
+| Testes automatizados do bot (`tests/test_telegram_stability.py`) | ✅ 14 testes passando |
+
+| Boot protegido sem `TELEGRAM_BOT_TOKEN` (falha clara, sem segredo) | ✅ Ativo em `bot/loader.py` |
+
  
 
 ### 🧪 Em desenvolvimento / código existente ainda não integrado
@@ -270,21 +291,19 @@ graph TD
 
 1. **Rotacionar o token do bot** do Telegram (credencial exposta no histórico do git) e purgar o histórico com `git filter-repo`/BFG.
 
-2. **Restringir chats autorizados** — hoje o bot processa comandos de qualquer remetente; adicionar allowlist de `chat_id`.
+2. **Proteger o `/resetar_docs`** com confirmação/autorização.
 
-3. **Proteger o `/resetar_docs`** com confirmação/autorização.
+3. **Corrigir o coletor de FIIs** — a busca do ativo pelo CNPJ nunca encontra correspondência, então informes de FIIs não são salvos.
 
-4. **Corrigir o coletor de FIIs** — a busca do ativo pelo CNPJ nunca encontra correspondência, então informes de FIIs não são salvos.
+4. **Corrigir o filtro de ROE** no garimpo de ações (`ROE >= 8.0` é sempre falso após a conversão decimal; deveria ser `0.08`).
 
-5. **Corrigir o filtro de ROE** no garimpo de ações (`ROE >= 8.0` é sempre falso após a conversão decimal; deveria ser `0.08`).
-
-6. **Sanitizar entrada** do `/adicionar` (risco de formula injection no Google Sheets).
+5. **Sanitizar entrada** do `/adicionar` (risco de formula injection no Google Sheets).
 
  
 
 ### P1 — Robustez e manutenibilidade
 
-1. **Criar suíte de testes** (pytest) para coletores, orquestrador e banco, rodando no CI do GitHub Actions (hoje não há nenhum teste).
+1. **Ampliar a suíte de testes** — hoje há cobertura apenas do bot (`tests/test_telegram_stability.py`); faltam testes para coletores, orquestrador e banco, além de executá-los no CI do GitHub Actions.
 
 2. **Proteger o boot** — não quebrar o import de `atualizador_documentos.py` quando `GROQ_API_KEY`/`DATABASE_URL` não existirem.
 
@@ -372,6 +391,8 @@ pip install -r requirements.txt
 
 export TELEGRAM_BOT_TOKEN="seu_token_do_bot"
 
+export TELEGRAM_CHATS_AUTORIZADOS="8867098987"
+
 export GROQ_API_KEY="sua_chave_groq"
 
 export CLIENT_ID="..."
@@ -394,11 +415,21 @@ python main.py
 
 python app.py
 
+# Testes do bot (nao acessam servicos reais)
+
+python tests/test_telegram_stability.py
+
+python tests/test_bot_boot.py
+
 ```
 
  
 
 > 💡 Sem `DATABASE_URL` o sistema usa SQLite local (`pipeline_dados/banco_institucional.db`). Demais configurações e catálogos ficam em `config.py`.
+
+ 
+
+> ⚠️ O bot **não inicia** se `TELEGRAM_BOT_TOKEN` estiver ausente ou vazio: `bot/loader.py` falha com uma mensagem clara e **não** fornece token padrão. `TELEGRAM_CHATS_AUTORIZADOS` é opcional e, se não definida, assume o valor de `TELEGRAM_CHAT_ID`.
 
  
 
@@ -414,9 +445,11 @@ python app.py
 
 - **Sem SQL Injection** — SQLAlchemy (ORM parametrizado) protege as consultas.
 
-- **Sem credenciais em texto puro** na árvore atual (`.gitignore` cobre `credenciais.json` e o banco local).
+- **Sem credenciais em texto puro** na árvore atual (`.gitignore` cobre `credenciais.json`, `.env`, chaves locais e o banco SQLite).
 
-- **Melhorias necessárias** — allowlist de `chat_id`, confirmação no `/resetar_docs` e sanitização de entradas que vão para o Google Sheets.
+- **Allowlist de chats** — apenas os `chat_id` listados em `CHATS_AUTORIZADOS` são processados; demais atualizações são descartadas e registradas em log (ver `bot/loader.py`).
+
+- **Melhorias necessárias** — confirmação no `/resetar_docs` e sanitização de entradas que vão para o Google Sheets.
 
  
 
