@@ -1,0 +1,71 @@
+# ==========================================
+# 🐍 PYTHON - BYTECODE E CACHE
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ==========================================
+# 🧪 AMBIENTES VIRTUAIS
+# ==========================================
+.venv/
+venv/
+env/
+ENV/
+virtualenv/
+.python-version
+
+# ==========================================
+# 📦 BUILD E DISTRIBUICAO
+# ==========================================
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# ==========================================
+# 🔐 SEGREDOS, CREDENCIAIS E CHAVES LOCAIS
+# ==========================================
+.env
+.env.*
+*.env
+.envrc
+
+# Credenciais de servico (Google Sheets/Drive etc.)
+credenciais.json
+credentials.json
+service_account.json
+client_secret*.json
+token.json
+*.pem
+*.key
+
+# ==========================================
+# 🗄️ BANCOS DE DADOS LOCAIS
+# ==========================================
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+pipeline_dados/banco_institucional.db
+
+# ==========================================
+# 📄 LOGS E ARQUIVOS TEMPORARIOS
+# ==========================================
+*.log
+*.tmp
+*.bak
+*.swp
+.DS_Store
+Thumbs.db
+
+# ==========================================
+# 🧰 FERRAMENTAS DE DESENVOLVIMENTO
+# ==========================================
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/

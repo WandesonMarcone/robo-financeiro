@@ -7,11 +7,38 @@ JSON_KEY = 'credenciais.json'
 # --- CONFIGURAÇÕES ---
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") 
 TELEGRAM_CHAT_ID = "8867098987"
-CHATS_AUTORIZADOS = [
-    c.strip()
-    for c in os.environ.get("TELEGRAM_CHATS_AUTORIZADOS", TELEGRAM_CHAT_ID).split(",")
-    if c.strip()
-]
+
+# ==========================================
+# 👤 USUÁRIOS E PERMISSÕES (FASE 2)
+# ==========================================
+# Papéis disponíveis. O papel define o que o usuário pode executar.
+PAPEL_ADMIN = "admin"
+PAPEL_USER = "user"
+
+
+def _ids_de_env(nome_variavel, padrao):
+    """Lê uma lista de IDs separados por vírgula, preservando o padrão do projeto."""
+    valor = os.environ.get(nome_variavel, padrao)
+    return [item.strip() for item in str(valor).split(",") if item.strip()]
+
+
+# IDs por papel (configuráveis por variável de ambiente, com os padrões da Fase 2).
+ADMINISTRADOR_IDS = _ids_de_env("TELEGRAM_ADMIN_IDS", "8867098987")
+USUARIO_IDS = _ids_de_env("TELEGRAM_USUARIO_IDS", "5336458734")
+
+# Mapa Telegram ID -> papel. O papel do administrador tem precedência.
+PAPEIS_USUARIOS = {}
+for _id_admin in ADMINISTRADOR_IDS:
+    PAPEIS_USUARIOS[_id_admin] = PAPEL_ADMIN
+for _id_user in USUARIO_IDS:
+    PAPEIS_USUARIOS.setdefault(_id_user, PAPEL_USER)
+
+# Lista de chats autorizados: união de administradores, usuários e do valor
+# legado (TELEGRAM_CHATS_AUTORIZADOS / TELEGRAM_CHAT_ID), sem duplicatas.
+_CHATS_LEGADO = _ids_de_env("TELEGRAM_CHATS_AUTORIZADOS", TELEGRAM_CHAT_ID)
+CHATS_AUTORIZADOS = list(
+    dict.fromkeys([*ADMINISTRADOR_IDS, *USUARIO_IDS, *_CHATS_LEGADO])
+)
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY") # CONFIG IA(GROQ)
 DATABASE_URL = os.environ.get("DATABASE_URL") # CONFIG BASE DE DADOS
 
