@@ -1,71 +1,30 @@
-import logging
-
 import telebot
-
 import config
-from bot.telegram_utils import (
-    NotificadorDeFalhas,
-    chat_autorizado,
-    descrever_update,
-)
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
-logger = logging.getLogger("robo.telegram")
 
 
 class BotAutorizado(telebot.TeleBot):
-    """Bot que descarta atualizações de chats não autorizados e registra a execução.
-
-    A execução é verificável pelos logs: cada update autorizado e o resultado
-    final dos handlers (sem falha / com falha) são registrados.
-    """
+    """Bot que descarta atualizações (mensagens e callbacks) de chats não autorizados."""
 
     def _chat_autorizado(self, update):
-        return chat_autorizado(update)
+        if update.message:
+            chat_id = update.message.chat.id
+        elif update.callback_query and update.callback_query.message:
+            chat_id = update.callback_query.message.chat.id
+        else:
+            return True
+        return str(chat_id) in config.CHATS_AUTORIZADOS
 
     def process_new_updates(self, updates):
-        logger.info("TELEGRAM - updates recebidos: %d", len(updates))
-
-        autorizados = []
-        for update in updates:
-            descricao = descrever_update(update)
-            if self._chat_autorizado(update):
-                logger.info("TELEGRAM - update autorizado: %s", descricao)
-                autorizados.append(update)
-            else:
-                logger.warning(
-                    "TELEGRAM - update descartado (chat nao autorizado): %s",
-                    descricao,
-                )
-
-        logger.info(
-            "TELEGRAM - enviando %d update(s) para os handlers", len(autorizados)
-        )
-
-        for update in autorizados:
-            self._update_em_processamento = update
-            self._falha_no_update = None
-            try:
-                super().process_new_updates([update])
-            finally:
-                if self._falha_no_update is None:
-                    logger.info(
-                        "TELEGRAM - handlers concluidos sem falha: %s",
-                        descrever_update(update),
-                    )
-                else:
-                    logger.error(
-                        "TELEGRAM - handlers concluidos com falha: %s",
-                        descrever_update(update),
-                    )
-                self._update_em_processamento = None
-        return None
+        print(f"TELEGRAM DIAGNOSTICO - updates recebidos: {len(updates)}")
+        autorizados = [u for u in updates if self._chat_autorizado(u)]
+        print(f"TELEGRAM DIAGNOSTICO - updates autorizados: {len(autorizados)}")
+        print(f"TELEGRAM DIAGNOSTICO - enviando {len(autorizados)} update(s) para os handlers")
+        try:
+            return super().process_new_updates(autorizados)
+        except Exception as e:
+            print(f"TELEGRAM DIAGNOSTICO - erro nos handlers: {type(e).__name__}: {e}")
+            raise
 
 
 # O objeto 'bot' nasce aqui e será importado pelos outros módulos
 bot = BotAutorizado(config.TELEGRAM_BOT_TOKEN, threaded=False)
-bot.exception_handler = NotificadorDeFalhas()
-bot.exception_handler.bot = bot
