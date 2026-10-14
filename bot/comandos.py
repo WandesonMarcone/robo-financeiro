@@ -1,3 +1,4 @@
+import logging
 import threading
 import time
 import requests
@@ -6,9 +7,69 @@ import fitz
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import func, or_
 from bot.loader import bot
+from bot.telegram_utils import requer_papel, PAPEL_ADMIN, PAPEL_USER
 from atualizador_documentos import SessionDB 
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
-from modules.utils import conectar_gspread
+from modules.utils import conectar_gspread, url_pdf_valida
+
+logger = logging.getLogger(__name__)
+
+STATUS_SALVO_DRIVE = "SALVO_DRIVE"
+MARCADORES_MARKDOWN = ("_", "*", "`", "[")
+
+
+def escapar_markdown(texto):
+    """Neutraliza marcadores do Markdown sem alterar o conteúdo visível."""
+    if texto is None:
+        return ""
+    texto = str(texto)
+    for char in MARCADORES_MARKDOWN:
+        texto = texto.replace(char, f"\\{char}")
+    return texto
+
+
+def buscar_relatorios_disponiveis(session, limite=10):
+    """Retorna os documentos efetivamente salvos no Drive e com URL válida.
+
+    Filtra por status compatível com arquivos já armazenados no Drive e
+    descarta links nulos/vazios/"nan"/inválidos antes de montar a mensagem.
+    """
+    candidatos = session.query(DocumentosQualitativos, Ativo)\
+        .join(Ativo, DocumentosQualitativos.ativo_id == Ativo.id)\
+        .filter(DocumentosQualitativos.status_processamento.ilike(f"%{STATUS_SALVO_DRIVE}%"))\
+        .filter(DocumentosQualitativos.url_pdf.isnot(None))\
+        .filter(DocumentosQualitativos.url_pdf != "")\
+        .filter(DocumentosQualitativos.url_pdf.ilike("http%"))\
+        .order_by(DocumentosQualitativos.data_publicacao.desc())\
+        .limit(limite)\
+        .all()
+
+    return [(doc, ativo) for doc, ativo in candidatos if url_pdf_valida(doc.url_pdf)]
+
+
+def montar_mensagem_relatorios(documentos):
+    """Monta a mensagem do comando, incluindo somente documentos com link válido."""
+    documentos_validos = [
+        (doc, ativo) for doc, ativo in documentos if url_pdf_valida(doc.url_pdf)
+    ]
+
+    if not documentos_validos:
+        return None
+
+    resposta = "📄 **Últimos Relatórios Capturados:**\n\n"
+    for doc, ativo in documentos_validos:
+        ticker = escapar_markdown(ativo.ticker)
+        data_formatada = doc.data_publicacao.strftime('%d/%m/%Y') if doc.data_publicacao else "Data N/A"
+        tipo = escapar_markdown(doc.tipo_documento)
+
+        resposta += f"🏢 **{ticker}** - {data_formatada}\n"
+        resposta += f"🏷️ Tipo: {tipo}\n"
+        if doc.assunto and str(doc.assunto).strip():
+            resposta += f"📌 Assunto: {escapar_markdown(doc.assunto)}\n"
+        resposta += f"🔗 [Acessar PDF]({doc.url_pdf})\n"
+        resposta += "➖➖➖➖➖➖➖➖➖➖\n"
+
+    return resposta
 
 from modules.scraper_fiis import rodar_garimpo_fiis # <--- Importe o arquivo que corrigimos
 
@@ -26,6 +87,7 @@ def sanitizar_valor_planilha(valor):
 # 🧭 MENUS DE NAVEGAÇÃO E INTERFACE (UI)
 # ==========================================
 @bot.message_handler(commands=['menu', 'start'])
+@requer_papel(bot, PAPEL_USER)
 def enviar_menu(message):
     markup = InlineKeyboardMarkup()
     markup.row(InlineKeyboardButton("🏢 FIIs (Imobiliários)", callback_data="menu_fiis"),
@@ -35,6 +97,7 @@ def enviar_menu(message):
     bot.send_message(message.chat.id, "🤖 *Terminal Institucional* 🤖\nSelecione o módulo de análise abaixo:", reply_markup=markup, parse_mode="Markdown")
 
 @bot.message_handler(commands=['status'])
+@requer_papel(bot, PAPEL_ADMIN)
 def status_banco(message):
     session = SessionDB() 
     try:
@@ -58,31 +121,29 @@ def status_banco(message):
         session.close() 
 
 @bot.message_handler(commands=['relatorios', 'docs'])
+@requer_papel(bot, PAPEL_USER)
 def enviar_ultimos_relatorios(message):
     bot.reply_to(message, "🔎 Buscando os últimos documentos no cofre...")
     session = SessionDB()
     try:
-        ultimos_docs = session.query(DocumentosQualitativos, Ativo)\
-            .join(Ativo, DocumentosQualitativos.ativo_id == Ativo.id)\
-            .order_by(DocumentosQualitativos.data_publicacao.desc())\
-            .limit(10).all()
+        documentos = buscar_relatorios_disponiveis(session)
+        resposta = montar_mensagem_relatorios(documentos)
 
-        if not ultimos_docs:
-            bot.send_message(message.chat.id, "📭 Nenhum documento encontrado no banco ainda.")
+        if not resposta:
+            bot.send_message(
+                message.chat.id,
+                "📭 Nenhum documento com link de PDF disponível no momento.",
+            )
             return
 
-        resposta = "📄 **Últimos Relatórios Capturados:**\n\n"
-        for doc, ativo in ultimos_docs:
-            data_formatada = doc.data_publicacao.strftime('%d/%m/%Y')
-            resposta += f"🏢 **{ativo.ticker}** - {data_formatada}\n"
-            resposta += f"🏷️ Tipo: {doc.tipo_documento}\n"
-            if doc.assunto and doc.assunto.strip():
-                resposta += f"📌 Assunto: {doc.assunto}\n"
-            resposta += f"🔗 [Acessar PDF]({doc.url_pdf})\n"
-            resposta += "➖➖➖➖➖➖➖➖➖➖\n"
-
-        bot.send_message(message.chat.id, resposta, parse_mode='Markdown', disable_web_page_preview=True)
-    except Exception as e:
+        bot.send_message(
+            message.chat.id,
+            resposta,
+            parse_mode='Markdown',
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        logger.exception("Falha ao listar relatorios (comando /relatorios e /docs)")
         bot.send_message(message.chat.id, "❌ Ops! Deu um erro ao tentar ler o banco de dados.")
     finally:
         session.close()
@@ -91,6 +152,7 @@ def enviar_ultimos_relatorios(message):
 # 📊 COMANDOS DE PLANILHA DO GOOGLE E GESTÃO
 # ==========================================
 @bot.message_handler(commands=['adicionar'])
+@requer_papel(bot, PAPEL_ADMIN)
 def comando_adicionar(message):
     try:
         partes = message.text.split()
@@ -121,6 +183,7 @@ def comando_adicionar(message):
         bot.reply_to(message, f"❌ Erro ao adicionar ativo: {e}")
 
 @bot.message_handler(commands=['forcar_varredura'])
+@requer_papel(bot, PAPEL_ADMIN)
 def acionar_varredura_manual(message):
     bot.reply_to(message, "⚙️ *Iniciando varredura na B3 e CVM...*\nIsso pode levar alguns minutos. Buscando apenas documentos novos!", parse_mode="Markdown")
 
@@ -188,6 +251,7 @@ def acionar_varredura_manual(message):
     threading.Thread(target=tarefa_pesada_background).start()
 
 @bot.message_handler(commands=['forcar_docs_acoes'])
+@requer_papel(bot, PAPEL_ADMIN)
 def rodar_docs_acoes(message):
     from datetime import datetime
 
@@ -231,6 +295,7 @@ def rodar_docs_acoes(message):
     thread_docs.start()
 
 @bot.message_handler(commands=['processar_acoes_ia'])
+@requer_papel(bot, PAPEL_ADMIN)
 def rodar_ia_acoes(message):
     bot.send_message(message.chat.id, "🧠 *Iniciando motor de IA para Ações...*\nLendo PDFs da CVM, classificando e enviando ao Drive em segundo plano. Isso pode levar alguns minutos.", parse_mode="Markdown")
     
@@ -252,6 +317,7 @@ def rodar_ia_acoes(message):
     thread_ia.start()
 
 @bot.message_handler(commands=['forcar_cvm'])
+@requer_papel(bot, PAPEL_ADMIN)
 def rodar_cvm(message):
     from datetime import datetime
     
@@ -288,6 +354,7 @@ import threading
 from pipeline_dados.coletor_fiis import processar_informes_fiis_cvm
 
 @bot.message_handler(commands=['forcar_fiis'])
+@requer_papel(bot, PAPEL_ADMIN)
 def cmd_forcar_fiis(message):
     chat_id = message.chat.id
     bot.reply_to(message, "📥 Baixando informes mensais de FIIs em segundo plano. Aguarde o aviso de conclusão!")
