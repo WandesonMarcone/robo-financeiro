@@ -4,7 +4,6 @@ import io
 from datetime import datetime
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos, TipoAtivo
 from atualizador_documentos import SessionDB
-from modules.utils import url_pdf_valida
 
 class RelatoriosAcoesCVM:
     def __init__(self, session):
@@ -70,10 +69,7 @@ class RelatoriosAcoesCVM:
         for index, row in df_filtrado.iterrows():
             cnpj_doc = str(row[col_cnpj]).strip()
             ativo = mapa_ativos.get(cnpj_doc)
-            link_bruto = str(row[col_link]).strip()
-            # Links ausentes, vazios, "nan" ou inválidos NÃO são gravados como URL.
-            # O documento é preservado com url_pdf=None para não perder metadados.
-            link_pdf = link_bruto if url_pdf_valida(link_bruto) else None
+            link_pdf = str(row[col_link]).strip()
             data_doc_str = str(row[col_data]).strip()
             categoria = str(row[col_categoria]).strip()
             assunto = str(row[col_assunto]).strip()
@@ -84,21 +80,10 @@ class RelatoriosAcoesCVM:
                 data_pub = datetime.strptime(data_limpa, "%Y-%m-%d").date()
             except:
                 continue 
-
-            # Dedup: com link válido, mantém a regra original por url_pdf.
-            # Sem link válido, evita duplicar o mesmo metadado (url_pdf nulo).
-            if link_pdf is not None:
-                existe = self.session.query(DocumentosQualitativos).filter(
-                    DocumentosQualitativos.url_pdf == link_pdf
-                ).first()
-            else:
-                existe = self.session.query(DocumentosQualitativos).filter(
-                    DocumentosQualitativos.ativo_id == ativo.id,
-                    DocumentosQualitativos.data_publicacao == data_pub,
-                    DocumentosQualitativos.tipo_documento == categoria,
-                    DocumentosQualitativos.assunto == assunto,
-                    DocumentosQualitativos.url_pdf.is_(None),
-                ).first()
+                
+            existe = self.session.query(DocumentosQualitativos).filter(
+                DocumentosQualitativos.url_pdf == link_pdf
+            ).first()
             
             if not existe:
                 novo_doc = DocumentosQualitativos(
