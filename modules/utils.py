@@ -5,35 +5,11 @@ import pandas as pd
 import pytz
 import telebot
 from datetime import datetime
-from urllib.parse import urlparse
 import config
 import time
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-
-VALORES_NAO_URL = {"nan", "none", "null", "undefined", ""}
-
-def url_pdf_valida(valor):
-    """Retorna True apenas para URLs HTTP/HTTPS com host válido.
-
-    Rejeita None, vazio, espaços, "nan", "None", "null", "undefined" e
-    esquemas diferentes de HTTP/HTTPS (ex.: ftp:, javascript:, file:).
-    """
-    if valor is None:
-        return False
-
-    texto = str(valor).strip()
-    if texto.lower() in VALORES_NAO_URL:
-        return False
-
-    try:
-        partes = urlparse(texto)
-    except (ValueError, AttributeError):
-        return False
-
-    return partes.scheme in ("http", "https") and bool(partes.netloc)
-
 
 def get_request_with_retry(url, headers):
     """Uma requisição blindada que tenta 3 vezes antes de desistir."""
