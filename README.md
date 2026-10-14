@@ -215,7 +215,78 @@ O `pyTelegramBotAPI` avalia os handlers na ordem em que foram registrados e **pa
 
 ---
 
- 
+## Controle de Usuarios e Permissoes (Fase 2)
+
+O acesso ao bot e restrito a usuarios previamente autorizados. Nao ha liberacao
+automatica para quem inicia uma conversa: atualizacoes de chats fora da
+allowlist sao descartadas antes de qualquer handler executar.
+
+### Papeis
+
+| Papel | Telegram ID (padrao) | Descricao |
+|---|---|---|
+| `admin` | 8867098987 | Acesso administrativo total e tambem todas as funcionalidades do usuario comum. |
+| `user` | 5336458734 | Somente funcionalidades financeiras e de consulta autorizadas. |
+
+### Permissoes
+
+Comandos liberados para `user` (consulta/financeiro): `/menu`, `/start`,
+`/relatorios`, `/docs`.
+
+Comandos exclusivos do `admin` (operacao/configuracao/manutencao/destrutivos):
+`/status`, `/adicionar`, `/forcar_varredura`, `/forcar_docs_acoes`,
+`/processar_acoes_ia`, `/forcar_cvm`, `/forcar_fiis`, `/alimentar_ia`,
+`/mapear_nomes`, `/resetar_docs`, `/revisao`.
+
+Callbacks liberados para `user`: navegacao e consulta (`menu_*`, `macro_*`,
+`subsetor_*`, `sub_ac_*`, `painel_*`, `dados_*`, `ano_*`, `mes_*`, `docs_*`,
+`dnav_*`, `dl_*`, `tipo_fii_*`, `setor_*`, `favoritos_*`, `oportunidades_*`,
+`ia_*`, `ajuda_*`, `ajuda_cvm_*`, `voltar_menu`).
+
+Callbacks exclusivos do `admin`: `rev_*` (Central de Revisao), `ver_raiox_docs`,
+`confirmar_reset`, `cancelar_reset`, `iniciar_revisao_pendencias`.
+
+Operacoes nao reconhecidas (comandos/callbacks desconhecidos) sao tratadas como
+administrativas por padrao (falha segura): nao recebem autorizacao automatica.
+
+### Como a autenticacao funciona
+
+1. `bot/loader.py` — `BotAutorizado.process_new_updates` e o ponto unico de
+   despacho.
+2. O chat e validado contra `config.CHATS_AUTORIZADOS`.
+3. `bot/permissoes.py` identifica o autor pelo Telegram ID (`from_user.id`, com
+   fallback para o `chat.id`), resolve o papel em `config.USUARIOS_AUTORIZADOS`,
+   classifica a operacao (comando ou callback) e decide se ela pode ser
+   executada.
+4. Operacoes negadas sao respondidas com uma mensagem generica (sem detalhes
+   internos) e registradas em log. Uma tentativa negada nunca interrompe o bot.
+
+O papel e sempre derivado do Telegram ID fornecido pela plataforma; ele nao pode
+ser alterado por texto de comando, parametros nem por dados de callback.
+
+### Como adicionar outro usuario autorizado
+
+Adicione o Telegram ID em `TELEGRAM_USUARIOS_LIMITADOS` (lista separada por
+virgulas) e reinicie o servico. Para definir o administrador, use
+`TELEGRAM_ADMIN_ID` (um unico ID). Chats que so precisam de leitura podem ser
+incluidos em `TELEGRAM_CHATS_AUTORIZADOS`, mas continuam sujeitos ao bloqueio de
+operacoes administrativas.
+
+Variaveis de ambiente relacionadas (nunca versione IDs, tokens ou credenciais
+reais):
+
+- `TELEGRAM_ADMIN_ID` (padrao `8867098987`)
+- `TELEGRAM_USUARIOS_LIMITADOS` (padrao `5336458734`)
+- `TELEGRAM_CHATS_AUTORIZADOS` (opcional; complementa a allowlist)
+
+### Funcionalidades exclusivas do administrador
+
+Coleta e processamento (CVM/FNET/FIIs/IA), manutencao e diagnostico
+(`/status`, `/mapear_nomes`, `ver_raiox_docs`), alteracao de dados
+(`/adicionar`), reset de documentos (`/resetar_docs`) e a Central de Revisao
+Humana (`/revisao` e callbacks `rev_*`).
+
+---
 
 ## 🚀 Progresso do Sistema
 
@@ -257,9 +328,13 @@ O `pyTelegramBotAPI` avalia os handlers na ordem em que foram registrados e **pa
 
 | Allowlist de chats autorizados (`CHATS_AUTORIZADOS`) | ✅ Ativo em `bot/telegram_utils.py` + `bot/loader.py` |
 
+| Papéis de usuário (`admin`/`user`) e IDs autorizados | ✅ Ativo em `config.py` + `bot/permissoes.py` |
+
+| Controle centralizado de permissões em comandos e callbacks | ✅ Ativo em `bot/loader.py` + `bot/permissoes.py` |
+
 | Estabilização de handlers/callbacks (falhas visíveis + callback desconhecido) | ✅ Ativo em `bot/telegram_utils.py` |
 
-| Testes automatizados do bot (`tests/test_telegram_stability.py`) | ✅ 14 testes passando |
+| Testes automatizados do bot (`tests/test_bot_boot.py`, `tests/test_telegram_stability.py`, `tests/test_permissoes.py`) | ✅ 41 testes passando |
 
 | Boot protegido sem `TELEGRAM_BOT_TOKEN` (falha clara, sem segredo) | ✅ Ativo em `bot/loader.py` |
 
@@ -393,6 +468,10 @@ export TELEGRAM_BOT_TOKEN="seu_token_do_bot"
 
 export TELEGRAM_CHATS_AUTORIZADOS="8867098987"
 
+export TELEGRAM_ADMIN_ID="8867098987"
+
+export TELEGRAM_USUARIOS_LIMITADOS="5336458734"
+
 export GROQ_API_KEY="sua_chave_groq"
 
 export CLIENT_ID="..."
@@ -421,6 +500,8 @@ python tests/test_telegram_stability.py
 
 python tests/test_bot_boot.py
 
+python tests/test_permissoes.py
+
 ```
 
  
@@ -429,7 +510,7 @@ python tests/test_bot_boot.py
 
  
 
-> ⚠️ O bot **não inicia** se `TELEGRAM_BOT_TOKEN` estiver ausente ou vazio: `bot/loader.py` falha com uma mensagem clara e **não** fornece token padrão. `TELEGRAM_CHATS_AUTORIZADOS` é opcional e, se não definida, assume o valor de `TELEGRAM_CHAT_ID`.
+> ⚠️ O bot **não inicia** se `TELEGRAM_BOT_TOKEN` estiver ausente ou vazio: `bot/loader.py` falha com uma mensagem clara e **não** fornece token padrão. Os usuários definidos em `USUARIOS_AUTORIZADOS` (via `TELEGRAM_ADMIN_ID` e `TELEGRAM_USUARIOS_LIMITADOS`) são sempre autorizados; `TELEGRAM_CHATS_AUTORIZADOS` é opcional e complementa a allowlist de chats.
 
  
 
@@ -446,6 +527,8 @@ python tests/test_bot_boot.py
 - **Sem SQL Injection** — SQLAlchemy (ORM parametrizado) protege as consultas.
 
 - **Sem credenciais em texto puro** na árvore atual (`.gitignore` cobre `credenciais.json`, `.env`, chaves locais e o banco SQLite).
+
+- **Controle de acesso por papel** — o acesso é restrito a `USUARIOS_AUTORIZADOS`. Cada update é classificado por `bot/permissoes.py` e operações administrativas (comandos e callbacks) são bloqueadas para o papel `user` antes de qualquer efeito; tentativas negadas são registradas em log sem expor credenciais (ver `bot/loader.py`).
 
 - **Allowlist de chats** — apenas os `chat_id` listados em `CHATS_AUTORIZADOS` são processados; demais atualizações são descartadas e registradas em log (ver `bot/loader.py`).
 
