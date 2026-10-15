@@ -1,549 +1,479 @@
-# 🤖 Robô Financeiro & Data Lake Institucional
+# Robô Financeiro & Data Lake Institucional
 
- 
+Ecossistema de engenharia de dados focado no mercado financeiro brasileiro (B3).
+O projeto automatiza a **coleta, auditoria e armazenamento** de dados de FIIs e
+Ações: raspagem de documentos oficiais (FNET/B3, CVM), classificação com
+Inteligência Artificial, cofre documental no Google Drive, painel em Google
+Sheets e operação via **bot do Telegram**.
 
-Bem-vindo ao repositório do **Robô Financeiro**, um ecossistema de Engenharia de Dados focado no mercado financeiro brasileiro (B3).
-
- 
-
-Este sistema abandona o modelo amador de planilhas manuais e implementa uma arquitetura automatizada de **coleta, auditoria e armazenamento** de FIIs e Ações: raspagem de documentos oficiais (FNET/CVM/B3), classificação com Inteligência Artificial, cofre documental no Google Drive, dashboard em Google Sheets e operação em tempo real via **bot do Telegram**.
-
- 
+Para uma explicação simplificada voltada ao proprietário, veja `admin.md`.
 
 ---
 
- 
+## 1. Visão geral
 
-## 🎯 Objetivos Alcançados (Arquitetura Atual)
+O sistema tem dois fluxos independentes:
 
- 
+- **Servidor 24/7** (`main.py`): sobe o Flask, recebe os updates do Telegram por
+  webhook e agenda a varredura diária. Roda no Render.
+- **Coletor agendado** (`app.py`): dispara o garimpo de oportunidades, grava nas
+  planilhas e envia alertas. Roda no cron do GitHub Actions.
 
-- **Data Lake Dinâmico:** Utilização do Google Sheets como banco de dados visual (Dashboard), recebendo cargas contínuas e automatizadas via APIs (`batch_update` em abas `BD_FIIs`, `BD_Acoes`, `BD_Logs`).
+Principais capacidades:
 
-- **Scraping Resiliente:** Sistema de fallback duplo. Se uma fonte falha (ex.: Fundamentus fora do ar), o robô busca os dados no **Yahoo Finance** (yfinance) ou **StatusInvest** — inclusive com retry automático em cada requisição.
-
-- **Acervo Documental na Nuvem:** Varredura autônoma no sistema **FNET da B3** e na **CVM** para capturar Fatos Relevantes, Relatórios Gerenciais, formulários e informes, organizando-os automaticamente em pastas dinâmicas no Google Drive (`Documentos → Tipo → Ticker → Ano → Mês`).
-
-- **Inteligência Artificial Documental:** Todo PDF baixado passa por **extração de texto** (PyPDF2/PyMuPDF/pdfplumber) e **classificação pela API Groq (LLM)**, que devolve um JSON com tipo de documento e nível de **confiança** — documentos com confiança ≥ 80 são salvos automaticamente; os demais seguem para **revisão humana**.
-
-- **Bot de Telegram Operacional:** Interface mobile em tempo real para controle do fluxo, emissão de alertas de oportunidades (quando um ativo entra na margem de desconto) e links diretos para leitura de PDFs oficiais.
-
-- **Banco de Dados Relacional:** Integração com **SQLite (padrão) ou PostgreSQL (produção)** via SQLAlchemy para evitar processamentos duplicados, registrando o histórico de relatórios baixados com máquina de estados (`SALVO_DRIVE`, `AGUARDANDO_REVISAO`, `ERRO_DOWNLOAD`, `ERRO_DRIVE`, `REJEITADO_MANUAL`).
-
- 
+- **Scraping resiliente** com fallback (Fundamentus, StatusInvest, Yahoo
+  Finance) e retry por requisição.
+- **Acervo documental na nuvem**: varredura em FNET/B3 e CVM, com organização
+  automática de PDFs em pastas do Google Drive (`Documentos`, `Tipo`, `Ticker`,
+  `Ano`, `Mês`, além da pasta de revisão).
+- **IA documental**: extração de texto do PDF e classificação pela API Groq com
+  nível de confiança; documentos com confiança alta são salvos automaticamente e
+  os demais seguem para revisão humana.
+- **Bot do Telegram**: menus, consultas financeiras, alertas de oportunidades,
+  controle de acesso por papel, autocadastro com aprovação e favoritos por
+  usuário.
+- **Banco relacional** (PostgreSQL/Neon em produção) via SQLAlchemy, com máquina
+  de estados dos documentos.
 
 ---
 
- 
-
-## 🏗️ Arquitetura Geral
-
- 
+## 2. Arquitetura e fluxos de execução
 
 ```mermaid
-
 graph TD
-
-    subgraph "Operação"
-
-        BOT["Bot Telegram bot/"]
-
-        WEB["Servidor Flask main.py"]
-
-        SCH["Agendador APScheduler seg-sex 08:00"]
-
+    subgraph Operacao
+        BOT["Bot Telegram (bot/)"]
+        WEB["Servidor Flask (main.py)"]
+        SCH["APScheduler seg-sex 08:00"]
         ACT["Cron GitHub Actions 5x/dia"]
-
     end
-
-    subgraph "Pipeline"
-
+    subgraph Pipeline
         ORC["Orquestrador varredura_diaria"]
-
-        GAR["Garimpo de oportunidades app.py"]
-
-        COL["Coletores CVM/FNET/B3"]
-
+        GAR["Garimpo de oportunidades (app.py)"]
+        COL["Coletores CVM / FNET / B3"]
     end
-
-    subgraph "Fontes Externas"
-
+    subgraph Fontes
         CVM["CVM"]
-
         FNET["FNET B3"]
-
         FUND["Fundamentus"]
-
         SI["StatusInvest"]
-
         YF["Yahoo Finance"]
-
     end
-
-    subgraph "Processamento e IA"
-
-        PDF["Extração de texto leitor_pdf"]
-
-        IA["Classificação Groq confiança"]
-
+    subgraph Processamento
+        PDF["Extracao de texto (leitor_pdf)"]
+        IA["Classificacao Groq"]
     end
-
-    subgraph "Armazenamento"
-
-        DB[("SQLite/PostgreSQL")]
-
+    subgraph Armazenamento
+        DB[("PostgreSQL / Neon")]
         SHEET[("Google Sheets")]
-
         DRIVE[("Google Drive")]
-
     end
-
     BOT --> ORC
-
     WEB --> ORC
-
     SCH --> ORC
-
     ACT --> GAR
-
     ORC --> COL
-
     GAR --> FUND
-
     GAR --> SI
-
     GAR --> YF
-
     COL --> CVM
-
     COL --> FNET
-
     COL --> PDF
-
     PDF --> IA
-
     ORC --> DB
-
-    GAR --> SHEET
-
     IA --> DRIVE
-
     IA --> DB
-
     DRIVE --> SHEET
-
 ```
 
- 
+### `main.py` — servidor (Render)
+
+- Sobe o Flask e expõe a rota de webhook do Telegram e uma rota raiz de status.
+- No boot, configura o webhook e inicia o APScheduler com a varredura diária de
+  segunda a sexta às 08:00 (America/Sao_Paulo).
+- **Criação de tabelas**: NÃO ocorre por padrão. O `create_all` só roda com
+  `CRIAR_TABELAS=1` (uso em desenvolvimento limpo); o banco de produção não é
+  alterado no boot.
+- Ao apenas **importar** `main`, nenhum job é agendado e nenhum webhook é
+  registrado. O boot completo na importação só ocorre com
+  `ROBO_INICIAR_NO_IMPORT=1` (compatibilidade com servidores WSGI).
+- Execução local: `python main.py`.
+
+### `app.py` — coletor de oportunidades (GitHub Actions)
+
+- Não é o servidor web.
+- Executa o garimpo de FIIs e Ações, grava em lote nas abas do Google Sheets e
+  envia os alertas consolidados no Telegram.
+- Execução: `python app.py`.
+- Agendamento: `.github/workflows/main.yml`, cron `0 13,15,17,19,21 * * 1-5`
+  (segunda a sexta, 5 vezes ao dia, em UTC).
+
+### Ordem de registro dos handlers do Telegram
+
+O `main.py` importa os módulos nesta ordem:
+
+1. `bot.cadastro`
+2. `bot.favoritos`
+3. `bot.comandos`
+4. `bot.handlers`
+5. `bot.callbacks_revisao`
+6. `bot.callbacks_menus`
+
+O `pyTelegramBotAPI` avalia os handlers na ordem de registro e para no primeiro
+que corresponder. Por isso `bot.callbacks_menus`, que registra um
+`callback_query_handler(func=lambda call: True)` (catch-all), é importado por
+último. Os módulos com callbacks específicos (`cad_*`, `favoritos_*`, `favadd_*`,
+`favnew_*`, `favrem_*`, `rev_*`) são registrados antes, para não serem capturados
+pelo genérico.
 
 ---
 
- 
+## 3. Estrutura das pastas
 
-## 📂 Mapeamento de Arquivos e Módulos
+- `bot/` — bot do Telegram (comandos, menus, cadastro, favoritos, permissões,
+  loader e utilitários).
+- `modules/` — scrapers, leitura de PDF, Google Drive, utilitários e clientes de
+  IA.
+- `services/` — orquestrador da rotina diária, planilhas, menus/painéis, logos e
+  motor de IA (inativo).
+- `pipeline_dados/` — conexão, modelos ORM, repositórios e coletores CVM/FIIs.
+- `migrations/` — migrações SQL manuais e versionadas para o banco de produção.
+- `tests/` — testes automatizados (sem rede e sem banco real).
+- `.github/workflows/main.yml` — cron do GitHub Actions que executa `app.py`.
 
- 
-
-### 📱 Interface e Servidor
-
-- `main.py`: O **"cérebro" da comunicação** e o verdadeiro ponto de entrada web. Roda 24/7 no Render (via Webhook/Gunicorn), sobe o Flask, registra o webhook do Telegram, cria as tabelas do banco e agenda a varredura diária com o APScheduler.
-
-- `bot/loader.py`: Cria a **instância única** do bot (telebot).
-
-- `bot/comandos.py`, `bot/handlers.py`, `bot/callbacks_menus.py`, `bot/callbacks_revisao.py`: Menus, comandos, navegação por setor/tipo e o fluxo de **revisão humana** de documentos.
-
-- `app.py`: **Garimpo de oportunidades** — não é o servidor web. Roda no cron do GitHub Actions, dispara os scrapers de FIIs/Ações, grava em lote nas planilhas e envia alertas consolidados.
-
- 
-
-### 🔌 Ordem de registro dos handlers do Telegram
-
-O `main.py` importa os módulos que registram handlers nesta ordem:
-
-1. `bot.comandos` — comandos (`/...`).
-2. `bot.handlers` — callbacks específicos de tipo/setor.
-3. `bot.callbacks_revisao` — fluxo de revisão humana.
-4. `bot.callbacks_menus` — menus e o **callback catch-all**.
-
-O `pyTelegramBotAPI` avalia os handlers na ordem em que foram registrados e **para no primeiro que corresponder**. Por isso `bot.callbacks_menus`, que registra `@bot.callback_query_handler(func=lambda call: True)` (catch-all), deve ser importado **por último**: se fosse importado antes, capturaria todos os callbacks e impediria os handlers específicos de `bot.handlers` e `bot.callbacks_revisao` de executar.
-
- 
-
-### 🕵️ Motores de Busca e Auditoria (Scrapers)
-
-- `modules/scraper_fiis.py`: Motor focado em Fundos Imobiliários. Audita P/VP, Dividend Yield, **vacância física real**, quantidade de imóveis e inquilinos via StatusInvest (JSON + HTML), com preço do Fundamentus e fallback no Yahoo Finance.
-
-- `modules/scraper_acoes.py`: Caçador de barganhas focado em Ações. Calcula P/L, P/VP, ROE, Margens e Dividend Yield (Fundamentus + fallback Yahoo Finance) e organiza o portfólio por setores.
-
-- `fnet_scraper.py`: Robô especializado na plataforma da **B3 (FNET)**, encarregado de caçar e baixar PDFs institucionais.
-
-- `pipeline_dados/coletor_cvm.py`: Leitura institucional dos documentos da **CVM** (relatórios e formulários por ano/ativo).
-
-- `pipeline_dados/coletor_docs_acoes.py` e `pipeline_dados/coletor_fiis.py`: Coletores específicos de ações e informes de FIIs.
-
- 
-
-### 📁 Gerenciamento de Nuvem, IA e Banco de Dados
-
-- `atualizador_documentos.py`: A ponte entre a B3, o Banco de Dados, a IA e o Google Drive. Verifica se o documento já está registrado, baixa PDFs inéditos, **extrai o texto, classifica com Groq e salva** no Drive quando a confiança é alta.
-
-- `modules/GoogleDriveManager.py`: Módulo customizado de API do Google. Verifica a existência de diretórios, cria pastas hierárquicas dinâmicas (`Documentos → Tipo → Ticker → Ano → Mês`, além da pasta de revisão `⚠️ REVISÃO`) e faz o upload dos PDFs liberando link público.
-
-- `modules/leitor_pdf.py`: Extração de texto de PDFs (PyMuPDF + pdfplumber).
-
-- `modules/module_ia.py`: Consultas interativas de fatos relevantes dos ativos via LLM (Groq/OpenAI).
-
-- `pipeline_dados/banco_dados.py`: Modelagem ORM (SQLAlchemy) com as classes e constraints do sistema (`Ativos`, `DadosFinanceirosAcoes`, `DadosFinanceirosFiis`, `DocumentosQualitativos`).
-
-- `services/orquestrador.py`: **Ponto de entrada do pipeline** — a `varredura_diaria` que roda a rotina B3/FNET, a coleta CVM e dispara os alertas.
-
-- `services/planilhas.py` e `services/dashboard_menus.py`: Leitura de Sheets com cache (TTL 5 min) e geração dos painéis de oportunidades/favoritos exibidos no bot.
-
-- `services/logo_service.py`: Fornece os links de logos dos ativos nos menus.
-
- 
-
-### 🛠️ Configurações e Variáveis de Ambiente
-
-- `config.py`: Centralizador de variáveis de ambiente, catálogos (mapas de tickers, setores, CNPJs e contas CVM), filtros de garimpo e tipos de documento.
-
-- `requirements.txt`: Relação estruturada das dependências do Python para build e deployment.
-
-- `.github/workflows/main.yml`: Cron de execução do garimpo no GitHub Actions (segunda a sexta, 13h–21h UTC).
-
- 
+Arquivos de topo: `main.py`, `app.py`, `config.py`, `atualizador_documentos.py`
+(ponte entre B3, banco, IA e Drive), `fnet_scraper.py`, `requirements.txt`.
 
 ---
 
-## Controle de Usuarios e Permissoes (Fase 2)
+## 4. Funcionalidades e integrações
 
-O acesso ao bot e restrito a usuarios previamente autorizados. Nao ha liberacao
-automatica para quem inicia uma conversa: atualizacoes de chats fora da
-allowlist sao descartadas antes de qualquer handler executar.
+### Funcionalidades ativas
 
-### Papeis
-
-| Papel | Telegram ID (padrao) | Descricao |
-|---|---|---|
-| `admin` | 8867098987 | Acesso administrativo total e tambem todas as funcionalidades do usuario comum. |
-| `user` | 5336458734 | Somente funcionalidades financeiras e de consulta autorizadas. |
-
-### Permissoes
-
-Comandos liberados para `user` (consulta/financeiro): `/menu`, `/start`,
-`/relatorios`, `/docs`.
-
-Comandos exclusivos do `admin` (operacao/configuracao/manutencao/destrutivos):
-`/status`, `/adicionar`, `/forcar_varredura`, `/forcar_docs_acoes`,
-`/processar_acoes_ia`, `/forcar_cvm`, `/forcar_fiis`, `/alimentar_ia`,
-`/mapear_nomes`, `/resetar_docs`, `/revisao`.
-
-Callbacks liberados para `user`: navegacao e consulta (`menu_*`, `macro_*`,
-`subsetor_*`, `sub_ac_*`, `painel_*`, `dados_*`, `ano_*`, `mes_*`, `docs_*`,
-`dnav_*`, `dl_*`, `tipo_fii_*`, `setor_*`, `favoritos_*`, `oportunidades_*`,
-`ia_*`, `ajuda_*`, `ajuda_cvm_*`, `voltar_menu`).
-
-Callbacks exclusivos do `admin`: `rev_*` (Central de Revisao), `ver_raiox_docs`,
-`confirmar_reset`, `cancelar_reset`, `iniciar_revisao_pendencias`.
-
-Operacoes nao reconhecidas (comandos/callbacks desconhecidos) sao tratadas como
-administrativas por padrao (falha segura): nao recebem autorizacao automatica.
-
-### Como a autenticacao funciona
-
-1. `bot/loader.py` — `BotAutorizado.process_new_updates` e o ponto unico de
-   despacho.
-2. O chat e validado contra `config.CHATS_AUTORIZADOS`.
-3. `bot/permissoes.py` identifica o autor pelo Telegram ID (`from_user.id`, com
-   fallback para o `chat.id`), resolve o papel em `config.USUARIOS_AUTORIZADOS`,
-   classifica a operacao (comando ou callback) e decide se ela pode ser
-   executada.
-4. Operacoes negadas sao respondidas com uma mensagem generica (sem detalhes
-   internos) e registradas em log. Uma tentativa negada nunca interrompe o bot.
-
-O papel e sempre derivado do Telegram ID fornecido pela plataforma; ele nao pode
-ser alterado por texto de comando, parametros nem por dados de callback.
-
-### Como adicionar outro usuario autorizado
-
-Adicione o Telegram ID em `TELEGRAM_USUARIOS_LIMITADOS` (lista separada por
-virgulas) e reinicie o servico. Para definir o administrador, use
-`TELEGRAM_ADMIN_ID` (um unico ID). Chats que so precisam de leitura podem ser
-incluidos em `TELEGRAM_CHATS_AUTORIZADOS`, mas continuam sujeitos ao bloqueio de
-operacoes administrativas.
-
-Variaveis de ambiente relacionadas (nunca versione IDs, tokens ou credenciais
-reais):
-
-- `TELEGRAM_ADMIN_ID` (padrao `8867098987`)
-- `TELEGRAM_USUARIOS_LIMITADOS` (padrao `5336458734`)
-- `TELEGRAM_CHATS_AUTORIZADOS` (opcional; complementa a allowlist)
-
-### Funcionalidades exclusivas do administrador
-
-Coleta e processamento (CVM/FNET/FIIs/IA), manutencao e diagnostico
-(`/status`, `/mapear_nomes`, `ver_raiox_docs`), alteracao de dados
-(`/adicionar`), reset de documentos (`/resetar_docs`) e a Central de Revisao
-Humana (`/revisao` e callbacks `rev_*`).
-
----
-
-## 🚀 Progresso do Sistema
-
- 
-
-### ✅ Implementado e em produção
-
- 
-
-| Módulo | Status |
-
+| Área | Descrição |
 |---|---|
+| Servidor Flask + webhook | `main.py`, no Render |
+| Agendador diário | APScheduler, seg-sex 08:00 America/Sao_Paulo |
+| Varredura orquestrada | `services/orquestrador.py::varredura_diaria` (B3/FNET + CVM) |
+| IA documental | Extração de PDF + classificação Groq com confiança, em `atualizador_documentos.py` |
+| Coleta CVM | `pipeline_dados/coletor_cvm.py` |
+| Coleta FNET/B3 | `fnet_scraper.py` + `atualizador_documentos.py` |
+| Google Drive | `modules/GoogleDriveManager.py` (pastas hierárquicas + revisão) |
+| Google Sheets | `services/planilhas.py` (cache de 5 min) |
+| Garimpo de oportunidades | `app.py` via GitHub Actions |
+| Bot do Telegram | Comandos, menus, `/ia`, raio-x, favoritos e revisão |
+| Controle de acesso | Papéis `admin`/`user` e allowlist de chats |
+| Cadastro e aprovação | Autocadastro por `/start` com aprovação administrativa |
+| Revisão humana | `bot/callbacks_revisao.py` (`/revisao` e callbacks `rev_*`) |
+| Testes automatizados | 115 testes do bot (execução local) |
 
-| Bot do Telegram (webhook, comandos, menus, revisão) | ✅ Ativo |
+### Integrações externas
 
-| Servidor Flask + webhook no Render | ✅ Ativo |
+- **Telegram** (bot e alertas).
+- **Neon / PostgreSQL** (banco de produção) e SQLite apenas se definido
+  explicitamente.
+- **Google Sheets** (painel de dados) e **Google Drive** (PDFs e logos).
+- **Groq** (classificação e consultas de IA); **OpenAI/OpenRouter** como
+  alternativas opcionais.
+- **Fontes de mercado**: FNET/B3, CVM, Fundamentus, StatusInvest, Yahoo Finance.
+- **Render** (servidor) e **GitHub Actions** (cron). São ambientes distintos:
+  o Render hospeda `main.py`; o GitHub Actions só executa `app.py`.
 
-| Agendador diário (APScheduler, seg-sex 08:00 America/Sao_Paulo) | ✅ Ativo |
+### Detalhes por módulo
 
-| Varredura diária orquestrada | ✅ Ativo |
-
-| **IA Documental (Groq)** — extração de PDF + classificação JSON + confiança ≥ 80 | ✅ Ativo em `atualizador_documentos.py` |
-
-| Coleta **CVM** (ações e relatórios) | ✅ Ativo |
-
-| Coleta **FNET/B3** (informes e relatórios) | ✅ Ativo |
-
-| Upload automático ao Google Drive (pastas hierárquicas + revisão) | ✅ Ativo |
-
-| Planilhas Google Sheets (BD_FIIs, BD_Acoes, BD_Logs) | ✅ Ativo |
-
-| Garimpo de oportunidades (Ações + FIIs) via GitHub Actions | ✅ Ativo |
-
-| Banco SQLite/PostgreSQL com máquina de estados documental | ✅ Ativo |
-
-| Revisão humana de documentos de baixa confiança | ✅ Ativo |
-
-| IA de fatos (`/ia`) e dashboard de oportunidades | ✅ Ativo |
-
-| Allowlist de chats autorizados (`CHATS_AUTORIZADOS`) | ✅ Ativo em `bot/telegram_utils.py` + `bot/loader.py` |
-
-| Papéis de usuário (`admin`/`user`) e IDs autorizados | ✅ Ativo em `config.py` + `bot/permissoes.py` |
-
-| Controle centralizado de permissões em comandos e callbacks | ✅ Ativo em `bot/loader.py` + `bot/permissoes.py` |
-
-| Estabilização de handlers/callbacks (falhas visíveis + callback desconhecido) | ✅ Ativo em `bot/telegram_utils.py` |
-
-| Testes automatizados do bot (`tests/test_bot_boot.py`, `tests/test_telegram_stability.py`, `tests/test_permissoes.py`) | ✅ 41 testes passando |
-
-| Boot protegido sem `TELEGRAM_BOT_TOKEN` (falha clara, sem segredo) | ✅ Ativo em `bot/loader.py` |
-
- 
-
-### 🧪 Em desenvolvimento / código existente ainda não integrado
-
- 
-
-- `services/motor_ia.py` — leitura de relatórios com IA: a chamada está **comentada** no orquestrador, pronta para ser ativada.
-
-- `modules/module_macro.py` — dados macroeconômicos: não é importado por nenhum fluxo.
-
-- `modules/llm_manager.py` — gerenciador de múltiplos LLMs: não é importado.
-
-- `modules/motor_imagem.py` e `modules/gerador_graficos.py` — imagens e gráficos: exigem `Pillow`/`matplotlib`, que ainda não estão no `requirements.txt`.
-
- 
+- `modules/scraper_fiis.py`: auditores de FIIs (P/VP, Dividend Yield, vacância
+  física, imóveis e inquilinos) com fallback entre fontes.
+- `modules/scraper_acoes.py`: indicadores de Ações (P/L, P/VP, ROE, margens, DY)
+  organizados por setor.
+- `atualizador_documentos.py`: verifica duplicidade, baixa PDFs inéditos, extrai
+  texto, classifica com Groq e salva no Drive quando a confiança é alta.
+- `modules/leitor_pdf.py`: extração de texto de PDFs (PyMuPDF + pdfplumber).
+- `modules/module_ia.py`: consultas de IA do bot (`/ia`).
+- `services/dashboard_menus.py`: painéis de oportunidades/favoritos do bot.
+- `services/logo_service.py`: logos dos ativos (Logo.dev com plano B no GitHub).
+- `pipeline_dados/banco_dados.py`: modelos ORM (`Ativo`, `DadosFinanceirosAcoes`,
+  `DadosFinanceirosFiis`, `DocumentosQualitativos`).
+- `pipeline_dados/coletor_cvm.py`, `coletor_fiis.py`, `coletor_docs_acoes.py`:
+  coletores de CVM, informes de FIIs e relatórios de ações.
 
 ---
 
- 
+## 5. Configuração das variáveis de ambiente
 
-## 🔜 Próximos Passos (Roadmap)
+Nunca versionar valores reais de tokens, senhas ou URLs de conexão.
 
- 
+### Render (servidor `main.py`)
 
-### P0 — Correções críticas (segurança e funcionamento)
+Obrigatórias:
 
-1. **Rotacionar o token do bot** do Telegram (credencial exposta no histórico do git) e purgar o histórico com `git filter-repo`/BFG.
+- `TELEGRAM_BOT_TOKEN` — token do bot. Sem ele, o bot não inicializa.
+- `DATABASE_URL` — conexão com o banco. A URL é normalizada
+  (`postgres://` para `postgresql://`). Sem ela, a criação do engine falha com erro
+  controlado (não há fallback silencioso para SQLite).
 
-2. **Proteger o `/resetar_docs`** com confirmação/autorização.
+Permissões e acesso:
 
-3. **Corrigir o coletor de FIIs** — a busca do ativo pelo CNPJ nunca encontra correspondência, então informes de FIIs não são salvos.
+- `TELEGRAM_ADMIN_ID` (padrão no código: `8867098987`).
+- `TELEGRAM_USUARIOS_LIMITADOS` (padrão no código: `5336458734`; lista separada
+  por vírgulas).
+- `TELEGRAM_CHATS_AUTORIZADOS` (opcional; complementa a allowlist de chats).
 
-4. **Corrigir o filtro de ROE** no garimpo de ações (`ROE >= 8.0` é sempre falso após a conversão decimal; deveria ser `0.08`).
+Operação e funcionalidades opcionais:
 
-5. **Sanitizar entrada** do `/adicionar` (risco de formula injection no Google Sheets).
+- `WEBHOOK_BASE_URL` (opcional; padrão no código).
+- `PORT` (injetada pelo Render; padrão interno `10000`).
+- `GROQ_API_KEY` (IA; sem ela, apenas as operações de IA falham de forma
+  controlada).
+- `LOGO_DEV_TOKEN`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_BASE_URL`.
+- `CLIENT_ID`, `CLIENT_SECRET`, `REFRESH_TOKEN`, `DRIVE_ROOT_FOLDER_ID`,
+  `GOOGLE_CREDS` (Google Drive/Sheets).
 
- 
+Flags de manutenção:
 
-### P1 — Robustez e manutenibilidade
+- `CRIAR_TABELAS=1` — habilita `create_all` (apenas em desenvolvimento limpo).
+- `ROBO_INICIAR_NO_IMPORT=1` — executa o boot completo ao importar `main`.
 
-1. **Ampliar a suíte de testes** — hoje há cobertura apenas do bot (`tests/test_telegram_stability.py`); faltam testes para coletores, orquestrador e banco, além de executá-los no CI do GitHub Actions.
+### GitHub Actions (coletor `app.py`)
 
-2. ~~**Proteger o boot** — não quebrar o import de `atualizador_documentos.py` quando `GROQ_API_KEY`/`DATABASE_URL` não existirem.~~ **Resolvido:** o cliente Groq é criado sob demanda (sem chave, apenas operações de IA falham com erro controlado) e a conexão SQLAlchemy é preguiçosa, criada com a URL normalizada por `pipeline_dados/conexao.py`.
+Definidas como secrets em `.github/workflows/main.yml`:
 
-3. **Popular o `hash_sha256`** dos documentos para deduplicação real (o campo existe no banco, mas nunca é preenchido).
+- `GOOGLE_CREDENTIALS` (gera `credenciais.json` em tempo de execução),
+  `TELEGRAM_BOT_TOKEN`, `GROQ_API_KEY`, `LOGO_DEV_TOKEN`, `CLIENT_ID`,
+  `CLIENT_SECRET`, `REFRESH_TOKEN`, `DRIVE_ROOT_FOLDER_ID`.
 
-4. **Ativar o motor de IA** do orquestrador (ou removê-lo como código morto).
-
-5. Adicionar `Pillow` e `matplotlib` ao `requirements.txt` caso imagem/gráficos sejam ativados.
-
- 
-
-### P2 — Qualidade de dados e observabilidade
-
-1. Usar a **data de publicação real** dos documentos em vez da data de captura como referência.
-
-2. Tornar os documentos `ERRO_DOWNLOAD`/`ERRO_DRIVE` re-processáveis.
-
-3. Padronizar logs (substituir `print` por `logging`) e expor métricas de execução.
-
- 
-
-### P3 — Escala e evolução
-
-1. **Fila de processamento** (ex.: Redis + Celery) para lotes grandes sem bloquear a varredura.
-
-2. **Paralelizar downloads** com limite de concorrência.
-
-3. Extrair catálogos fixos de `config.py` para tabelas/arquivos externos.
-
-4. Deploy reprodutível (Dockerfile + `render.yaml`/Procfile).
-
- 
+Mapeada mas **sem uso confirmado no código**: `GEMINI_API_KEY`.
 
 ---
 
- 
-
-## 🛠️ Tecnologias Utilizadas
-
- 
-
-- **Linguagem:** Python 3.x
-
-- **Servidor/Agendamento:** Flask, Gunicorn, APScheduler, pytz
-
-- **Bot:** pyTelegramBotAPI (webhook)
-
-- **Dados/Scraping:** pandas, requests, yfinance, BeautifulSoup4, lxml, html5lib
-
-- **Google:** gspread (Sheets), google-api-python-client (Drive), google-auth-oauthlib
-
-- **IA:** Groq (classificação documental), OpenAI SDK (provedor alternativo)
-
-- **PDFs:** PyPDF2, PyMuPDF, pdfplumber
-
-- **Banco:** SQLAlchemy, SQLite (local), psycopg2/PostgreSQL (produção)
-
-- **Infra:** Render (servidor web), GitHub Actions (cron)
-
- 
-
----
-
- 
-
-## 🔑 Configuração Rápida
-
- 
+## 6. Execução local e testes
 
 ```bash
-
-# Clonar e instalar
-
-git clone https://github.com/WandesonMarcone/robo-financeiro.git
-
+# Clonar e preparar ambiente
+git clone <url-do-repositorio>
 cd robo-financeiro
-
 python -m venv .venv && source .venv/bin/activate
-
 pip install -r requirements.txt
 
- 
-
-# Variáveis de ambiente essenciais
-
+# Variáveis de ambiente essenciais (exemplo; use valores reais locais)
 export TELEGRAM_BOT_TOKEN="seu_token_do_bot"
-
-export TELEGRAM_CHATS_AUTORIZADOS="8867098987"
-
-export TELEGRAM_ADMIN_ID="8867098987"
-
-export TELEGRAM_USUARIOS_LIMITADOS="5336458734"
-
+export DATABASE_URL="sua_url_de_conexao"
 export GROQ_API_KEY="sua_chave_groq"
 
-export CLIENT_ID="..."
-
-export CLIENT_SECRET="..."
-
-export REFRESH_TOKEN="..."
-
-export DRIVE_ROOT_FOLDER_ID="..."
-
- 
-
 # Servidor (webhook + agendador + banco)
-
 python main.py
 
- 
-
-# Garimpo manual
-
+# Garimpo manual de oportunidades
 python app.py
 
-# Testes do bot (nao acessam servicos reais)
-
-python tests/test_telegram_stability.py
-
-python tests/test_bot_boot.py
-
-python tests/test_permissoes.py
-
-python tests/test_inicializacao.py
-
+# Testes automatizados (não acessam serviços reais)
+python -m unittest discover -s tests
 ```
 
- 
+Observações:
 
-> 💡 `DATABASE_URL` é obrigatória para as operações de banco. A URL é normalizada (`postgres://` → `postgresql://`) e usada por `pipeline_dados/conexao.py`. **Não há mais fallback silencioso para SQLite**: se `DATABASE_URL` não estiver definida, a criação do engine falha com erro controlado. Para desenvolvimento com SQLite, defina-a explicitamente (ex.: `DATABASE_URL=sqlite:///pipeline_dados/banco_institucional.db`). Demais configurações e catálogos ficam em `config.py`.
-
-> ⚠️ A inicialização **não** executa `ALTER TABLE`, nem `Base.metadata.create_all`, nem migrações (preserva as tabelas existentes no Neon, inclusive as que não são representadas pelos modelos). A criação de schema é opt-in via `CRIAR_TABELAS=1` (apenas em ambiente limpo de desenvolvimento). Ao importar `main`, nenhum job é agendado e nenhum webhook é registrado: isso só ocorre no boot (`python main.py`) ou com `ROBO_INICIAR_NO_IMPORT=1`.
-
-> ⚠️ A IA (Groq) é opcional no boot. Sem `GROQ_API_KEY`, o bot inicia normalmente; somente as operações que realmente usam IA falham com erro controlado (`IAIndisponivelError`), sem expor a chave em logs.
-
- 
-
-> ⚠️ O bot **não inicia** se `TELEGRAM_BOT_TOKEN` estiver ausente ou vazio: `bot/loader.py` falha com uma mensagem clara e **não** fornece token padrão. Os usuários definidos em `USUARIOS_AUTORIZADOS` (via `TELEGRAM_ADMIN_ID` e `TELEGRAM_USUARIOS_LIMITADOS`) são sempre autorizados; `TELEGRAM_CHATS_AUTORIZADOS` é opcional e complementa a allowlist de chats.
-
- 
-
----
-
- 
-
-## ⚠️ Segurança
-
- 
-
-- **Credencial exposta no histórico** — versões antigas de `config.py` continham o token do bot em texto puro. O código atual lê de variável de ambiente, mas o valor persiste no git e **deve ser rotacionado e purgado**.
-
-- **Sem SQL Injection** — SQLAlchemy (ORM parametrizado) protege as consultas.
-
-- **Sem credenciais em texto puro** na árvore atual (`.gitignore` cobre `credenciais.json`, `.env`, chaves locais e o banco SQLite).
-
-- **Controle de acesso por papel** — o acesso é restrito a `USUARIOS_AUTORIZADOS`. Cada update é classificado por `bot/permissoes.py` e operações administrativas (comandos e callbacks) são bloqueadas para o papel `user` antes de qualquer efeito; tentativas negadas são registradas em log sem expor credenciais (ver `bot/loader.py`).
-
-- **Allowlist de chats** — apenas os `chat_id` listados em `CHATS_AUTORIZADOS` são processados; demais atualizações são descartadas e registradas em log (ver `bot/loader.py`).
-
-- **Melhorias necessárias** — confirmação no `/resetar_docs` e sanitização de entradas que vão para o Google Sheets.
-
- 
+- A suíte atual tem **115 testes** distribuídos em `tests/`:
+  `test_bot_boot.py` (9), `test_inicializacao.py` (20), `test_cadastro.py` (20),
+  `test_permissoes.py` (22), `test_favoritos.py` (30) e
+  `test_telegram_stability.py` (14).
+- Os testes rodam sem `TELEGRAM_BOT_TOKEN`; quando um token é necessário,
+  usam apenas um valor fictício. Não há conexão com o banco real.
+- O import de `main.py` e dos módulos do bot não exige token; apenas a
+  inicialização efetiva (boot do servidor) exige `TELEGRAM_BOT_TOKEN` e falha
+  com mensagem clara se ele estiver ausente.
+- A IA é opcional no boot: sem `GROQ_API_KEY`, o bot inicia e apenas as
+  operações de IA falham de forma controlada (`IAIndisponivelError`).
 
 ---
 
- 
+## 7. Banco de dados e migrações
 
-*Construído com Python, APIs Financeiras e LLMs para automatizar e blindar a tomada de decisão no mercado financeiro.*
+- Acesso via SQLAlchemy. A conexão é criada de forma preguiçosa por
+  `pipeline_dados/conexao.py`, usando a `DATABASE_URL` normalizada.
+- Modelos:
+  - `pipeline_dados/banco_dados.py` — `Ativo`, `DadosFinanceirosAcoes`,
+    `DadosFinanceirosFiis`, `DocumentosQualitativos` (máquina de estados:
+    `SALVO`, `SALVO_DRIVE`, `AGUARDANDO_REVISAO`, `ERRO_DOWNLOAD`, `ERRO_DRIVE`,
+    `REJEITADO_MANUAL`).
+  - `pipeline_dados/modelos_usuarios.py` — tabela `usuarios` existente no Neon
+    (somente mapeamento; o projeto não a cria nem recria).
+  - `pipeline_dados/modelos_ativos.py` — associação de favoritos.
+- A aplicação **não executa migrações automaticamente** e não altera o schema no
+  boot.
+- Migração versionada: `migrations/versions/0001_add_status_cadastro_usuarios.sql`
+  (adiciona `status_cadastro` à tabela `usuarios`). Execução **manual**, pelo
+  administrador, com backup antes. Instruções e procedimento em
+  `migrations/README.md`.
+- Criação de tabelas apenas de forma opt-in (`CRIAR_TABELAS=1`), destinada a
+  ambientes de desenvolvimento limpos.
+
+---
+
+## 8. Funcionalidades inativas ou pendentes
+
+Código presente no repositório que **não participa do fluxo ativo**. Não remova
+sem antes decidir o destino:
+
+- `services/motor_ia.py` — leitura de relatórios com IA. É importado pelo
+  orquestrador, mas a chamada está comentada e a resposta de IA é simulada (não
+  usa API real). **Não é uma funcionalidade ativa.**
+- `modules/module_fatos.py` — resumo de fatos via Groq; não é importado por
+  nenhum fluxo.
+- `modules/module_macro.py` — dados macroeconômicos; não é importado.
+- `modules/llm_manager.py` — gerenciador de múltiplos LLMs; não é importado.
+- `modules/motor_imagem.py` e `modules/gerador_graficos.py` — imagem e gráfico;
+  exigem `Pillow`/`matplotlib`, que não estão em `requirements.txt`.
+- `modules/leitor_pdf.py::extrair_texto_do_pdf` — função sem chamadas (a usada é
+  `extrair_texto_com_paginas`, acionada apenas pelo `services/motor_ia.py`
+  inativo).
+- `GEMINI_API_KEY` — mapeada no workflow, sem uso no código.
+
+Outras pendências de manutenção (ver roadmap abaixo): rotacionar o token do bot
+caso ele tenha sido exposto em histórico, confirmar `/resetar_docs`, corrigir o
+coletor de FIIs por CNPJ, revisar o filtro de ROE do garimpo de ações e sanitizar
+a entrada do `/adicionar`.
+
+---
+
+## 9. Controle de usuários e permissões
+
+O acesso é restrito a usuários autorizados. Atualizações de chats fora da
+allowlist são descartadas antes de qualquer handler executar; não há liberação
+automática para quem inicia uma conversa.
+
+### Papéis
+
+| Papel | Telegram ID (padrão no código) | Descrição |
+|---|---|---|
+| `admin` | `8867098987` | Acesso administrativo total e todas as funcionalidades de `user`. |
+| `user` | `5336458734` | Somente funcionalidades financeiras e de consulta autorizadas. |
+
+### Permissões
+
+Comandos liberados para `user`: `/menu`, `/start`, `/relatorios`, `/docs`,
+`/help`.
+
+Comandos exclusivos do `admin`: `/status`, `/adicionar`, `/forcar_varredura`,
+`/forcar_docs_acoes`, `/processar_acoes_ia`, `/forcar_cvm`, `/forcar_fiis`,
+`/alimentar_ia`, `/mapear_nomes`, `/resetar_docs`, `/revisao`.
+
+Callbacks de `user` incluem navegação e consulta (`menu_*`, `macro_fii_*`,
+`macro_ac_*`, `subsetor_fii_*`, `sub_ac_*`, `tipo_fii_*`, `setor_fii_*`,
+`setor_acao_*`, `painel_*`, `dados_*`, `ano_*`, `mes_*`, `docs_*`, `dnav_*`,
+`dl_*`, `ia_*`, `ajuda_*`, `ajuda_cvm_*`, `voltar_menu`, `favoritos_*`,
+`oportunidades_*`) e favoritos (`favadd_*`, `favnew_*`, `favrem_*`).
+
+Callbacks exclusivos do `admin`: `rev_*`, `cad_*`, `ver_raiox_docs`,
+`confirmar_reset`, `cancelar_reset`, `iniciar_revisao_pendencias`.
+
+Operações não reconhecidas (comandos/callbacks desconhecidos) são tratadas como
+administrativas por padrão (falha segura): não recebem autorização automática.
+
+### Como a autenticação funciona
+
+1. `bot/loader.py` — `BotAutorizado.process_new_updates` é o ponto único de
+   despacho.
+2. O chat é validado contra `config.CHATS_AUTORIZADOS`.
+3. `bot/permissoes.py` identifica o autor pelo Telegram ID (`from_user.id`, com
+   fallback para o `chat.id`), resolve o papel (`config.USUARIOS_AUTORIZADOS` e,
+   para contas aprovadas no autocadastro, o banco), classifica a operação
+   (comando ou callback) e decide se ela pode ser executada.
+4. Operações negadas recebem uma mensagem genérica e são registradas em log; uma
+   tentativa negada nunca interrompe o bot.
+
+O papel é sempre derivado do Telegram ID fornecido pela plataforma; ele não pode
+ser alterado por texto de comando, parâmetros nem por dados de callback.
+
+### Cadastro e favoritos
+
+- `bot/cadastro.py`: `/start` cria uma solicitação `pendente` (sem duplicar
+  contas) e o administrador aprova/rejeita por botões. Usuários já autorizados
+  por config entram direto no menu. Decisões administrativas são revalidadas no
+  servidor e registradas em log de auditoria.
+- `bot/favoritos.py`: favoritos individuais por usuário. Exigem conta
+  persistente; usuários comuns precisam de cadastro aprovado e conta ativa. O
+  administrador autorizado por config pode usá-los mesmo com status pendente,
+  desde que exista registro correspondente em `usuarios`.
+
+### Como adicionar outro usuário
+
+Adicione o Telegram ID em `TELEGRAM_USUARIOS_LIMITADOS` (lista separada por
+vírgulas) e reinicie o serviço. O administrador é definido por
+`TELEGRAM_ADMIN_ID`. Chats de leitura podem ir em `TELEGRAM_CHATS_AUTORIZADOS`,
+mas continuam sujeitos ao bloqueio de operações administrativas.
+
+---
+
+## 10. Segurança
+
+- **Sem credenciais em texto puro na árvore atual**: `.gitignore` cobre
+  `credenciais.json`, `.env`, chaves locais e bancos SQLite.
+- **Sem SQL Injection**: consultas via SQLAlchemy (ORM parametrizado).
+- **Controle de acesso por papel** e **allowlist de chats** (ver seção 9).
+- **Token do bot**: se o token já tiver sido exposto no histórico do Git,
+  rotacione-o e purgue o histórico. O código atual lê o token apenas de variável
+  de ambiente.
+- **Melhorias recomendadas**: confirmar `/resetar_docs` e sanitizar entradas que
+  vão para o Google Sheets.
+
+---
+
+## 11. Roadmap
+
+### P0 — correções críticas
+
+1. Rotacionar o token do bot, se houver exposição em histórico.
+2. Proteger o `/resetar_docs` com confirmação/autorização.
+3. Corrigir o coletor de FIIs (busca por CNPJ).
+4. Corrigir o filtro de ROE no garimpo de ações.
+5. Sanitizar a entrada do `/adicionar` (formula injection no Google Sheets).
+
+### P1 — robustez e manutenibilidade
+
+1. Ampliar a cobertura de testes (coletores, orquestrador, banco) e executá-los
+   no CI.
+2. Popular o `hash_sha256` dos documentos para deduplicação real.
+3. Decidir o destino do motor de IA do orquestrador (`services/motor_ia.py`):
+   ativar ou remover.
+4. Adicionar `Pillow` e `matplotlib` caso imagem/gráficos sejam ativados.
+
+### P2 — qualidade de dados e observabilidade
+
+1. Usar a data de publicação real dos documentos.
+2. Tornar documentos `ERRO_DOWNLOAD`/`ERRO_DRIVE` reprocessáveis.
+3. Padronizar logs (substituir `print` por `logging`) e expor métricas.
+
+### P3 — escala e evolução
+
+1. Fila de processamento (ex.: Redis + Celery) para lotes grandes.
+2. Paralelizar downloads com limite de concorrência.
+3. Extrair catálogos fixos de `config.py` para arquivos/tabelas externas.
+4. Deploy reprodutível (Dockerfile + `render.yaml`/Procfile).
+
+---
+
+## 12. Tecnologias
+
+- **Linguagem:** Python 3.x
+- **Servidor/Agendamento:** Flask, Gunicorn, APScheduler, pytz
+- **Bot:** pyTelegramBotAPI (webhook)
+- **Dados/Scraping:** pandas, requests, yfinance, BeautifulSoup4, lxml, html5lib
+- **Google:** gspread (Sheets), google-api-python-client (Drive),
+  google-auth-oauthlib
+- **IA:** Groq (classificação), OpenAI SDK (provedor alternativo)
+- **PDFs:** PyPDF2, PyMuPDF, pdfplumber
+- **Banco:** SQLAlchemy, PostgreSQL (Neon); SQLite apenas se definido
+  explicitamente
+- **Infra:** Render (servidor), GitHub Actions (cron)
+
+---
+
+## 13. Documentação do administrador
+
+Para uma explicação simplificada do sistema (estrutura, funcionamento,
+integrações, o que está ativo e o que ainda não está), consulte `admin.md`. Os
+detalhes de migrações ficam em `migrations/README.md`.
+
+---
+
+*Construído com Python, APIs financeiras e LLMs para automatizar e blindar a
+tomada de decisão no mercado financeiro.*
