@@ -8,9 +8,12 @@ Telegram:
 * se ele está autorizado;
 * se ele pode executar a operação solicitada (comando ou callback).
 
-Ele deve permanecer leve (importa apenas ``config``) para poder ser testado de
-forma isolada e para ser reutilizado pelo ``bot.loader`` antes do despacho dos
-handlers. Nenhum token ou credencial é lido ou registrado aqui.
+Ele deve permanecer leve (importa ``config`` no topo e o repositório de usuários
+de forma preguiçosa, apenas para reconhecer contas aprovadas no autocadastro) para
+poder ser testado de forma isolada e para ser reutilizado pelo ``bot.loader``
+antes do despacho dos handlers. Nenhum token ou credencial é lido ou registrado
+aqui; qualquer falha de banco resulta em negação (falha segura), nunca em
+concessão de acesso.
 """
 
 import logging
@@ -24,6 +27,10 @@ NIVEL_ADMIN = 2
 
 PAPEL_ADMIN = getattr(config, "PAPEL_ADMIN", "admin")
 PAPEL_USUARIO = getattr(config, "PAPEL_USUARIO", "user")
+
+# Ponto de entrada publico do autocadastro. E o unico comando que um usuario
+# ainda nao cadastrado pode executar; todo o restante exige aprovacao.
+COMANDO_CADASTRO = "start"
 
 # Comandos exclusivos do administrador (manutenção, configuração ou destrutivos).
 COMANDOS_ADMIN = frozenset(
@@ -56,7 +63,7 @@ CALLBACKS_ADMIN_EXATOS = frozenset(
         "iniciar_revisao_pendencias",
     }
 )
-CALLBACKS_ADMIN_PREFIXOS = ("rev_",)
+CALLBACKS_ADMIN_PREFIXOS = ("rev_", "cad_")
 
 # Callbacks de navegação, filtros e consultas liberados para usuários comuns.
 CALLBACKS_USUARIO_EXATOS = frozenset(
@@ -90,6 +97,11 @@ CALLBACKS_USUARIO_PREFIXOS = (
     "docs_",
     "dnav_",
     "dl_",
+    # Favoritos individuais por usuário (Etapa 3). São operações de nível de
+    # usuário; o handler ainda revalida que a conta está aprovada no banco.
+    "favadd_",
+    "favnew_",
+    "favrem_",
 )
 
 
@@ -106,12 +118,40 @@ def usuarios_autorizados():
     return getattr(config, "USUARIOS_AUTORIZADOS", {}) or {}
 
 
-def obter_papel(usuario_id):
-    """Retorna o papel do usuário ou ``None`` se ele não estiver autorizado."""
+def _papel_do_banco(usuario_id):
+    """Consulta o papel de um usuário aprovado no banco (falha segura).
+
+    A lista estática de ``config`` continua sendo a fonte de verdade primária
+    (o administrador e o usuário limitado atuais não dependem do banco). Este
+    fallback existe para que usuários aprovados via autocadastro também tenham
+    seu papel reconhecido. Qualquer erro (banco não configurado, indisponível)
+    resulta em ``None``: nunca se "adivinha" um papel.
+    """
     chave = normalizar_id(usuario_id)
     if chave is None:
         return None
-    return usuarios_autorizados().get(chave)
+    try:
+        from pipeline_dados.repositorio_usuarios import RepositorioUsuarios
+
+        return RepositorioUsuarios().papel_de_usuario_aprovado(chave)
+    except Exception:
+        logger.debug("Falha ao consultar papel no banco", exc_info=True)
+        return None
+
+
+def obter_papel(usuario_id):
+    """Retorna o papel do usuário ou ``None`` se ele não estiver autorizado.
+
+    Resolve primeiro em ``config`` (rápido, sem banco) e, se não encontrado,
+    consulta o banco para reconhecer usuários aprovados no autocadastro.
+    """
+    chave = normalizar_id(usuario_id)
+    if chave is None:
+        return None
+    papel = usuarios_autorizados().get(chave)
+    if papel:
+        return papel
+    return _papel_do_banco(chave)
 
 
 def esta_autorizado(usuario_id):
@@ -119,14 +159,50 @@ def esta_autorizado(usuario_id):
     return obter_papel(usuario_id) is not None
 
 
-def pode_executar(usuario_id, nivel_minimo):
-    """Retorna True se o papel do usuário comporta o nível mínimo exigido."""
-    papel = obter_papel(usuario_id)
-    if papel is None:
-        return False
+def _papel_comporta(papel, nivel_minimo):
     if papel == PAPEL_ADMIN:
         return True
-    return nivel_minimo <= NIVEL_USUARIO
+    if papel == PAPEL_USUARIO:
+        return nivel_minimo <= NIVEL_USUARIO
+    return False
+
+
+def pode_executar(usuario_id, nivel_minimo):
+    """Retorna True se o papel do usuário comporta o nível mínimo exigido."""
+    return _papel_comporta(obter_papel(usuario_id), nivel_minimo)
+
+
+def usuario_reconhecido(usuario_id):
+    """True se o Telegram ID pertence a um usuário autorizado OU cadastrado.
+
+    Usado pela allowlist de chats em ``bot.loader`` para permitir que um
+    usuário autocadastrado receba as mensagens de status (pendente, aprovado,
+    rejeitado, suspenso) mesmo sem constar na lista estática de ``config``.
+    Falha segura: sem banco, só a lista de ``config`` vale.
+    """
+    chave = normalizar_id(usuario_id)
+    if chave is None:
+        return False
+    if chave in usuarios_autorizados():
+        return True
+    try:
+        from pipeline_dados.repositorio_usuarios import RepositorioUsuarios
+
+        return RepositorioUsuarios().obter_por_telegram_id(chave) is not None
+    except Exception:
+        logger.debug("Falha ao verificar cadastro no banco", exc_info=True)
+        return False
+
+
+def e_comando_start(update):
+    """True se o update for a mensagem pública de entrada ``/start``."""
+    message = getattr(update, "message", None)
+    if message is None:
+        return False
+    operacao = operacao_de_comando(getattr(message, "text", None))
+    if operacao is None:
+        return False
+    return operacao[0] == f"comando:/{COMANDO_CADASTRO}"
 
 
 def usuario_id_do_update(update):
@@ -228,9 +304,12 @@ def verificar_update(update):
         usuario_id = usuario_id_do_update(update)
         if usuario_id is None:
             return False, nome
-        if not esta_autorizado(usuario_id):
-            return False, nome
-        return pode_executar(usuario_id, nivel_minimo), nome
+        # Entrada pública do autocadastro: liberada para qualquer usuário
+        # identificável (inclusive ainda não cadastrado). A decisão de acesso
+        # efetiva continua sendo tomada pelo fluxo de cadastro.
+        if nome == f"comando:/{COMANDO_CADASTRO}":
+            return True, nome
+        return _papel_comporta(obter_papel(usuario_id), nivel_minimo), nome
     except Exception:
         logger.exception("Falha ao verificar permissao do update")
         return False, None

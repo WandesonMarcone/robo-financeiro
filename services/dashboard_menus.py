@@ -8,8 +8,17 @@ from modules.GoogleDriveManager import GoogleDriveManager
 from atualizador_documentos import SessionDB
 from pipeline_dados.banco_dados import DocumentosQualitativos, Ativo
 
-# Instancia o gerenciador de arquivos uma vez
-drive_manager = GoogleDriveManager()
+# O gerenciador do Drive e criado sob demanda: instancia-lo na importacao
+# disparava a descoberta de rede do Google apenas por carregar o modulo. A
+# criacao preguicosa reduz efeitos colaterais em importacoes e testes.
+_drive_manager = None
+
+
+def obter_drive_manager():
+    global _drive_manager
+    if _drive_manager is None:
+        _drive_manager = GoogleDriveManager()
+    return _drive_manager
 
 def sanitizar_markdown(texto: str) -> str:
     """Escapa caracteres do Markdown para não quebrar a API do Telegram."""
@@ -113,7 +122,7 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
     voltar_cmd = "menu_fiis" if is_fii else "menu_acoes"
 
     # Puxa o link direto gerado pelo seu código (GitHub ou Logo.dev)
-    url_logo = obter_link_logo(ticker, tipo, drive_manager=drive_manager)
+    url_logo = obter_link_logo(ticker, tipo, drive_manager=obter_drive_manager())
     link_invisivel = ""
 
     # Como o link já é uma URL direta de imagem, nós injetamos direto no Telegram!

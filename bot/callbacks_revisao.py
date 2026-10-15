@@ -9,8 +9,16 @@ from atualizador_documentos import SessionDB
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from modules.GoogleDriveManager import GoogleDriveManager
 
-# Instancia o gerenciador do Drive exclusivo para este módulo
-drive_manager = GoogleDriveManager()
+# O gerenciador do Drive e criado sob demanda para evitar descoberta de rede do
+# Google apenas por importar o modulo (reduz efeitos colaterais em testes).
+_drive_manager = None
+
+
+def obter_drive_manager():
+    global _drive_manager
+    if _drive_manager is None:
+        _drive_manager = GoogleDriveManager()
+    return _drive_manager
 
 def extrair_file_id(url):
     """Extrai apenas o ID alfanumérico do link longo do Google Drive"""
@@ -232,7 +240,7 @@ def processar_revisao(call):
             tipo_ativo_str = "ACAO" if tipo_cat == "ACAO" else "FII"
 
             # 1. MOVER CORRETAMENTE DA REVISÃO PARA A PASTA OFICIAL DO ATIVO NO DRIVE
-            novo_link = drive_manager.mover_arquivo_da_revisao_por_id(
+            novo_link = obter_drive_manager().mover_arquivo_da_revisao_por_id(
                 file_id=file_id,
                 ticker=doc.ativo.ticker,
                 mes_ref=mes_ref,
@@ -249,7 +257,7 @@ def processar_revisao(call):
 
                 # 3. 🔥 APAGA O ARQUIVO DA PASTA REVISÃO PARA SUMIR DE LÁ
                 if file_id:
-                    drive_manager.deletar_arquivo(file_id)
+                    obter_drive_manager().deletar_arquivo(file_id)
 
                 # --- DAQUI PARA BAIXO SEGUE O SEU CÓDIGO DA CONTAGEM DE PENDENTES QUE JÁ ESTÁ PERFEITO ---
                 ticker = doc.ativo.ticker
@@ -294,7 +302,7 @@ def processar_revisao(call):
             # Só tenta deletar no drive se tiver um link válido
             deletou_drive = False
             if file_id:
-                deletou_drive = drive_manager.deletar_arquivo(file_id)
+                deletou_drive = obter_drive_manager().deletar_arquivo(file_id)
             else:
                 deletou_drive = True # Se não tem link, considera deletado para podermos apagar do banco
 

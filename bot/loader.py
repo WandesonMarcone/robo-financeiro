@@ -47,7 +47,22 @@ class BotAutorizado(telebot.TeleBot):
     """
 
     def _chat_autorizado(self, update):
-        return chat_autorizado(update)
+        """Allowlist de chats, ampliada pelo autocadastro.
+
+        Além da lista estática de ``config.CHATS_AUTORIZADOS``, são aceitos:
+
+        * o comando público ``/start`` (entrada do autocadastro), de qualquer
+          chat, para que um usuário novo consiga se registrar;
+        * mensagens/callbacks de chats cujo Telegram ID já conste como usuário
+          cadastrado (para receber as mensagens de status). A decisão de acesso
+          efetiva continua em ``bot.permissoes``; chats desconhecidos seguem
+          sendo descartados.
+        """
+        if chat_autorizado(update):
+            return True
+        if permissoes.e_comando_start(update):
+            return True
+        return permissoes.usuario_reconhecido(permissoes.usuario_id_do_update(update))
 
     def process_new_updates(self, updates):
         logger.info("TELEGRAM - updates recebidos: %d", len(updates))
@@ -123,7 +138,123 @@ class BotAutorizado(telebot.TeleBot):
             )
 
 
-# O objeto 'bot' nasce aqui e será importado pelos outros módulos
-bot = BotAutorizado(obter_token_obrigatorio(), threaded=False)
-bot.exception_handler = NotificadorDeFalhas()
-bot.exception_handler.bot = bot
+class BotPreguicoso:
+    """Proxy que adia a criacao real do bot e a exigencia do token.
+
+    Importar ``bot.loader`` (e, portanto, qualquer modulo que registre handlers)
+    **nao** deve exigir ``TELEGRAM_BOT_TOKEN``. Este proxy:
+
+    * aceita o registro de handlers de mensagem/callback no import, guardando-os
+      para repetir no bot real (preservando a ordem de registro);
+    * guarda atribuicoes (ex.: ``exception_handler``) para aplicar no bot real;
+    * delega qualquer outro acesso ao bot real, criando-o na primeira vez -- e
+      somente entao validando/exigindo o token; e
+    * nao usa nenhum token ficticio: o token vem exclusivamente de
+      ``obter_token_obrigatorio``.
+
+    A exigencia de configuracao permanece integral: a inicializacao efetiva
+    (primeira operacao real ou :func:`inicializar_bot`) falha com erro claro se o
+    token estiver ausente/vazio, sem enfraquecer a validacao de producao.
+    """
+
+    # Nomes que pertencem ao proprio proxy. Qualquer OUTRO nome (mesmo iniciado
+    # por "_", como "_falha_no_update" ou "_update_em_processamento") pertence ao
+    # bot real e deve ser roteado para ele.
+    _INTERNOS = frozenset({"_construtor", "_real", "_registros", "_atributos"})
+
+    def __init__(self, construtor):
+        object.__setattr__(self, "_construtor", construtor)
+        object.__setattr__(self, "_real", None)
+        object.__setattr__(self, "_registros", [])
+        object.__setattr__(self, "_atributos", {})
+
+    def _obter_real(self):
+        real = object.__getattribute__(self, "_real")
+        if real is None:
+            real = object.__getattribute__(self, "_construtor")()
+            object.__setattr__(self, "_real", real)
+            registros = object.__getattribute__(self, "_registros")
+            for nome, args, kwargs, func in registros:
+                getattr(real, nome)(*args, **kwargs)(func)
+            registros.clear()
+            for nome, valor in object.__getattribute__(self, "_atributos").items():
+                setattr(real, nome, valor)
+        return real
+
+    def inicializar(self):
+        """Forca a criacao do bot real (validando o token) e o devolve."""
+        return self._obter_real()
+
+    def _registrar_handler(self, nome, args, kwargs, func):
+        real = object.__getattribute__(self, "_real")
+        if real is None:
+            object.__getattribute__(self, "_registros").append(
+                (nome, args, kwargs, func)
+            )
+        else:
+            getattr(real, nome)(*args, **kwargs)(func)
+        return func
+
+    def message_handler(self, *args, **kwargs):
+        return lambda func: self._registrar_handler(
+            "message_handler", args, kwargs, func
+        )
+
+    def callback_query_handler(self, *args, **kwargs):
+        return lambda func: self._registrar_handler(
+            "callback_query_handler", args, kwargs, func
+        )
+
+    def __getattr__(self, nome):
+        # Enquanto o bot real nao existe, atributos guardados (ex.: fakes de
+        # teste ou ``exception_handler``) sao devolvidos diretamente. Assim que o
+        # bot real e criado, TODO acesso passa a ser delegado a ele -- inclusive
+        # para nomes presentes no cache --, evitando que valores definidos antes
+        # da inicializacao ofusquem os definidos depois (o que quebraria a
+        # substituicao de metodos feita pelos testes).
+        if object.__getattribute__(self, "_real") is None:
+            atributos = object.__getattribute__(self, "_atributos")
+            if nome in atributos:
+                return atributos[nome]
+        return getattr(self._obter_real(), nome)
+
+    def __setattr__(self, nome, valor):
+        if nome in BotPreguicoso._INTERNOS:
+            object.__setattr__(self, nome, valor)
+            return
+        real = object.__getattribute__(self, "_real")
+        if real is None:
+            object.__getattribute__(self, "_atributos")[nome] = valor
+        else:
+            setattr(real, nome, valor)
+
+    def __repr__(self):  # pragma: no cover - diagnostico
+        real = object.__getattribute__(self, "_real")
+        return f"<BotPreguicoso inicializado={real is not None}>"
+
+
+def criar_bot():
+    """Cria a instancia real do bot, exigindo o token configurado."""
+    return BotAutorizado(obter_token_obrigatorio(), threaded=False)
+
+
+# O objeto 'bot' nasce aqui como proxy preguicoso e sera importado pelos outros
+# modulos. Importar este modulo NAO exige TELEGRAM_BOT_TOKEN; a exigencia ocorre
+# na primeira operacao real (ou em `inicializar_bot`).
+bot = BotPreguicoso(criar_bot)
+
+# Notificador ligado ao proxy: quando o bot real existir, o proxy delega os
+# acessos (idioma de falhas do telebot), sem exigir o token no import.
+_notificador_de_falhas = NotificadorDeFalhas()
+_notificador_de_falhas.bot = bot
+bot.exception_handler = _notificador_de_falhas
+
+
+def inicializar_bot():
+    """Inicializa efetivamente o bot do Telegram (valida/exige o token).
+
+    Ponto unico e explicito para a inicializacao real. Deve ser chamado na
+    subida da aplicacao (producao), nunca como efeito colateral de import.
+    Retorna a instancia real de :class:`BotAutorizado`.
+    """
+    return bot.inicializar()

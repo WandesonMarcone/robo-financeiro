@@ -6,6 +6,7 @@ import fitz
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import func, or_
 from bot.loader import bot
+from bot.telegram_utils import TEXTO_MENU_INICIAL, construir_menu_inicial
 from atualizador_documentos import SessionDB 
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from modules.utils import conectar_gspread
@@ -25,14 +26,14 @@ def sanitizar_valor_planilha(valor):
 # ==========================================
 # 🧭 MENUS DE NAVEGAÇÃO E INTERFACE (UI)
 # ==========================================
-@bot.message_handler(commands=['menu', 'start'])
+@bot.message_handler(commands=['menu'])
 def enviar_menu(message):
-    markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("🏢 FIIs (Imobiliários)", callback_data="menu_fiis"),
-               InlineKeyboardButton("📈 Ações (Empresas)", callback_data="menu_acoes"))
-    markup.row(InlineKeyboardButton("🌍 Visão Macro & Notícias", callback_data="menu_macro"))
-    markup.row(InlineKeyboardButton("ℹ️ Ajuda / Sobre", callback_data="menu_ajuda"))
-    bot.send_message(message.chat.id, "🤖 *Terminal Institucional* 🤖\nSelecione o módulo de análise abaixo:", reply_markup=markup, parse_mode="Markdown")
+    bot.send_message(
+        message.chat.id,
+        TEXTO_MENU_INICIAL,
+        reply_markup=construir_menu_inicial(),
+        parse_mode="Markdown",
+    )
 
 @bot.message_handler(commands=['status'])
 def status_banco(message):

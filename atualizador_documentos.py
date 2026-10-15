@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import logging
 import re
 import requests
 import unicodedata
@@ -10,31 +11,47 @@ from fnet_scraper import FnetDownloader
 from modules.GoogleDriveManager import GoogleDriveManager
 from modules.utils import conectar_gspread
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from pipeline_dados.conexao import obter_session_factory
 import PyPDF2
 import fitz  # 👈 AQUI ESTÁ A BIBLIOTECA DA IA (PyMuPDF)
 from groq import Groq
-from config import DATABASE_URL, MAPA_ISCAS_MASTER, TIPOS_DOC_FII
+from config import MAPA_ISCAS_MASTER, TIPOS_DOC_FII
 
-client = Groq(api_key=config.GROQ_API_KEY)
+logger = logging.getLogger("robo.documentos")
 
-# Pega o banco das variáveis do sistema 
-url_banco = os.environ.get('DATABASE_URL', 'sqlite:///pipeline_dados/banco_institucional.db')
+# O cliente Groq NAO e mais instanciado na importacao: sem GROQ_API_KEY o modulo
+# carrega normalmente e funcionalidades que nao usam IA continuam disponiveis. O
+# erro controlado so surge quando uma operacao de IA e realmente solicitada.
+_cliente_groq = None
 
-# Corrige o prefixo caso o Render mande postgres:// em vez de postgresql://
-if url_banco.startswith("postgres://"):
-    url_banco = url_banco.replace("postgres://", "postgresql://", 1)
 
-# Substitua o antigo create_engine por este:
-engine = create_engine(
-    config.DATABASE_URL,     # Mantenha a sua variável exata aqui (ex: config.DATABASE_URL)
-    pool_pre_ping=True,      # Testa se a conexão com o Neon caiu antes de fazer a query
-    pool_recycle=1800,       # Renova a conexão a cada 30 minutos (evita o fechamento forçado)
-    pool_size=5,             # Mantém um limite seguro de conexões para não estourar a memória
-    max_overflow=10
-)
-SessionDB = sessionmaker(bind=engine)
+class IAIndisponivelError(RuntimeError):
+    """Erro controlado quando uma operacao exige IA e nao ha credencial."""
+
+
+def obter_cliente_groq():
+    """Cria o cliente Groq sob demanda ou falha com erro controlado.
+
+    A mensagem de erro nunca inclui o valor da chave.
+    """
+    global _cliente_groq
+    if _cliente_groq is None:
+        chave = config.GROQ_API_KEY or os.environ.get("GROQ_API_KEY")
+        if not chave:
+            raise IAIndisponivelError(
+                "GROQ_API_KEY ausente: a operacao de IA nao pode ser executada."
+            )
+        _cliente_groq = Groq(api_key=chave)
+    return _cliente_groq
+
+
+def SessionDB():
+    """Fabrica de sessoes do banco, criada apenas quando realmente usada.
+
+    A conexao usa a URL normalizada (ver ``pipeline_dados.conexao``) e nunca faz
+    fallback silencioso para SQLite.
+    """
+    return obter_session_factory()()
 
 def obter_tickers_da_planilha():
     try:
@@ -74,6 +91,16 @@ def classificar_documento_com_ia(nome_original, texto_extraido):
     )
 
     try:
+        client = obter_cliente_groq()
+    except IAIndisponivelError:
+        logger.warning(
+            "IA indisponivel (GROQ_API_KEY ausente). Classificacao automatica "
+            "ignorada e documento mantido como '%s'.",
+            nome_original,
+        )
+        return nome_original, 0
+
+    try:
         chat = client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
@@ -93,7 +120,13 @@ def classificar_documento_com_ia(nome_original, texto_extraido):
         return tipo_ia, confianca_ia
 
     except Exception as e:
-        print(f"⚠️ Erro ao consultar IA para classificação híbrida: {e}")
+        # Loga apenas o tipo da excecao: mensagens de SDK podem conter detalhes
+        # da requisicao e nunca devem expor credenciais.
+        logger.warning(
+            "Erro ao consultar IA para classificacao hibrida (%s). "
+            "Mantendo classificacao original.",
+            type(e).__name__,
+        )
         return nome_original, 0
 
 def enviar_alerta_revisao_telegram(ticker, nome_doc, link_pdf, file_id, db_id):
@@ -131,7 +164,11 @@ def enviar_alerta_revisao_telegram(ticker, nome_doc, link_pdf, file_id, db_id):
     try:
         requests.post(url, data=payload)
     except Exception as e:
-        print(f"⚠️ Erro ao enviar alerta Telegram: {e}")
+        # A URL contem o token do bot; registramos apenas o tipo do erro.
+        logger.warning(
+            "Falha ao enviar alerta de revisao no Telegram (%s).",
+            type(e).__name__,
+        )
 
 # ==========================================
 # CAMADA 1: COLETA

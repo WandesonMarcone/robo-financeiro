@@ -380,7 +380,7 @@ Humana (`/revisao` e callbacks `rev_*`).
 
 1. **Ampliar a suíte de testes** — hoje há cobertura apenas do bot (`tests/test_telegram_stability.py`); faltam testes para coletores, orquestrador e banco, além de executá-los no CI do GitHub Actions.
 
-2. **Proteger o boot** — não quebrar o import de `atualizador_documentos.py` quando `GROQ_API_KEY`/`DATABASE_URL` não existirem.
+2. ~~**Proteger o boot** — não quebrar o import de `atualizador_documentos.py` quando `GROQ_API_KEY`/`DATABASE_URL` não existirem.~~ **Resolvido:** o cliente Groq é criado sob demanda (sem chave, apenas operações de IA falham com erro controlado) e a conexão SQLAlchemy é preguiçosa, criada com a URL normalizada por `pipeline_dados/conexao.py`.
 
 3. **Popular o `hash_sha256`** dos documentos para deduplicação real (o campo existe no banco, mas nunca é preenchido).
 
@@ -502,11 +502,17 @@ python tests/test_bot_boot.py
 
 python tests/test_permissoes.py
 
+python tests/test_inicializacao.py
+
 ```
 
  
 
-> 💡 Sem `DATABASE_URL` o sistema usa SQLite local (`pipeline_dados/banco_institucional.db`). Demais configurações e catálogos ficam em `config.py`.
+> 💡 `DATABASE_URL` é obrigatória para as operações de banco. A URL é normalizada (`postgres://` → `postgresql://`) e usada por `pipeline_dados/conexao.py`. **Não há mais fallback silencioso para SQLite**: se `DATABASE_URL` não estiver definida, a criação do engine falha com erro controlado. Para desenvolvimento com SQLite, defina-a explicitamente (ex.: `DATABASE_URL=sqlite:///pipeline_dados/banco_institucional.db`). Demais configurações e catálogos ficam em `config.py`.
+
+> ⚠️ A inicialização **não** executa `ALTER TABLE`, nem `Base.metadata.create_all`, nem migrações (preserva as tabelas existentes no Neon, inclusive as que não são representadas pelos modelos). A criação de schema é opt-in via `CRIAR_TABELAS=1` (apenas em ambiente limpo de desenvolvimento). Ao importar `main`, nenhum job é agendado e nenhum webhook é registrado: isso só ocorre no boot (`python main.py`) ou com `ROBO_INICIAR_NO_IMPORT=1`.
+
+> ⚠️ A IA (Groq) é opcional no boot. Sem `GROQ_API_KEY`, o bot inicia normalmente; somente as operações que realmente usam IA falham com erro controlado (`IAIndisponivelError`), sem expor a chave em logs.
 
  
 

@@ -8,10 +8,33 @@ falhas seja testável de forma isolada.
 import logging
 
 import telebot
+from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 import config
 
 logger = logging.getLogger("robo.telegram")
+
+TEXTO_MENU_INICIAL = (
+    "🤖 *Terminal Institucional* 🤖\n"
+    "Selecione o módulo de análise abaixo:"
+)
+
+
+def construir_menu_inicial():
+    """Monta o teclado do menu principal.
+
+    Extraído de ``bot/comandos.py`` para ser reutilizado tanto pelo comando
+    ``/menu`` quanto pelo fluxo de cadastro (``bot/cadastro.py``) sem acoplar o
+    cadastro aos imports pesados de ``bot.comandos``.
+    """
+    markup = InlineKeyboardMarkup()
+    markup.row(
+        InlineKeyboardButton("🏢 FIIs (Imobiliários)", callback_data="menu_fiis"),
+        InlineKeyboardButton("📈 Ações (Empresas)", callback_data="menu_acoes"),
+    )
+    markup.row(InlineKeyboardButton("🌍 Visão Macro & Notícias", callback_data="menu_macro"))
+    markup.row(InlineKeyboardButton("ℹ️ Ajuda / Sobre", callback_data="menu_ajuda"))
+    return markup
 
 TEXTO_CALLBACK_DESCONHECIDO = (
     "⚠️ Este botão não é mais válido. Envie /menu para recomeçar."
