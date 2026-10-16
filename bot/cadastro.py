@@ -38,7 +38,7 @@ import re
 from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 import config
-from bot import permissoes, sessao_cadastro
+from bot import menu_principal, permissoes, sessao_cadastro
 from bot.loader import bot
 from bot.sessao_cadastro import (
     ETAPA_CONFIRMACAO,
@@ -47,8 +47,6 @@ from bot.sessao_cadastro import (
 )
 from bot.telegram_utils import (
     TEXTO_ACESSO_NEGADO,
-    TEXTO_MENU_INICIAL,
-    construir_menu_inicial,
 )
 from pipeline_dados.modelos_usuarios import (
     STATUS_APROVADO,
@@ -245,25 +243,13 @@ def enviar_texto(chat_id, texto, **kwargs):
     return _enviar_texto(chat_id, texto, **kwargs)
 
 
-def _enviar_menu(chat_id, usuario_id=None):
+def _enviar_menu(chat_id, usuario_id=None, from_user=None):
     if chat_id is None:
         return
-    # O botao da Central de Controles e administrativo: so e anexado ao menu
-    # quando o proprio solicitante e o administrador autorizado.
-    incluir_admin = False
-    try:
-        incluir_admin = permissoes.obter_papel(usuario_id) == config.PAPEL_ADMIN
-    except Exception:
-        incluir_admin = False
-    try:
-        bot.send_message(
-            chat_id,
-            TEXTO_MENU_INICIAL,
-            reply_markup=construir_menu_inicial(incluir_admin=incluir_admin),
-            parse_mode="Markdown",
-        )
-    except Exception:
-        logger.warning("CADASTRO - falha ao enviar menu", exc_info=True)
+    # Substitui o menu generico pelo painel personalizado (saudacao + favoritos
+    # do proprio usuario + atalhos reais). O botao da Central de Controles e
+    # anexado pelo painel somente quando o solicitante e o admin autorizado.
+    menu_principal.enviar_painel(chat_id, usuario_id, from_user)
 
 
 def _responder_callback(call, texto):
@@ -507,7 +493,7 @@ def iniciar_cadastro(message):
 
     papel = permissoes.obter_papel(usuario_id)
     if papel is not None:
-        _enviar_menu(chat_id, usuario_id)
+        _enviar_menu(chat_id, usuario_id, getattr(message, "from_user", None))
         return
 
     try:

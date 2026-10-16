@@ -68,6 +68,17 @@ def enviar_painel_tickers(chat_id, message_id=None):
     finally:
         session.close()
 
+# Atalho administrativo "📥 Iniciar Revisão Manual" do relatório pós-varredura
+# (``bot/comandos.py``). Reutiliza exatamente a mesma tela do comando
+# ``/revisao``; a autorização é administrativa e já foi revalidada pelo controle
+# central (``bot.permissoes``) antes do despacho. Sem este handler específico, o
+# callback cairia no handler genérico de ``bot.callbacks_menus`` e responderia
+# "botão inválido". Registrado neste módulo, que é importado antes do genérico.
+@bot.callback_query_handler(func=lambda call: call.data == "iniciar_revisao_pendencias")
+def abrir_revisao_pelo_relatorio(call):
+    bot.answer_callback_query(call.id)
+    enviar_painel_tickers(call.message.chat.id, call.message.message_id)
+
 # 🧠 O CÉREBRO DA REVISÃO (Lida com todos os cliques dos botões)
 @bot.callback_query_handler(func=lambda call: call.data.startswith('rev_'))
 def processar_revisao(call):

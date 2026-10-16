@@ -3,7 +3,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Imports base e configurações
 from bot.loader import bot
-from bot import permissoes
+from bot import menu_principal
 from bot.telegram_utils import responder_callback_desconhecido
 from config import SPREADSHEET_URL, MAPA_SETORES_B3
 
@@ -17,6 +17,131 @@ from services.planilhas import buscar_dados_planilha_com_cache, buscar_ativo_na_
 
 logger = logging.getLogger(__name__)
 
+
+# ==========================================
+# ----- CALLBACKS DO PAINEL PERSONALIZADO -----
+# ==========================================
+# Registrados ANTES do handler generico (``callback_geral``) para que os botoes
+# do painel inicial nao caiam no fluxo "botao invalido". Reutilizam os servicos
+# e repositorios ja existentes (favoritos por usuario, documentos, cadastro).
+
+@bot.callback_query_handler(func=lambda call: call.data == "voltar_painel")
+def callback_voltar_painel(call):
+    """Retorna ao painel personalizado, editando a mensagem atual."""
+    autor = getattr(call, "from_user", None)
+    menu_principal.responder_callback(call)
+    chat_id, message_id = menu_principal.chat_e_message(call)
+    menu_principal.editar_painel(
+        chat_id, message_id, getattr(autor, "id", None), autor
+    )
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "novos_documentos")
+def callback_novos_documentos(call):
+    """Lista os últimos documentos capturados (recurso já existente)."""
+    _telegram_id, _papel, _dto, erro = menu_principal.usuario_autorizado(call)
+    if erro:
+        menu_principal.responder_callback(call, erro)
+        return
+    menu_principal.responder_callback(call)
+    menu_principal.editar_callback(
+        call, menu_principal.texto_novos_documentos(), menu_principal.markup_voltar()
+    )
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "minha_carteira")
+def callback_minha_carteira(call):
+    """Exibe os ativos acompanhados pelo próprio usuário (sua carteira)."""
+    _telegram_id, _papel, dto, erro = menu_principal.usuario_autorizado(call)
+    if erro:
+        menu_principal.responder_callback(call, erro)
+        return
+    if dto is None:
+        menu_principal.responder_callback(call, menu_principal.TEXTO_SEM_CONTA)
+        menu_principal.editar_callback(
+            call, menu_principal.TEXTO_SEM_CONTA, menu_principal.markup_voltar()
+        )
+        return
+    try:
+        repositorio = menu_principal.RepositorioFavoritos()
+        favoritos_fii = repositorio.listar(dto.id, "fii")
+        favoritos_acao = repositorio.listar(dto.id, "acao")
+    except Exception:
+        logger.warning("MENU - falha ao carregar carteira", exc_info=True)
+        menu_principal.responder_callback(call, menu_principal.TEXTO_ERRO_BANCO)
+        menu_principal.editar_callback(
+            call, menu_principal.TEXTO_ERRO_BANCO, menu_principal.markup_voltar()
+        )
+        return
+    menu_principal.responder_callback(call)
+    texto, markup = menu_principal.texto_carteira(favoritos_fii, favoritos_acao)
+    menu_principal.editar_callback(call, texto, markup)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "meus_alertas")
+def callback_meus_alertas(call):
+    """Informa a limitação: alertas por usuário ainda não existem."""
+    _telegram_id, _papel, _dto, erro = menu_principal.usuario_autorizado(call)
+    if erro:
+        menu_principal.responder_callback(call, erro)
+        return
+    menu_principal.responder_callback(call)
+    menu_principal.editar_callback(
+        call,
+        menu_principal.TEXTO_ALERTAS_INDISPONIVEL,
+        menu_principal.markup_voltar(),
+    )
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "gerenciar_favoritos")
+def callback_gerenciar_favoritos(call):
+    """Abre o submenu de gerenciamento dos favoritos individuais."""
+    _telegram_id, _papel, _dto, erro = menu_principal.usuario_autorizado(call)
+    if erro:
+        menu_principal.responder_callback(call, erro)
+        return
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("🏢 FIIs", callback_data="favoritos_fiis"),
+        InlineKeyboardButton("📈 Ações", callback_data="favoritos_acoes"),
+    )
+    markup.row(InlineKeyboardButton("🔙 Voltar ao painel", callback_data="voltar_painel"))
+    menu_principal.responder_callback(call)
+    menu_principal.editar_callback(call, menu_principal.TEXTO_GERENCIAR_FAVORITOS, markup)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "consultar_indicadores")
+def callback_consultar_indicadores(call):
+    """Abre o submenu de navegação pelos módulos de indicadores existentes."""
+    _telegram_id, _papel, _dto, erro = menu_principal.usuario_autorizado(call)
+    if erro:
+        menu_principal.responder_callback(call, erro)
+        return
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("🏢 FIIs (Imobiliários)", callback_data="menu_fiis"),
+        InlineKeyboardButton("📈 Ações (Empresas)", callback_data="menu_acoes"),
+    )
+    markup.add(InlineKeyboardButton("🔙 Voltar ao painel", callback_data="voltar_painel"))
+    menu_principal.responder_callback(call)
+    menu_principal.editar_callback(call, menu_principal.TEXTO_CONSULTAR_INDICADORES, markup)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "minha_conta")
+def callback_minha_conta(call):
+    """Exibe os dados cadastrais do próprio usuário (recurso já existente)."""
+    telegram_id, papel, dto, erro = menu_principal.usuario_autorizado(call)
+    if erro:
+        menu_principal.responder_callback(call, erro)
+        return
+    menu_principal.responder_callback(call)
+    menu_principal.editar_callback(
+        call,
+        menu_principal.texto_minha_conta(telegram_id, papel, dto),
+        menu_principal.markup_voltar(),
+    )
+
+
 # ==========================================
 # ----- BOTÕES PRINCIPAIS -----
 # ==========================================
@@ -29,19 +154,13 @@ def callback_geral(call):
 
         # --- NAVEGAÇÃO BÁSICA ---
         if dados == "voltar_menu":
-            markup = InlineKeyboardMarkup()
-            markup.row(InlineKeyboardButton("🏢 FIIs (Imobiliários)", callback_data="menu_fiis"),
-                       InlineKeyboardButton("📈 Ações (Empresas)", callback_data="menu_acoes"))
-            markup.row(InlineKeyboardButton("🌍 Visão Macro & Notícias", callback_data="menu_macro"))
-            markup.row(InlineKeyboardButton("ℹ️ Ajuda / Sobre", callback_data="menu_ajuda"))
-            # Atalho administrativo visível apenas para o admin autorizado.
-            autor_id = getattr(getattr(call, "from_user", None), "id", None)
-            try:
-                if permissoes.obter_papel(autor_id) == permissoes.PAPEL_ADMIN:
-                    markup.row(InlineKeyboardButton("⚙️ Central de Controles", callback_data="adm_home"))
-            except Exception:
-                pass
-            bot.edit_message_text("🤖 *Terminal Institucional* 🤖\nSelecione o módulo de análise abaixo:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            # Substitui o menu generico pelo painel personalizado do usuario,
+            # editando a mensagem atual (sem duplicar). O botao administrativo e
+            # anexado apenas para o admin autorizado.
+            autor = getattr(call, "from_user", None)
+            menu_principal.editar_painel(
+                chat_id, msg_id, getattr(autor, "id", None), autor
+            )
 
         elif dados == "menu_ajuda":
             markup = InlineKeyboardMarkup(row_width=1)

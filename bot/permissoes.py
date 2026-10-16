@@ -80,6 +80,7 @@ CALLBACKS_ADMIN_PREFIXOS = ("rev_", "cad_", "adm_")
 CALLBACKS_USUARIO_EXATOS = frozenset(
     {
         "voltar_menu",
+        "voltar_painel",
         "menu_ajuda",
         "menu_fiis",
         "menu_acoes",
@@ -89,6 +90,14 @@ CALLBACKS_USUARIO_EXATOS = frozenset(
         "oportunidades_acoes",
         "ajuda_roadmap",
         "ajuda_comandos",
+        # Atalhos do painel inicial personalizado. As telas que devolvem dados
+        # (carteira, conta, documentos) revalidam a conta aprovada no handler.
+        "novos_documentos",
+        "minha_carteira",
+        "meus_alertas",
+        "gerenciar_favoritos",
+        "consultar_indicadores",
+        "minha_conta",
     }
 )
 CALLBACKS_USUARIO_PREFIXOS = (

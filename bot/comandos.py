@@ -6,8 +6,8 @@ import fitz
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import func, or_
 from bot.loader import bot
-from bot import permissoes
-from bot.telegram_utils import TEXTO_MENU_INICIAL, construir_menu_inicial
+from bot import menu_principal, permissoes
+from bot.telegram_utils import montar_guia_comandos
 from atualizador_documentos import SessionDB 
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from modules.utils import conectar_gspread
@@ -29,16 +29,30 @@ def sanitizar_valor_planilha(valor):
 # ==========================================
 @bot.message_handler(commands=['menu'])
 def enviar_menu(message):
-    autor_id = getattr(getattr(message, "from_user", None), "id", None)
-    try:
-        incluir_admin = permissoes.obter_papel(autor_id) == permissoes.PAPEL_ADMIN
-    except Exception:
-        incluir_admin = False
+    autor = getattr(message, "from_user", None)
+    autor_id = getattr(autor, "id", None)
+    menu_principal.enviar_painel(message.chat.id, autor_id, autor)
+
+@bot.message_handler(commands=['help'])
+def enviar_ajuda(message):
+    """Guia de comandos sob demanda, restrito ao papel do usuário.
+
+    A permissão do comando é validada pelo controle central (``bot.permissoes``
+    via ``bot.loader``); ainda assim o conteúdo é montado a partir do papel
+    resolvido no servidor, para nunca exibir opções administrativas a um usuário
+    comum.
+    """
+    autor = getattr(message, "from_user", None)
+    autor_id = getattr(autor, "id", None)
+    papel = permissoes.obter_papel(autor_id)
+    markup = InlineKeyboardMarkup().add(
+        InlineKeyboardButton("🔙 Abrir o menu", callback_data="voltar_menu")
+    )
     bot.send_message(
         message.chat.id,
-        TEXTO_MENU_INICIAL,
-        reply_markup=construir_menu_inicial(incluir_admin=incluir_admin),
+        montar_guia_comandos(papel),
         parse_mode="Markdown",
+        reply_markup=markup,
     )
 
 @bot.message_handler(commands=['status'])

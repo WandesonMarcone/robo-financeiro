@@ -1,5 +1,7 @@
 import config
 from bot.loader import bot
+from bot import permissoes
+from bot.telegram_utils import montar_guia_comandos
 from services.planilhas import buscar_dados_planilha_com_cache
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pipeline_dados.banco_dados import DocumentosQualitativos
@@ -147,15 +149,14 @@ def callback_ajuda_roadmap(call):
 
 @bot.callback_query_handler(func=lambda call: call.data == 'ajuda_comandos')
 def callback_ajuda_comandos(call):
-    """Lista detalhada de todos os comandos do sistema"""
-    texto_comandos = (
-        "📖 *Guia de Comandos*\n\n"
-        "🔹 */status* - Verifica a saúde do banco de dados.\n"
-        "🔹 */relatorios* - Acesso direto aos últimos PDFs de Fatos Relevantes.\n"
-        "🔹 */adicionar [TICKER]* - Adiciona um ativo manualmente ao seu monitoramento.\n"
-        "🔹 */analisar [TICKER]* - Força uma análise profunda do ativo via IA.\n\n"
-        "Dica: Utilize os menus dinâmicos para navegar pelos setores sem precisar digitar comandos."
-    )
+    """Lista os comandos reais do sistema, restrita ao papel do usuário.
+
+    Reutiliza a mesma fonte de verdade do comando ``/help`` para não citar
+    comandos inexistentes nem exibir opções administrativas a usuários comuns.
+    """
+    autor = getattr(call, "from_user", None)
+    papel = permissoes.obter_papel(getattr(autor, "id", None))
+    texto_comandos = montar_guia_comandos(papel)
 
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🔙 Voltar à Ajuda", callback_data="menu_ajuda"))
