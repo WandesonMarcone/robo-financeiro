@@ -15,16 +15,18 @@ import config
 from bot.loader import bot, bot as tele_bot
 
 # 3. Registrando os Comandos e Menus (Essencial para o bot "ouvir" o Telegram)
-# Ordem importante: bot.cadastro, bot.central_controles e bot.favoritos sao
-# registrados ANTES de bot.callbacks_menus. O telebot executa apenas o primeiro
-# handler de callback cujo filtro casa, e bot.callbacks_menus registra um
-# handler generico (func=lambda call: True). Registrar os modulos de fluxo
-# especifico primeiro garante que seus callbacks (cad_*, adm_*, favoritos_*,
-# favadd_*, favnew_*, favrem_*) sejam tratados por eles, e nao engolidos pelo
-# handler generico (que responderia "botao invalido" a Central de Controles).
+# Ordem importante: bot.cadastro, bot.central_controles, bot.favoritos e
+# bot.menu_principal sao registrados ANTES de bot.callbacks_menus. O telebot
+# executa apenas o primeiro handler de callback cujo filtro casa, e
+# bot.callbacks_menus registra um handler generico (func=lambda call: True).
+# Registrar os modulos de fluxo especifico primeiro garante que seus callbacks
+# (cad_*, adm_*, favoritos_*, favadd_*, favnew_*, favrem_*, minha_*, etc.) sejam
+# tratados por eles, e nao engolidos pelo handler generico (que responderia
+# "botao invalido" a Central de Controles).
 import bot.cadastro
 import bot.central_controles
 import bot.favoritos
+import bot.menu_principal
 import bot.comandos
 import bot.handlers
 import bot.callbacks_revisao

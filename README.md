@@ -168,7 +168,7 @@ Arquivos de topo: `main.py`, `app.py`, `config.py`, `atualizador_documentos.py`
 | Cadastro e aprovação | Autocadastro por `/start` com aprovação administrativa |
 | Central de Controles | `/controles` (admin): gestão de acessos pelo Telegram (`bot/central_controles.py`) |
 | Revisão humana | `bot/callbacks_revisao.py` (`/revisao` e callbacks `rev_*`) |
-| Testes automatizados | 203 testes do bot (execução local) |
+| Testes automatizados | 242 testes do bot (execução local) |
 
 ### Integrações externas
 
@@ -274,9 +274,10 @@ python -m unittest discover -s tests
 
 Observações:
 
-- A suíte atual tem **203 testes** distribuídos em `tests/`:
+- A suíte atual tem **242 testes** distribuídos em `tests/`:
   `test_bot_boot.py` (9), `test_inicializacao.py` (20), `test_cadastro.py` (41),
   `test_central_controles.py` (55), `test_permissoes.py` (22),
+  `test_menu_principal.py` (35), `test_callbacks_revisao.py` (4),
   `test_favoritos.py` (30), `test_scraper_fiis.py` (12) e
   `test_telegram_stability.py` (14).
 - Os testes rodam sem `TELEGRAM_BOT_TOKEN`; quando um token é necessário,
