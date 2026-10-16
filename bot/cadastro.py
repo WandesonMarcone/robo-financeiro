@@ -1,30 +1,50 @@
 """Autocadastro de usuários e aprovação pelo administrador (Fase 2 / Etapa 2).
 
-Fluxo:
+Fluxo conversacional:
 
-1. Um usuário desconhecido envia ``/start``. Ele é identificado pelo
-   ``telegram_user_id`` e uma solicitação ``pendente`` é criada (sem duplicar
-   contas existentes). O ``telegram_chat_id`` é registrado para entrega das
-   respostas.
-2. O administrador recebe a solicitação com botões de aprovar/rejeitar.
-3. A decisão é aplicada de forma idempotente e o usuário é notificado.
+1. Um usuário desconhecido envia ``/start``. O bot inicia um formulário e pede
+   o **nome completo** e depois o **e-mail**.
+2. Os dados obtidos do Telegram (Telegram User ID, username quando houver, nome
+   de exibição e Chat ID) são coletados junto do formulário.
+3. Antes de enviar, o usuário revisa os dados e confirma. Só então uma
+   solicitação ``pendente`` é criada (sem duplicar contas/atendimentos) e o
+   administrador é notificado com um cartão completo da solicitação.
+4. O administrador aprova/rejeita com botões; a decisão é revalidada no servidor
+   (papel do autor e estado atual da solicitação) e o solicitante é avisado.
 
 Regras de projeto respeitadas:
 
 * não altera o schema, não executa migrações e não cria o administrador;
+* ``nome`` e ``email`` usam colunas que já existem na tabela ``usuarios``;
 * usuários já autorizados por ``config`` continuam entrando direto no menu;
-* toda decisão administrativa é revalidada no servidor (o papel nunca vem do
-  callback);
+* usuários pendentes/rejeitados/suspensos não acessam funcionalidades restritas
+  (``bot.permissoes`` exige status aprovado + ativo);
+* o formulário pode ser cancelado (``/cancelar`` ou botão) e reiniciado com
+  ``/start`` sem criar solicitações duplicadas;
 * nenhum token, credencial ou URL de banco é registrado em log.
+
+Limitação conhecida (documentada, não "inventada"): o estado do formulário vive
+na memória do processo (``bot.sessao_cadastro``). Reinícios/múltiplos workers
+podem descartar um formulário em andamento; o usuário reinicia com ``/start``.
+O username do Telegram e o nome de exibição não possuem coluna própria na tabela
+``usuarios``; eles são exibidos ao administrador e registrados na trilha de
+auditoria (logs estruturados, ``robo.auditoria``), mas não persistidos no banco,
+para não alterar o schema.
 """
 
 import logging
+import re
 
 from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 import config
-from bot import permissoes
+from bot import permissoes, sessao_cadastro
 from bot.loader import bot
+from bot.sessao_cadastro import (
+    ETAPA_CONFIRMACAO,
+    ETAPA_EMAIL,
+    ETAPA_NOME,
+)
 from bot.telegram_utils import (
     TEXTO_ACESSO_NEGADO,
     TEXTO_MENU_INICIAL,
@@ -49,6 +69,10 @@ PREFIXO_CALLBACK = "cad_"
 ACAO_APROVAR = "aprovar"
 ACAO_REJEITAR = "rejeitar"
 
+ACAO_FORM_CONFIRMAR = "confirmar"
+ACAO_FORM_CORRIGIR = "corrigir"
+ACAO_FORM_CANCELAR = "cancelar"
+
 TEXTO_PENDENTE = (
     "⏳ Solicitação recebida!\n\n"
     "Seu cadastro está aguardando aprovação do administrador. "
@@ -59,8 +83,63 @@ TEXTO_SUSPENSO = "⛔ Seu acesso está suspenso. Fale com o administrador."
 TEXTO_CADASTRO_INDISPONIVEL = (
     "⚠️ Não foi possível concluir o cadastro agora. Tente novamente mais tarde."
 )
-TEXTO_APROVADO = "✅ Seu acesso foi liberado! Bem-vindo(a)."
+TEXTO_APROVADO = (
+    "✅ Seu acesso foi liberado! Bem-vindo(a).\n\n"
+    "Para acessar o menu principal, toque em *Menu* ou envie /start."
+)
+TEXTO_REATIVADO = (
+    "✅ Seu acesso foi reativado.\n\n"
+    "Para acessar o menu principal, toque em *Menu* ou envie /start."
+)
+TEXTO_ESTADO_DESATUALIZADO = (
+    "ℹ️ O estado atual desta solicitação não permite esta ação. "
+    "Use /controles para ver a situação atualizada."
+)
 
+TEXTO_FORM_NOME = (
+    "📝 *Cadastro de acesso*\n\n"
+    "Vamos registrar sua solicitação. Leva menos de um minuto.\n\n"
+    "1/2 — Informe seu *nome completo*:"
+)
+TEXTO_FORM_EMAIL = (
+    "2/2 — Agora informe seu *e-mail* para contato:"
+)
+TEXTO_NOME_INVALIDO = (
+    "⚠️ Nome inválido. Informe o *nome completo* (nome e sobrenome), "
+    "usando apenas letras e espaços."
+)
+TEXTO_EMAIL_INVALIDO = (
+    "⚠️ E-mail inválido. Informe um endereço no formato *nome@dominio.com*."
+)
+TEXTO_CANCELADO = (
+    "❌ Cadastro cancelado. Quando quiser, envie /start para recomeçar."
+)
+TEXTO_NADA_PARA_CANCELAR = (
+    "ℹ️ Não há cadastro em andamento. Envie /start para iniciar."
+)
+TEXTO_FORM_EXPIRADO = (
+    "⌛ Este formulário expirou. Envie /start para recomeçar."
+)
+TEXTO_CONFIRMADO = (
+    "✅ Dados confirmados!\n\n"
+    "Sua solicitação foi enviada ao administrador. "
+    "Você será avisado assim que for analisada."
+)
+
+_RX_NOME = re.compile(r"^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ' .-]*$")
+_RX_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
+
+_ROTULO_SITUACAO = {
+    STATUS_PENDENTE: "Pendente de aprovação",
+    STATUS_APROVADO: "Aprovado",
+    STATUS_REJEITADO: "Rejeitado",
+    STATUS_SUSPENSO: "Suspenso",
+}
+
+
+# ---------------------------------------------------------------------------
+# Extração de dados do Telegram
+# ---------------------------------------------------------------------------
 
 def _id_do_autor(message_or_call):
     """Telegram ID do autor a partir de uma ``Message`` ou ``CallbackQuery``.
@@ -76,13 +155,26 @@ def _id_do_autor(message_or_call):
     return getattr(chat, "id", None)
 
 
-def _chat_id_da_mensagem(message):
+def _chat_id_da_mensagem(message_or_call):
+    chat = getattr(message_or_call, "chat", None)
+    if chat is not None:
+        return getattr(chat, "id", None)
+    message = getattr(message_or_call, "message", None)
     chat = getattr(message, "chat", None)
     return getattr(chat, "id", None) if chat is not None else None
 
 
-def _nome_de_exibicao(message):
-    from_user = getattr(message, "from_user", None)
+def _username_do_autor(message_or_call):
+    """Username do Telegram (sem ``@``) ou ``None`` se indisponível."""
+    from_user = getattr(message_or_call, "from_user", None)
+    username = getattr(from_user, "username", None)
+    if username:
+        return str(username).strip().lstrip("@") or None
+    return None
+
+
+def _nome_de_exibicao(message_or_call):
+    from_user = getattr(message_or_call, "from_user", None)
     if from_user is None:
         return None
     partes = [
@@ -96,6 +188,45 @@ def _nome_de_exibicao(message):
     return f"@{username}" if username else None
 
 
+# ---------------------------------------------------------------------------
+# Validação / normalização
+# ---------------------------------------------------------------------------
+
+def normalizar_nome(texto):
+    """Valida e normaliza o nome completo (retorna ``None`` se inválido)."""
+    if not texto:
+        return None
+    nome = " ".join(str(texto).split())
+    if not (3 <= len(nome) <= 120):
+        return None
+    palavras = nome.split(" ")
+    if len(palavras) < 2:
+        return None
+    # Exige nome e sobrenome com pelo menos 2 caracteres cada (iniciais no meio
+    # são aceitas), evitando "A B" como nome completo.
+    if len(palavras[0]) < 2 or len(palavras[-1]) < 2:
+        return None
+    if not _RX_NOME.match(nome):
+        return None
+    return nome
+
+
+def normalizar_email(texto):
+    """Normaliza (minúsculas) e valida o e-mail (``None`` se inválido)."""
+    if not texto:
+        return None
+    email = str(texto).strip().lower()
+    if not (3 <= len(email) <= 254):
+        return None
+    if not _RX_EMAIL.match(email):
+        return None
+    return email
+
+
+# ---------------------------------------------------------------------------
+# Envio de mensagens
+# ---------------------------------------------------------------------------
+
 def _enviar_texto(chat_id, texto, **kwargs):
     if chat_id is None:
         return
@@ -108,18 +239,38 @@ def _enviar_texto(chat_id, texto, **kwargs):
         )
 
 
-def _enviar_menu(chat_id):
+def enviar_texto(chat_id, texto, **kwargs):
+    """Alias publico de :func:`_enviar_texto` para reuso por outros modulos
+    administrativos (ex.: Central de Controles), sem duplicar a implementacao."""
+    return _enviar_texto(chat_id, texto, **kwargs)
+
+
+def _enviar_menu(chat_id, usuario_id=None):
     if chat_id is None:
         return
+    # O botao da Central de Controles e administrativo: so e anexado ao menu
+    # quando o proprio solicitante e o administrador autorizado.
+    incluir_admin = False
+    try:
+        incluir_admin = permissoes.obter_papel(usuario_id) == config.PAPEL_ADMIN
+    except Exception:
+        incluir_admin = False
     try:
         bot.send_message(
             chat_id,
             TEXTO_MENU_INICIAL,
-            reply_markup=construir_menu_inicial(),
+            reply_markup=construir_menu_inicial(incluir_admin=incluir_admin),
             parse_mode="Markdown",
         )
     except Exception:
         logger.warning("CADASTRO - falha ao enviar menu", exc_info=True)
+
+
+def _responder_callback(call, texto):
+    try:
+        bot.answer_callback_query(call.id, text=texto)
+    except Exception:
+        logger.debug("CADASTRO - falha ao responder callback", exc_info=True)
 
 
 def _responder_status(chat_id, dto):
@@ -127,7 +278,7 @@ def _responder_status(chat_id, dto):
         _enviar_texto(chat_id, TEXTO_CADASTRO_INDISPONIVEL)
         return
     if dto.status == STATUS_APROVADO:
-        _enviar_menu(chat_id)
+        _enviar_menu(chat_id, dto.telegram_user_id)
     elif dto.status == STATUS_REJEITADO:
         _enviar_texto(chat_id, TEXTO_REJEITADO)
     elif dto.status == STATUS_SUSPENSO:
@@ -136,25 +287,63 @@ def _responder_status(chat_id, dto):
         _enviar_texto(chat_id, TEXTO_PENDENTE)
 
 
-def _registrar_auditoria(autor_id, solicitacao_id, acao, resultado):
-    """Registra a decisao administrativa numa trilha de auditoria verificavel.
+# ---------------------------------------------------------------------------
+# Auditoria
+# ---------------------------------------------------------------------------
+
+def _registrar_auditoria(
+    autor_id,
+    solicitacao_id,
+    acao,
+    resultado,
+    username=None,
+    nome_telegram=None,
+    status_anterior=None,
+):
+    """Registra um evento do cadastro numa trilha de auditoria verificavel.
 
     A tabela ``auditoria_acesso`` existe no banco de producao, mas seu esquema
     (colunas) nao esta declarado neste repositorio. Para nao presumir colunas
-    inexistentes nem tocar o Neon, a decisao e registrada na infraestrutura de
-    auditoria compatível disponivel no codigo: a trilha estruturada de logs.
-    Nenhum token ou credencial e registrado; apenas identificadores de Telegram
-    (ja presentes nos logs de permissao do projeto) e o id interno da
-    solicitacao.
-    """
-    logger_auditoria.info(
-        "AUDITORIA_CADASTRO autor=%s solicitacao=%s acao=%s resultado=%s",
-        autor_id,
-        solicitacao_id,
-        acao,
-        resultado,
-    )
+    inexistentes nem tocar o Neon, os eventos sao registrados na infraestrutura
+    de auditoria compatível disponivel no codigo: a trilha estruturada de logs.
 
+    Campos opcionais que **nao** possuem coluna na tabela ``usuarios`` (username
+    e nome de exibicao do Telegram) e o estado da solicitacao antes da decisao
+    administrativa sao anexados ao registro, de modo que a solicitacao possa ser
+    rastreada sem alterar o schema.
+
+    Nenhum token ou credencial e registrado; apenas identificadores de Telegram
+    (ja presentes nos logs de permissao do projeto), o id interno da solicitacao
+    e os dados de contato informados pelo proprio solicitante.
+    """
+    partes = [
+        "AUDITORIA_CADASTRO",
+        f"autor={autor_id}",
+        f"solicitacao={solicitacao_id}",
+        f"acao={acao}",
+        f"resultado={resultado}",
+    ]
+    if username:
+        partes.append(f"username=@{username}")
+    if nome_telegram:
+        partes.append(f"nome_telegram={nome_telegram}")
+    if status_anterior:
+        partes.append(f"status_anterior={status_anterior}")
+    logger_auditoria.info(" ".join(partes))
+
+
+def registrar_auditoria(*args, **kwargs):
+    """Alias publico de :func:`_registrar_auditoria`.
+
+    Permite que outros modulos administrativos (ex.: Central de Controles)
+    registrem decisoes no mesmo mecanismo de auditoria, sem reimplementa-lo.
+    """
+    return _registrar_auditoria(*args, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Notificação do administrador
+# ---------------------------------------------------------------------------
 
 def _chat_do_administrador():
     """Chat de destino das solicitacoes: admin configurado no ambiente.
@@ -167,7 +356,44 @@ def _chat_do_administrador():
     )
 
 
-def _notificar_admin(dto, nome):
+def _situacao(dto):
+    return _ROTULO_SITUACAO.get(dto.status, dto.status or "Desconhecida")
+
+
+def _data_solicitacao(dto):
+    criado_em = getattr(dto, "criado_em", None)
+    try:
+        return criado_em.strftime("%d/%m/%Y %H:%M")
+    except (AttributeError, ValueError):
+        return "Não informada"
+
+
+def _texto_solicitacao(dto, nome_telegram=None, username=None):
+    """Cartão da solicitação exibido ao administrador (texto simples).
+
+    Enviado SEM ``parse_mode`` de propósito: nome/e-mail/username vêm do usuário
+    e poderiam conter caracteres que quebrariam a formatação do Telegram.
+    """
+    linhas = [
+        "🔔 Nova solicitação de acesso",
+        "",
+        f"📄 Solicitação #{dto.id}",
+        f"👤 Nome completo: {dto.nome or 'Não informado'}",
+        f"📧 E-mail: {dto.email or 'Não informado'}",
+        f"🔗 Username Telegram: @{username}" if username else "🔗 Username Telegram: não informado",
+        f"🆔 Telegram User ID: {dto.telegram_user_id}",
+        f"💬 Chat ID: {dto.telegram_chat_id if dto.telegram_chat_id is not None else 'não informado'}",
+        f"🗓️ Data da solicitação: {_data_solicitacao(dto)}",
+        f"📌 Situação: {_situacao(dto)}",
+    ]
+    if nome_telegram and nome_telegram != dto.nome:
+        linhas.append(f"ℹ️ Nome no Telegram: {nome_telegram}")
+    linhas.append("")
+    linhas.append("Deseja liberar o acesso a este usuário?")
+    return "\n".join(linhas)
+
+
+def _notificar_admin(dto, nome_telegram=None, username=None):
     chat_admin = _chat_do_administrador()
     if chat_admin is None:
         return
@@ -180,45 +406,94 @@ def _notificar_admin(dto, nome):
             "🚫 Rejeitar", callback_data=f"{PREFIXO_CALLBACK}{ACAO_REJEITAR}_{dto.id}"
         ),
     )
-    identificacao = nome or "Usuario sem nome"
-    texto = (
-        "🔔 *Nova solicitação de acesso*\n\n"
-        f"📄 Solicitação #{dto.id}\n"
-        f"👤 {identificacao}\n"
-        "Deseja liberar o acesso a este usuário?"
-    )
+    texto = _texto_solicitacao(dto, nome_telegram=nome_telegram, username=username)
     try:
-        bot.send_message(chat_admin, texto, reply_markup=markup, parse_mode="Markdown")
+        bot.send_message(chat_admin, texto, reply_markup=markup)
     except Exception:
         logger.warning("CADASTRO - falha ao notificar o administrador", exc_info=True)
 
 
-def _notificar_usuario(dto):
+def _notificar_usuario(dto, reativado=False):
     if dto is None:
         return
     destino = dto.telegram_chat_id or dto.telegram_user_id
     if destino is None:
         return
     if dto.status == STATUS_APROVADO:
-        _enviar_texto(destino, TEXTO_APROVADO + "\n\nEnvie /start para começar.")
+        texto = TEXTO_REATIVADO if reativado else TEXTO_APROVADO
+        _enviar_texto(destino, texto, parse_mode="Markdown")
     elif dto.status == STATUS_REJEITADO:
         _enviar_texto(destino, TEXTO_REJEITADO)
     elif dto.status == STATUS_SUSPENSO:
         _enviar_texto(destino, TEXTO_SUSPENSO)
 
 
-def _parse_decisao(dados):
-    """Extrai ``(acao, usuario_id)`` de um callback ``cad_<acao>_<id>``."""
-    partes = (dados or "").split("_")
-    if len(partes) != 3 or partes[0] != "cad":
-        return None, None
-    acao = partes[1]
-    if acao not in (ACAO_APROVAR, ACAO_REJEITAR):
-        return None, None
+def notificar_usuario(dto, reativado=False):
+    """Alias publico de :func:`_notificar_usuario` (reuso pela Central de
+    Controles). A mensagem e generica: nao revela quem decidiu nem dados
+    administrativos."""
+    return _notificar_usuario(dto, reativado=reativado)
+
+
+# ---------------------------------------------------------------------------
+# Formulário conversacional
+# ---------------------------------------------------------------------------
+
+def _resumo_confirmacao(sessao, chat_id, autor):
+    linhas = [
+        "🔎 Confira seus dados antes de enviar:",
+        "",
+        f"👤 Nome completo: {sessao.nome}",
+        f"📧 E-mail: {sessao.email}",
+        "",
+        "Dados do Telegram que serão anexados:",
+        f"🆔 Telegram User ID: {_id_do_autor(autor)}",
+        f"💬 Chat ID: {chat_id}",
+    ]
+    username = _username_do_autor(autor)
+    linhas.append(
+        f"🔗 Username: @{username}" if username else "🔗 Username: não informado"
+    )
+    return "\n".join(linhas)
+
+
+def _enviar_confirmacao(chat_id, sessao, autor):
+    if chat_id is None:
+        return
+    markup = InlineKeyboardMarkup()
+    markup.row(
+        InlineKeyboardButton(
+            "✅ Confirmar e enviar",
+            callback_data=f"{permissoes.PREFIXO_CALLBACK_FORMULARIO}{ACAO_FORM_CONFIRMAR}",
+        ),
+        InlineKeyboardButton(
+            "✏️ Corrigir",
+            callback_data=f"{permissoes.PREFIXO_CALLBACK_FORMULARIO}{ACAO_FORM_CORRIGIR}",
+        ),
+    )
+    markup.row(
+        InlineKeyboardButton(
+            "❌ Cancelar",
+            callback_data=f"{permissoes.PREFIXO_CALLBACK_FORMULARIO}{ACAO_FORM_CANCELAR}",
+        )
+    )
     try:
-        return acao, int(partes[2])
-    except (TypeError, ValueError):
-        return None, None
+        bot.send_message(
+            chat_id, _resumo_confirmacao(sessao, chat_id, autor), reply_markup=markup
+        )
+    except Exception:
+        logger.warning("CADASTRO - falha ao enviar confirmacao", exc_info=True)
+
+
+def _e_texto_de_formulario(message):
+    """Predicado do handler de texto: sessão ativa e mensagem não-comando."""
+    usuario_id = _id_do_autor(message)
+    if not sessao_cadastro.tem_sessao_ativa(usuario_id):
+        return False
+    texto = getattr(message, "text", None)
+    if not texto:
+        return False
+    return not texto.strip().startswith("/")
 
 
 @bot.message_handler(commands=[permissoes.COMANDO_CADASTRO])
@@ -232,15 +507,113 @@ def iniciar_cadastro(message):
 
     papel = permissoes.obter_papel(usuario_id)
     if papel is not None:
-        _enviar_menu(chat_id)
+        _enviar_menu(chat_id, usuario_id)
+        return
+
+    try:
+        repositorio = RepositorioUsuarios()
+        dto = repositorio.obter_por_telegram_id(usuario_id)
+    except Exception:
+        logger.warning("CADASTRO - falha ao consultar cadastro", exc_info=True)
+        _enviar_texto(chat_id, TEXTO_CADASTRO_INDISPONIVEL)
+        return
+
+    if dto is not None:
+        # Já existe solicitação/conta: nunca duplica; apenas informa o estado.
+        try:
+            dto = repositorio.atualizar_chat_id(dto.id, chat_id) or dto
+        except Exception:
+            logger.debug("CADASTRO - falha ao atualizar chat_id", exc_info=True)
+        _responder_status(chat_id, dto)
+        return
+
+    sessao_cadastro.iniciar(usuario_id, chat_id)
+    _enviar_texto(chat_id, TEXTO_FORM_NOME, parse_mode="Markdown")
+
+
+@bot.message_handler(commands=[permissoes.COMANDO_CANCELAR])
+def cancelar_cadastro(message):
+    """Cancela o formulário em andamento (sem criar solicitação)."""
+    usuario_id = _id_do_autor(message)
+    chat_id = _chat_id_da_mensagem(message)
+    if sessao_cadastro.cancelar(usuario_id):
+        _enviar_texto(chat_id, TEXTO_CANCELADO)
+    else:
+        _enviar_texto(chat_id, TEXTO_NADA_PARA_CANCELAR)
+
+
+@bot.message_handler(func=_e_texto_de_formulario)
+def processar_texto_formulario(message):
+    """Processa cada etapa do formulário (nome → e-mail → confirmação)."""
+    usuario_id = _id_do_autor(message)
+    chat_id = _chat_id_da_mensagem(message)
+    sessao = sessao_cadastro.obter(usuario_id)
+    if sessao is None:
+        return
+
+    texto = (getattr(message, "text", None) or "").strip()
+
+    if sessao.etapa == ETAPA_NOME:
+        nome = normalizar_nome(texto)
+        if nome is None:
+            _enviar_texto(chat_id, TEXTO_NOME_INVALIDO, parse_mode="Markdown")
+            return
+        sessao = sessao_cadastro.atualizar(usuario_id, nome=nome, etapa=ETAPA_EMAIL)
+        _enviar_texto(chat_id, TEXTO_FORM_EMAIL, parse_mode="Markdown")
+        return
+
+    if sessao.etapa == ETAPA_EMAIL:
+        email = normalizar_email(texto)
+        if email is None:
+            _enviar_texto(chat_id, TEXTO_EMAIL_INVALIDO, parse_mode="Markdown")
+            return
+        sessao = sessao_cadastro.atualizar(
+            usuario_id, email=email, etapa=ETAPA_CONFIRMACAO
+        )
+        _enviar_confirmacao(chat_id, sessao, message)
+        return
+
+    if sessao.etapa == ETAPA_CONFIRMACAO:
+        chave = texto.strip().lower()
+        if chave in ("confirmar", "confirmo", "sim", "ok", "enviar"):
+            _finalizar_formulario(usuario_id, chat_id, message)
+        elif chave in ("cancelar", "nao", "não"):
+            sessao_cadastro.cancelar(usuario_id)
+            _enviar_texto(chat_id, TEXTO_CANCELADO)
+        elif chave in ("corrigir", "editar"):
+            sessao_cadastro.atualizar(
+                usuario_id, nome=None, email=None, etapa=ETAPA_NOME
+            )
+            _enviar_texto(chat_id, TEXTO_FORM_NOME, parse_mode="Markdown")
+        else:
+            _enviar_texto(
+                chat_id,
+                "ℹ️ Use os botões acima ou responda *confirmar* / *corrigir* / "
+                "*cancelar*.",
+                parse_mode="Markdown",
+            )
+        return
+
+
+def _finalizar_formulario(usuario_id, chat_id, autor):
+    """Cria a solicitação após a confirmação do usuário (com revalidação)."""
+    sessao = sessao_cadastro.obter(usuario_id)
+    if sessao is None:
+        _enviar_texto(chat_id, TEXTO_FORM_EXPIRADO)
+        return
+
+    # Revalidação (defesa em profundidade): não confia no estado da UI.
+    nome = normalizar_nome(sessao.nome)
+    email = normalizar_email(sessao.email)
+    if nome is None or email is None:
+        sessao_cadastro.atualizar(usuario_id, etapa=ETAPA_NOME)
+        _enviar_texto(chat_id, TEXTO_FORM_NOME, parse_mode="Markdown")
         return
 
     try:
         repositorio = RepositorioUsuarios()
         dto, criado = repositorio.criar_solicitacao(
-            usuario_id,
-            chat_id,
-            nome=_nome_de_exibicao(message),
+            usuario_id, chat_id, nome=nome, email=email
         )
         if dto is not None and not criado:
             dto = repositorio.atualizar_chat_id(dto.id, chat_id) or dto
@@ -249,9 +622,96 @@ def iniciar_cadastro(message):
         _enviar_texto(chat_id, TEXTO_CADASTRO_INDISPONIVEL)
         return
 
+    if dto is None:
+        _enviar_texto(chat_id, TEXTO_CADASTRO_INDISPONIVEL)
+        return
+
+    sessao_cadastro.limpar(usuario_id)
+
+    username = _username_do_autor(autor)
+    nome_telegram = _nome_de_exibicao(autor)
+
     if criado:
-        _notificar_admin(dto, _nome_de_exibicao(message))
-    _responder_status(chat_id, dto)
+        _registrar_auditoria(
+            usuario_id,
+            dto.id,
+            "solicitacao",
+            "criada",
+            username=username,
+            nome_telegram=nome_telegram,
+        )
+        _notificar_admin(
+            dto,
+            nome_telegram=nome_telegram,
+            username=username,
+        )
+        _enviar_texto(chat_id, TEXTO_CONFIRMADO)
+    else:
+        # Já existia (corrida ou repetição): não notifica de novo.
+        _registrar_auditoria(
+            usuario_id,
+            dto.id,
+            "solicitacao",
+            "ja_existia",
+            username=username,
+            nome_telegram=nome_telegram,
+        )
+        _responder_status(chat_id, dto)
+
+
+@bot.callback_query_handler(
+    func=lambda call: bool(call.data)
+    and call.data.startswith(permissoes.PREFIXO_CALLBACK_FORMULARIO)
+)
+def processar_confirmacao_formulario(call):
+    """Confirma/corrige/cancela o formulário, sempre revalidando a sessão."""
+    usuario_id = _id_do_autor(call)
+    chat_id = _chat_id_da_mensagem(call)
+    sessao = sessao_cadastro.obter(usuario_id)
+    if sessao is None:
+        _responder_callback(call, TEXTO_FORM_EXPIRADO)
+        return
+
+    acao = (call.data or "").split("_", 1)[1] if "_" in (call.data or "") else ""
+
+    if acao == ACAO_FORM_CANCELAR:
+        sessao_cadastro.cancelar(usuario_id)
+        _responder_callback(call, "Cadastro cancelado.")
+        _enviar_texto(chat_id, TEXTO_CANCELADO)
+        return
+
+    if acao == ACAO_FORM_CORRIGIR:
+        sessao_cadastro.atualizar(
+            usuario_id, nome=None, email=None, etapa=ETAPA_NOME
+        )
+        _responder_callback(call, "Vamos corrigir os dados.")
+        _enviar_texto(chat_id, TEXTO_FORM_NOME, parse_mode="Markdown")
+        return
+
+    if acao == ACAO_FORM_CONFIRMAR:
+        _responder_callback(call, "Enviando solicitação...")
+        _finalizar_formulario(usuario_id, chat_id, call)
+        return
+
+    _responder_callback(call, TEXTO_ACESSO_NEGADO)
+
+
+# ---------------------------------------------------------------------------
+# Decisão do administrador
+# ---------------------------------------------------------------------------
+
+def _parse_decisao(dados):
+    """Extrai ``(acao, usuario_id)`` de um callback ``cad_<acao>_<id>``."""
+    partes = (dados or "").split("_")
+    if len(partes) != 3 or partes[0] != "cad":
+        return None, None
+    acao = partes[1]
+    if acao not in (ACAO_APROVAR, ACAO_REJEITAR):
+        return None, None
+    try:
+        return acao, int(partes[2])
+    except (TypeError, ValueError):
+        return None, None
 
 
 @bot.callback_query_handler(
@@ -278,14 +738,32 @@ def processar_decisao(call):
             logger.debug("CADASTRO - falha ao responder negacao", exc_info=True)
         return
 
+    status_anterior = None
     try:
         repositorio = RepositorioUsuarios()
+        # Revalidacao do estado atual da solicitacao (defesa em profundidade):
+        # le o estado antes de aplicar a decisao para registrar a transicao e
+        # confirmar que a solicitacao ainda existe, sem confiar na UI.
+        anterior = repositorio.obter_por_id(usuario_id)
+        if anterior is not None:
+            status_anterior = anterior.status
+        # O cartao da solicitacao so decide solicitacoes PENDENTES. A origem e
+        # conferida na gravacao (mesma sessao): um botao antigo nao reativa um
+        # usuario suspenso, nem rejeita/aprova quem mudou de estado depois (por
+        # exemplo, pela Central de Controles). Repeticoes no mesmo alvo seguem
+        # idempotentes ("ja_constava").
         if acao == ACAO_APROVAR:
-            dto, mudou = repositorio.aprovar(usuario_id)
+            dto, mudou = repositorio.aprovar(
+                usuario_id, origens_permitidas={STATUS_PENDENTE}
+            )
+            alvo = STATUS_APROVADO
             rotulo = "aprovado"
             texto_resultado = "✅ Solicitação APROVADA."
         else:
-            dto, mudou = repositorio.rejeitar(usuario_id)
+            dto, mudou = repositorio.rejeitar(
+                usuario_id, origens_permitidas={STATUS_PENDENTE}
+            )
+            alvo = STATUS_REJEITADO
             rotulo = "rejeitado"
             texto_resultado = "🚫 Solicitação REJEITADA."
     except Exception:
@@ -305,8 +783,27 @@ def processar_decisao(call):
             logger.debug("CADASTRO - falha ao responder erro", exc_info=True)
         return
 
+    if not mudou and dto.status != alvo:
+        # Transicao bloqueada: o estado atual nao e "pendente" nem o alvo.
+        _registrar_auditoria(
+            autor_id,
+            usuario_id,
+            acao,
+            "estado_invalido",
+            status_anterior=dto.status,
+        )
+        try:
+            bot.answer_callback_query(call.id, text=TEXTO_ESTADO_DESATUALIZADO)
+        except Exception:
+            logger.debug("CADASTRO - falha ao responder estado invalido", exc_info=True)
+        return
+
     _registrar_auditoria(
-        autor_id, usuario_id, acao, "aplicada" if mudou else "ja_constava"
+        autor_id,
+        usuario_id,
+        acao,
+        "aplicada" if mudou else "ja_constava",
+        status_anterior=status_anterior,
     )
 
     feedback = texto_resultado if mudou else f"ℹ️ Já constava como {rotulo}."

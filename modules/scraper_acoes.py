@@ -28,7 +28,10 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     aba_base = planilha.worksheet("BD_Acoes")
 
     try:
-        url = "https://www.fundamentus.com.br/resultado.php"
+        # Sem "www": o certificado TLS do Fundamentus só cobre o domínio raiz
+        # (fundamentus.com.br); "www" causa SSLCertVerificationError (hostname
+        # mismatch). Correção segura, mantendo a validação SSL ativa.
+        url = "https://fundamentus.com.br/resultado.php"
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'

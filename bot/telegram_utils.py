@@ -20,12 +20,17 @@ TEXTO_MENU_INICIAL = (
 )
 
 
-def construir_menu_inicial():
+def construir_menu_inicial(incluir_admin=False):
     """Monta o teclado do menu principal.
 
     Extraído de ``bot/comandos.py`` para ser reutilizado tanto pelo comando
     ``/menu`` quanto pelo fluxo de cadastro (``bot/cadastro.py``) sem acoplar o
     cadastro aos imports pesados de ``bot.comandos``.
+
+    Quando ``incluir_admin`` é verdadeiro, acrescenta o atalho administrativo
+    "⚙️ Central de Controles". O chamador é responsável por habilitá-lo somente
+    para o administrador autorizado; o callback ainda é revalidado no servidor
+    (``bot.permissoes`` e ``bot.central_controles``).
     """
     markup = InlineKeyboardMarkup()
     markup.row(
@@ -34,6 +39,10 @@ def construir_menu_inicial():
     )
     markup.row(InlineKeyboardButton("🌍 Visão Macro & Notícias", callback_data="menu_macro"))
     markup.row(InlineKeyboardButton("ℹ️ Ajuda / Sobre", callback_data="menu_ajuda"))
+    if incluir_admin:
+        markup.row(
+            InlineKeyboardButton("⚙️ Central de Controles", callback_data="adm_home")
+        )
     return markup
 
 TEXTO_CALLBACK_DESCONHECIDO = (

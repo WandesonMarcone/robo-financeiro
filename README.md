@@ -113,18 +113,20 @@ graph TD
 O `main.py` importa os módulos nesta ordem:
 
 1. `bot.cadastro`
-2. `bot.favoritos`
-3. `bot.comandos`
-4. `bot.handlers`
-5. `bot.callbacks_revisao`
-6. `bot.callbacks_menus`
+2. `bot.central_controles`
+3. `bot.favoritos`
+4. `bot.comandos`
+5. `bot.handlers`
+6. `bot.callbacks_revisao`
+7. `bot.callbacks_menus`
 
 O `pyTelegramBotAPI` avalia os handlers na ordem de registro e para no primeiro
 que corresponder. Por isso `bot.callbacks_menus`, que registra um
 `callback_query_handler(func=lambda call: True)` (catch-all), é importado por
-último. Os módulos com callbacks específicos (`cad_*`, `favoritos_*`, `favadd_*`,
-`favnew_*`, `favrem_*`, `rev_*`) são registrados antes, para não serem capturados
-pelo genérico.
+último. Os módulos com callbacks específicos (`cad_*`, `adm_*`, `favoritos_*`,
+`favadd_*`, `favnew_*`, `favrem_*`, `rev_*`) são registrados antes, para não serem
+capturados pelo genérico (sem isso a Central de Controles responderia "botão
+inválido"; há teste cobrindo a ordem em `main.py`).
 
 ---
 
@@ -164,8 +166,9 @@ Arquivos de topo: `main.py`, `app.py`, `config.py`, `atualizador_documentos.py`
 | Bot do Telegram | Comandos, menus, `/ia`, raio-x, favoritos e revisão |
 | Controle de acesso | Papéis `admin`/`user` e allowlist de chats |
 | Cadastro e aprovação | Autocadastro por `/start` com aprovação administrativa |
+| Central de Controles | `/controles` (admin): gestão de acessos pelo Telegram (`bot/central_controles.py`) |
 | Revisão humana | `bot/callbacks_revisao.py` (`/revisao` e callbacks `rev_*`) |
-| Testes automatizados | 115 testes do bot (execução local) |
+| Testes automatizados | 203 testes do bot (execução local) |
 
 ### Integrações externas
 
@@ -271,9 +274,10 @@ python -m unittest discover -s tests
 
 Observações:
 
-- A suíte atual tem **115 testes** distribuídos em `tests/`:
-  `test_bot_boot.py` (9), `test_inicializacao.py` (20), `test_cadastro.py` (20),
-  `test_permissoes.py` (22), `test_favoritos.py` (30) e
+- A suíte atual tem **203 testes** distribuídos em `tests/`:
+  `test_bot_boot.py` (9), `test_inicializacao.py` (20), `test_cadastro.py` (41),
+  `test_central_controles.py` (55), `test_permissoes.py` (22),
+  `test_favoritos.py` (30), `test_scraper_fiis.py` (12) e
   `test_telegram_stability.py` (14).
 - Os testes rodam sem `TELEGRAM_BOT_TOKEN`; quando um token é necessário,
   usam apenas um valor fictício. Não há conexão com o banco real.
@@ -354,7 +358,7 @@ Comandos liberados para `user`: `/menu`, `/start`, `/relatorios`, `/docs`,
 
 Comandos exclusivos do `admin`: `/status`, `/adicionar`, `/forcar_varredura`,
 `/forcar_docs_acoes`, `/processar_acoes_ia`, `/forcar_cvm`, `/forcar_fiis`,
-`/alimentar_ia`, `/mapear_nomes`, `/resetar_docs`, `/revisao`.
+`/alimentar_ia`, `/mapear_nomes`, `/resetar_docs`, `/revisao`, `/controles`.
 
 Callbacks de `user` incluem navegação e consulta (`menu_*`, `macro_fii_*`,
 `macro_ac_*`, `subsetor_fii_*`, `sub_ac_*`, `tipo_fii_*`, `setor_fii_*`,
@@ -362,7 +366,7 @@ Callbacks de `user` incluem navegação e consulta (`menu_*`, `macro_fii_*`,
 `dl_*`, `ia_*`, `ajuda_*`, `ajuda_cvm_*`, `voltar_menu`, `favoritos_*`,
 `oportunidades_*`) e favoritos (`favadd_*`, `favnew_*`, `favrem_*`).
 
-Callbacks exclusivos do `admin`: `rev_*`, `cad_*`, `ver_raiox_docs`,
+Callbacks exclusivos do `admin`: `rev_*`, `cad_*`, `adm_*`, `ver_raiox_docs`,
 `confirmar_reset`, `cancelar_reset`, `iniciar_revisao_pendencias`.
 
 Operações não reconhecidas (comandos/callbacks desconhecidos) são tratadas como
@@ -388,11 +392,55 @@ ser alterado por texto de comando, parâmetros nem por dados de callback.
 - `bot/cadastro.py`: `/start` cria uma solicitação `pendente` (sem duplicar
   contas) e o administrador aprova/rejeita por botões. Usuários já autorizados
   por config entram direto no menu. Decisões administrativas são revalidadas no
-  servidor e registradas em log de auditoria.
+  servidor (permissão do autor e estado atual da solicitação) e registradas em
+  trilha de auditoria (`robo.auditoria`, logs estruturados). Como a tabela
+  `usuarios` não tem colunas para username/nome de exibição do Telegram, esses
+  dados e o status anterior da solicitação são anexados ao registro de auditoria
+  (sem alterar o schema).
 - `bot/favoritos.py`: favoritos individuais por usuário. Exigem conta
   persistente; usuários comuns precisam de cadastro aprovado e conta ativa. O
   administrador autorizado por config pode usá-los mesmo com status pendente,
   desde que exista registro correspondente em `usuarios`.
+
+### Central de Controles (`/controles`)
+
+Painel administrativo para gerenciar acessos pelo Telegram, sem mexer no banco.
+Abre por `/controles` ou pelo botão "⚙️ Central de Controles" do menu, que só
+aparece para o administrador autorizado (`bot/central_controles.py`).
+
+- **Áreas:** solicitações pendentes, usuários aprovados, rejeitados e suspensos,
+  paginadas de 8 em 8. Ao tocar numa pessoa são exibidos nome completo, e-mail,
+  Telegram User ID, username, data de cadastro e situação atual.
+- **Ações por situação:** pendente → aprovar/rejeitar; aprovado → suspender;
+  suspenso → reativar; rejeitado → aprovar (reconsiderar).
+  Rejeitar, suspender, reativar e reconsiderar exigem confirmação.
+- **Revalidação:** a cada callback o servidor confere o papel do autor (pelo
+  Telegram ID do update, nunca pelo `callback_data`) e o estado atual do
+  usuário; a transição é conferida de novo na gravação
+  (`definir_status(..., origens_permitidas=...)`). Botões antigos não
+  sobrescrevem um estado que mudou. O cartão `cad_*` de solicitação também só
+  decide solicitações pendentes.
+- **Contas somente leitura:** contas definidas em `config.USUARIOS_AUTORIZADOS`
+  (por precedência de `bot.permissoes`, mudar o banco não revogaria o acesso) e
+  a própria conta do autor aparecem com 🔒 e sem botões de ação.
+- **Notificação:** o usuário afetado recebe as mensagens de `bot/cadastro.py`
+  (aprovado, rejeitado, suspenso, reativado), sem identificar o administrador.
+- **Auditoria:** `robo.auditoria` (`acao=central_<ação>`, `resultado`,
+  `status_anterior`), o mesmo mecanismo do cadastro. A tabela `auditoria_acesso`
+  não tem esquema declarado no repositório, então nenhuma coluna é presumida.
+- **Sem exclusão:** não há remoção de usuários; o acesso é revogado por
+  rejeição/suspensão, preservando histórico, documentos e auditoria. Nenhuma
+  tabela ou migração foi criada.
+
+Limitações conhecidas:
+
+- O username não é persistido (não há coluna); é consultado ao Telegram na hora
+  e aparece como "não disponível" se o usuário nunca conversou com o bot ou o
+  bloqueou.
+- Depois de aplicar a migração `0001` sem backfill, todas as linhas antigas têm
+  `status_cadastro = 'pendente'` e aparecem em "Solicitações pendentes".
+- Suspender um administrador definido só no banco é permitido a outro
+  administrador; administradores definidos em `config` só mudam por configuração.
 
 ### Como adicionar outro usuário
 

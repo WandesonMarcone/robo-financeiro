@@ -1,4 +1,5 @@
 import io
+import math
 import random
 import requests
 import pandas as pd
@@ -7,8 +8,52 @@ from datetime import datetime
 import pytz
 import config
 import json
-from modules.utils import formatar, precisa_atualizar, get_request_with_retry
+from modules.utils import precisa_atualizar, get_request_with_retry
 from bs4 import BeautifulSoup
+
+# Sentinelas de ausência usadas pelas fontes de dados (Fundamentus usa "-").
+_SENTINELAS_AUSENCIA = {"", "-", "--", "n/d", "nd", "n/a", "s/n", "none", "nan"}
+
+
+def converter_numero(valor):
+    """Converte um valor de fonte para float preservando zero legítimo.
+
+    Retorna ``float('nan')`` para valores ausentes, sentinelas (``-``, ``N/D``),
+    ``None``, texto não numérico, ``NaN`` ou infinitos. Um ``0`` real é mantido.
+
+    Aceita formatos brasileiros (``1.234,56``) e percentuais (``11,34%`` -> 0.1134).
+    """
+    if valor is None or isinstance(valor, bool):
+        return float("nan")
+    if isinstance(valor, (int, float)):
+        num = float(valor)
+        return num if math.isfinite(num) else float("nan")
+
+    texto = str(valor).strip().lower().replace("r$", "").strip()
+    if texto in _SENTINELAS_AUSENCIA:
+        return float("nan")
+
+    eh_percentual = "%" in texto
+    texto = texto.replace("%", "").replace(" ", "")
+    if "," in texto:
+        # Formato pt-BR: ponto é separador de milhar, vírgula é decimal.
+        texto = texto.replace(".", "").replace(",", ".")
+    try:
+        num = float(texto)
+    except (TypeError, ValueError):
+        return float("nan")
+    if not math.isfinite(num):
+        return float("nan")
+    return num / 100 if eh_percentual else num
+
+
+def eh_valido(valor):
+    """Indica se o valor é um número finito (zero é considerado válido)."""
+    return (
+        isinstance(valor, (int, float))
+        and not isinstance(valor, bool)
+        and math.isfinite(valor)
+    )
 
 def classificar_fii_e_emoji(setor, ticker):
     """
@@ -141,15 +186,21 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     novatos_garimpados = []
     
     try:
-        url = "https://www.fundamentus.com.br/fii_resultado.php"
+        # Sem "www": o certificado TLS do Fundamentus só cobre o domínio raiz
+        # (fundamentus.com.br). Usar "www" causa SSLCertVerificationError por
+        # hostname mismatch. Ver correção segura sem desativar a validação SSL.
+        url = "https://fundamentus.com.br/fii_resultado.php"
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = get_request_with_retry(url, headers=headers)
         df = pd.read_html(io.StringIO(response.text), decimal=',', thousands='.')[0]
         df['Papel'] = df['Papel'].str.strip().str.upper()
         df = df.set_index('Papel')
+        # converter_numero preserva o zero legítimo e transforma sentinelas ("-")
+        # em NaN, permitindo distinguir ausência de dado de um valor real.
         for col in ['Cotação', 'P/VP', 'Dividend Yield', 'Liquidez', 'Vacância Média', 'Valor de Mercado', 'Qtd de imóveis']:
-            if col in df.columns: df[col] = df[col].apply(formatar)
+            if col in df.columns: df[col] = df[col].map(converter_numero)
     except Exception as e:
+        print(f"⚠️ Fundamentus indisponível para FIIs: {e}")
         df = pd.DataFrame()
 
     dados_planilha = aba_fiis.get_all_values()
@@ -200,83 +251,139 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
 
     for ticker in fila_total:
         try:
-            yf_info = yf.Ticker(f"{ticker}.SA").info
-            preco_yf = formatar(yf_info.get('currentPrice') or yf_info.get('regularMarketPrice') or 0)
+            yf_info = yf.Ticker(f"{ticker}.SA").info or {}
+            preco_yf = converter_numero(yf_info.get('currentPrice'))
+            if not eh_valido(preco_yf):
+                preco_yf = converter_numero(yf_info.get('regularMarketPrice'))
+            # Preço zero não é cota válida: trata como ausência.
+            if not (eh_valido(preco_yf) and preco_yf > 0):
+                preco_yf = None
 
-            if not df.empty and ticker in df.index:
+            fundamentus_ok = (not df.empty) and (ticker in df.index)
+            f = {}
+            if fundamentus_ok:
                 f = df.loc[ticker]
-                if isinstance(f, pd.DataFrame): f = f.iloc[0] 
-            else: f = {}
+                if isinstance(f, pd.DataFrame): f = f.iloc[0]
 
-            preco_fundamentus = formatar(f.get('Cotação', 0))
-            preco = preco_yf if preco_yf > 0 else preco_fundamentus
-            
-            pvp = formatar(f.get('P/VP', 0))
-            dy = formatar(f.get('Dividend Yield', 0))
-            liquidez = formatar(f.get('Liquidez', 0))
-            valor_mercado = formatar(f.get('Valor de Mercado', 0))
-            
-            # API JSON
+            def _fund(col):
+                # Só confia no Fundamentus quando a linha do ticker existe; caso
+                # contrário devolve NaN para que o valor anterior seja preservado.
+                return converter_numero(f.get(col)) if fundamentus_ok else float('nan')
+
+            preco_fundamentus = _fund('Cotação')
+            if not (eh_valido(preco_fundamentus) and preco_fundamentus > 0):
+                preco_fundamentus = None
+            preco = preco_yf if preco_yf is not None else preco_fundamentus
+
+            pvp = _fund('P/VP')
+            if not (eh_valido(pvp) and pvp > 0):
+                pvp = float('nan')  # P/VP zero/nulo indica ausência, não um valor.
+            dy = _fund('Dividend Yield')            # DY 0 é legítimo (fundo sem distribuição)
+            liquidez = _fund('Liquidez')            # Liquidez 0 é legítima
+            valor_mercado = _fund('Valor de Mercado')
+            qtd_imoveis = _fund('Qtd de imóveis')   # 0 imóveis é legítimo
+            vacancia_fund = _fund('Vacância Média') # Vacância 0 é legítima
+            segmento_fund = f.get('Segmento') if fundamentus_ok else None
+
+            # API JSON / HTML (StatusInvest)
             dados_profundos = buscar_dados_profundos_fii(ticker)
-            setor = dados_profundos["segmento_real"] if dados_profundos["segmento_real"] else f.get('Segmento', 'N/D')
-            vacancia = dados_profundos["vacancia_real"] if dados_profundos["vacancia_real"] > 0 else formatar(f.get('Vacância Média', 0))
-            qtd_imoveis = dados_profundos["imoveis_reais"] if dados_profundos["imoveis_reais"] > 0 else formatar(f.get('Qtd de imóveis', 0))
-            inquilinos_planilha = dados_profundos["principais_inquilinos"]
+            segmento_status = dados_profundos.get("segmento_real")
+            vacancia_status = dados_profundos.get("vacancia_real")
+            imoveis_status = dados_profundos.get("imoveis_reais")
+            inquilinos_status = dados_profundos.get("principais_inquilinos")
 
-            tipo, emoji = classificar_fii_e_emoji(setor, ticker)
+            if segmento_status:
+                setor = segmento_status
+            elif isinstance(segmento_fund, str) and segmento_fund.strip() not in ('', '-'):
+                setor = segmento_fund.strip()
+            else:
+                setor = None
 
-            vpa = (preco / pvp) if pvp > 0 else 0
-            numero_cotas = (valor_mercado / preco) if preco > 0 else 0
-            media_div_mensal = (preco * dy) / 12
-            lucro_12m = valor_mercado * dy 
+            if setor:
+                tipo, emoji = classificar_fii_e_emoji(setor, ticker)
+            else:
+                tipo, emoji = None, "🏢"
 
-            # =========================================================================
-            # 🗺️ MAPEAMENTO COMPLETO (Agora com 18 Colunas: Distribuição de A até R)
-            # =========================================================================
-            row_update_completo = [
-                ticker,                 # 00 | Coluna A: Ticker do Fundo
-                tipo,                   # 01 | Coluna B: Tipo de FII (Ex: Tijolo, Papel)
-                setor,                  # 02 | Coluna C: Segmento Específico
-                preco,                  # 03 | Coluna D: Cotação Atualizada
-                numero_cotas,           # 04 | Coluna E: Quantidade Total de Cotas
-                pvp,                    # 05 | Coluna F: P/VP
-                dy,                     # 06 | Coluna G: Dividend Yield
-                vacancia,               # 07 | Coluna H: Vacância Física/Financeira Média
-                qtd_imoveis,            # 08 | Coluna I: Quantidade Física de Imóveis
-                inquilinos_planilha,     # 09 | Coluna J: LISTA DE INQUILINOS
-                "Pendente de IA",       # 10 | Coluna K: WALT 
-                "Pendente de IA",       # 11 | Coluna L: Alavancagem / Dívida
-                liquidez,               # 12 | Coluna M: Liquidez Média Diária Negociada
-                valor_mercado,          # 13 | Coluna N: Patrimônio Líquido Total
-                vpa,                    # 14 | Coluna O: Valor Patrimonial Justo da Cota
-                lucro_12m,              # 15 | Coluna P: Montante de Lucro Distribuído (12M)
-                media_div_mensal,       # 16 | Coluna Q: Projeção de Dividendo Mensal
-                f"{agora_sp}"             # 17 | Coluna R: Carimbo de Conclusão da Carga
-            ]
+            if eh_valido(vacancia_status) and vacancia_status > 0:
+                vacancia = vacancia_status
+            else:
+                vacancia = vacancia_fund
 
-            row_update_parcial = row_update_completo[1:] 
+            if eh_valido(imoveis_status) and imoveis_status > 0:
+                qtd_imoveis = imoveis_status
+
+            if (isinstance(inquilinos_status, str) and inquilinos_status.strip()
+                    and inquilinos_status != "Não informado / Não aplicável"):
+                inquilinos_planilha = inquilinos_status
+            else:
+                inquilinos_planilha = None
+
+            # Indicadores derivados: só calculados quando as entradas são válidas,
+            # evitando gravar zeros/lixos provenientes de falha de fonte.
+            vpa = (preco / pvp) if (eh_valido(preco) and eh_valido(pvp) and pvp > 0) else float('nan')
+            numero_cotas = (valor_mercado / preco) if (eh_valido(valor_mercado) and eh_valido(preco) and preco > 0) else float('nan')
+            media_div_mensal = (preco * dy) / 12 if (eh_valido(preco) and eh_valido(dy)) else float('nan')
+            lucro_12m = valor_mercado * dy if (eh_valido(valor_mercado) and eh_valido(dy)) else float('nan')
 
             if ticker in tickers_planilha:
                 linha_idx = tickers_planilha.index(ticker) + 2
-                batch_updates.append({'range': f'B{linha_idx}:R{linha_idx}', 'values': [row_update_parcial]})
+                ticker_novo = False
             else:
-                batch_updates.append({'range': f'A{proxima_linha_vazia}:R{proxima_linha_vazia}', 'values': [row_update_completo]})
+                linha_idx = proxima_linha_vazia
+                ticker_novo = True
+
+            # =========================================================================
+            # 🗺️ GRAVAÇÃO CÉLULA A CÉLULA (A até R): somente indicadores válidos são
+            # enviados. Campos inválidos são OMITIDOS, preservando o dado já existente.
+            # =========================================================================
+            valores = {}
+            if ticker_novo:
+                valores['A'] = ticker                 # Cria a linha do novo fundo
+            if tipo is not None: valores['B'] = tipo
+            if setor is not None: valores['C'] = setor
+            if eh_valido(preco): valores['D'] = preco
+            if eh_valido(numero_cotas): valores['E'] = numero_cotas
+            if eh_valido(pvp): valores['F'] = pvp
+            if eh_valido(dy): valores['G'] = dy
+            if eh_valido(vacancia): valores['H'] = vacancia
+            if eh_valido(qtd_imoveis): valores['I'] = qtd_imoveis
+            if inquilinos_planilha: valores['J'] = inquilinos_planilha
+            if ticker_novo:
+                valores['K'] = "Pendente de IA"
+                valores['L'] = "Pendente de IA"
+            if eh_valido(liquidez): valores['M'] = liquidez
+            if eh_valido(valor_mercado): valores['N'] = valor_mercado
+            if eh_valido(vpa): valores['O'] = vpa
+            if eh_valido(lucro_12m): valores['P'] = lucro_12m
+            if eh_valido(media_div_mensal): valores['Q'] = media_div_mensal
+            # Só carimba a atualização quando o Fundamentus respondeu de fato.
+            # Assim uma falha parcial não marca dados antigos como recentes.
+            if fundamentus_ok: valores['R'] = agora_sp
+
+            for coluna, valor in valores.items():
+                batch_updates.append({'range': f'{coluna}{linha_idx}', 'values': [[valor]]})
+
+            if ticker_novo:
                 proxima_linha_vazia += 1
 
-            preco_velho = precos_antigos.get(ticker, preco)
-            icone_variacao = "📈" if preco > preco_velho else ("📉" if preco < preco_velho else "➖")
-            txt_vacancia = f" | 🏚️ Vacância: {vacancia*100:.1f}%" if tipo == "Tijolo" else ""
+            preco_velho = precos_antigos.get(ticker, 0.0)
+            preco_exib = preco if eh_valido(preco) else preco_velho
+            tipo_exib = tipo if tipo else "N/D"
+            pvp_txt = f"{pvp:.2f}" if eh_valido(pvp) else "N/D"
+            dy_txt = f"{dy*100:.1f}%" if eh_valido(dy) else "N/D"
+            icone_variacao = "📈" if preco_exib > preco_velho else ("📉" if preco_exib < preco_velho else "➖")
+            txt_vacancia = f" | 🏚️ Vacância: {vacancia*100:.1f}%" if (tipo == "Tijolo" and eh_valido(vacancia)) else ""
 
             if ticker in novatos_garimpados:
-                relatorio_opps.append(f"{emoji} *{ticker}* ({tipo})\n   R$ {preco:.2f}\n   P/VP: {pvp:.2f} | DY: {dy*100:.1f}%{txt_vacancia}")
+                relatorio_opps.append(f"{emoji} *{ticker}* ({tipo_exib})\n   R$ {preco_exib:.2f}\n   P/VP: {pvp_txt} | DY: {dy_txt}{txt_vacancia}")
             elif ticker in config.FIXAS_FIIS:
-                texto_ativo = f"{emoji} *{ticker}* ({tipo})\n   R$ {preco_velho:.2f} ➔ R$ {preco:.2f} {icone_variacao}\n   P/VP: {pvp:.2f} | DY: {dy*100:.1f}%{txt_vacancia}"
+                texto_ativo = f"{emoji} *{ticker}* ({tipo_exib})\n   R$ {preco_velho:.2f} ➔ R$ {preco_exib:.2f} {icone_variacao}\n   P/VP: {pvp_txt} | DY: {dy_txt}{txt_vacancia}"
                 if ticker in oportunidades_gerais:
                     relatorio_fixas_opps.append(f"🚨 *{ticker} ENTROU EM DESCONTO!* 🚨\n   {texto_ativo}")
                 else:
                     relatorio_fixas.append(texto_ativo)
             else:
-                relatorio_atualizados.append(f"{emoji} *{ticker}* ({tipo})\n   R$ {preco_velho:.2f} ➔ R$ {preco:.2f} {icone_variacao}\n   P/VP: {pvp:.2f} | DY: {dy*100:.1f}%{txt_vacancia}")
+                relatorio_atualizados.append(f"{emoji} *{ticker}* ({tipo_exib})\n   R$ {preco_velho:.2f} ➔ R$ {preco_exib:.2f} {icone_variacao}\n   P/VP: {pvp_txt} | DY: {dy_txt}{txt_vacancia}")
 
             print(f"   ✅ [OK] {ticker} mapeado e processado.")
         except Exception as e:

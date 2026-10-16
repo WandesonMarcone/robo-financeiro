@@ -84,11 +84,18 @@ class Usuario(BaseUsuarios):
             telegram_user_id=self.telegram_user_id,
             telegram_chat_id=self.telegram_chat_id,
             status=self.status_cadastro,
+            email=self.email,
+            criado_em=self.criado_em,
         )
 
 
 class UsuarioDTO:
-    """Representacao simples (desanexada) de um usuario para uso na aplicacao."""
+    """Representacao simples (desanexada) de um usuario para uso na aplicacao.
+
+    ``email`` e ``criado_em`` espelham colunas ja existentes na tabela
+    ``usuarios`` e sao expostos aqui (sem alterar o schema) para que o fluxo de
+    cadastro possa exibir/registrar o e-mail e a data da solicitacao.
+    """
 
     __slots__ = (
         "id",
@@ -99,6 +106,8 @@ class UsuarioDTO:
         "telegram_user_id",
         "telegram_chat_id",
         "status",
+        "email",
+        "criado_em",
     )
 
     def __init__(
@@ -111,6 +120,8 @@ class UsuarioDTO:
         telegram_user_id,
         telegram_chat_id,
         status,
+        email=None,
+        criado_em=None,
     ):
         self.id = id
         self.nome = nome
@@ -120,6 +131,8 @@ class UsuarioDTO:
         self.telegram_user_id = telegram_user_id
         self.telegram_chat_id = telegram_chat_id
         self.status = status
+        self.email = email
+        self.criado_em = criado_em
 
     def esta_aprovado(self):
         return self.status == STATUS_APROVADO

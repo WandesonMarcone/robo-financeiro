@@ -32,6 +32,14 @@ PAPEL_USUARIO = getattr(config, "PAPEL_USUARIO", "user")
 # ainda nao cadastrado pode executar; todo o restante exige aprovacao.
 COMANDO_CADASTRO = "start"
 
+# Comando de cancelamento do formulario de autocadastro. So tem efeito enquanto
+# existe um formulario em andamento (ver ``tem_fluxo_cadastro_ativo``).
+COMANDO_CANCELAR = "cancelar"
+
+# Prefixo dos callbacks do formulario conversacional (confirmar/corrigir/
+# cancelar). Sao operacoes de nivel de usuario e exigem formulario ativo.
+PREFIXO_CALLBACK_FORMULARIO = "formcad_"
+
 # Comandos exclusivos do administrador (manutenção, configuração ou destrutivos).
 COMANDOS_ADMIN = frozenset(
     {
@@ -46,12 +54,15 @@ COMANDOS_ADMIN = frozenset(
         "mapear_nomes",
         "resetar_docs",
         "revisao",
+        "controles",
     }
 )
 
-# Comandos de consulta/financeiros liberados para usuários comuns.
+# Comandos de consulta/financeiros liberados para usuários comuns. O comando
+# ``cancelar`` é do formulário de autocadastro e, para um usuário ainda não
+# aprovado, só é liberado enquanto houver formulário ativo (ver ``verificar_update``).
 COMANDOS_USUARIO = frozenset(
-    {"menu", "start", "relatorios", "docs", "help"}
+    {"menu", "start", "relatorios", "docs", "help", "cancelar"}
 )
 
 # Callbacks exclusivos do administrador (revisão, diagnóstico e reset).
@@ -63,7 +74,7 @@ CALLBACKS_ADMIN_EXATOS = frozenset(
         "iniciar_revisao_pendencias",
     }
 )
-CALLBACKS_ADMIN_PREFIXOS = ("rev_", "cad_")
+CALLBACKS_ADMIN_PREFIXOS = ("rev_", "cad_", "adm_")
 
 # Callbacks de navegação, filtros e consultas liberados para usuários comuns.
 CALLBACKS_USUARIO_EXATOS = frozenset(
@@ -102,6 +113,10 @@ CALLBACKS_USUARIO_PREFIXOS = (
     "favadd_",
     "favnew_",
     "favrem_",
+    # Callbacks do formulário conversacional de autocadastro. Ficam no nível de
+    # usuário; o acesso de um solicitante ainda não aprovado é liberado em
+    # ``verificar_update`` somente enquanto há formulário ativo.
+    PREFIXO_CALLBACK_FORMULARIO,
 )
 
 
@@ -203,6 +218,34 @@ def e_comando_start(update):
     if operacao is None:
         return False
     return operacao[0] == f"comando:/{COMANDO_CADASTRO}"
+
+
+def tem_fluxo_cadastro_ativo(usuario_id):
+    """True se o usuário tem um formulário de autocadastro em andamento.
+
+    Delega ao armazenamento de estado (``bot.sessao_cadastro``) por import
+    preguiçoso, mantendo este módulo leve. Qualquer falha resulta em ``False``
+    (falha segura: sem formulário reconhecido, nada é liberado).
+    """
+    try:
+        from bot import sessao_cadastro
+
+        return sessao_cadastro.tem_sessao_ativa(usuario_id)
+    except Exception:
+        logger.debug("Falha ao consultar formulario de cadastro", exc_info=True)
+        return False
+
+
+def _e_entrada_publica(nome):
+    """Operações liberadas independentemente de papel (autocadastro público)."""
+    return nome == f"comando:/{COMANDO_CADASTRO}"
+
+
+def _e_operacao_do_formulario(nome):
+    """Operações válidas apenas durante um formulário de autocadastro ativo."""
+    if nome == f"comando:/{COMANDO_CANCELAR}":
+        return True
+    return nome.startswith(f"callback:{PREFIXO_CALLBACK_FORMULARIO}")
 
 
 def usuario_id_do_update(update):
@@ -307,7 +350,11 @@ def verificar_update(update):
         # Entrada pública do autocadastro: liberada para qualquer usuário
         # identificável (inclusive ainda não cadastrado). A decisão de acesso
         # efetiva continua sendo tomada pelo fluxo de cadastro.
-        if nome == f"comando:/{COMANDO_CADASTRO}":
+        if _e_entrada_publica(nome):
+            return True, nome
+        # Operações do formulário (cancelar e callbacks de confirmação): são
+        # liberadas apenas enquanto existe formulário ativo para este usuário.
+        if _e_operacao_do_formulario(nome) and tem_fluxo_cadastro_ativo(usuario_id):
             return True, nome
         return _papel_comporta(obter_papel(usuario_id), nivel_minimo), nome
     except Exception:

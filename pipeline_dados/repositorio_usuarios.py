@@ -14,6 +14,7 @@ Regras de seguranca:
 import logging
 from datetime import datetime
 
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
 from pipeline_dados.conexao import obter_session_factory
@@ -73,12 +74,60 @@ class RepositorioUsuarios:
         finally:
             session.close()
 
-    def criar_solicitacao(self, telegram_user_id, telegram_chat_id, nome=None):
+    def listar_por_status(self, status, limite=None, deslocamento=0):
+        """Lista as contas de um status, de forma paginada e somente-leitura.
+
+        Usado pela Central de Controles administrativa para exibir as áreas
+        (pendentes, aprovados, rejeitados, suspensos) sem carregar todo o banco
+        de uma vez. Nao altera o schema nem cria tabelas; apenas consulta a
+        coluna ``status_cadastro`` ja existente. A ordenacao e por ``id``
+        (criterio estavel mesmo quando ``criado_em`` e nulo). Qualquer falha de
+        banco propaga a excecao para o chamador tratar (falha segura).
+        """
+        if status not in STATUS_VALIDOS:
+            raise ValueError(f"status invalido: {status!r}")
+        if deslocamento is None or deslocamento < 0:
+            deslocamento = 0
+        session = self._nova_sessao()
+        try:
+            consulta = (
+                session.query(Usuario)
+                .filter(Usuario.status_cadastro == status)
+                .order_by(Usuario.id.asc())
+            )
+            if deslocamento:
+                consulta = consulta.offset(deslocamento)
+            if limite is not None:
+                consulta = consulta.limit(limite)
+            return [usuario.para_dto() for usuario in consulta.all()]
+        finally:
+            session.close()
+
+    def contar_por_status(self, status):
+        """Conta as contas de um status (somente-leitura, para paginacao)."""
+        if status not in STATUS_VALIDOS:
+            raise ValueError(f"status invalido: {status!r}")
+        session = self._nova_sessao()
+        try:
+            total = (
+                session.query(func.count(Usuario.id))
+                .filter(Usuario.status_cadastro == status)
+                .scalar()
+            )
+            return int(total or 0)
+        finally:
+            session.close()
+
+    def criar_solicitacao(self, telegram_user_id, telegram_chat_id, nome=None, email=None):
         """Cria uma solicitacao pendente, sem duplicar usuarios existentes.
 
         Retorna ``(dto, criado)``. Se ja existir conta para o ``telegram_user_id``,
         retorna a existente com ``criado=False`` e **nao** altera nenhum campo
-        (nome, papel, plano, status). Nunca sobrescreve conta existente.
+        (nome, email, papel, plano, status). Nunca sobrescreve conta existente.
+
+        ``nome`` e ``email`` alimentam colunas que ja existem na tabela
+        ``usuarios`` (nenhum schema e alterado); ``email`` e gravado apenas se
+        informado.
         """
         chave = self._normalizar_telegram_id(telegram_user_id)
         if chave is None:
@@ -93,6 +142,7 @@ class RepositorioUsuarios:
             agora = datetime.now()
             usuario = Usuario(
                 nome=(nome or None),
+                email=(email or None),
                 papel=PAPEL_USUARIO_PADRAO,
                 ativo=False,
                 telegram_user_id=chave,
@@ -137,11 +187,20 @@ class RepositorioUsuarios:
         finally:
             session.close()
 
-    def definir_status(self, usuario_id, status):
+    def definir_status(self, usuario_id, status, origens_permitidas=None):
         """Define o status de cadastro de forma idempotente.
 
         Retorna ``(dto, mudou)``. Se o usuario ja estiver no status alvo,
         ``mudou=False`` e nada e alterado (cliques repetidos sao seguros).
+
+        ``origens_permitidas`` (opcional) e uma colecao de status de origem
+        aceitos para a transicao. Quando informada e o status **atual** (lido
+        nesta mesma sessao, no momento da gravacao) nao estiver nela, nada e
+        alterado e retorna ``(dto_atual, False)``: o chamador distingue "ja
+        estava no alvo" de "transicao bloqueada" comparando ``dto.status`` com
+        o alvo. Isso evita que uma decisao baseada em tela/botao antigo (estado
+        desatualizado) sobrescreva um estado que mudou nesse intervalo.
+        Sem o argumento, o comportamento anterior e preservado integralmente.
         """
         if status not in STATUS_VALIDOS:
             raise ValueError(f"status invalido: {status!r}")
@@ -155,6 +214,11 @@ class RepositorioUsuarios:
                 return None, False
             if usuario.status_cadastro == status:
                 return usuario.para_dto(), False
+            if (
+                origens_permitidas is not None
+                and usuario.status_cadastro not in origens_permitidas
+            ):
+                return usuario.para_dto(), False
 
             usuario.status_cadastro = status
             usuario.ativo = status == STATUS_APROVADO
@@ -165,14 +229,14 @@ class RepositorioUsuarios:
         finally:
             session.close()
 
-    def aprovar(self, usuario_id):
-        return self.definir_status(usuario_id, STATUS_APROVADO)
+    def aprovar(self, usuario_id, origens_permitidas=None):
+        return self.definir_status(usuario_id, STATUS_APROVADO, origens_permitidas)
 
-    def rejeitar(self, usuario_id):
-        return self.definir_status(usuario_id, STATUS_REJEITADO)
+    def rejeitar(self, usuario_id, origens_permitidas=None):
+        return self.definir_status(usuario_id, STATUS_REJEITADO, origens_permitidas)
 
-    def suspender(self, usuario_id):
-        return self.definir_status(usuario_id, STATUS_SUSPENSO)
+    def suspender(self, usuario_id, origens_permitidas=None):
+        return self.definir_status(usuario_id, STATUS_SUSPENSO, origens_permitidas)
 
     def papel_de_usuario_aprovado(self, telegram_user_id):
         """Retorna o papel apenas de usuario aprovado e ativo (ou ``None``).

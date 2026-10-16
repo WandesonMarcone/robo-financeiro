@@ -3,6 +3,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Imports base e configurações
 from bot.loader import bot
+from bot import permissoes
 from bot.telegram_utils import responder_callback_desconhecido
 from config import SPREADSHEET_URL, MAPA_SETORES_B3
 
@@ -33,6 +34,13 @@ def callback_geral(call):
                        InlineKeyboardButton("📈 Ações (Empresas)", callback_data="menu_acoes"))
             markup.row(InlineKeyboardButton("🌍 Visão Macro & Notícias", callback_data="menu_macro"))
             markup.row(InlineKeyboardButton("ℹ️ Ajuda / Sobre", callback_data="menu_ajuda"))
+            # Atalho administrativo visível apenas para o admin autorizado.
+            autor_id = getattr(getattr(call, "from_user", None), "id", None)
+            try:
+                if permissoes.obter_papel(autor_id) == permissoes.PAPEL_ADMIN:
+                    markup.row(InlineKeyboardButton("⚙️ Central de Controles", callback_data="adm_home"))
+            except Exception:
+                pass
             bot.edit_message_text("🤖 *Terminal Institucional* 🤖\nSelecione o módulo de análise abaixo:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         elif dados == "menu_ajuda":

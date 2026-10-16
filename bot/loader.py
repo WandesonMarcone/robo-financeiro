@@ -53,16 +53,22 @@ class BotAutorizado(telebot.TeleBot):
 
         * o comando público ``/start`` (entrada do autocadastro), de qualquer
           chat, para que um usuário novo consiga se registrar;
+        * mensagens/callbacks de chats com um formulário de autocadastro ativo
+          (ex.: respostas de nome/e-mail antes de existir registro no banco);
         * mensagens/callbacks de chats cujo Telegram ID já conste como usuário
-          cadastrado (para receber as mensagens de status). A decisão de acesso
-          efetiva continua em ``bot.permissoes``; chats desconhecidos seguem
-          sendo descartados.
+          cadastrado (para receber as mensagens de status).
+
+        A decisão de acesso efetiva continua em ``bot.permissoes``; chats
+        desconhecidos e sem formulário ativo seguem sendo descartados.
         """
         if chat_autorizado(update):
             return True
         if permissoes.e_comando_start(update):
             return True
-        return permissoes.usuario_reconhecido(permissoes.usuario_id_do_update(update))
+        usuario_id = permissoes.usuario_id_do_update(update)
+        if permissoes.tem_fluxo_cadastro_ativo(usuario_id):
+            return True
+        return permissoes.usuario_reconhecido(usuario_id)
 
     def process_new_updates(self, updates):
         logger.info("TELEGRAM - updates recebidos: %d", len(updates))
