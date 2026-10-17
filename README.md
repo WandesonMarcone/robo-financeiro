@@ -304,10 +304,14 @@ Observações:
   - `pipeline_dados/modelos_ativos.py` — associação de favoritos.
 - A aplicação **não executa migrações automaticamente** e não altera o schema no
   boot.
-- Migração versionada: `migrations/versions/0001_add_status_cadastro_usuarios.sql`
-  (adiciona `status_cadastro` à tabela `usuarios`). Execução **manual**, pelo
-  administrador, com backup antes. Instruções e procedimento em
-  `migrations/README.md`.
+- Migrações versionadas (execução **manual**, pelo administrador, com backup
+  antes; instruções em `migrations/README.md`):
+  - `0001_add_status_cadastro_usuarios.sql` — coluna `status_cadastro`;
+  - `0002_add_solicitacoes_troca.sql` — tabela `solicitacoes_troca`;
+  - `0003_fix_solicitacoes_troca_unique.sql` — índice único parcial de pendentes;
+  - `0004_add_favoritos_pendentes_usuarios.sql` — coluna `favoritos_pendentes`.
+  As migrações 0003/0004 estão **pendentes de autorização** e seu estado no Neon
+  ainda não foi verificado; nada é aplicado no boot.
 - Criação de tabelas apenas de forma opt-in (`CRIAR_TABELAS=1`), destinada a
   ambientes de desenvolvimento limpos.
 

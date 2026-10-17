@@ -129,21 +129,57 @@ def classificar_documento_com_ia(nome_original, texto_extraido):
         )
         return nome_original, 0
 
+def _chat_administrador():
+    """Chat do administrador para alertas operacionais (nunca transmissao ampla)."""
+    return (
+        os.environ.get("TELEGRAM_ADMIN_ID")
+        or getattr(config, "TELEGRAM_ADMIN_ID", None)
+        or os.environ.get("TELEGRAM_CHAT_ID")
+        or getattr(config, "TELEGRAM_CHAT_ID", None)
+    )
+
+
+def _enviar_mensagem_telegram(chat_id, mensagem, teclado=None, parse_mode=None):
+    """Envia uma mensagem a UM chat específico. Retorna True em caso de sucesso."""
+    if chat_id is None:
+        return False
+    token = (getattr(config, "TELEGRAM_BOT_TOKEN", None) or "").strip()
+    if not token:
+        logger.warning("TELEGRAM_BOT_TOKEN ausente; mensagem nao enviada.")
+        return False
+    payload = {"chat_id": chat_id, "text": mensagem}
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    if teclado:
+        payload["reply_markup"] = json.dumps(teclado)
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    try:
+        resposta = requests.post(url, data=payload, timeout=15)
+        if resposta.status_code != 200:
+            logger.warning(
+                "Telegram recusou mensagem (status %s).", resposta.status_code
+            )
+            return False
+        return True
+    except Exception as e:
+        # A URL contem o token do bot; registramos apenas o tipo do erro.
+        logger.warning(
+            "Falha ao enviar mensagem no Telegram (%s).", type(e).__name__
+        )
+        return False
+
+
 def enviar_alerta_revisao_telegram(ticker, nome_doc, link_pdf, file_id, db_id):
-    """Envia a mensagem interativa com botões para o seu Telegram"""
-    chat_id = os.environ.get('TELEGRAM_CHAT_ID') 
+    """Envia ao administrador a mensagem interativa de revisao manual."""
+    chat_id = _chat_administrador()
     if not chat_id:
-        print("⚠️ TELEGRAM_CHAT_ID não configurado. Alerta não enviado.")
-        return
+        logger.warning("Administrador nao configurado. Alerta nao enviado.")
+        return False
 
-    import json # Garante o import do json caso não tenha no topo
-    url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
-
-    # 🔴 CORREÇÃO AQUI: Mudança de doc.id para db_id
     teclado = {
         "inline_keyboard": [
-            [{"text": f"✅ Classificar Arquivo", "callback_data": f"rev_app_{db_id}"}],
-            [{"text": "🗑️ Apagar Lixo", "callback_data": f"rev_del_{db_id}"}]
+            [{"text": "✅ Classificar Arquivo", "callback_data": f"rev_app_{db_id}"}],
+            [{"text": "🗑️ Apagar Lixo", "callback_data": f"rev_del_{db_id}"}],
         ]
     }
 
@@ -154,21 +190,77 @@ def enviar_alerta_revisao_telegram(ticker, nome_doc, link_pdf, file_id, db_id):
         f"🔗 [Clique aqui para ler o PDF]({link_pdf})\n\n"
         f"O que faremos com ele?"
     )
+    return _enviar_mensagem_telegram(
+        chat_id, mensagem, teclado=teclado, parse_mode="Markdown"
+    )
 
-    payload = {
-        "chat_id": chat_id,
-        "text": mensagem,
-        "parse_mode": "Markdown",
-        "reply_markup": json.dumps(teclado)
-    }
+
+def _destinatarios_do_ativo(ativo_id):
+    """Usuarios aprovados e ativos que acompanham o ativo (vinculo confiavel)."""
+    from pipeline_dados.repositorio_favoritos import RepositorioFavoritos
+
+    return RepositorioFavoritos().usuarios_que_acompanham(ativo_id)
+
+
+def notificar_documento_disponivel(
+    ativo_id, ticker, nome_doc, data_publicacao=None, url_pdf=None
+):
+    """Notifica INDIVIDUALMENTE os seguidores de um ativo sobre um novo documento.
+
+    A lista de destinatarios vem de ``usuarios_que_acompanham`` (vinculo
+    persistente e aprovado); nao existe transmissao ampla. Sem associacao
+    confiavel (ativo ausente ou nenhum seguidor), nada e enviado. Retorna a
+    quantidade de mensagens entregues.
+    """
+    if ativo_id is None or not ticker:
+        return 0
     try:
-        requests.post(url, data=payload)
-    except Exception as e:
-        # A URL contem o token do bot; registramos apenas o tipo do erro.
+        destinatarios = _destinatarios_do_ativo(ativo_id)
+    except Exception:
         logger.warning(
-            "Falha ao enviar alerta de revisao no Telegram (%s).",
-            type(e).__name__,
+            "Falha ao resolver seguidores do ativo; documento nao distribuido",
+            exc_info=True,
         )
+        return 0
+
+    data = None
+    try:
+        data = data_publicacao.strftime("%d/%m/%Y")
+    except (AttributeError, ValueError):
+        data = None
+
+    linhas = [
+        "📄 Novo documento disponível",
+        "",
+        f"🏢 Ativo: {ticker}",
+        f"🏷️ Tipo: {nome_doc or 'Não informado'}",
+    ]
+    if data:
+        linhas.append(f"🗓️ Publicação: {data}")
+    if url_pdf:
+        linhas.extend(["", f"🔗 {url_pdf}"])
+    mensagem = "\n".join(linhas)
+    teclado = {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "📄 Ver novos documentos",
+                    "callback_data": "novos_documentos",
+                }
+            ]
+        ]
+    }
+
+    enviados = 0
+    for usuario in destinatarios:
+        destino = getattr(usuario, "telegram_chat_id", None) or getattr(
+            usuario, "telegram_user_id", None
+        )
+        if destino is None:
+            continue
+        if _enviar_mensagem_telegram(destino, mensagem, teclado=teclado):
+            enviados += 1
+    return enviados
 
 # ==========================================
 # CAMADA 1: COLETA
@@ -229,6 +321,7 @@ def rotina_processar_pendentes():
     for doc_id in pendentes_ids:
         # 2. 🟢 ABRE UMA NOVA SESSÃO EXCLUSIVA PARA ESTE ARQUIVO
         session = SessionDB()
+        notificacao = None
         try:
             doc_db = session.query(DocumentosQualitativos).filter_by(id=doc_id).first()
             if not doc_db:
@@ -298,6 +391,13 @@ def rotina_processar_pendentes():
                             doc_db.texto_extraido = texto_pdf[:15000] if texto_pdf else None
                     else:
                         doc_db.texto_extraido = None
+                    notificacao = {
+                        "ativo_id": doc_db.ativo_id,
+                        "ticker": ticker,
+                        "nome_doc": nome_limpo,
+                        "data_publicacao": doc_db.data_publicacao,
+                        "url_pdf": link_gerado,
+                    }
                 else:
                     doc_db.status_processamento = "ERRO_DRIVE"
 
@@ -317,6 +417,8 @@ def rotina_processar_pendentes():
 
             # 3. 💾 SALVA O PROGRESSO DESTE ARQUIVO E DELETA O TEMPORÁRIO
             session.commit()
+            if notificacao:
+                notificar_documento_disponivel(**notificacao)
             if os.path.exists(temp_filename): os.remove(temp_filename)
             time.sleep(6) 
 
@@ -347,6 +449,7 @@ def rotina_processar_acoes():
     for doc_id in pendentes_ids:
         # 2. 🟢 SESSÃO EXCLUSIVA POR AÇÃO
         session = SessionDB()
+        notificacao = None
         try:
             doc_db = session.query(DocumentosQualitativos).filter_by(id=doc_id).first()
             if not doc_db:
@@ -434,11 +537,20 @@ def rotina_processar_acoes():
                             doc_db.texto_extraido = texto_pdf[:15000] if texto_pdf else None
                     else:
                         doc_db.texto_extraido = None
+                    notificacao = {
+                        "ativo_id": doc_db.ativo_id,
+                        "ticker": ticker,
+                        "nome_doc": nome_limpo,
+                        "data_publicacao": doc_db.data_publicacao,
+                        "url_pdf": link_gerado,
+                    }
                 else:
                     doc_db.status_processamento = "ERRO_DRIVE"
 
             # 3. 💾 SALVA O PROGRESSO
             session.commit()
+            if notificacao:
+                notificar_documento_disponivel(**notificacao)
             if os.path.exists(temp_filename): os.remove(temp_filename)
             time.sleep(3) 
             

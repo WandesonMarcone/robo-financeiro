@@ -57,6 +57,52 @@ FAVORITOS = {
     "acao": FIXAS_ACOES
 }
 
+
+def _limite_inteiro(nome_env):
+    """Lê um limite positivo de variável de ambiente (ou ``None`` = sem limite).
+
+    Valores vazios, não numéricos ou menores que 1 são tratados como "sem
+    limite" para não bloquear o cadastro por erro de configuração.
+    """
+    valor = os.environ.get(nome_env)
+    if valor is None or not str(valor).strip():
+        return None
+    try:
+        numero = int(str(valor).strip())
+    except (TypeError, ValueError):
+        return None
+    return numero if numero > 0 else None
+
+
+# Limites máximos de favoritos por usuário, SEPARADOS por tipo. ``None`` significa
+# sem limite. São apenas tetos de quantidade: não restringem quais ativos podem
+# ser acompanhados (isso continua dependendo do catálogo da tabela ``ativos``).
+# Ajustáveis por ambiente (FAVORITOS_LIMITE_FII / FAVORITOS_LIMITE_ACAO) sem
+# alterar código. O valor definitivo é uma decisão de produto pendente.
+FAVORITOS_LIMITES = {
+    "fii": _limite_inteiro("FAVORITOS_LIMITE_FII"),
+    "acao": _limite_inteiro("FAVORITOS_LIMITE_ACAO"),
+}
+
+
+def _horas_prazo(nome_env, padrao):
+    """Lê o prazo de decisão em horas (0/None desativa a expiração)."""
+    valor = os.environ.get(nome_env)
+    if valor is None or not str(valor).strip():
+        return padrao
+    try:
+        numero = int(str(valor).strip())
+    except (TypeError, ValueError):
+        return padrao
+    return numero if numero > 0 else None
+
+
+# Prazo (em horas) para o administrador decidir uma solicitação de troca de
+# ativo favorito. Padrão confirmado: 48 horas. Quando ``None``/0, a solicitação
+# NÃO expira (permanece pendente até decisão). A expiração NUNCA aprova sozinha e
+# preserva o histórico (o registro muda de estado, não é apagado).
+TROCAS_PRAZO_HORAS = _horas_prazo("TROCAS_PRAZO_HORAS", 48)
+
 # --- 🚨 REGRAS FIXAS DEFINIDAS AQUI 🚨 ---
 
 FILTROS_FIXOS = {"fii": {"pvp_min": 0.50, "pvp_max": 1.15, "dy_min": 0.08},"acao": {"pl_min": 2.0, "pl_max": 15.0, "pvp_min": 0.50, "pvp_max": 2.50, "dy_min": 0.06, "roe_min": 0.10}}

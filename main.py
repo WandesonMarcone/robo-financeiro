@@ -20,12 +20,14 @@ from bot.loader import bot, bot as tele_bot
 # executa apenas o primeiro handler de callback cujo filtro casa, e
 # bot.callbacks_menus registra um handler generico (func=lambda call: True).
 # Registrar os modulos de fluxo especifico primeiro garante que seus callbacks
-# (cad_*, adm_*, favoritos_*, favadd_*, favnew_*, favrem_*, minha_*, etc.) sejam
+# (cad_*, adm_*, favoritos_*, favadd_*, favnew_*, favrem_*, troca_*, trocaadm_*,
+# minha_*, etc.) sejam
 # tratados por eles, e nao engolidos pelo handler generico (que responderia
 # "botao invalido" a Central de Controles).
 import bot.cadastro
 import bot.central_controles
 import bot.favoritos
+import bot.trocas
 import bot.menu_principal
 import bot.comandos
 import bot.handlers
