@@ -24,6 +24,7 @@ from sqlalchemy.exc import IntegrityError
 from pipeline_dados.banco_dados import Ativo, TipoAtivo
 from pipeline_dados.conexao import obter_session_factory
 from pipeline_dados.modelos_ativos import AtivoAcompanhado
+from pipeline_dados.modelos_usuarios import STATUS_APROVADO, Usuario
 
 logger = logging.getLogger("robo.favoritos")
 
@@ -143,6 +144,52 @@ class RepositorioFavoritos:
                 )
                 for vinculo, ativo in consulta.all()
             ]
+        finally:
+            session.close()
+
+    def listar_catalogo(self, tipo):
+        """Tickers cadastrados na tabela ``ativos`` para o tipo informado."""
+        tipo_enum = MAPA_TIPO.get(str(tipo).lower())
+        if tipo_enum is None:
+            return []
+        session = self._nova_sessao()
+        try:
+            ativos = (
+                session.query(Ativo)
+                .filter(Ativo.tipo == tipo_enum)
+                .order_by(Ativo.ticker.asc())
+                .all()
+            )
+            return [ativo.ticker for ativo in ativos]
+        finally:
+            session.close()
+
+    def usuarios_que_acompanham(self, ativo_id):
+        """Usuários com cadastro aprovado e conta ativa que seguem o ativo.
+
+        Usado pela distribuição individual de documentos. Pendentes,
+        rejeitados, suspensos e inativos são excluídos na própria consulta.
+        """
+        ativo = self._normalizar_id(ativo_id)
+        if ativo is None:
+            return []
+        session = self._nova_sessao()
+        try:
+            usuarios = (
+                session.query(Usuario)
+                .join(
+                    AtivoAcompanhado,
+                    AtivoAcompanhado.usuario_id == Usuario.id,
+                )
+                .filter(
+                    AtivoAcompanhado.ativo_id == ativo,
+                    Usuario.status_cadastro == STATUS_APROVADO,
+                    Usuario.ativo.is_(True),
+                )
+                .order_by(Usuario.id.asc())
+                .all()
+            )
+            return [usuario.para_dto() for usuario in usuarios]
         finally:
             session.close()
 

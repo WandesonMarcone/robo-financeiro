@@ -3,7 +3,8 @@
 Este modulo concentra tres responsabilidades que antes estavam duplicadas em
 ``atualizador_documentos.py`` e ``main.py``:
 
-* normalizar a URL de conexao (``postgres://`` -> ``postgresql://``);
+* normalizar a URL de conexao (``postgres://``/``postgresql://`` ->
+  ``postgresql+psycopg://``);
 * criar o ``Engine`` do SQLAlchemy usando SEMPRE a URL normalizada;
 * fornecer uma fabrica de sessoes *preguicosa* (lazy), criada apenas quando a
   primeira sessao e realmente solicitada.
@@ -32,6 +33,10 @@ logger = logging.getLogger("robo.banco")
 
 PREFIXO_POSTGRES_ANTIGO = "postgres://"
 PREFIXO_POSTGRES_NOVO = "postgresql://"
+# Driver efetivamente instalado por ``psycopg[binary]`` (psycopg 3). O prefixo
+# explicito evita que o SQLAlchemy tente o driver legado ``psycopg2``, que NAO
+# esta declarado em ``requirements.txt``.
+PREFIXO_POSTGRES_DRIVER = "postgresql+psycopg://"
 
 _engine = None
 _session_factory = None
@@ -48,11 +53,14 @@ def normalizar_database_url(url):
     """Normaliza a URL de conexao do banco.
 
     * Remove espacos acidentais.
-    * Converte o prefixo legado ``postgres://`` (Heroku/Render) em
-      ``postgresql://``, que e o esperado pelo SQLAlchemy 1.4+.
+    * Converte o prefixo legado ``postgres://`` (Heroku/Render) e o prefixo
+      ``postgresql://`` (sem driver) em ``postgresql+psycopg://``, que usa o
+      psycopg 3 instalado por ``psycopg[binary]``.
+    * URLs com driver explicito (``postgresql+psycopg2://``, etc.) sao
+      preservadas para nao quebrar configuracoes existentes.
     * Valores ``None``/vazios retornam ``None``.
 
-    Nenhuma senha ou host e alterado alem do prefixo do esquema.
+    Nenhuma senha ou host e alterado alem do prefixo do esquema/driver.
     """
     if url is None:
         return None
@@ -63,6 +71,12 @@ def normalizar_database_url(url):
 
     if texto.startswith(PREFIXO_POSTGRES_ANTIGO):
         texto = PREFIXO_POSTGRES_NOVO + texto[len(PREFIXO_POSTGRES_ANTIGO):]
+    # Só adiciona o driver quando a URL ainda não especifica um. Assim uma URL
+    # ``postgresql+psycopg2://`` fornecida explicitamente continua intacta.
+    if texto.startswith(PREFIXO_POSTGRES_NOVO) and not texto.startswith(
+        "postgresql+"
+    ):
+        texto = PREFIXO_POSTGRES_DRIVER + texto[len(PREFIXO_POSTGRES_NOVO):]
     return texto
 
 
@@ -85,7 +99,7 @@ def mascarar_url(url):
 def _opcoes_engine(url):
     """Opcoes de pool por dialeto, sem parametros invalidos para SQLite."""
     opcoes = {"pool_pre_ping": True}
-    if url.startswith(PREFIXO_POSTGRES_NOVO):
+    if url.startswith("postgresql"):
         opcoes.update(
             {
                 "pool_recycle": 1800,

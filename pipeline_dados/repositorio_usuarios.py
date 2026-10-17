@@ -11,6 +11,7 @@ Regras de seguranca:
 * nenhum dado sensivel (URL de conexao, tokens) e registrado em log.
 """
 
+import json
 import logging
 from datetime import datetime
 
@@ -30,6 +31,7 @@ from pipeline_dados.modelos_usuarios import (
 logger = logging.getLogger("robo.usuarios")
 
 PAPEL_USUARIO_PADRAO = "user"
+TIPOS_FAVORITO = ("fii", "acao")
 
 
 class RepositorioUsuarios:
@@ -118,7 +120,85 @@ class RepositorioUsuarios:
         finally:
             session.close()
 
-    def criar_solicitacao(self, telegram_user_id, telegram_chat_id, nome=None, email=None):
+    @staticmethod
+    def _normalizar_favoritos(favoritos):
+        """Normaliza ``{"fii": [...], "acao": [...]}`` para gravação segura.
+
+        Mantém apenas tickers em maiúsculas, sem duplicatas e dentro dos tipos
+        conhecidos. Valores ausentes/inválidos resultam em ``None``.
+        """
+        if not favoritos:
+            return None
+        normalizado = {}
+        for tipo in TIPOS_FAVORITO:
+            lista = favoritos.get(tipo) or []
+            vistos = []
+            for ticker in lista:
+                chave = str(ticker or "").strip().upper()
+                if chave and chave not in vistos:
+                    vistos.append(chave)
+            normalizado[tipo] = vistos
+        if not any(normalizado.values()):
+            return None
+        return normalizado
+
+    @staticmethod
+    def _desserializar_favoritos(texto):
+        if not texto:
+            return {"fii": [], "acao": []}
+        try:
+            dados = json.loads(texto)
+        except (TypeError, ValueError):
+            logger.warning("CADASTRO - favoritos pendentes ilegiveis; ignorando")
+            return {"fii": [], "acao": []}
+        normalizado = RepositorioUsuarios._normalizar_favoritos(dados) or {}
+        return {
+            "fii": list(normalizado.get("fii", [])),
+            "acao": list(normalizado.get("acao", [])),
+        }
+
+    @classmethod
+    def _json_favoritos(cls, favoritos):
+        normalizado = cls._normalizar_favoritos(favoritos)
+        return json.dumps(normalizado, ensure_ascii=False) if normalizado else None
+
+    def obter_favoritos_pendentes(self, usuario_id):
+        """Retorna os favoritos escolhidos no cadastro (ainda não aplicados)."""
+        if usuario_id is None:
+            return {"fii": [], "acao": []}
+        session = self._nova_sessao()
+        try:
+            usuario = session.get(Usuario, usuario_id)
+            if usuario is None:
+                return {"fii": [], "acao": []}
+            return self._desserializar_favoritos(usuario.favoritos_pendentes)
+        finally:
+            session.close()
+
+    def limpar_favoritos_pendentes(self, usuario_id):
+        """Descarta a seleção pendente sem tocar nos favoritos já ativos."""
+        if usuario_id is None:
+            return False
+        session = self._nova_sessao()
+        try:
+            usuario = session.get(Usuario, usuario_id)
+            if usuario is None or not usuario.favoritos_pendentes:
+                return False
+            usuario.favoritos_pendentes = None
+            usuario.atualizado_em = datetime.now()
+            session.commit()
+            return True
+        finally:
+            session.close()
+
+    def criar_solicitacao(
+        self,
+        telegram_user_id,
+        telegram_chat_id,
+        nome=None,
+        email=None,
+        favoritos_pendentes=None,
+    ):
         """Cria uma solicitacao pendente, sem duplicar usuarios existentes.
 
         Retorna ``(dto, criado)``. Se ja existir conta para o ``telegram_user_id``,
@@ -150,6 +230,7 @@ class RepositorioUsuarios:
                 criado_em=agora,
                 atualizado_em=agora,
                 status_cadastro=STATUS_PENDENTE,
+                favoritos_pendentes=self._json_favoritos(favoritos_pendentes),
             )
             session.add(usuario)
             try:

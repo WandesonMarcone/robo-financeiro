@@ -30,7 +30,7 @@ Regra de acesso (sem ambiguidade): a fonte de verdade do ciclo de vida e
 (``True`` apenas quando ``aprovado``), mas nunca substitui o status.
 """
 
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, Integer, String
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, Integer, String, Text
 from sqlalchemy.orm import declarative_base
 
 BaseUsuarios = declarative_base()
@@ -73,6 +73,11 @@ class Usuario(BaseUsuarios):
         default=STATUS_PENDENTE,
         server_default=STATUS_PENDENTE,
     )
+
+    # Favoritos escolhidos no formulario de cadastro, guardados como JSON
+    # ({"fii": [...], "acao": [...]}) e aplicados SOMENTE na aprovacao.
+    # Coluna adicionada pela migracao 0004 (nao executada automaticamente).
+    favoritos_pendentes = Column(Text, nullable=True)
 
     def para_dto(self):
         return UsuarioDTO(
