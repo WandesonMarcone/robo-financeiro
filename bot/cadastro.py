@@ -54,6 +54,10 @@ from pipeline_dados.modelos_usuarios import (
     STATUS_REJEITADO,
     STATUS_SUSPENSO,
 )
+from pipeline_dados.repositorio_favoritos import (
+    AtivoNaoCadastradoError,
+    RepositorioFavoritos,
+)
 from pipeline_dados.repositorio_usuarios import RepositorioUsuarios
 
 logger = logging.getLogger("robo.cadastro")
@@ -70,6 +74,17 @@ ACAO_REJEITAR = "rejeitar"
 ACAO_FORM_CONFIRMAR = "confirmar"
 ACAO_FORM_CORRIGIR = "corrigir"
 ACAO_FORM_CANCELAR = "cancelar"
+ACAO_FORM_FII = "fii"
+ACAO_FORM_ACAO = "acao"
+ACAO_FORM_FII_TOGGLE = "ft"
+ACAO_FORM_ACAO_TOGGLE = "at"
+ACAO_FORM_FII_PAGE = "fp"
+ACAO_FORM_ACAO_PAGE = "ap"
+ACAO_FORM_FII_DONE = "fd"
+ACAO_FORM_ACAO_DONE = "ad"
+
+TAMANHO_PAGINA_FAVORITOS = 10
+LIMITE_SEGURANCA_TICKERS = 200
 
 TEXTO_PENDENTE = (
     "⏳ Solicitação recebida!\n\n"
@@ -112,6 +127,8 @@ TEXTO_EMAIL_INVALIDO = (
 TEXTO_CANCELADO = (
     "❌ Cadastro cancelado. Quando quiser, envie /start para recomeçar."
 )
+TEXTO_SEM_FAVORITOS = "nenhum selecionado"
+TEXTO_CATALOGO_VAZIO = "📭 Nenhum ativo cadastrado para este tipo no momento."
 TEXTO_NADA_PARA_CANCELAR = (
     "ℹ️ Não há cadastro em andamento. Envie /start para iniciar."
 )
@@ -426,11 +443,15 @@ def notificar_usuario(dto, reativado=False):
 # ---------------------------------------------------------------------------
 
 def _resumo_confirmacao(sessao, chat_id, autor):
+    selecionados_fii = ", ".join(sessao.favoritos_fii) or TEXTO_SEM_FAVORITOS
+    selecionados_acao = ", ".join(sessao.favoritos_acao) or TEXTO_SEM_FAVORITOS
     linhas = [
         "🔎 Confira seus dados antes de enviar:",
         "",
         f"👤 Nome completo: {sessao.nome}",
         f"📧 E-mail: {sessao.email}",
+        f"🏢 FIIs escolhidos: {selecionados_fii}",
+        f"📈 Ações escolhidas: {selecionados_acao}",
         "",
         "Dados do Telegram que serão anexados:",
         f"🆔 Telegram User ID: {_id_do_autor(autor)}",
@@ -440,13 +461,26 @@ def _resumo_confirmacao(sessao, chat_id, autor):
     linhas.append(
         f"🔗 Username: @{username}" if username else "🔗 Username: não informado"
     )
+    linhas += [
+        "",
+        "Os favoritos escolhidos só serão ativados após a aprovação do "
+        "administrador.",
+    ]
     return "\n".join(linhas)
 
 
-def _enviar_confirmacao(chat_id, sessao, autor):
-    if chat_id is None:
-        return
+def _markup_confirmacao():
     markup = InlineKeyboardMarkup()
+    markup.row(
+        InlineKeyboardButton(
+            "🏢 Escolher FIIs",
+            callback_data=f"{permissoes.PREFIXO_CALLBACK_FORMULARIO}{ACAO_FORM_FII}",
+        ),
+        InlineKeyboardButton(
+            "📈 Escolher Ações",
+            callback_data=f"{permissoes.PREFIXO_CALLBACK_FORMULARIO}{ACAO_FORM_ACAO}",
+        ),
+    )
     markup.row(
         InlineKeyboardButton(
             "✅ Confirmar e enviar",
@@ -463,12 +497,242 @@ def _enviar_confirmacao(chat_id, sessao, autor):
             callback_data=f"{permissoes.PREFIXO_CALLBACK_FORMULARIO}{ACAO_FORM_CANCELAR}",
         )
     )
+    return markup
+
+
+def _enviar_confirmacao(chat_id, sessao, autor, call=None):
+    if chat_id is None:
+        return
+    texto = _resumo_confirmacao(sessao, chat_id, autor)
+    markup = _markup_confirmacao()
     try:
-        bot.send_message(
-            chat_id, _resumo_confirmacao(sessao, chat_id, autor), reply_markup=markup
-        )
-    except Exception:
+        if call is not None:
+            chat_id_call, msg_id = _chat_e_message(call)
+            if chat_id_call is not None and msg_id is not None:
+                bot.edit_message_text(
+                    texto,
+                    chat_id_call,
+                    msg_id,
+                    reply_markup=markup,
+                    parse_mode="Markdown",
+                )
+                return
+        bot.send_message(chat_id, texto, reply_markup=markup, parse_mode="Markdown")
+    except Exception as erro:
+        if "message is not modified" in str(erro).lower():
+            return
         logger.warning("CADASTRO - falha ao enviar confirmacao", exc_info=True)
+
+
+def _chat_e_message(message_or_call):
+    message = getattr(message_or_call, "message", None)
+    if message is not None:
+        chat = getattr(message, "chat", None)
+        return (
+            getattr(chat, "id", None) if chat is not None else None,
+            getattr(message, "message_id", None),
+        )
+    chat = getattr(message_or_call, "chat", None)
+    return (getattr(chat, "id", None) if chat is not None else None, None)
+
+
+def _limite_favorito(tipo):
+    limites = getattr(config, "FAVORITOS_LIMITES", None) or {}
+    return limites.get(tipo)
+
+
+def _lista_selecionada(sessao, tipo):
+    return list(sessao.favoritos_fii if tipo == "fii" else sessao.favoritos_acao)
+
+
+def _texto_selecao_favoritos(sessao, tipo, catalogo, pagina):
+    rotulo = "FIIs" if tipo == "fii" else "Ações"
+    selecionados = _lista_selecionada(sessao, tipo)
+    limite = _limite_favorito(tipo)
+    if not catalogo:
+        linhas = [
+            f"⭐ *Escolher {rotulo}*",
+            "",
+            TEXTO_CATALOGO_VAZIO,
+            "",
+            "Toque em ✅ Concluir para voltar à confirmação.",
+        ]
+        return "\n".join(linhas)
+    inicio = pagina * TAMANHO_PAGINA_FAVORITOS
+    total_paginas = max(
+        1, (len(catalogo) + TAMANHO_PAGINA_FAVORITOS - 1) // TAMANHO_PAGINA_FAVORITOS
+    )
+    linhas = [
+        f"⭐ *Escolher {rotulo}*",
+        "",
+        f"Selecionados ({len(selecionados)}"
+        + (f"/{limite}" if limite is not None else "")
+        + "): "
+        + (", ".join(selecionados) if selecionados else TEXTO_SEM_FAVORITOS),
+        "",
+        f"Página {pagina + 1}/{total_paginas}. Toque para marcar ou desmarcar.",
+    ]
+    return "\n".join(linhas)
+
+
+def _markup_selecao_favoritos(sessao, tipo, catalogo, pagina):
+    prefixo = permissoes.PREFIXO_CALLBACK_FORMULARIO
+    selecionados = set(_lista_selecionada(sessao, tipo))
+    markup = InlineKeyboardMarkup(row_width=2)
+    inicio = pagina * TAMANHO_PAGINA_FAVORITOS
+    fatia = catalogo[inicio : inicio + TAMANHO_PAGINA_FAVORITOS]
+    prefixo_toggle = (
+        ACAO_FORM_FII_TOGGLE if tipo == "fii" else ACAO_FORM_ACAO_TOGGLE
+    )
+    for ticker in fatia:
+        marca = "☑️" if ticker in selecionados else "⬜"
+        markup.add(
+            InlineKeyboardButton(
+                f"{marca} {ticker}",
+                callback_data=f"{prefixo}{prefixo_toggle}_{ticker}",
+            )
+        )
+    total_paginas = max(
+        1, (len(catalogo) + TAMANHO_PAGINA_FAVORITOS - 1) // TAMANHO_PAGINA_FAVORITOS
+    )
+    navegacao = []
+    prefixo_pagina = ACAO_FORM_FII_PAGE if tipo == "fii" else ACAO_FORM_ACAO_PAGE
+    if pagina > 0:
+        navegacao.append(
+            InlineKeyboardButton(
+                "⬅️", callback_data=f"{prefixo}{prefixo_pagina}_{pagina - 1}"
+            )
+        )
+    if pagina < total_paginas - 1:
+        navegacao.append(
+            InlineKeyboardButton(
+                "➡️", callback_data=f"{prefixo}{prefixo_pagina}_{pagina + 1}"
+            )
+        )
+    if navegacao:
+        markup.row(*navegacao)
+    acao_concluir = ACAO_FORM_FII_DONE if tipo == "fii" else ACAO_FORM_ACAO_DONE
+    markup.row(
+        InlineKeyboardButton(
+            "✅ Concluir", callback_data=f"{prefixo}{acao_concluir}"
+        )
+    )
+    return markup
+
+
+def _render_selecao_favoritos(chat_id, sessao, tipo, pagina, call=None):
+    try:
+        catalogo = RepositorioFavoritos().listar_catalogo(tipo)
+    except Exception:
+        logger.warning("CADASTRO - falha ao listar catálogo de favoritos", exc_info=True)
+        _enviar_texto(chat_id, TEXTO_CADASTRO_INDISPONIVEL)
+        return
+    total_paginas = max(
+        1, (len(catalogo) + TAMANHO_PAGINA_FAVORITOS - 1) // TAMANHO_PAGINA_FAVORITOS
+    )
+    pagina = max(0, min(pagina, total_paginas - 1))
+    atributo = "pagina_fii" if tipo == "fii" else "pagina_acao"
+    sessao = sessao_cadastro.atualizar(sessao.usuario_id, **{atributo: pagina})
+    if sessao is None:
+        _enviar_texto(chat_id, TEXTO_FORM_EXPIRADO)
+        return
+    texto = _texto_selecao_favoritos(sessao, tipo, catalogo, pagina)
+    markup = _markup_selecao_favoritos(sessao, tipo, catalogo, pagina)
+    try:
+        if call is not None:
+            chat_id_call, msg_id = _chat_e_message(call)
+            if chat_id_call is not None and msg_id is not None:
+                bot.edit_message_text(
+                    texto,
+                    chat_id_call,
+                    msg_id,
+                    reply_markup=markup,
+                    parse_mode="Markdown",
+                )
+                return
+        bot.send_message(chat_id, texto, reply_markup=markup, parse_mode="Markdown")
+    except Exception:
+        logger.warning("CADASTRO - falha ao exibir catálogo", exc_info=True)
+
+
+def _alternar_favorito(sessao, tipo, ticker):
+    """Marca/desmarca um ticker do catálogo, respeitando o limite configurado."""
+    try:
+        catalogo = set(RepositorioFavoritos().listar_catalogo(tipo))
+    except Exception:
+        logger.warning("CADASTRO - falha ao validar catálogo", exc_info=True)
+        return sessao, TEXTO_CADASTRO_INDISPONIVEL
+    chave = str(ticker or "").strip().upper()
+    if chave not in catalogo:
+        return sessao, "⚠️ Ativo inválido para este tipo."
+    atributo = "favoritos_fii" if tipo == "fii" else "favoritos_acao"
+    lista = _lista_selecionada(sessao, tipo)
+    if chave in lista:
+        lista.remove(chave)
+        aviso = f"⬜ {chave} removido."
+    else:
+        limite = _limite_favorito(tipo)
+        if limite is not None and len(lista) >= limite:
+            return sessao, (
+                f"🚫 Limite de {limite} ativo(s) deste tipo já foi atingido."
+            )
+        if len(lista) >= LIMITE_SEGURANCA_TICKERS:
+            return sessao, "⚠️ Seleção muito grande. Finalize e tente novamente."
+        lista.append(chave)
+        aviso = f"☑️ {chave} selecionado."
+    atualizada = sessao_cadastro.atualizar(sessao.usuario_id, **{atributo: lista})
+    return atualizada or sessao, aviso
+
+
+def _processar_acao_favoritos(call, usuario_id, chat_id, sessao, acao):
+    """Trata as ações ``formcad_fii/acao/ft_/at_/fp_/ap_/fd/ad``.
+
+    Retorna ``True`` quando a ação pertence à seleção de favoritos.
+    """
+    if acao in (ACAO_FORM_FII, ACAO_FORM_ACAO):
+        tipo = "fii" if acao == ACAO_FORM_FII else "acao"
+        pagina = sessao.pagina_fii if tipo == "fii" else sessao.pagina_acao
+        _responder_callback(call)
+        _render_selecao_favoritos(chat_id, sessao, tipo, pagina, call=call)
+        return True
+
+    for prefixo, tipo in (
+        (ACAO_FORM_FII_TOGGLE + "_", "fii"),
+        (ACAO_FORM_ACAO_TOGGLE + "_", "acao"),
+    ):
+        if acao.startswith(prefixo):
+            ticker = acao[len(prefixo) :]
+            sessao, aviso = _alternar_favorito(sessao, tipo, ticker)
+            pagina = (
+                sessao.pagina_fii if tipo == "fii" else sessao.pagina_acao
+            )
+            _responder_callback(call, aviso)
+            _render_selecao_favoritos(chat_id, sessao, tipo, pagina, call=call)
+            return True
+
+    for prefixo, tipo in (
+        (ACAO_FORM_FII_PAGE + "_", "fii"),
+        (ACAO_FORM_ACAO_PAGE + "_", "acao"),
+    ):
+        if acao.startswith(prefixo):
+            try:
+                pagina = int(acao[len(prefixo) :])
+            except (TypeError, ValueError):
+                pagina = 0
+            _responder_callback(call)
+            _render_selecao_favoritos(chat_id, sessao, tipo, pagina, call=call)
+            return True
+
+    if acao in (ACAO_FORM_FII_DONE, ACAO_FORM_ACAO_DONE):
+        sessao = sessao_cadastro.atualizar(usuario_id, etapa=ETAPA_CONFIRMACAO)
+        if sessao is None:
+            _responder_callback(call, TEXTO_FORM_EXPIRADO)
+            return True
+        _responder_callback(call)
+        _enviar_confirmacao(chat_id, sessao, call, call=call)
+        return True
+
+    return False
 
 
 def _e_texto_de_formulario(message):
@@ -599,7 +863,11 @@ def _finalizar_formulario(usuario_id, chat_id, autor):
     try:
         repositorio = RepositorioUsuarios()
         dto, criado = repositorio.criar_solicitacao(
-            usuario_id, chat_id, nome=nome, email=email
+            usuario_id,
+            chat_id,
+            nome=nome,
+            email=email,
+            favoritos_pendentes=sessao.favoritos_selecionados(),
         )
         if dto is not None and not criado:
             dto = repositorio.atualizar_chat_id(dto.id, chat_id) or dto
@@ -660,6 +928,9 @@ def processar_confirmacao_formulario(call):
 
     acao = (call.data or "").split("_", 1)[1] if "_" in (call.data or "") else ""
 
+    if _processar_acao_favoritos(call, usuario_id, chat_id, sessao, acao):
+        return
+
     if acao == ACAO_FORM_CANCELAR:
         sessao_cadastro.cancelar(usuario_id)
         _responder_callback(call, "Cadastro cancelado.")
@@ -680,6 +951,91 @@ def processar_confirmacao_formulario(call):
         return
 
     _responder_callback(call, TEXTO_ACESSO_NEGADO)
+
+
+def aplicar_favoritos_pendentes(usuario_id):
+    """Aplica os favoritos escolhidos no cadastro APÓS a aprovação.
+
+    Reutiliza o repositório de favoritos existente (não cria outro). Tickers
+    que não existem mais no catálogo são ignorados e registrados em log. O
+    limite configurado é revalidado no momento da aplicação. Retorna a
+    quantidade efetivamente adicionada. Em falha de banco, a seleção pendente é
+    preservada para nova tentativa.
+    """
+    repositorio_usuarios = RepositorioUsuarios()
+    try:
+        pendentes = repositorio_usuarios.obter_favoritos_pendentes(usuario_id)
+    except Exception:
+        logger.warning(
+            "CADASTRO - falha ao ler favoritos pendentes; seleção preservada",
+            exc_info=True,
+        )
+        return 0
+    if not (pendentes.get("fii") or pendentes.get("acao")):
+        try:
+            repositorio_usuarios.limpar_favoritos_pendentes(usuario_id)
+        except Exception:
+            logger.debug(
+                "CADASTRO - falha ao limpar seleção vazia", exc_info=True
+            )
+        return 0
+    repositorio_favoritos = RepositorioFavoritos()
+    adicionados = 0
+    try:
+        for tipo, tickers in pendentes.items():
+            if not tickers:
+                continue
+            limite = _limite_favorito(tipo)
+            atuais = repositorio_favoritos.listar(usuario_id, tipo)
+            existentes = {f.ticker for f in atuais}
+            disponiveis = None if limite is None else max(0, limite - len(atuais))
+            for ticker in tickers:
+                if ticker in existentes:
+                    continue
+                if disponiveis is not None and disponiveis <= 0:
+                    logger.warning(
+                        "CADASTRO - limite de favoritos %s atingido ao aplicar "
+                        "seleção pendente do usuário %s",
+                        tipo,
+                        usuario_id,
+                    )
+                    break
+                try:
+                    _dto, criado = repositorio_favoritos.adicionar(usuario_id, ticker)
+                except AtivoNaoCadastradoError:
+                    logger.warning(
+                        "CADASTRO - ticker %s nao existe mais no catalogo; "
+                        "ignorado ao aplicar favoritos",
+                        ticker,
+                    )
+                    continue
+                # Outras falhas (banco indisponivel) sobem para o except externo:
+                # a selecao pendente permanece para nova tentativa.
+                if criado:
+                    adicionados += 1
+                    existentes.add(ticker)
+                    if disponiveis is not None:
+                        disponiveis -= 1
+        repositorio_usuarios.limpar_favoritos_pendentes(usuario_id)
+    except Exception:
+        logger.warning(
+            "CADASTRO - falha ao aplicar favoritos pendentes; seleção preservada",
+            exc_info=True,
+        )
+        return adicionados
+    _registrar_auditoria(
+        usuario_id, usuario_id, "favoritos_cadastro", f"aplicados={adicionados}"
+    )
+    return adicionados
+
+
+def descartar_favoritos_pendentes(usuario_id):
+    """Descarta a seleção pendente (rejeição/limpeza), sem tocar nos favoritos."""
+    try:
+        return RepositorioUsuarios().limpar_favoritos_pendentes(usuario_id)
+    except Exception:
+        logger.warning("CADASTRO - falha ao descartar favoritos pendentes", exc_info=True)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -791,6 +1147,13 @@ def processar_decisao(call):
         "aplicada" if mudou else "ja_constava",
         status_anterior=status_anterior,
     )
+
+    # Aplica/descarta a seleção feita no cadastro somente agora, depois da
+    # decisão administrativa. Cliques repetidos são idempotentes.
+    if dto.status == STATUS_APROVADO:
+        aplicar_favoritos_pendentes(usuario_id)
+    elif dto.status == STATUS_REJEITADO:
+        descartar_favoritos_pendentes(usuario_id)
 
     feedback = texto_resultado if mudou else f"ℹ️ Já constava como {rotulo}."
     try:

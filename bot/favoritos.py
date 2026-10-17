@@ -21,6 +21,7 @@ import logging
 
 from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+import config
 from bot.loader import bot
 from bot.telegram_utils import TEXTO_ACESSO_NEGADO
 from bot import permissoes
@@ -118,6 +119,38 @@ def _resolver_usuario_autorizado(message_or_call):
     return dto.id, None
 
 
+def _e_admin(message_or_call):
+    """True se o autor é o administrador (papel resolvido por ``permissoes``)."""
+    try:
+        return (
+            permissoes.obter_papel(_id_do_autor(message_or_call))
+            == permissoes.PAPEL_ADMIN
+        )
+    except Exception:
+        logger.warning("FAVORITOS - falha ao verificar papel", exc_info=True)
+        return False
+
+
+def _destino_voltar(tipo, admin):
+    """Destino do botão Voltar.
+
+    O administrador volta aos módulos gerais de FIIs/Ações; o usuário comum não
+    tem acesso a eles (consulta geral é exclusiva do admin) e volta ao submenu
+    de gerenciamento de favoritos.
+    """
+    return VOLTAR_MENU[tipo] if admin else "gerenciar_favoritos"
+
+
+def _limite_do_tipo(tipo):
+    """Limite máximo configurado para o tipo (``None`` = sem limite).
+
+    Os valores vêm de ``config.FAVORITOS_LIMITES`` (por tipo, via ambiente).
+    Nenhum número definitivo é assumido aqui.
+    """
+    limites = getattr(config, "FAVORITOS_LIMITES", None) or {}
+    return limites.get(tipo)
+
+
 def _responder_callback(call, texto):
     try:
         bot.answer_callback_query(call.id, text=texto)
@@ -140,29 +173,41 @@ def _render(call, texto, markup):
         logger.warning("FAVORITOS - falha ao exibir tela", exc_info=True)
 
 
-def _markup_favoritos(favoritos, tipo):
+def _markup_favoritos(favoritos, tipo, admin=False):
     markup = InlineKeyboardMarkup(row_width=2)
     for favorito in favoritos:
+        if admin:
+            # Administrador gerencia os próprios favoritos diretamente.
+            acao = InlineKeyboardButton(
+                "❌",
+                callback_data=f"{PREFIXO_REMOVER}{favorito.ticker}_{tipo}",
+            )
+        else:
+            # Usuário comum não altera favorito ativo diretamente: pede troca
+            # (exige aprovação do administrador).
+            acao = InlineKeyboardButton(
+                "🔁 Trocar",
+                callback_data=f"troca_ini_{favorito.ticker}_0",
+            )
         markup.row(
             InlineKeyboardButton(
                 f"📊 {favorito.ticker}",
                 callback_data=f"painel_{favorito.ticker}_{tipo}",
             ),
-            InlineKeyboardButton(
-                "❌",
-                callback_data=f"{PREFIXO_REMOVER}{favorito.ticker}_{tipo}",
-            ),
+            acao,
         )
     markup.row(
         InlineKeyboardButton(
             "➕ Adicionar", callback_data=f"{PREFIXO_LISTAR_ADICIONAR}{tipo}_0"
         )
     )
-    markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=VOLTAR_MENU[tipo]))
+    markup.row(
+        InlineKeyboardButton("🔙 Voltar", callback_data=_destino_voltar(tipo, admin))
+    )
     return markup
 
 
-def _texto_favoritos(favoritos, tipo):
+def _texto_favoritos(favoritos, tipo, admin=False):
     rotulo = ROTULO_TIPO[tipo]
     if not favoritos:
         return (
@@ -174,11 +219,17 @@ def _texto_favoritos(favoritos, tipo):
     return (
         f"⭐ *Seus Ativos Favoritos ({rotulo})*\n\n"
         f"{linhas}\n\n"
-        "Toque em um ativo para abrir o painel, ou em ❌ para remover:"
+        + (
+            "Toque em um ativo para abrir o painel, ou em ❌ para remover:"
+            if admin
+            else "Toque em um ativo para abrir o painel, ou em 🔁 Trocar para "
+            "pedir a substituição (sujeita à aprovação do administrador):"
+        )
     )
 
 
 def _mostrar_favoritos(call, tipo, usuario_id, aviso=None):
+    admin = _e_admin(call)
     try:
         favoritos = RepositorioFavoritos().listar(usuario_id, tipo)
     except Exception:
@@ -188,13 +239,19 @@ def _mostrar_favoritos(call, tipo, usuario_id, aviso=None):
             call,
             TEXTO_ERRO_BANCO,
             InlineKeyboardMarkup().add(
-                InlineKeyboardButton("🔙 Voltar", callback_data=VOLTAR_MENU[tipo])
+                InlineKeyboardButton(
+                    "🔙 Voltar", callback_data=_destino_voltar(tipo, admin)
+                )
             ),
         )
         return
     if aviso:
         _responder_callback(call, aviso)
-    _render(call, _texto_favoritos(favoritos, tipo), _markup_favoritos(favoritos, tipo))
+    _render(
+        call,
+        _texto_favoritos(favoritos, tipo, admin),
+        _markup_favoritos(favoritos, tipo, admin),
+    )
 
 
 def _mostrar_disponiveis(call, tipo, usuario_id, pagina):
@@ -311,6 +368,30 @@ def adicionar_favorito(call):
         _responder_callback(call, erro or TEXTO_ACESSO_NEGADO)
         return
 
+    # Limite máximo por tipo (configurável; None = sem limite). Vale para o
+    # usuário comum; o administrador não é limitado nos próprios favoritos.
+    limite = _limite_do_tipo(tipo)
+    if limite is not None and not _e_admin(call):
+        try:
+            repositorio = RepositorioFavoritos()
+            resolvido = repositorio.resolver_ativo(ticker)
+            atuais = repositorio.listar(usuario_id, tipo)
+        except Exception:
+            logger.warning("FAVORITOS - falha ao validar limite", exc_info=True)
+            _responder_callback(call, TEXTO_ERRO_BANCO)
+            return
+        ja_favorito = resolvido is not None and any(
+            f.ticker == resolvido[1] for f in atuais
+        )
+        if not ja_favorito and len(atuais) >= limite:
+            _responder_callback(
+                call,
+                f"🚫 Limite de {limite} {ROTULO_TIPO[tipo]} atingido. "
+                "Para mudar, use 🔁 Trocar (requer aprovação).",
+            )
+            _mostrar_favoritos(call, tipo, usuario_id)
+            return
+
     try:
         _dto, criado = RepositorioFavoritos().adicionar(usuario_id, ticker)
     except AtivoNaoCadastradoError:
@@ -340,6 +421,17 @@ def remover_favorito(call):
     usuario_id, erro = _resolver_usuario_autorizado(call)
     if usuario_id is None:
         _responder_callback(call, erro or TEXTO_ACESSO_NEGADO)
+        return
+
+    # Remoção direta de favorito ativo é exclusiva do administrador. O usuário
+    # comum só altera favoritos por solicitação de troca aprovada. Revalidado
+    # aqui, independentemente dos botões exibidos (callback_data pode ser forjado).
+    if not _e_admin(call):
+        _responder_callback(
+            call,
+            "🔒 Para alterar um favorito, use 🔁 Trocar (requer aprovação do administrador).",
+        )
+        _mostrar_favoritos(call, tipo, usuario_id)
         return
 
     try:

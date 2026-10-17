@@ -80,11 +80,27 @@ def status_banco(message):
 
 @bot.message_handler(commands=['relatorios', 'docs'])
 def enviar_ultimos_relatorios(message):
+    # Usuario comum ve somente documentos dos proprios favoritos ativos; o admin
+    # mantem a visao ampla (``None`` = sem filtro). Falha segura: sem conta
+    # aprovada/favoritos, nada e listado.
+    autor = getattr(message, "from_user", None)
+    permitidos = permissoes.tickers_permitidos(getattr(autor, "id", None))
+    if permitidos is not None and not permitidos:
+        bot.reply_to(
+            message,
+            "📭 Você ainda não acompanha nenhum ativo. "
+            "Use ⭐ Gerenciar favoritos no /menu para escolher.",
+        )
+        return
+
     bot.reply_to(message, "🔎 Buscando os últimos documentos no cofre...")
     session = SessionDB()
     try:
-        ultimos_docs = session.query(DocumentosQualitativos, Ativo)\
-            .join(Ativo, DocumentosQualitativos.ativo_id == Ativo.id)\
+        consulta = session.query(DocumentosQualitativos, Ativo)\
+            .join(Ativo, DocumentosQualitativos.ativo_id == Ativo.id)
+        if permitidos is not None:
+            consulta = consulta.filter(Ativo.ticker.in_(sorted(permitidos)))
+        ultimos_docs = consulta\
             .order_by(DocumentosQualitativos.data_publicacao.desc())\
             .limit(10).all()
 

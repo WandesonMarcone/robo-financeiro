@@ -72,9 +72,31 @@ CALLBACKS_ADMIN_EXATOS = frozenset(
         "confirmar_reset",
         "cancelar_reset",
         "iniciar_revisao_pendencias",
+        # Consulta geral de indicadores: navega por TODOS os ativos monitorados
+        # (setores, oportunidades). Exclusiva do administrador; o usuario comum
+        # acessa apenas os paineis dos proprios favoritos.
+        "consultar_indicadores",
+        "menu_fiis",
+        "menu_acoes",
+        "oportunidades_fiis",
+        "oportunidades_acoes",
     }
 )
-CALLBACKS_ADMIN_PREFIXOS = ("rev_", "cad_", "adm_")
+CALLBACKS_ADMIN_PREFIXOS = (
+    "rev_",
+    "cad_",
+    "adm_",
+    # Navegacao geral por setor/segmento (lista ativos nao favoritados).
+    "tipo_fii_",
+    "setor_fii_",
+    "setor_acao_",
+    "macro_fii_",
+    "subsetor_fii_",
+    "macro_ac_",
+    "sub_ac_",
+    # Decisao de trocas de favorito: exclusiva do administrador.
+    "trocaadm_",
+)
 
 # Callbacks de navegação, filtros e consultas liberados para usuários comuns.
 CALLBACKS_USUARIO_EXATOS = frozenset(
@@ -82,12 +104,8 @@ CALLBACKS_USUARIO_EXATOS = frozenset(
         "voltar_menu",
         "voltar_painel",
         "menu_ajuda",
-        "menu_fiis",
-        "menu_acoes",
         "favoritos_fiis",
         "favoritos_acoes",
-        "oportunidades_fiis",
-        "oportunidades_acoes",
         "ajuda_roadmap",
         "ajuda_comandos",
         # Atalhos do painel inicial personalizado. As telas que devolvem dados
@@ -96,20 +114,12 @@ CALLBACKS_USUARIO_EXATOS = frozenset(
         "minha_carteira",
         "meus_alertas",
         "gerenciar_favoritos",
-        "consultar_indicadores",
         "minha_conta",
     }
 )
 CALLBACKS_USUARIO_PREFIXOS = (
-    "tipo_fii_",
-    "setor_fii_",
-    "setor_acao_",
     "ia_",
     "ajuda_cvm_",
-    "macro_fii_",
-    "subsetor_fii_",
-    "macro_ac_",
-    "sub_ac_",
     "painel_",
     "dados_",
     "ano_",
@@ -122,6 +132,9 @@ CALLBACKS_USUARIO_PREFIXOS = (
     "favadd_",
     "favnew_",
     "favrem_",
+    # Solicitacoes de troca de favorito (lado do usuario). O handler revalida a
+    # conta aprovada e que o ativo de saida e favorito do proprio usuario.
+    "troca_",
     # Callbacks do formulário conversacional de autocadastro. Ficam no nível de
     # usuário; o acesso de um solicitante ainda não aprovado é liberado em
     # ``verificar_update`` somente enquanto há formulário ativo.
@@ -339,6 +352,91 @@ def operacao_do_update(update):
     return None
 
 
+# ---------------------------------------------------------------------------
+# Acesso por ativo (favoritos ativos do usuario)
+# ---------------------------------------------------------------------------
+
+# Callbacks que carregam um ticker. O valor e o indice do ticker apos
+# ``dados.split("_")`` (tickers nao contem "_"). Um usuario comum so pode acionar
+# estes callbacks para ativos que sao seus favoritos ATIVOS; o administrador tem
+# visao ampla. A verificacao ocorre em ``verificar_update`` (antes de qualquer
+# handler), portanto vale mesmo para callback_data forjado/antigo.
+CALLBACKS_COM_TICKER = {
+    "painel_": 1,
+    "dados_": 1,
+    "ano_": 1,
+    "mes_": 1,
+    "docs_": 1,
+    "dnav_": 1,
+    "dl_": 1,
+    "ia_": 1,
+    "ajuda_cvm_": 2,
+}
+
+
+def tickers_permitidos(usuario_id):
+    """Tickers que o Telegram ID pode consultar.
+
+    * ``None``  -> sem restricao (administrador: visao ampla);
+    * conjunto  -> somente esses tickers (favoritos ativos de uma conta
+      aprovada e ativa). Conjunto vazio nega tudo.
+
+    Falha segura: qualquer erro de banco, conta ausente, pendente, rejeitada,
+    suspensa ou inativa resulta em conjunto vazio (nunca em liberacao).
+    """
+    chave = normalizar_id(usuario_id)
+    if chave is None:
+        return frozenset()
+    try:
+        papel = obter_papel(chave)
+        if papel == PAPEL_ADMIN:
+            return None
+        if papel != PAPEL_USUARIO:
+            return frozenset()
+        from pipeline_dados.repositorio_favoritos import RepositorioFavoritos
+        from pipeline_dados.repositorio_usuarios import RepositorioUsuarios
+
+        dto = RepositorioUsuarios().obter_por_telegram_id(chave)
+        if dto is None or not dto.esta_aprovado() or not dto.ativo:
+            return frozenset()
+        return frozenset(
+            str(f.ticker).strip().upper()
+            for f in RepositorioFavoritos().listar(dto.id)
+            if getattr(f, "ticker", None)
+        )
+    except Exception:
+        logger.warning("Falha ao resolver ativos permitidos", exc_info=True)
+        return frozenset()
+
+
+def pode_acessar_ativo(usuario_id, ticker):
+    """True se o usuario pode consultar o ativo (admin ou favorito ativo)."""
+    ticker_norm = normalizar_id(ticker)
+    if ticker_norm is None:
+        return False
+    permitidos = tickers_permitidos(usuario_id)
+    if permitidos is None:
+        return True
+    return ticker_norm.upper() in permitidos
+
+
+def ticker_do_callback(dados):
+    """Extrai o ticker de um callback que o carrega (ou ``None``).
+
+    Retorna ``(tem_ticker, ticker)``: ``tem_ticker`` indica que o callback e
+    sensivel a ativo; ``ticker`` e ``None`` quando o formato e invalido (o
+    chamador deve negar).
+    """
+    dados = dados or ""
+    for prefixo, indice in CALLBACKS_COM_TICKER.items():
+        if dados.startswith(prefixo):
+            partes = dados.split("_")
+            if len(partes) <= indice or not partes[indice].strip():
+                return True, None
+            return True, partes[indice].strip().upper()
+    return False, None
+
+
 def verificar_update(update):
     """Decide se o update pode ser despachado para os handlers.
 
@@ -365,7 +463,16 @@ def verificar_update(update):
         # liberadas apenas enquanto existe formulário ativo para este usuário.
         if _e_operacao_do_formulario(nome) and tem_fluxo_cadastro_ativo(usuario_id):
             return True, nome
-        return _papel_comporta(obter_papel(usuario_id), nivel_minimo), nome
+        if not _papel_comporta(obter_papel(usuario_id), nivel_minimo):
+            return False, nome
+        # Controle por ativo: callbacks de painel/documentos/indicadores de um
+        # ticker so passam para o admin ou para o dono do favorito ativo.
+        callback = getattr(update, "callback_query", None)
+        if callback is not None:
+            sensivel, ticker = ticker_do_callback(getattr(callback, "data", None))
+            if sensivel and not pode_acessar_ativo(usuario_id, ticker):
+                return False, nome
+        return True, nome
     except Exception:
         logger.exception("Falha ao verificar permissao do update")
         return False, None

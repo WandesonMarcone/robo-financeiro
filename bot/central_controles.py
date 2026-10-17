@@ -295,6 +295,13 @@ def _markup_home(contagens):
                 callback_data=f"{PREFIXO_CALLBACK}area_{area}_0",
             )
         )
+    # Atalho para a decisão de solicitações de troca de favorito (módulo
+    # bot.trocas, callbacks com prefixo próprio ``trocaadm_``).
+    markup.add(
+        InlineKeyboardButton(
+            "🔁 Solicitações de troca", callback_data="trocaadm_home"
+        )
+    )
     markup.add(InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="voltar_menu"))
     return markup
 

@@ -3,8 +3,8 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Imports base e configurações
 from bot.loader import bot
-from bot import menu_principal
-from bot.telegram_utils import responder_callback_desconhecido
+from bot import menu_principal, permissoes
+from bot.telegram_utils import TEXTO_ACESSO_NEGADO, responder_callback_desconhecido
 from config import SPREADSHEET_URL, MAPA_SETORES_B3
 
 # Banco de Dados
@@ -39,13 +39,17 @@ def callback_voltar_painel(call):
 @bot.callback_query_handler(func=lambda call: call.data == "novos_documentos")
 def callback_novos_documentos(call):
     """Lista os últimos documentos capturados (recurso já existente)."""
-    _telegram_id, _papel, _dto, erro = menu_principal.usuario_autorizado(call)
+    telegram_id, _papel, _dto, erro = menu_principal.usuario_autorizado(call)
     if erro:
         menu_principal.responder_callback(call, erro)
         return
+    # Administrador: visão ampla (None). Usuário comum: só favoritos ativos.
+    permitidos = permissoes.tickers_permitidos(telegram_id)
     menu_principal.responder_callback(call)
     menu_principal.editar_callback(
-        call, menu_principal.texto_novos_documentos(), menu_principal.markup_voltar()
+        call,
+        menu_principal.texto_novos_documentos(tickers_permitidos=permitidos),
+        menu_principal.markup_voltar(),
     )
 
 
@@ -113,9 +117,14 @@ def callback_gerenciar_favoritos(call):
 @bot.callback_query_handler(func=lambda call: call.data == "consultar_indicadores")
 def callback_consultar_indicadores(call):
     """Abre o submenu de navegação pelos módulos de indicadores existentes."""
-    _telegram_id, _papel, _dto, erro = menu_principal.usuario_autorizado(call)
+    _telegram_id, papel, _dto, erro = menu_principal.usuario_autorizado(call)
     if erro:
         menu_principal.responder_callback(call, erro)
+        return
+    # Consulta geral de indicadores: exclusiva do administrador (revalidada
+    # aqui além de bot.permissoes, independentemente dos botões visíveis).
+    if papel != permissoes.PAPEL_ADMIN:
+        menu_principal.responder_callback(call, TEXTO_ACESSO_NEGADO)
         return
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
@@ -151,6 +160,22 @@ def callback_geral(call):
         dados = call.data
         chat_id = call.message.chat.id
         msg_id = call.message.message_id
+
+        # --- BARREIRA DE AUTORIZAÇÃO (defesa em profundidade) ---
+        # bot.permissoes já filtra antes do despacho; aqui revalida, com o
+        # Telegram ID do próprio update, os callbacks que dependem de ativo ou
+        # de papel administrativo, para que o controle não dependa só do menu.
+        autor_id = getattr(getattr(call, "from_user", None), "id", None)
+        sensivel, ticker_cb = permissoes.ticker_do_callback(dados)
+        if sensivel and not permissoes.pode_acessar_ativo(autor_id, ticker_cb):
+            bot.answer_callback_query(call.id, TEXTO_ACESSO_NEGADO)
+            return
+        if (
+            dados in permissoes.CALLBACKS_ADMIN_EXATOS
+            or dados.startswith(permissoes.CALLBACKS_ADMIN_PREFIXOS)
+        ) and permissoes.obter_papel(autor_id) != permissoes.PAPEL_ADMIN:
+            bot.answer_callback_query(call.id, TEXTO_ACESSO_NEGADO)
+            return
 
         # --- NAVEGAÇÃO BÁSICA ---
         if dados == "voltar_menu":

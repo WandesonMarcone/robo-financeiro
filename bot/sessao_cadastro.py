@@ -30,7 +30,18 @@ _sessoes = {}
 class SessaoCadastro:
     """Formulário em andamento de um usuário do Telegram."""
 
-    __slots__ = ("usuario_id", "chat_id", "etapa", "nome", "email", "atualizado_em")
+    __slots__ = (
+        "usuario_id",
+        "chat_id",
+        "etapa",
+        "nome",
+        "email",
+        "favoritos_fii",
+        "favoritos_acao",
+        "pagina_fii",
+        "pagina_acao",
+        "atualizado_em",
+    )
 
     def __init__(self, usuario_id, chat_id):
         self.usuario_id = usuario_id
@@ -38,7 +49,18 @@ class SessaoCadastro:
         self.etapa = ETAPA_NOME
         self.nome = None
         self.email = None
+        # Escolhas feitas nas telas de favoritos. Aplicadas somente na aprovacao.
+        self.favoritos_fii = []
+        self.favoritos_acao = []
+        self.pagina_fii = 0
+        self.pagina_acao = 0
         self.atualizado_em = time.monotonic()
+
+    def favoritos_selecionados(self):
+        return {
+            "fii": list(self.favoritos_fii),
+            "acao": list(self.favoritos_acao),
+        }
 
 
 def _chave(usuario_id):

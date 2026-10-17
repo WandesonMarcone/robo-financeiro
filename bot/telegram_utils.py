@@ -114,25 +114,26 @@ def montar_painel_inicial(nome, favoritos_fii=None, favoritos_acao=None, incluir
     _adicionar_favoritos(markup, itens_acao, "acao")
 
     markup.row(
-        InlineKeyboardButton("📄 Novos documentos", callback_data="novos_documentos")
+        InlineKeyboardButton("📊 Minha carteira", callback_data="minha_carteira")
     )
     markup.row(
-        InlineKeyboardButton("📊 Minha carteira", callback_data="minha_carteira"),
+        InlineKeyboardButton("📄 Novos documentos", callback_data="novos_documentos"),
         InlineKeyboardButton("🔔 Alertas", callback_data="meus_alertas"),
     )
     markup.row(
         InlineKeyboardButton("⭐ Gerenciar favoritos", callback_data="gerenciar_favoritos")
     )
     markup.row(
-        InlineKeyboardButton(
-            "📈 Consultar indicadores", callback_data="consultar_indicadores"
-        )
-    )
-    markup.row(
         InlineKeyboardButton("⚙️ Minha conta", callback_data="minha_conta"),
         InlineKeyboardButton("❓ Ajuda", callback_data="menu_ajuda"),
     )
     if incluir_admin:
+        # Funções exclusivas do administrador (revalidadas no servidor).
+        markup.row(
+            InlineKeyboardButton(
+                "📈 Consultar indicadores", callback_data="consultar_indicadores"
+            )
+        )
         markup.row(
             InlineKeyboardButton("⚙️ Central de Controles", callback_data="adm_home")
         )
@@ -191,10 +192,19 @@ def construir_menu_inicial(incluir_admin=False):
     (``bot.permissoes`` e ``bot.central_controles``).
     """
     markup = InlineKeyboardMarkup()
-    markup.row(
-        InlineKeyboardButton("🏢 FIIs (Imobiliários)", callback_data="menu_fiis"),
-        InlineKeyboardButton("📈 Ações (Empresas)", callback_data="menu_acoes"),
-    )
+    if incluir_admin:
+        # Navegação geral por todos os ativos: exclusiva do administrador.
+        markup.row(
+            InlineKeyboardButton("🏢 FIIs (Imobiliários)", callback_data="menu_fiis"),
+            InlineKeyboardButton("📈 Ações (Empresas)", callback_data="menu_acoes"),
+        )
+    else:
+        markup.row(
+            InlineKeyboardButton("📊 Minha carteira", callback_data="minha_carteira"),
+            InlineKeyboardButton(
+                "⭐ Gerenciar favoritos", callback_data="gerenciar_favoritos"
+            ),
+        )
     markup.row(InlineKeyboardButton("ℹ️ Ajuda / Sobre", callback_data="menu_ajuda"))
     if incluir_admin:
         markup.row(

@@ -339,8 +339,15 @@ def texto_minha_conta(telegram_id, papel, dto):
     return "\n".join(linhas)
 
 
-def texto_novos_documentos(limite=10):
-    """Lista os últimos documentos capturados, reutilizando a base existente."""
+def texto_novos_documentos(limite=10, tickers_permitidos=None):
+    """Lista os últimos documentos capturados, reutilizando a base existente.
+
+    ``tickers_permitidos``: ``None`` = visão ampla (administrador); um conjunto
+    restringe a lista aos tickers informados (favoritos ativos do usuário
+    comum). Conjunto vazio resulta em lista vazia, sem consultar o banco.
+    """
+    if tickers_permitidos is not None and not tickers_permitidos:
+        return TEXTO_ATIVOS_VAZIOS
     try:
         from atualizador_documentos import SessionDB
         from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
@@ -351,10 +358,13 @@ def texto_novos_documentos(limite=10):
     session = None
     try:
         session = SessionDB()
+        consulta = session.query(DocumentosQualitativos, Ativo).join(
+            Ativo, DocumentosQualitativos.ativo_id == Ativo.id
+        )
+        if tickers_permitidos is not None:
+            consulta = consulta.filter(Ativo.ticker.in_(sorted(tickers_permitidos)))
         ultimos = (
-            session.query(DocumentosQualitativos, Ativo)
-            .join(Ativo, DocumentosQualitativos.ativo_id == Ativo.id)
-            .order_by(DocumentosQualitativos.data_publicacao.desc())
+            consulta.order_by(DocumentosQualitativos.data_publicacao.desc())
             .limit(limite)
             .all()
         )
