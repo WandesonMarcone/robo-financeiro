@@ -71,19 +71,21 @@ def nome_de_exibicao_do_telegram(from_user):
 
 
 def montar_painel_inicial(nome, favoritos_fii=None, favoritos_acao=None, incluir_admin=False):
-    """Monta o texto e o teclado do painel inicial personalizado.
+    """Monta o texto e o teclado do painel inicial.
 
     Retorna ``(texto, markup)``. Função pura (sem banco/serviços) para poder ser
-    testada isoladamente. Reconhece o nome do usuário, lista apenas os favoritos
-    recebidos (que o chamador resolve por usuário) e oferece atalhos para os
-    módulos que realmente existem no projeto.
-
-    ``favoritos_fii``/``favoritos_acao`` aceitam tanto objetos com atributo
-    ``ticker`` (``FavoritoDTO``) quanto strings de ticker.
+    testada isoladamente. O administrador recebe um painel próprio, com as
+    funções administrativas (Central de Controles, consulta de indicadores e
+    minha carteira) e **sem** o fluxo de seleção de favoritos usado no cadastro
+    dos usuários comuns. ``favoritos_fii``/``favoritos_acao`` aceitam tanto
+    objetos com atributo ``ticker`` (``FavoritoDTO``) quanto strings de ticker.
     """
     nome_limpo = nome_de_exibicao(nome)
     itens_fii = _normalizar_favoritos(favoritos_fii)
     itens_acao = _normalizar_favoritos(favoritos_acao)
+
+    if incluir_admin:
+        return _montar_painel_admin(nome_limpo, itens_fii, itens_acao)
 
     linhas = [
         TITULO_PAINEL,
@@ -127,18 +129,64 @@ def montar_painel_inicial(nome, favoritos_fii=None, favoritos_acao=None, incluir
         InlineKeyboardButton("⚙️ Minha conta", callback_data="minha_conta"),
         InlineKeyboardButton("❓ Ajuda", callback_data="menu_ajuda"),
     )
-    if incluir_admin:
-        # Funções exclusivas do administrador (revalidadas no servidor).
-        markup.row(
-            InlineKeyboardButton(
-                "📈 Consultar indicadores", callback_data="consultar_indicadores"
-            )
-        )
-        markup.row(
-            InlineKeyboardButton("⚙️ Central de Controles", callback_data="adm_home")
-        )
     return texto, markup
 
+
+def _montar_painel_admin(nome_limpo, itens_fii, itens_acao):
+    """Painel exclusivo do administrador (diferente do fluxo de usuário comum)."""
+    linhas = [
+        TITULO_PAINEL,
+        "",
+        f"Olá, {escapar_markdown(nome_limpo)}! 👋",
+        "",
+        "🔧 *PAINEL ADMINISTRATIVO*",
+        "",
+        "📌 *AÇÕES ADMINISTRATIVAS*",
+        "• Central de Controles",
+        "• Consulta de indicadores",
+        "• Minha carteira",
+        "• Novos documentos",
+        "",
+        "📊 *RESUMO DOS SEUS ATIVOS*",
+        "🏢 FIIs: "
+        + (
+            ", ".join(escapar_markdown(t) for t in itens_fii)
+            if itens_fii
+            else TEXTO_CATEGORIA_VAZIA
+        ),
+        "📈 Ações: "
+        + (
+            ", ".join(escapar_markdown(t) for t in itens_acao)
+            if itens_acao
+            else TEXTO_CATEGORIA_VAZIA
+        ),
+    ]
+    texto = "\n".join(linhas)
+
+    markup = InlineKeyboardMarkup()
+    markup.row(
+        InlineKeyboardButton(
+            "⚙️ Central de Controles", callback_data="adm_home"
+        )
+    )
+    markup.row(
+        InlineKeyboardButton(
+            "📈 Consultar indicadores", callback_data="consultar_indicadores"
+        )
+    )
+    markup.row(
+        InlineKeyboardButton("📊 Minha carteira", callback_data="minha_carteira")
+    )
+    markup.row(
+        InlineKeyboardButton(
+            "📄 Novos documentos", callback_data="novos_documentos"
+        )
+    )
+    markup.row(
+        InlineKeyboardButton("⚙️ Minha conta", callback_data="minha_conta"),
+        InlineKeyboardButton("❓ Ajuda", callback_data="menu_ajuda"),
+    )
+    return texto, markup
 
 def nome_de_exibicao(nome):
     """Normaliza o nome de saudação (fallback seguro quando vazio)."""

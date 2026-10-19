@@ -10,6 +10,12 @@ import config
 from fnet_scraper import FnetDownloader
 from modules.GoogleDriveManager import GoogleDriveManager
 from modules.utils import conectar_gspread
+from services.logo_service import (
+    invalidar_file_id_logo,
+    obter_media_logo_rapida,
+    registrar_falha_logo,
+    registrar_file_id_logo,
+)
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from pipeline_dados.conexao import obter_session_factory
 import PyPDF2
@@ -169,6 +175,57 @@ def _enviar_mensagem_telegram(chat_id, mensagem, teclado=None, parse_mode=None):
         return False
 
 
+def _enviar_foto_telegram(chat_id, ticker, foto, legenda, teclado=None, parse_mode=None):
+    """Envia uma foto com legenda a UM chat e memoriza o ``file_id`` retornado."""
+    if chat_id is None or not foto:
+        return False
+    token = (getattr(config, "TELEGRAM_BOT_TOKEN", None) or "").strip()
+    if not token:
+        logger.warning("TELEGRAM_BOT_TOKEN ausente; foto nao enviada.")
+        return False
+    payload = {"chat_id": chat_id, "photo": foto, "caption": legenda}
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    if teclado:
+        payload["reply_markup"] = json.dumps(teclado)
+    url = f"https://api.telegram.org/bot{token}/sendPhoto"
+    try:
+        resposta = requests.post(url, data=payload, timeout=15)
+        if resposta.status_code != 200:
+            logger.warning(
+                "Telegram recusou foto (status %s); usando fallback textual.",
+                resposta.status_code,
+            )
+            if str(foto).startswith(("http://", "https://")):
+                registrar_falha_logo(
+                    ticker,
+                    erro=f"HTTP {resposta.status_code}",
+                    url_origem=foto,
+                )
+            else:
+                invalidar_file_id_logo(
+                    ticker, erro=f"HTTP {resposta.status_code}"
+                )
+            return False
+        try:
+            fotos = resposta.json().get("result", {}).get("photo", [])
+            if fotos:
+                registrar_file_id_logo(ticker, fotos[-1].get("file_id"))
+        except Exception:
+            logger.debug("Nao foi possivel ler o file_id da foto enviada.")
+        return True
+    except Exception as e:
+        # A URL contem o token do bot; registramos apenas o tipo do erro.
+        logger.warning(
+            "Falha ao enviar foto no Telegram (%s).", type(e).__name__
+        )
+        if str(foto).startswith(("http://", "https://")):
+            registrar_falha_logo(ticker, erro=type(e).__name__, url_origem=foto)
+        else:
+            invalidar_file_id_logo(ticker, erro=type(e).__name__)
+        return False
+
+
 def enviar_alerta_revisao_telegram(ticker, nome_doc, link_pdf, file_id, db_id):
     """Envia ao administrador a mensagem interativa de revisao manual."""
     chat_id = _chat_administrador()
@@ -190,6 +247,13 @@ def enviar_alerta_revisao_telegram(ticker, nome_doc, link_pdf, file_id, db_id):
         f"🔗 [Clique aqui para ler o PDF]({link_pdf})\n\n"
         f"O que faremos com ele?"
     )
+    media = ""
+    if (getattr(config, "TELEGRAM_BOT_TOKEN", None) or "").strip():
+        media = obter_media_logo_rapida(ticker)
+    if media and _enviar_foto_telegram(
+        chat_id, ticker, media, mensagem, teclado=teclado, parse_mode="Markdown"
+    ):
+        return True
     return _enviar_mensagem_telegram(
         chat_id, mensagem, teclado=teclado, parse_mode="Markdown"
     )
@@ -251,6 +315,10 @@ def notificar_documento_disponivel(
         ]
     }
 
+    media = ""
+    if (getattr(config, "TELEGRAM_BOT_TOKEN", None) or "").strip():
+        media = obter_media_logo_rapida(ticker)
+
     enviados = 0
     for usuario in destinatarios:
         destino = getattr(usuario, "telegram_chat_id", None) or getattr(
@@ -258,7 +326,14 @@ def notificar_documento_disponivel(
         )
         if destino is None:
             continue
-        if _enviar_mensagem_telegram(destino, mensagem, teclado=teclado):
+        entregue = False
+        if media:
+            entregue = _enviar_foto_telegram(
+                destino, ticker, media, mensagem, teclado=teclado
+            )
+        if not entregue:
+            entregue = _enviar_mensagem_telegram(destino, mensagem, teclado=teclado)
+        if entregue:
             enviados += 1
     return enviados
 

@@ -40,6 +40,7 @@ from services.orquestrador import varredura_diaria
 # 5. Banco de Dados (conexão centralizada e normalizada)
 from pipeline_dados.banco_dados import Base
 from pipeline_dados.conexao import obter_engine
+from pipeline_dados.modelos_catalogo import BaseCatalogo
 
 logger = logging.getLogger("robo.main")
 
@@ -106,6 +107,7 @@ def criar_tabelas_se_solicitado():
         return
     engine = obter_engine()
     Base.metadata.create_all(engine)
+    BaseCatalogo.metadata.create_all(engine)
     logger.info("Tabelas verificadas/criadas a pedido (CRIAR_TABELAS=1).")
 
 

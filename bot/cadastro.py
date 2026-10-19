@@ -736,9 +736,17 @@ def _processar_acao_favoritos(call, usuario_id, chat_id, sessao, acao):
 
 
 def _e_texto_de_formulario(message):
-    """Predicado do handler de texto: sessão ativa e mensagem não-comando."""
+    """Predicado do handler de texto: sessão ativa e mensagem não-comando.
+
+    O administrador nunca participa do formulário de cadastro/favoritos: se
+    houver uma sessão antiga em memória, ela é descartada e o painel
+    administrativo assume o atendimento.
+    """
     usuario_id = _id_do_autor(message)
     if not sessao_cadastro.tem_sessao_ativa(usuario_id):
+        return False
+    if permissoes.obter_papel(usuario_id) is not None:
+        sessao_cadastro.cancelar(usuario_id)
         return False
     texto = getattr(message, "text", None)
     if not texto:
@@ -921,6 +929,13 @@ def processar_confirmacao_formulario(call):
     """Confirma/corrige/cancela o formulário, sempre revalidando a sessão."""
     usuario_id = _id_do_autor(call)
     chat_id = _chat_id_da_mensagem(call)
+    # Defesa explícita: contas já autorizadas (em especial o administrador) não
+    # passam pelo fluxo de seleção de favoritos do cadastro de usuários comuns.
+    if permissoes.obter_papel(usuario_id) is not None:
+        sessao_cadastro.cancelar(usuario_id)
+        _responder_callback(call, "Painel administrativo")
+        _enviar_menu(chat_id, usuario_id, getattr(call, "from_user", None))
+        return
     sessao = sessao_cadastro.obter(usuario_id)
     if sessao is None:
         _responder_callback(call, TEXTO_FORM_EXPIRADO)

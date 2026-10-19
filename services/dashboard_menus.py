@@ -1,9 +1,21 @@
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import logging
+
+from telebot.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputMediaPhoto,
+)
 import re
 import config
 from bot.loader import bot
 from services.planilhas import buscar_dados_planilha_com_cache, buscar_ativo_na_planilha
-from services.logo_service import obter_link_logo
+from services.logo_service import (
+    invalidar_file_id_logo,
+    obter_file_id_logo,
+    obter_link_logo,
+    registrar_falha_logo,
+    registrar_file_id_logo,
+)
 from modules.GoogleDriveManager import GoogleDriveManager
 from atualizador_documentos import SessionDB
 from pipeline_dados.banco_dados import DocumentosQualitativos, Ativo
@@ -11,6 +23,8 @@ from pipeline_dados.banco_dados import DocumentosQualitativos, Ativo
 # O gerenciador do Drive e criado sob demanda: instancia-lo na importacao
 # disparava a descoberta de rede do Google apenas por carregar o modulo. A
 # criacao preguicosa reduz efeitos colaterais em importacoes e testes.
+logger = logging.getLogger("robo.paineis")
+
 _drive_manager = None
 
 
@@ -114,21 +128,128 @@ def buscar_oportunidades(tipo):
         print(f"Erro no filtro de oportunidades: {e}")
         return []
 
+def _registrar_file_id_do_painel(mensagem, ticker):
+    """Guarda o ``file_id`` devolvido pelo Telegram para reutilizar depois."""
+    fotos = getattr(mensagem, "photo", None)
+    if not fotos:
+        return
+    try:
+        registrar_file_id_logo(ticker, fotos[-1].file_id)
+    except Exception:
+        logger.debug("Falha ao registrar file_id da logo de %s", ticker, exc_info=True)
+
+
+def _enviar_painel_ativo(chat_id, ticker, texto, texto_com_link, markup, media_logo):
+    """Envia o painel como foto (com legenda) ou texto, com fallback seguro."""
+    if media_logo:
+        try:
+            mensagem = bot.send_photo(
+                chat_id,
+                media_logo,
+                caption=texto,
+                reply_markup=markup,
+                parse_mode="Markdown",
+            )
+            _registrar_file_id_do_painel(mensagem, ticker)
+            return
+        except Exception as erro:
+            logger.warning(
+                "Painel de %s: envio da logo falhou; usando texto", ticker,
+                exc_info=True,
+            )
+            if str(media_logo).startswith(("http://", "https://")):
+                registrar_falha_logo(
+                    ticker, erro=type(erro).__name__, url_origem=media_logo
+                )
+            else:
+                # O Telegram recusou um file_id; invalida só o cache do
+                # Telegram para permitir resolver uma nova imagem.
+                invalidar_file_id_logo(ticker, erro=type(erro).__name__)
+    bot.send_message(
+        chat_id,
+        texto_com_link,
+        reply_markup=markup,
+        parse_mode="Markdown",
+        disable_web_page_preview=False,
+    )
+
+
+def _editar_painel_ativo(chat_id, message_id, ticker, texto, texto_com_link, markup, media_logo):
+    """Edita o painel preservando a logo quando a mensagem atual é uma foto."""
+    if media_logo:
+        try:
+            bot.edit_message_media(
+                InputMediaPhoto(
+                    media=media_logo, caption=texto, parse_mode="Markdown"
+                ),
+                chat_id=chat_id,
+                message_id=message_id,
+                reply_markup=markup,
+            )
+            return
+        except Exception as erro:
+            # Se o Telegram rejeitou um file_id, ele pode ter expirado ou ser
+            # invalido. Invalida o cache (inclusive o persistente) para que a
+            # proxima chamada resolva uma nova midia. Falhas em mensagens de
+            # texto sao apenas fallback e nao invalidam uma URL valida.
+            if not str(media_logo).startswith(("http://", "https://")):
+                invalidar_file_id_logo(ticker, erro=type(erro).__name__)
+            # Mensagens de texto (menu anterior) não aceitam edit_message_media.
+            logger.debug(
+                "Painel de %s: edição de mídia indisponível; usando texto",
+                ticker,
+                exc_info=True,
+            )
+    try:
+        bot.edit_message_text(
+            texto_com_link,
+            chat_id,
+            message_id,
+            reply_markup=markup,
+            parse_mode="Markdown",
+            disable_web_page_preview=False,
+        )
+    except Exception:
+        # Se a mensagem atual é uma foto, o Telegram recusa convertê-la em
+        # texto. Envia um novo painel textual em vez de interromper o bot.
+        logger.debug(
+            "Painel de %s: não foi possível editar a mensagem; enviando nova",
+            ticker,
+            exc_info=True,
+        )
+        try:
+            bot.send_message(
+                chat_id,
+                texto_com_link,
+                reply_markup=markup,
+                parse_mode="Markdown",
+                disable_web_page_preview=False,
+            )
+        except Exception:
+            logger.warning(
+                "Painel de %s: fallback textual também falhou", ticker,
+                exc_info=True,
+            )
+
+
 def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
-    """Gera a mensagem principal com os botões interativos e dados em tempo real"""
+    """Gera o painel do ativo com logo, indicadores e botões existentes.
+
+    A logo nunca é obrigatória: quando o catálogo não tem a imagem (ou o
+    Telegram recusa o envio), o painel é entregue apenas com texto, sem
+    interromper o fluxo. Os botões continuam usando emojis, pois teclados do
+    Telegram não suportam imagens personalizadas.
+    """
 
     is_fii = (tipo == 'fii')
     icone = "🏢 Fundo" if is_fii else "📈 Ação"
     voltar_cmd = "menu_fiis" if is_fii else "menu_acoes"
 
-    # Puxa o link direto gerado pelo seu código (GitHub ou Logo.dev)
-    url_logo = obter_link_logo(ticker, tipo, drive_manager=obter_drive_manager())
-    link_invisivel = ""
-
-    # Como o link já é uma URL direta de imagem, nós injetamos direto no Telegram!
-    if url_logo:
-        # \u200e é o caractere invisível que força o Telegram a ler a imagem
-        link_invisivel = f"[\u200e]({url_logo})"
+    # O file_id do Telegram evita novo download; a URL só é resolvida quando
+    # ainda não há cache do envio anterior.
+    file_id_logo = obter_file_id_logo(ticker)
+    url_logo = "" if file_id_logo else obter_link_logo(ticker, tipo)
+    media_logo = file_id_logo or url_logo
 
     indicadores = buscar_ativo_na_planilha(ticker, is_fii)
 
@@ -147,7 +268,7 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
     ticker_limpo = sanitizar_markdown(ticker)
 
     texto = (
-        f"{link_invisivel}{icone}: **{ticker_limpo}**\n"
+        f"{icone}: **{ticker_limpo}**\n"
         f"📝 **Resumo:** _{resumo_limpo}_ (Setor: {setor_limpo})\n\n"
         f"💰 **Preço:** R$ {indicadores.get('preco', 'N/A')}\n"
         f"💸 **Dividend Yield:** {indicadores.get('dy', 'N/A')}\n"
@@ -158,13 +279,16 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
     else:
         texto += f"📊 **P/L:** {indicadores.get('pl', 'N/A')} | ⚖️ **P/VP:** {indicadores.get('pvp', 'N/A')}\n📈 **ROE:** {indicadores.get('roe', 'N/A')}"
 
+    # No modo texto, mantém o link invisível já usado pelo projeto para forçar
+    # a prévia da imagem sem alterar o conteúdo visível.
+    link_invisivel = f"[\u200e]({url_logo})" if url_logo else ""
+    texto_com_link = f"{link_invisivel}{texto}"
+
     markup = InlineKeyboardMarkup(row_width=2)
 
-    # 🔴 1. VERIFICAÇÃO DE AUDITORIA (Agora funciona para FIIs e Ações!)
+    # 1. VERIFICAÇÃO DE AUDITORIA (Agora funciona para FIIs e Ações!)
     pendentes = 0
     try:
-        from atualizador_documentos import SessionDB
-        from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
         session = SessionDB()
         pendentes = session.query(DocumentosQualitativos).join(Ativo).filter(
             Ativo.ticker == ticker,
@@ -172,27 +296,30 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
         ).count()
         session.close()
     except Exception as e:
-        print(f"DEBUG: Revisão temporariamente indisponível: {e}")
+        logger.debug("Revisão temporariamente indisponível: %s", e)
 
-    # 🔴 2. SE TIVER PENDÊNCIA, COLOCA O BOTÃO DE ALERTA NO TOPO
+    # 2. SE TIVER PENDÊNCIA, COLOCA O BOTÃO DE ALERTA NO TOPO
     if pendentes > 0:
         markup.add(InlineKeyboardButton(f"⚠️ Requer Auditoria ({pendentes} docs)", callback_data=f"rev_t_{ticker}"))
 
-    # 🔴 3. ADICIONA OS BOTÕES PADRÕES LADO A LADO
+    # 3. ADICIONA OS BOTÕES PADRÕES LADO A LADO
     markup.row(
         InlineKeyboardButton("📎 Dados", callback_data=f"dados_{ticker}_{tipo}"),
         InlineKeyboardButton("📁 Docs", callback_data=f"docs_{ticker}_{tipo}")
     )
 
-    # 🔴 4. BOTÕES INFERIORES
+    # 4. BOTÕES INFERIORES
     markup.add(InlineKeyboardButton("⚠️ Análise IA", callback_data=f"ia_{ticker}_{tipo}"))
     markup.add(InlineKeyboardButton(f"🔙 Voltar", callback_data=voltar_cmd))
 
-    # O disable_web_page_preview=False é quem permite que a imagem invisível apareça no topo!
-    if message_id: 
-        bot.edit_message_text(texto, chat_id, message_id, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=False)
-    else: 
-        bot.send_message(chat_id, texto, reply_markup=markup, parse_mode="Markdown", disable_web_page_preview=False)
+    if message_id:
+        _editar_painel_ativo(
+            chat_id, message_id, ticker, texto, texto_com_link, markup, media_logo
+        )
+    else:
+        _enviar_painel_ativo(
+            chat_id, ticker, texto, texto_com_link, markup, media_logo
+        )
 
 def extrair_data_real(doc):
     """Garante que datas reais sejam exibidas, priorizando o Mês/Ano no Assunto do documento."""

@@ -136,8 +136,8 @@ inválido"; há teste cobrindo a ordem em `main.py`).
   loader e utilitários).
 - `modules/` — scrapers, leitura de PDF, Google Drive, utilitários e clientes de
   IA.
-- `services/` — orquestrador da rotina diária, planilhas, menus/painéis, logos e
-  motor de IA (inativo).
+- `services/` — orquestrador da rotina diária, planilhas, menus/painéis, logos,
+  catálogo de empresas e motor de IA (inativo).
 - `pipeline_dados/` — conexão, modelos ORM, repositórios e coletores CVM/FIIs.
 - `migrations/` — migrações SQL manuais e versionadas para o banco de produção.
 - `tests/` — testes automatizados (sem rede e sem banco real).
@@ -168,7 +168,9 @@ Arquivos de topo: `main.py`, `app.py`, `config.py`, `atualizador_documentos.py`
 | Cadastro e aprovação | Autocadastro por `/start` com aprovação administrativa |
 | Central de Controles | `/controles` (admin): gestão de acessos pelo Telegram (`bot/central_controles.py`) |
 | Revisão humana | `bot/callbacks_revisao.py` (`/revisao` e callbacks `rev_*`) |
-| Testes automatizados | 242 testes do bot (execução local) |
+| Logos dos ativos | Catálogo GitHub (pasta plana `icones/`), cache de `file_id` do Telegram e fallback textual |
+| Painel administrativo | Visão própria do admin: Central de Controles, indicadores, carteira e documentos |
+| Testes automatizados | 359 testes (execução local; 7 exigem PostgreSQL local) |
 
 ### Integrações externas
 
@@ -193,7 +195,33 @@ Arquivos de topo: `main.py`, `app.py`, `config.py`, `atualizador_documentos.py`
 - `modules/leitor_pdf.py`: extração de texto de PDFs (PyMuPDF + pdfplumber).
 - `modules/module_ia.py`: consultas de IA do bot (`/ia`).
 - `services/dashboard_menus.py`: painéis de oportunidades/favoritos do bot.
-- `services/logo_service.py`: logos dos ativos (Logo.dev com plano B no GitHub).
+- `services/logo_service.py`: logos dos ativos. Fonte principal é o catálogo
+  público `WandesonMarcone/icones-bolsabr` (pasta plana `icones/`, mais de 3 mil
+  PNGs), consultado por URL `raw.githubusercontent.com` para **não consumir a
+  API de listagem do GitHub**. PETR3 e PETR4 compartilham a identidade visual da
+  Petrobras (`PETR4.png`), sem unir os dados financeiros. Logo.dev (`LOGO_DEV_TOKEN`)
+  é apenas alternativa quando o catálogo não tem a imagem. O `file_id` devolvido
+  pelo Telegram é persistido em `cache_logos_telegram` (ver
+  `pipeline_dados/repositorio_logos.py`), reutilizável após reinícios do bot,
+  associado à empresa para que tickers irmãos compartilhem a mesma logo. Falhas
+  são registradas com expiração (cache negativo). Sem logo, o painel/mensagem
+  degrada para texto sem interromper o bot.
+- `pipeline_dados/modelos_catalogo.py`: catálogo central (`empresas`,
+  `setores`, `subsetores`, `atividades_economicas`, `empresa_ativos`,
+  `empresa_segmentos`, `empresa_atividades`, `sugestoes_catalogo`,
+  `cache_logos_telegram`). Uma empresa pode ter vários tickers, mas os dados
+  financeiros continuam por ticker em `ativos`/`dados_financeiros_*`.
+- `pipeline_dados/repositorio_catalogo.py`: upserts, classificação setorial com
+  histórico (vigência), fila de revisão e resumo da empresa.
+- `pipeline_dados/repositorio_logos.py`: cache persistente do `file_id` do
+  Telegram com TTL para falhas e vínculo opcional à empresa.
+- `pipeline_dados/coletor_catalogo_cvm.py`: importa o FCA oficial da CVM
+  (`dados.cvm.gov.br`), cria empresas e associa tickers oficiais.
+- `services/catalogo_empresas.py`: aplica `config.MAPA_SETORES_B3` e monta o
+  resumo consolidado da empresa.
+- `services/catalogo_ia.py`: detecção assistida por IA com validação
+  (confiança, fonte oficial, evidência); casos ambíguos vão para
+  `sugestoes_catalogo` em vez de criar registros.
 - `pipeline_dados/banco_dados.py`: modelos ORM (`Ativo`, `DadosFinanceirosAcoes`,
   `DadosFinanceirosFiis`, `DocumentosQualitativos`).
 - `pipeline_dados/coletor_cvm.py`, `coletor_fiis.py`, `coletor_docs_acoes.py`:
@@ -227,7 +255,10 @@ Operação e funcionalidades opcionais:
 - `PORT` (injetada pelo Render; padrão interno `10000`).
 - `GROQ_API_KEY` (IA; sem ela, apenas as operações de IA falham de forma
   controlada).
-- `LOGO_DEV_TOKEN`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_BASE_URL`.
+- `LOGO_DEV_TOKEN` (alternativa opcional; GitHub é a fonte principal),
+  `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_BASE_URL`.
+- `LOGO_GITHUB_REPO`, `LOGO_GITHUB_BRANCH`, `LOGO_GITHUB_DIR` (opcionais; padrão
+  `WandesonMarcone/icones-bolsabr`, `main`, `icones`).
 - `CLIENT_ID`, `CLIENT_SECRET`, `REFRESH_TOKEN`, `DRIVE_ROOT_FOLDER_ID`,
   `GOOGLE_CREDS` (Google Drive/Sheets).
 
@@ -274,14 +305,26 @@ python -m unittest discover -s tests
 
 Observações:
 
-- A suíte atual tem **242 testes** distribuídos em `tests/`:
-  `test_bot_boot.py` (9), `test_inicializacao.py` (20), `test_cadastro.py` (41),
-  `test_central_controles.py` (55), `test_permissoes.py` (22),
-  `test_menu_principal.py` (35), `test_callbacks_revisao.py` (4),
-  `test_favoritos.py` (30), `test_scraper_fiis.py` (12) e
-  `test_telegram_stability.py` (14).
+- A suíte atual tem **359 testes** distribuídos em `tests/`:
+  `test_acesso_ativos.py` (9), `test_bot_boot.py` (9), `test_cadastro.py` (47),
+  `test_callbacks_revisao.py` (4), `test_catalogo_correcoes.py` (14),
+  `test_catalogo_empresas.py` (18), `test_catalogo_postgres.py` (7),
+  `test_central_controles.py` (56), `test_dashboard_logos.py` (10),
+  `test_documentos_notificacoes.py` (6), `test_favoritos.py` (38),
+  `test_inicializacao.py` (21), `test_logo_service.py` (13),
+  `test_menu_principal.py` (39), `test_permissoes.py` (22),
+  `test_scraper_fiis.py` (12), `test_telegram_stability.py` (14) e
+  `test_trocas.py` (20).
 - Os testes rodam sem `TELEGRAM_BOT_TOKEN`; quando um token é necessário,
   usam apenas um valor fictício. Não há conexão com o banco real.
+- Os 7 testes de `test_catalogo_postgres.py` exercitam as migrações 0005/0006/
+  0007 em um PostgreSQL local descartável e são ignorados sem
+  `TEST_DATABASE_URL`; o módulo recusa hosts remotos (incluindo o Neon):
+
+  ```bash
+  TEST_DATABASE_URL="postgresql+psycopg://usuario:senha@127.0.0.1:5432/robo_test" \
+      python3 -m unittest tests.test_catalogo_postgres -v
+  ```
 - O import de `main.py` e dos módulos do bot não exige token; apenas a
   inicialização efetiva (boot do servidor) exige `TELEGRAM_BOT_TOKEN` e falha
   com mensagem clara se ele estiver ausente.
@@ -305,13 +348,17 @@ Observações:
 - A aplicação **não executa migrações automaticamente** e não altera o schema no
   boot.
 - Migrações versionadas (execução **manual**, pelo administrador, com backup
-  antes; instruções em `migrations/README.md`):
+  antes; instruções e estado real em `migrations/README.md`):
   - `0001_add_status_cadastro_usuarios.sql` — coluna `status_cadastro`;
   - `0002_add_solicitacoes_troca.sql` — tabela `solicitacoes_troca`;
   - `0003_fix_solicitacoes_troca_unique.sql` — índice único parcial de pendentes;
-  - `0004_add_favoritos_pendentes_usuarios.sql` — coluna `favoritos_pendentes`.
-  As migrações 0003/0004 estão **pendentes de autorização** e seu estado no Neon
-  ainda não foi verificado; nada é aplicado no boot.
+  - `0004_add_favoritos_pendentes_usuarios.sql` — coluna `favoritos_pendentes`;
+  - `0005_catalogo_empresas.sql` — tabelas do catálogo central e fila de revisão;
+  - `0006_cache_logos_telegram.sql` — cache persistente de `file_id` de logos;
+  - `0007_empresa_ativo_unico.sql` — unicidade de `empresa_ativos.ativo_id`.
+  As sete migrações **existem no repositório**, mas **nenhuma foi executada ou
+  verificada no Neon nesta revisão**. O estado real é desconhecido até uma
+  verificação somente leitura feita pelo administrador; nada é aplicado no boot.
 - Criação de tabelas apenas de forma opt-in (`CRIAR_TABELAS=1`), destinada a
   ambientes de desenvolvimento limpos.
 
@@ -406,6 +453,14 @@ ser alterado por texto de comando, parâmetros nem por dados de callback.
   persistente; usuários comuns precisam de cadastro aprovado e conta ativa. O
   administrador autorizado por config pode usá-los mesmo com status pendente,
   desde que exista registro correspondente em `usuarios`.
+
+### Painel administrativo
+
+O administrador autenticado recebe um painel próprio, distinto do fluxo dos
+usuários comuns: Central de Controles, consulta de indicadores, Minha carteira e
+Novos documentos. O fluxo de seleção de favoritos do cadastro (FIIs/Ações antes
+da aprovação) **não** é apresentado ao administrador; se houver uma sessão
+antiga em memória, ela é descartada e o painel administrativo assume.
 
 ### Central de Controles (`/controles`)
 
