@@ -84,15 +84,21 @@ def callback_minha_carteira(call):
 
 @bot.callback_query_handler(func=lambda call: call.data == "meus_alertas")
 def callback_meus_alertas(call):
-    """Informa a limitação: alertas por usuário ainda não existem."""
-    _telegram_id, _papel, _dto, erro = menu_principal.usuario_autorizado(call)
+    """Lista eventos persistidos dos favoritos do próprio usuário."""
+    _telegram_id, _papel, dto, erro = menu_principal.usuario_autorizado(call)
     if erro:
         menu_principal.responder_callback(call, erro)
+        return
+    if dto is None:
+        menu_principal.responder_callback(call, menu_principal.TEXTO_SEM_CONTA)
+        menu_principal.editar_callback(
+            call, menu_principal.TEXTO_SEM_CONTA, menu_principal.markup_voltar()
+        )
         return
     menu_principal.responder_callback(call)
     menu_principal.editar_callback(
         call,
-        menu_principal.TEXTO_ALERTAS_INDISPONIVEL,
+        menu_principal.texto_meus_alertas(dto.id),
         menu_principal.markup_voltar(),
     )
 

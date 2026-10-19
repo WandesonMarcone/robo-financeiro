@@ -349,44 +349,10 @@ def notificar_documento_disponivel(
 # ==========================================
 # CAMADA 1: COLETA
 # ==========================================
-def rotina_de_coleta_b3():
-    b3 = FnetDownloader()
-    lista_de_fiis = obter_tickers_da_planilha()
-    session = SessionDB()
+def rotina_de_coleta_b3(dias=60, session=None, capturar_tudo=None):
+    from pipeline_dados.coletor_fnet import ColetorFnet
 
-    data_busca = (datetime.now() - timedelta(days=60)).strftime("%d/%m/%Y")
-    todos_documentos = b3.capturar_tudo(data_busca)
-
-    novos = 0
-    for doc in todos_documentos:
-        nome_fundo_b3 = normalizar_texto(doc['nome_fundo'])
-        id_doc = str(doc['id'])
-
-        for ticker in lista_de_fiis:
-            isca = normalizar_texto(MAPA_ISCAS_MASTER.get(ticker, ticker))
-            if isca in nome_fundo_b3:
-                existe = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.id_b3 == id_doc).first()
-                if not existe:
-                    ativo_db = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-                    if not ativo_db:
-                        ativo_db = Ativo(ticker=ticker, cnpj=f"PENDENTE-{ticker}", tipo="FII") 
-                        session.add(ativo_db)
-                        session.commit()
-
-                    novo_doc = DocumentosQualitativos(
-                        ativo_id=ativo_db.id,
-                        id_b3=id_doc,
-                        data_publicacao=datetime.now(),
-                        tipo_documento=doc['tipo_doc'], 
-                        assunto=doc['data_ref'], 
-                        status_processamento="PENDENTE"
-                    )
-                    session.add(novo_doc)
-                    session.commit()
-                    novos += 1
-                break
-    session.close()
-    return novos
+    return ColetorFnet(session=session, capturar_tudo=capturar_tudo).coletar(dias=dias)
 
 # ==========================================
 # CAMADA 2 E 3: PROCESSAMENTO E REVISÃO
@@ -518,10 +484,15 @@ def rotina_processar_pendentes():
             # 4. 🔴 FECHA A SESSÃO DO ARQUIVO PARA NÃO DAR TIMEOUT
             session.close()
 
-def rotina_de_atualizacao_em_massa():
-    novos_encontrados = rotina_de_coleta_b3()
-    rotina_processar_pendentes()
-    return f"Varredura concluída. Novos encontrados: {novos_encontrados}"
+def rotina_de_atualizacao_em_massa(dias=60, session=None, capturar_tudo=None):
+    from pipeline_dados.coletor_fnet import STATUS_GRAVADO
+
+    resultado = rotina_de_coleta_b3(
+        dias=dias, session=session, capturar_tudo=capturar_tudo
+    )
+    if resultado.status == STATUS_GRAVADO and resultado.gravados > 0:
+        rotina_processar_pendentes()
+    return resultado
 
 def rotina_processar_acoes():
     """Esteira exclusiva da Inteligência Artificial para documentos da CVM"""

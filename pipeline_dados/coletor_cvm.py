@@ -1,179 +1,316 @@
-import logging
-import requests
-import zipfile
-import io
-import pandas as pd
-from datetime import datetime
-from typing import List, Dict, Any
-from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
+"""Coleta de ITR de acoes da CVM (CSV em ZIP).
 
-# Módulos do seu projeto
-import config
-from modules.utils import conectar_gspread
-from pipeline_dados.banco_dados import DadosFinanceirosAcoes, Ativo 
-from config import MAPA_CNPJ_B3, MAPA_CONTAS_CVM 
+Associa cada demonstracao ao ``Ativo`` pelo CNPJ cadastrado (coluna
+``ativos.cnpj``), nunca pelo ticker nem por planilha. O ano vem do chamador;
+o padrao, se omitido, e o ano civil corrente.
+"""
+
+import csv
+import io
+import logging
+import zipfile
+from datetime import datetime
+
+import requests
+
+from config import MAPA_CONTAS_CVM
+from pipeline_dados.banco_dados import Ativo, DadosFinanceirosAcoes, TipoAtivo
+from pipeline_dados.coletor_fiis import ano_padrao_coleta, normalizar_cnpj
 
 logger = logging.getLogger(__name__)
 
-class AcoesCVMReader:
-    """Motor de captura de dados contábeis de Ações com métodos encapsulados."""
+STATUS_ARQUIVO_INDISPONIVEL = "arquivo_indisponivel"
+STATUS_ARQUIVO_INVALIDO = "arquivo_invalido"
+STATUS_SEM_INFORMES = "sem_informes"
+STATUS_SEM_ATIVOS = "sem_ativos"
+STATUS_GRAVADO = "gravado"
+STATUS_ERRO = "erro"
 
-    def __init__(self, db_session: Session):
-        self.session = db_session
-        self.base_url_itr = "https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/ITR/DADOS/itr_cia_aberta_{}.zip"
+URL_ITR = (
+    "https://dados.cvm.gov.br/dados/CIA_ABERTA/DOC/ITR/DADOS/"
+    "itr_cia_aberta_{ano}.zip"
+)
 
-        # 1. Busca os tickers usando o método interno (agora impossível de dar erro de 'not defined')
-        self.meus_tickers = self._obter_tickers() 
-        logger.info(f"Tickers de ações identificados na planilha: {self.meus_tickers}")
+ARQUIVOS_ITR = (
+    "itr_cia_aberta_BPA_con_{ano}.csv",
+    "itr_cia_aberta_BPP_con_{ano}.csv",
+    "itr_cia_aberta_DRE_con_{ano}.csv",
+    "itr_cia_aberta_DFC_MI_con_{ano}.csv",
+)
 
-        # 2. O FILTRO VIP
-        self.cnpjs_alvo = []
-        for cnpj, ticker in MAPA_CNPJ_B3.items():
-            if ticker in self.meus_tickers:
-                self.cnpjs_alvo.append(cnpj)
+CAMPOS_BANCO = (
+    "ativo_total",
+    "patrimonio_liquido",
+    "caixa",
+    "passivo_total",
+    "divida_curto_prazo",
+    "divida_longo_prazo",
+    "divida_bruta",
+    "divida_liquida",
+    "receita",
+    "lucro_bruto",
+    "resultado_financeiro",
+    "lucro_liquido",
+    "ebitda",
+    "fco",
+)
 
-        logger.info(f"O robô monitorará {len(self.cnpjs_alvo)} CNPJs.")
 
-    def _obter_tickers(self) -> List[str]:
-        """Método interno para buscar tickers na planilha."""
-        try:
-            planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
-            aba = planilha.worksheet("BD_Acoes")
-            tickers = aba.col_values(1)[1:] 
-            return list(set([t.strip().upper() for t in tickers if t.strip()])) 
-        except Exception as e:
-            logger.error(f"Erro ao conectar na planilha BD_Acoes: {e}")
-            return []
+def _float_cvm(valor):
+    if valor is None:
+        return None
+    if isinstance(valor, bool):
+        return None
+    if isinstance(valor, (int, float)):
+        return float(valor)
+    texto = str(valor).strip()
+    if not texto or texto in {"-", "--"}:
+        return None
+    try:
+        return float(texto.replace(",", "."))
+    except (TypeError, ValueError):
+        return None
 
-    def atualizar_acoes(self, ano: int) -> None:
-        """Método principal orquestrador para Ações."""
-        if not self.cnpjs_alvo:
-            logger.warning("Nenhum CNPJ alvo identificado na planilha. Cancelando.")
-            return
 
-        logger.info(f"Iniciando atualização de Ações (ITR) para o ano {ano}")
+class ResultadoColetaAcoes:
+    """Contagens da coleta ITR. Nao afirma sucesso se nada foi gravado."""
 
-        dataframes = self._baixar_arquivos_cvm(ano)
-        if not dataframes:
-            return
+    def __init__(self, ano):
+        self.ano = ano
+        self.status = STATUS_ERRO
+        self.http_status = None
+        self.informes_encontrados = 0
+        self.gravados = 0
+        self.sem_ativo = 0
+        self.ignorados_validacao = 0
+        self.falhas_persistencia = 0
+        self.erro = None
 
-        dados_estruturados = self._processar_itr_dfp(dataframes)
-        self._salvar_no_banco(dados_estruturados)
-        logger.info(f"Atualização de Ações concluída.")
+    def mensagem_telegram(self):
+        ano = self.ano
+        if self.status == STATUS_ARQUIVO_INDISPONIVEL:
+            codigo = self.http_status if self.http_status is not None else "—"
+            return (
+                f"Coleta CVM ITR ({ano}): arquivo nao obtido na CVM "
+                f"(HTTP {codigo}). Nenhum registro gravado."
+            )
+        if self.status == STATUS_ARQUIVO_INVALIDO:
+            return (
+                f"Coleta CVM ITR ({ano}): arquivo obtido, mas invalido "
+                "(ZIP/CSV ilegivel ou sem tabelas ITR). Nenhum registro gravado."
+            )
+        if self.status == STATUS_SEM_INFORMES:
+            return (
+                f"Coleta CVM ITR ({ano}): arquivo obtido, porem nenhum informe "
+                "valido foi encontrado. Nenhum registro gravado."
+            )
+        if self.status == STATUS_SEM_ATIVOS:
+            return (
+                f"Coleta CVM ITR ({ano}): {self.informes_encontrados} informe(s) "
+                f"no arquivo; nenhum CNPJ corresponde a uma acao cadastrada. "
+                f"Sem ativo: {self.sem_ativo}. Ignorados: {self.ignorados_validacao}. "
+                "Nenhum registro gravado."
+            )
+        if self.status == STATUS_GRAVADO:
+            return (
+                f"Coleta CVM ITR ({ano}) concluida.\n"
+                f"Registros gravados: {self.gravados}\n"
+                f"Informes no arquivo: {self.informes_encontrados}\n"
+                f"Sem ativo correspondente: {self.sem_ativo}\n"
+                f"Ignorados por validacao: {self.ignorados_validacao}\n"
+                f"Falhas de persistencia: {self.falhas_persistencia}"
+            )
+        detalhe = self.erro or "falha de processamento"
+        return (
+            f"Coleta CVM ITR ({ano}): falha de processamento ou persistencia "
+            f"({detalhe}). Gravados: {self.gravados}."
+        )
 
-    # ... (O restante dos métodos _baixar_arquivos_cvm, _processar_itr_dfp e _salvar_no_banco continuam iguais)
-    
-    def _baixar_arquivos_cvm(self, ano: int) -> Dict[str, pd.DataFrame]:
-        url = self.base_url_itr.format(ano)
-        try:
-            response = requests.get(url, timeout=30)
-            response.raise_for_status() 
-            with zipfile.ZipFile(io.BytesIO(response.content)) as z:
-                dfs = {}
-                # 🔥 CORREÇÃO 1: Adicionado o DFC_MI para extrair o Fluxo de Caixa e Depreciação!
-                arquivos_alvo = [f'itr_cia_aberta_BPA_con_{ano}.csv', 
-                                 f'itr_cia_aberta_BPP_con_{ano}.csv', 
-                                 f'itr_cia_aberta_DRE_con_{ano}.csv',
-                                 f'itr_cia_aberta_DFC_MI_con_{ano}.csv']
-                for arquivo in arquivos_alvo:
-                    if arquivo in z.namelist():
-                        with z.open(arquivo) as f:
-                            dfs[arquivo] = pd.read_csv(f, sep=';', encoding='latin1')
-                return dfs
-        except Exception as e:
-            logger.error(f"Erro ao baixar/extrair CVM: {e}")
-            return {}
 
-    def _processar_itr_dfp(self, dfs: Dict[str, pd.DataFrame]) -> List[Dict[str, Any]]:
+def _mapa_acoes_por_cnpj(session):
+    mapa = {}
+    consulta = session.query(Ativo).filter(Ativo.tipo == TipoAtivo.ACAO)
+    for ativo in consulta:
+        chave = normalizar_cnpj(ativo.cnpj)
+        if chave is None:
+            continue
+        if chave not in mapa:
+            mapa[chave] = ativo
+    return mapa
+
+
+def _ler_zip_itr(conteudo, ano):
+    nomes_alvo = {nome.format(ano=ano) for nome in ARQUIVOS_ITR}
+    with zipfile.ZipFile(io.BytesIO(conteudo)) as pacote:
+        presentes = [n for n in pacote.namelist() if n in nomes_alvo]
+        if not presentes:
+            return None
         registros = {}
-        for nome_arquivo, df in dfs.items():
-            df_filtrado = df[(df['ORDEM_EXERC'] == 'ÚLTIMO') & (df['CD_CONTA'].isin(MAPA_CONTAS_CVM.keys()))].copy()
-            for _, row in df_filtrado.iterrows():
-                cnpj = row['CNPJ_CIA']
-                if cnpj not in self.cnpjs_alvo: continue
+        for nome in presentes:
+            with pacote.open(nome) as arquivo:
+                leitor = csv.DictReader(
+                    io.TextIOWrapper(arquivo, encoding="latin1"),
+                    delimiter=";",
+                )
+                for linha in leitor:
+                    ordem = str(linha.get("ORDEM_EXERC") or "").strip()
+                    if ordem != "ÚLTIMO":
+                        continue
+                    conta = str(linha.get("CD_CONTA") or "").strip()
+                    if conta not in MAPA_CONTAS_CVM:
+                        continue
+                    cnpj_cia = linha.get("CNPJ_CIA")
+                    data_ref_str = linha.get("DT_REFER")
+                    if not cnpj_cia or not data_ref_str:
+                        continue
+                    valor = _float_cvm(linha.get("VL_CONTA"))
+                    if valor is None:
+                        continue
+                    chave = (cnpj_cia, str(data_ref_str)[:10])
+                    if chave not in registros:
+                        registros[chave] = {}
+                    registros[chave][MAPA_CONTAS_CVM[conta]] = valor * 1000
+        return registros
 
-                data_ref_str = row['DT_REFER']
-                conta = row['CD_CONTA']
-                valor = row['VL_CONTA'] * 1000  
 
-                try:
-                    data_ref = datetime.strptime(data_ref_str, '%Y-%m-%d').date()
-                except: continue
+def _fechar_metricas(metricas):
+    cp = metricas.get("divida_curto_prazo")
+    lp = metricas.get("divida_longo_prazo")
+    if cp is not None or lp is not None:
+        bruta = (0 if cp is None else cp) + (0 if lp is None else lp)
+        metricas["divida_bruta"] = bruta
+        caixa = metricas.get("caixa")
+        if caixa is not None:
+            metricas["divida_liquida"] = bruta - caixa
+    ebit = metricas.get("ebit")
+    if ebit is not None:
+        dep = metricas.get("depreciacao")
+        extra = abs(dep) if dep is not None else 0
+        metricas["ebitda"] = ebit + extra
+    metricas.pop("ebit", None)
+    metricas.pop("depreciacao", None)
 
-                chave = f"{cnpj}_{data_ref_str}"
-                if chave not in registros:
-                    # 🔥 CORREÇÃO 2: Preparando as gavetas vazias para TODAS as métricas
-                    registros[chave] = {
-                        'cnpj': cnpj, 'data_referencia': data_ref, 'tipo_doc': 'ITR',
-                        'ativo_total': None, 'patrimonio_liquido': None, 'caixa': None,
-                        'passivo_total': None, 'divida_curto_prazo': None, 'divida_longo_prazo': None,
-                        'divida_bruta': None, 'divida_liquida': None, 'receita': None, 
-                        'lucro_bruto': None, 'resultado_financeiro': None, 'lucro_liquido': None, 
-                        'ebitda': None, 'fco': None, 'ebit': None, 'depreciacao': None
-                    }
-                registros[chave][MAPA_CONTAS_CVM[conta]] = float(valor)
 
-        # 🔥 CORREÇÃO 3: Motor de Cálculo Final (EBITDA, Dívida Bruta e Líquida)
-        for reg in registros.values():
-            # Calcula as Dívidas
-            cp = reg.get('divida_curto_prazo')
-            lp = reg.get('divida_longo_prazo')
-            
-            if cp is not None or lp is not None:
-                reg['divida_bruta'] = (cp or 0) + (lp or 0)
-                caixa = reg.get('caixa') or 0
-                reg['divida_liquida'] = reg['divida_bruta'] - caixa
+class AcoesCVMReader:
+    """Motor de captura de ITR. Nao acessa Google Sheets nem Telegram."""
 
-            # Calcula o EBITDA (EBIT + Depreciação)
-            ebit = reg.get('ebit')
-            dep = reg.get('depreciacao')
-            
-            if ebit is not None:
-                # Na CVM a depreciação costuma vir negativa, usamos abs() para somar certo
-                reg['ebitda'] = ebit + abs(dep or 0)
+    def __init__(self, db_session=None, http_get=None):
+        self.session = db_session
+        self.http_get = http_get
 
-            # Remove as chaves temporárias para não dar erro na hora de salvar no banco
-            reg.pop('ebit', None)
-            reg.pop('depreciacao', None)
+    def atualizar_acoes(self, ano=None):
+        if ano is None:
+            ano = ano_padrao_coleta()
+        resultado = ResultadoColetaAcoes(ano)
+        session_propria = self.session is None
+        obter = self.http_get if self.http_get is not None else requests.get
+        session = self.session
 
-        return list(registros.values())
+        if session_propria:
+            from atualizador_documentos import SessionDB
 
-    def _salvar_no_banco(self, dados: List[Dict[str, Any]]) -> None:
-        for dado in dados:
-            cnpj_alvo = dado.pop('cnpj')
-            ticker_real = MAPA_CNPJ_B3[cnpj_alvo]
-            
-            ativo = self.session.query(Ativo).filter(Ativo.ticker == ticker_real).first()
-            if not ativo:
-                ativo = Ativo(ticker=ticker_real, cnpj=cnpj_alvo, tipo="ACAO")
-                self.session.add(ativo)
-                try: 
-                    self.session.commit()
-                except: 
-                    self.session.rollback()
-                    continue
-                    
-            dado['ativo_id'] = ativo.id
-            
-            # 🔴 A MÁGICA AQUI: Procura se o balanço já existe
-            registro_existente = self.session.query(DadosFinanceirosAcoes).filter_by(
-                ativo_id=ativo.id,
-                data_referencia=dado['data_referencia'],
-                tipo_doc=dado['tipo_doc']
-            ).first()
+            session = SessionDB()
+
+        url = URL_ITR.format(ano=ano)
+        logger.info("Baixando ITR de acoes da CVM para o ano de %s", ano)
+        try:
+            resposta = obter(url, timeout=30)
+            resultado.http_status = getattr(resposta, "status_code", None)
+            if resultado.http_status != 200:
+                logger.error(
+                    "Erro ao baixar ITR da CVM: Status %s", resultado.http_status
+                )
+                resultado.status = STATUS_ARQUIVO_INDISPONIVEL
+                return resultado
 
             try:
-                if registro_existente:
-                    # Se existe, SOBRESCREVE os N/A antigos pelos dados novos
-                    for chave, valor in dado.items():
-                        setattr(registro_existente, chave, valor)
-                else:
-                    # Se não existe, cria um novo
-                    novo_registro = DadosFinanceirosAcoes(**dado)
-                    self.session.add(novo_registro)
-                    
-                self.session.commit()
-            except Exception as e:
-                self.session.rollback()
-                logger.error(f"Erro ao salvar/atualizar CVM de {ticker_real}: {e}")
+                consolidados = _ler_zip_itr(resposta.content, ano)
+            except zipfile.BadZipFile:
+                resultado.status = STATUS_ARQUIVO_INVALIDO
+                return resultado
+            except Exception as erro:
+                resultado.status = STATUS_ARQUIVO_INVALIDO
+                resultado.erro = type(erro).__name__
+                return resultado
+
+            if consolidados is None:
+                resultado.status = STATUS_ARQUIVO_INVALIDO
+                return resultado
+
+            mapa_cnpj = _mapa_acoes_por_cnpj(session)
+            informes_com_metrica = 0
+
+            for (cnpj_cia, data_ref_str), metricas in consolidados.items():
+                if not metricas:
+                    resultado.ignorados_validacao += 1
+                    continue
+
+                cnpj_limpo = normalizar_cnpj(cnpj_cia)
+                if cnpj_limpo is None:
+                    resultado.ignorados_validacao += 1
+                    continue
+
+                try:
+                    data_referencia = datetime.strptime(
+                        str(data_ref_str)[:10], "%Y-%m-%d"
+                    ).date()
+                except (TypeError, ValueError):
+                    resultado.ignorados_validacao += 1
+                    continue
+
+                informes_com_metrica += 1
+                ativo = mapa_cnpj.get(cnpj_limpo)
+                if ativo is None:
+                    resultado.sem_ativo += 1
+                    continue
+
+                _fechar_metricas(metricas)
+
+                try:
+                    registro = (
+                        session.query(DadosFinanceirosAcoes)
+                        .filter_by(
+                            ativo_id=ativo.id,
+                            data_referencia=data_referencia,
+                            tipo_doc="ITR",
+                        )
+                        .first()
+                    )
+                    if not registro:
+                        registro = DadosFinanceirosAcoes(
+                            ativo_id=ativo.id,
+                            data_referencia=data_referencia,
+                            tipo_doc="ITR",
+                        )
+                        session.add(registro)
+                    for campo in CAMPOS_BANCO:
+                        if campo in metricas and metricas[campo] is not None:
+                            setattr(registro, campo, metricas[campo])
+                    session.commit()
+                    resultado.gravados += 1
+                except Exception as erro:
+                    session.rollback()
+                    resultado.falhas_persistencia += 1
+                    logger.error(
+                        "Falha ao gravar ITR %s %s: %s",
+                        cnpj_limpo,
+                        data_referencia,
+                        type(erro).__name__,
+                    )
+
+            resultado.informes_encontrados = informes_com_metrica
+            if resultado.gravados > 0:
+                resultado.status = STATUS_GRAVADO
+            elif informes_com_metrica == 0:
+                resultado.status = STATUS_SEM_INFORMES
+            else:
+                resultado.status = STATUS_SEM_ATIVOS
+            return resultado
+        except Exception as erro:
+            logger.error("Erro geral ao processar ITR: %s", erro)
+            resultado.status = STATUS_ERRO
+            resultado.erro = type(erro).__name__
+            return resultado
+        finally:
+            if session_propria and session is not None:
+                session.close()

@@ -31,8 +31,10 @@ testes, e o registro dos callbacks do painel fica em ``bot.callbacks_menus``.
 
 Limitações conhecidas (informadas ao usuário, não inventadas):
 
-* os "Alertas" por usuário ainda não existem no projeto; o botão apenas explica
-  a limitação e mantém os recursos existentes acessíveis;
+* os alertas listam apenas eventos já persistidos em ``alertas_eventos`` para
+  os favoritos do próprio usuário; ausência de evento não vira zero inventado;
+* a fila ``notificacoes`` e as flags de ``preferencias_usuarios`` não são
+  usadas (vocabulario ainda desconhecido);
 * os ativos aparecem pelo ticker, pois a tabela ``ativos`` não guarda o nome
   de mercado do fundo/empresa.
 """
@@ -50,6 +52,7 @@ from bot.telegram_utils import (
     montar_painel_inicial,
     nome_de_exibicao_do_telegram,
 )
+from pipeline_dados.repositorio_alertas import RepositorioAlertas
 from pipeline_dados.repositorio_favoritos import RepositorioFavoritos
 from pipeline_dados.repositorio_usuarios import RepositorioUsuarios
 
@@ -64,12 +67,9 @@ TEXTO_ATIVOS_VAZIOS = (
     "📭 Você ainda não acompanha nenhum ativo.\n"
     "Use ⭐ Gerenciar favoritos para escolher seus FIIs e ações."
 )
-TEXTO_ALERTAS_INDISPONIVEL = (
+TEXTO_ALERTAS_VAZIOS = (
     "🔔 *Alertas*\n\n"
-    "Os alertas personalizados por usuário ainda não estão disponíveis nesta "
-    "versão do sistema.\n\n"
-    "Enquanto isso, acompanhe seus ativos favoritos e consulte os últimos "
-    "documentos pelo painel principal."
+    "Nenhum evento encontrado para os seus favoritos."
 )
 TEXTO_GERENCIAR_FAVORITOS = (
     "⭐ *Gerenciar favoritos*\n\n"
@@ -390,4 +390,66 @@ def texto_novos_documentos(limite=10, tickers_permitidos=None):
             f"🏢 *{escapar_markdown(ativo.ticker)}* — {escapar_markdown(data)}"
         )
         linhas.append(f"🏷️ {escapar_markdown(doc.tipo_documento)}")
+    return "\n".join(linhas)
+
+
+def _formatar_valor_alerta(valor):
+    """Formata um valor persistido; ``None`` permanece ausente (nao vira zero)."""
+    if valor is None:
+        return None
+    texto = format(valor, "f") if hasattr(valor, "as_tuple") else str(valor)
+    if "." in texto:
+        texto = texto.rstrip("0").rstrip(".")
+    return texto or "0"
+
+
+def texto_meus_alertas(usuario_id, limite=10):
+    """Lista eventos persistidos dos favoritos do usuario.
+
+    Sem favoritos, nao consulta ``alertas_eventos``. Falha de banco devolve
+    texto seguro. Nenhum status de ``notificacoes`` e inventado.
+    """
+    try:
+        favoritos = RepositorioFavoritos().listar(usuario_id)
+    except Exception:
+        logger.warning("MENU - falha ao carregar favoritos para alertas", exc_info=True)
+        return TEXTO_ERRO_BANCO
+    if not favoritos:
+        return TEXTO_ATIVOS_VAZIOS
+    ids = [favorito.ativo_id for favorito in favoritos]
+    try:
+        eventos = RepositorioAlertas().listar_por_ativos(ids, limite=limite)
+    except Exception:
+        logger.warning("MENU - falha ao consultar alertas", exc_info=True)
+        return TEXTO_ERRO_BANCO
+    if not eventos:
+        return TEXTO_ALERTAS_VAZIOS
+
+    linhas = ["🔔 *Alertas*", "", "Eventos recentes dos seus favoritos:"]
+    for evento in eventos:
+        data = (
+            evento.data_evento.strftime("%d/%m/%Y %H:%M")
+            if evento.data_evento
+            else "Data N/A"
+        )
+        linhas.append("")
+        linhas.append(
+            f"🏢 *{escapar_markdown(evento.ticker)}* — {escapar_markdown(data)}"
+        )
+        linhas.append(
+            f"🏷️ {escapar_markdown(evento.indicador)} · "
+            f"{escapar_markdown(evento.regra)} · "
+            f"{escapar_markdown(evento.severidade)}"
+        )
+        if evento.motivo:
+            linhas.append(f"📝 {escapar_markdown(evento.motivo)}")
+        atual = _formatar_valor_alerta(evento.valor_atual)
+        anterior = _formatar_valor_alerta(evento.valor_anterior)
+        if atual is not None or anterior is not None:
+            partes = []
+            if atual is not None:
+                partes.append(f"atual {atual}")
+            if anterior is not None:
+                partes.append(f"anterior {anterior}")
+            linhas.append(f"📌 {escapar_markdown(' · '.join(partes))}")
     return "\n".join(linhas)

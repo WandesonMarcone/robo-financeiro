@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime
 
 import config
 from bot.loader import bot
@@ -41,8 +40,8 @@ def varredura_diaria():
 
     # 1. Rotina B3/FNET
     try:
-        qtd = rotina_de_atualizacao_em_massa()
-        _avisar(f"✅ B3 finalizada! {qtd} documentos salvos.")
+        resultado = rotina_de_atualizacao_em_massa()
+        _avisar(resultado.mensagem_telegram())
     except Exception as e:
         _avisar(f"❌ Erro na varredura B3: {type(e).__name__}")
 
@@ -51,8 +50,8 @@ def varredura_diaria():
     try:
         session = SessionDB()
         coletor = AcoesCVMReader(session)
-        coletor.atualizar_acoes(datetime.now().year)
-        _avisar("✅ Coleta CVM finalizada com sucesso!")
+        resultado = coletor.atualizar_acoes()
+        _avisar(resultado.mensagem_telegram())
     except Exception as e:
         _avisar(f"❌ Erro na varredura CVM: {type(e).__name__}")
     finally:

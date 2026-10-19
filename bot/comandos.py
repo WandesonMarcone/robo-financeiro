@@ -10,9 +10,17 @@ from bot import menu_principal, permissoes
 from bot.telegram_utils import montar_guia_comandos
 from atualizador_documentos import SessionDB 
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
+from pipeline_dados.coletor_fiis import ano_padrao_coleta, processar_informes_fiis_cvm
 from modules.utils import conectar_gspread
 
 from modules.scraper_fiis import rodar_garimpo_fiis # <--- Importe o arquivo que corrigimos
+
+
+def _ano_do_comando(message):
+    texto = (message.text or "").split()
+    if len(texto) > 1 and texto[1].isdigit():
+        return int(texto[1])
+    return ano_padrao_coleta()
 
 # ==========================================
 # 🔒 UTILITÁRIOS DE SEGURANÇA
@@ -161,113 +169,77 @@ def comando_adicionar(message):
 
 @bot.message_handler(commands=['forcar_varredura'])
 def acionar_varredura_manual(message):
-    bot.reply_to(message, "⚙️ *Iniciando varredura na B3 e CVM...*\nIsso pode levar alguns minutos. Buscando apenas documentos novos!", parse_mode="Markdown")
+    chat_id = message.chat.id
+    texto = (message.text or "").split()
+    dias = 60
+    if len(texto) > 1 and texto[1].isdigit():
+        dias = int(texto[1])
+    bot.reply_to(
+        message,
+        f"Varredura FNET de FIIs (ultimos {dias} dia(s)) em segundo plano. "
+        "Aguarde o aviso de conclusao!",
+    )
 
-    def tarefa_pesada_background():
+    def tarefa_pesada_background(janela):
         try:
-            from atualizador_documentos import rotina_de_atualizacao_em_massa, SessionDB
-            from pipeline_dados.banco_dados import DocumentosQualitativos
-            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+            from pipeline_dados.coletor_fnet import ColetorFnet, STATUS_GRAVADO
+            from atualizador_documentos import rotina_processar_pendentes
 
-            session_antes = SessionDB()
-
-            # --- FOTO DO BANCO ANTES DA VARREDURA ---
-            total_antes = session_antes.query(DocumentosQualitativos).count()
-            salvos_antes = session_antes.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")).count()
-            revisao_antes = session_antes.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO").count()
-            erros_antes = session_antes.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.in_(["ERRO_DOWNLOAD", "ERRO_DRIVE"])).count()
-
-            session_antes.close()
-
-            # --- A VARREDURA ACONTECE AQUI ---
-            rotina_de_atualizacao_em_massa()
-
-            # --- FOTO DO BANCO DEPOIS DA VARREDURA ---
             session = SessionDB()
-            total_depois = session.query(DocumentosQualitativos).count()
-            salvos_depois = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")).count()
-            revisao_depois = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO").count()
-            erros_depois = session.query(DocumentosQualitativos).filter(DocumentosQualitativos.status_processamento.in_(["ERRO_DOWNLOAD", "ERRO_DRIVE"])).count()
-            session.close()
-
-            # --- CÁLCULO ESPECÍFICO DESTA SESSÃO (O DELTA) ---
-            novos_capturados = total_depois - total_antes 
-            salvos_agora = salvos_depois - salvos_antes
-            revisao_agora = revisao_depois - revisao_antes
-            erros_agora = erros_depois - erros_antes
-
-            # --- ESTATÍSTICA DESTA VARREDURA ---
-            processados_agora = salvos_agora + revisao_agora + erros_agora
-            eficiencia_agora = (salvos_agora / processados_agora * 100) if processados_agora > 0 else 0
-
-            markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(
-                InlineKeyboardButton("📊 Ver Raio-X Global", callback_data="ver_raiox_docs"),
-                InlineKeyboardButton("📥 Iniciar Revisão Manual", callback_data="iniciar_revisao_pendencias")
-            )
-
-            # Relatório APENAS da Sessão (Varredura Atual)
-            resposta_final = (
-                f"✅ **Varredura Concluída!**\n\n"
-                f"📥 **Resumo desta Sessão:**\n"
-                f" ├ Documentos novos encontrados: `{novos_capturados}`\n"
-                f" ├ Processados (Auto-salvos): `{salvos_agora}`\n"
-                f" ├ Enviados para Revisão: `{revisao_agora}`\n"
-                f" ├ Falhas (Links corrompidos): `{erros_agora}`\n"
-                f" └ Eficiência nesta busca: `{eficiencia_agora:.1f}%`\n\n"
-                f"💡 _Dica: Para ver a cobertura completa de datas e o volume total de todos os fundos, acesse o botão de Raio-X abaixo._"
-            )
-
-            bot.send_message(message.chat.id, resposta_final, parse_mode="Markdown", reply_markup=markup)
-
+            try:
+                resultado = ColetorFnet(session).coletar(dias=janela)
+            finally:
+                session.close()
+            bot.send_message(chat_id, resultado.mensagem_telegram())
+            if resultado.status == STATUS_GRAVADO and resultado.gravados > 0:
+                bot.send_message(
+                    chat_id,
+                    "Documentos novos gravados; processando fila (Drive/IA).",
+                )
+                rotina_processar_pendentes()
         except Exception as e:
-            bot.send_message(message.chat.id, f"❌ Erro na varredura: {str(e)[:200]}") 
+            bot.send_message(
+                chat_id,
+                f"Varredura FNET de FIIs: falha de processamento ou persistencia ({e}).",
+            )
 
-    import threading
-    threading.Thread(target=tarefa_pesada_background).start()
+    threading.Thread(target=tarefa_pesada_background, args=(dias,)).start()
 
 @bot.message_handler(commands=['forcar_docs_acoes'])
 def rodar_docs_acoes(message):
-    from datetime import datetime
-
-    # Verifica se você digitou um ano (Ex: /forcar_docs_acoes 2025). Se não, usa o atual.
-    texto = message.text.split()
-    ano_escolhido = datetime.now().year
-    if len(texto) > 1 and texto[1].isdigit():
-        ano_escolhido = int(texto[1])
-
-    bot.send_message(message.chat.id, f"⏳ *Iniciando varredura de PDFs (Ações) para {ano_escolhido}...*\nBuscando Fatos Relevantes na CVM em segundo plano.", parse_mode="Markdown")
+    chat_id = message.chat.id
+    ano_escolhido = _ano_do_comando(message)
+    bot.reply_to(
+        message,
+        f"Varredura de PDFs de acoes na CVM ({ano_escolhido}) em segundo plano. "
+        "Aguarde o aviso de conclusao!",
+    )
 
     def tarefa_docs_background(ano):
         try:
-            # Importa o novo módulo que criamos
             from pipeline_dados.coletor_docs_acoes import RelatoriosAcoesCVM
-            from atualizador_documentos import SessionDB
+            from pipeline_dados.coletor_docs_acoes import STATUS_GRAVADO as DOCS_GRAVADO
 
             session = SessionDB()
-            coletor = RelatoriosAcoesCVM(session)
-
-            # Roda a função que vasculha a base IPE da CVM
-            docs_baixados = coletor.vasculhar_documentos(ano)
-            session.close()
-
-            bot.send_message(message.chat.id, f"✅ *Varredura de Ações ({ano}) Concluída!*\n📥 Documentos novos enviados para a fila do Drive: {docs_baixados}", parse_mode="Markdown")
-
-            # 🔴 GATILHO AUTOMÁTICO: Aciona o motor da IA logo após a varredura
-            # A IA só será ligada se o robô encontrou 1 ou mais documentos novos.
-            if isinstance(docs_baixados, int) and docs_baixados > 0:
-                bot.send_message(message.chat.id, "🔄 *Gatilho Automático:* Repassando a fila para a Inteligência Artificial classificar...", parse_mode="Markdown")
-                rodar_ia_acoes(message) # Chama a função da IA passando a mensagem original
-            else:
-                bot.send_message(message.chat.id, "📭 Nenhum documento novo foi baixado agora. A IA foi dispensada.", parse_mode="Markdown")
-
+            try:
+                resultado = RelatoriosAcoesCVM(session).vasculhar_documentos(ano)
+            finally:
+                session.close()
+            bot.send_message(chat_id, resultado.mensagem_telegram())
+            if resultado.status == DOCS_GRAVADO and resultado.gravados > 0:
+                bot.send_message(
+                    chat_id,
+                    "Documentos novos gravados; iniciando classificacao por IA.",
+                )
+                rodar_ia_acoes(message)
         except Exception as e:
-            bot.send_message(message.chat.id, f"❌ Erro ao baixar docs de ações: {str(e)}")
+            bot.send_message(
+                chat_id,
+                f"Varredura de PDFs de acoes ({ano}): falha de processamento "
+                f"ou persistencia ({e}).",
+            )
 
-    # Inicia a tarefa em segundo plano
-    import threading
-    thread_docs = threading.Thread(target=tarefa_docs_background, args=(ano_escolhido,))
-    thread_docs.start()
+    threading.Thread(target=tarefa_docs_background, args=(ano_escolhido,)).start()
 
 @bot.message_handler(commands=['processar_acoes_ia'])
 def rodar_ia_acoes(message):
@@ -285,65 +257,59 @@ def rodar_ia_acoes(message):
         except Exception as e:
             bot.send_message(message.chat.id, f"❌ Erro fatal no processamento da IA: {str(e)}")
             
-    # Roda em segundo plano (Thread) para não congelar o uso do bot no Telegram
-    import threading
-    thread_ia = threading.Thread(target=tarefa_ia_background)
-    thread_ia.start()
+    threading.Thread(target=tarefa_ia_background).start()
+
 
 @bot.message_handler(commands=['forcar_cvm'])
 def rodar_cvm(message):
-    from datetime import datetime
-    
-    # Verifica se você digitou um ano (Ex: /forcar_cvm 2025). Se não, usa o ano atual.
-    texto = message.text.split()
-    ano_escolhido = datetime.now().year
-    if len(texto) > 1 and texto[1].isdigit():
-        ano_escolhido = int(texto[1])
+    chat_id = message.chat.id
+    ano_escolhido = _ano_do_comando(message)
+    bot.reply_to(
+        message,
+        f"Baixando ITR de acoes da CVM ({ano_escolhido}) em segundo plano. "
+        "Aguarde o aviso de conclusao!",
+    )
 
-    bot.send_message(message.chat.id, f"⏳ *Iniciando motor CVM para o ano {ano_escolhido}...*\nBaixando balanços em segundo plano. Aguarde o aviso de conclusão!", parse_mode="Markdown")
-    
     def tarefa_cvm_background(ano):
         try:
             from pipeline_dados.coletor_cvm import AcoesCVMReader
-            from atualizador_documentos import SessionDB
-            
-            session = SessionDB()
-            coletor = AcoesCVMReader(session)
-            
-            # Executa a coleta com o ano que você escolheu
-            coletor.atualizar_acoes(ano) 
-            session.close()
-            
-            bot.send_message(message.chat.id, f"✅ *Coleta CVM ({ano}) Concluída!*\nBalanços atualizados no banco de dados.", parse_mode="Markdown")
-        except Exception as e:
-            bot.send_message(message.chat.id, f"❌ Erro na CVM: {str(e)}")
-            
-    # Inicia a tarefa em segundo plano
-    import threading
-    thread_cvm = threading.Thread(target=tarefa_cvm_background, args=(ano_escolhido,))
-    thread_cvm.start()
 
-import threading
-from pipeline_dados.coletor_fiis import processar_informes_fiis_cvm
+            session = SessionDB()
+            try:
+                resultado = AcoesCVMReader(session).atualizar_acoes(ano)
+            finally:
+                session.close()
+            bot.send_message(chat_id, resultado.mensagem_telegram())
+        except Exception as e:
+            bot.send_message(
+                chat_id,
+                f"Coleta CVM ITR ({ano}): falha de processamento ou persistencia ({e}).",
+            )
+
+    threading.Thread(target=tarefa_cvm_background, args=(ano_escolhido,)).start()
+
 
 @bot.message_handler(commands=['forcar_fiis'])
 def cmd_forcar_fiis(message):
     chat_id = message.chat.id
-    bot.reply_to(message, "📥 Baixando informes mensais de FIIs em segundo plano. Aguarde o aviso de conclusão!")
-    
-    def background_coleta():
-        try:
-            # Roda para o ano atual (2026)
-            sucesso = processar_informes_fiis_cvm(ano=2026)
-            if sucesso:
-                bot.send_message(chat_id, "✅ **Coleta de FIIs (2026) Concluída!**\nIndicadores contábeis e operacionais atualizados no banco de dados.", parse_mode="Markdown")
-            else:
-                bot.send_message(chat_id, "⚠️ A coleta rodou, mas nenhum informe válido foi processado. Verifique os logs.")
-        except Exception as e:
-            bot.send_message(chat_id, f"❌ Erro crítico na coleta de FIIs: {str(e)}")
+    ano_escolhido = _ano_do_comando(message)
+    bot.reply_to(
+        message,
+        f"Baixando informes mensais de FIIs ({ano_escolhido}) em segundo plano. "
+        "Aguarde o aviso de conclusao!",
+    )
 
-    # Dispara a tarefa em segundo plano para não travar o Telegram
-    threading.Thread(target=background_coleta).start()
+    def background_coleta(ano):
+        try:
+            resultado = processar_informes_fiis_cvm(ano=ano)
+            bot.send_message(chat_id, resultado.mensagem_telegram())
+        except Exception as e:
+            bot.send_message(
+                chat_id,
+                f"Coleta de FIIs ({ano}): falha de processamento ou persistencia ({e}).",
+            )
+
+    threading.Thread(target=background_coleta, args=(ano_escolhido,)).start()
 
 @bot.message_handler(commands=['alimentar_ia'])
 def alimentar_ia_passado(message):
