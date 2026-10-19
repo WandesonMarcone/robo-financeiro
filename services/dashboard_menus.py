@@ -11,12 +11,12 @@ from bot.loader import bot
 from services.planilhas import buscar_dados_planilha_com_cache, buscar_ativo_na_planilha
 from services.logo_service import (
     invalidar_file_id_logo,
+    obter_bytes_logo_drive,
     obter_file_id_logo,
     obter_link_logo,
     registrar_falha_logo,
     registrar_file_id_logo,
 )
-from modules.GoogleDriveManager import GoogleDriveManager
 from atualizador_documentos import SessionDB
 from pipeline_dados.banco_dados import DocumentosQualitativos, Ativo
 
@@ -31,6 +31,8 @@ _drive_manager = None
 def obter_drive_manager():
     global _drive_manager
     if _drive_manager is None:
+        from modules.GoogleDriveManager import GoogleDriveManager
+
         _drive_manager = GoogleDriveManager()
     return _drive_manager
 
@@ -139,13 +141,23 @@ def _registrar_file_id_do_painel(mensagem, ticker):
         logger.debug("Falha ao registrar file_id da logo de %s", ticker, exc_info=True)
 
 
+def _midia_telegram(media_logo):
+    """Converte ``drive:<id>`` em bytes; URLs e file_id seguem como estão."""
+    if not media_logo:
+        return None
+    if str(media_logo).startswith("drive:"):
+        return obter_bytes_logo_drive(media_logo)
+    return media_logo
+
+
 def _enviar_painel_ativo(chat_id, ticker, texto, texto_com_link, markup, media_logo):
     """Envia o painel como foto (com legenda) ou texto, com fallback seguro."""
-    if media_logo:
+    foto = _midia_telegram(media_logo)
+    if foto:
         try:
             mensagem = bot.send_photo(
                 chat_id,
-                media_logo,
+                foto,
                 caption=texto,
                 reply_markup=markup,
                 parse_mode="Markdown",
@@ -161,9 +173,7 @@ def _enviar_painel_ativo(chat_id, ticker, texto, texto_com_link, markup, media_l
                 registrar_falha_logo(
                     ticker, erro=type(erro).__name__, url_origem=media_logo
                 )
-            else:
-                # O Telegram recusou um file_id; invalida só o cache do
-                # Telegram para permitir resolver uma nova imagem.
+            elif not str(media_logo).startswith("drive:"):
                 invalidar_file_id_logo(ticker, erro=type(erro).__name__)
     bot.send_message(
         chat_id,
@@ -176,11 +186,12 @@ def _enviar_painel_ativo(chat_id, ticker, texto, texto_com_link, markup, media_l
 
 def _editar_painel_ativo(chat_id, message_id, ticker, texto, texto_com_link, markup, media_logo):
     """Edita o painel preservando a logo quando a mensagem atual é uma foto."""
-    if media_logo:
+    foto = _midia_telegram(media_logo)
+    if foto:
         try:
             bot.edit_message_media(
                 InputMediaPhoto(
-                    media=media_logo, caption=texto, parse_mode="Markdown"
+                    media=foto, caption=texto, parse_mode="Markdown"
                 ),
                 chat_id=chat_id,
                 message_id=message_id,
@@ -188,11 +199,9 @@ def _editar_painel_ativo(chat_id, message_id, ticker, texto, texto_com_link, mar
             )
             return
         except Exception as erro:
-            # Se o Telegram rejeitou um file_id, ele pode ter expirado ou ser
-            # invalido. Invalida o cache (inclusive o persistente) para que a
-            # proxima chamada resolva uma nova midia. Falhas em mensagens de
-            # texto sao apenas fallback e nao invalidam uma URL valida.
-            if not str(media_logo).startswith(("http://", "https://")):
+            if (
+                not str(media_logo).startswith(("http://", "https://", "drive:"))
+            ):
                 invalidar_file_id_logo(ticker, erro=type(erro).__name__)
             # Mensagens de texto (menu anterior) não aceitam edit_message_media.
             logger.debug(
@@ -281,7 +290,11 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
 
     # No modo texto, mantém o link invisível já usado pelo projeto para forçar
     # a prévia da imagem sem alterar o conteúdo visível.
-    link_invisivel = f"[\u200e]({url_logo})" if url_logo else ""
+    link_invisivel = (
+        f"[\u200e]({url_logo})"
+        if str(url_logo).startswith(("http://", "https://"))
+        else ""
+    )
     texto_com_link = f"{link_invisivel}{texto}"
 
     markup = InlineKeyboardMarkup(row_width=2)

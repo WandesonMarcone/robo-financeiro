@@ -133,18 +133,11 @@ def callback_listar_ativos_acao(call):
 # ==========================================
 @bot.callback_query_handler(func=lambda call: call.data == 'ajuda_roadmap')
 def callback_ajuda_roadmap(call):
-    texto = (
-        "🗺️ *Roadmap de Desenvolvimento*\n\n"
-        "✅ *Concluído:* Scraper FIIs, Cache, Menu Hierárquico.\n\n"
-        "🚧 *Próximos Passos (Backlog):*\n"
-        "1. *Hash SHA256:* Garantir integridade máxima contra duplicidade.\n"
-        "2. *Validação Pós-Download:* Verificar PDF corrompido antes de salvar.\n"
-        "3. *IA Analítica (Groq):* Ler PDFs para detectar riscos e vacância.\n"
-        "4. *Retry Complexo:* Lógica de 3 tentativas com *backoff* de 15min.\n"
-        "5. *CVM Ações:* Integrar download e backup dos PDFs originais no Google Drive.\n"
-    )
+    from bot.telegram_utils import TEXTO_MENU_AJUDA
+
+    texto = TEXTO_MENU_AJUDA
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_ajuda"))
+    markup.add(InlineKeyboardButton("Voltar", callback_data="menu_ajuda"))
     bot.edit_message_text(texto, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data == 'ajuda_comandos')
@@ -155,11 +148,15 @@ def callback_ajuda_comandos(call):
     comandos inexistentes nem exibir opções administrativas a usuários comuns.
     """
     autor = getattr(call, "from_user", None)
-    papel = permissoes.obter_papel(getattr(autor, "id", None))
-    texto_comandos = montar_guia_comandos(papel)
+    papel, status, formulario_ativo = permissoes.contexto_ajuda(
+        getattr(autor, "id", None)
+    )
+    texto_comandos = montar_guia_comandos(
+        papel, status=status, formulario_ativo=formulario_ativo
+    )
 
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🔙 Voltar à Ajuda", callback_data="menu_ajuda"))
+    markup.add(InlineKeyboardButton("Voltar à Ajuda", callback_data="menu_ajuda"))
 
     bot.edit_message_text(texto_comandos, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 

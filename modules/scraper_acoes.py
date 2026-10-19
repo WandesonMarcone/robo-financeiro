@@ -5,7 +5,12 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime
 import config
-from modules.utils import formatar, precisa_atualizar, get_request_with_retry
+from modules.utils import (
+    converter_numero,
+    eh_valido,
+    precisa_atualizar,
+    get_request_with_retry,
+)
 from config import MAPA_SETORES_B3
 
 def classificar_setor_por_mapa(ticker):
@@ -43,23 +48,16 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
         
         df['Papel'] = df['Papel'].str.strip().str.upper()
         df = df.set_index('Papel')
-        
-        # 🟢 ALTERAÇÃO 2: Limpeza dos símbolos '%' antes de formatar
-        def limpar_porcentagem_df(val):
-            if isinstance(val, str):
-                val = val.replace('%', '').replace('.', '').replace(',', '.')
-                try:
-                    return float(val) / 100
-                except ValueError:
-                    return 0.0
-            return val
-        
-        for col_perc in ['Div.Yield', 'ROE', 'Mrg Bruta', 'Mrg Ebit', 'Mrg. Líq.', 'Cresc. Rec.5a', 'ROIC']:
-            if col_perc in df.columns:
-                df[col_perc] = df[col_perc].apply(limpar_porcentagem_df)
-                
-        for col in ['P/L', 'P/VP', 'Div.Yield', 'ROE', 'Liq.2meses']:
-            if col in df.columns: df[col] = df[col].apply(formatar)
+
+        colunas_numericas = [
+            'Cotação', 'P/L', 'P/VP', 'Div.Yield', 'ROE', 'Liq.2meses',
+            'P/Ativo', 'Mrg Bruta', 'Mrg Ebit', 'Mrg. Líq.', 'P/EBIT',
+            'EV/EBIT', 'Dív.Líq/ Patrim.', 'PSR', 'P/Cap.Giro',
+            'P/Ativ Circ.Liq', 'Liq. Corr.', 'ROIC', 'Cresc. Rec.5a',
+        ]
+        for col in colunas_numericas:
+            if col in df.columns:
+                df[col] = df[col].map(converter_numero)
             
     except Exception as e:
         print(f"⚠️ Fundamentus indisponível: {e}. Alternando para Yahoo.")
@@ -75,12 +73,9 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
             todas_originais.append(t)
 
             # Lógica de limpeza para o preço na Coluna C (índice 2)
-            try:
-                # Remove "R$", tira o ponto de milhar, troca vírgula por ponto
-                raw_val = str(row[2]).replace('R$', '').replace('.', '').replace(',', '.').strip()
-                precos_antigos[t] = float(raw_val) if raw_val else 0.0
-            except:
-                precos_antigos[t] = 0.0
+            preco_planilha = converter_numero(row[2] if len(row) > 2 else None)
+            if eh_valido(preco_planilha):
+                precos_antigos[t] = preco_planilha
 
             # Mapeamento da Coluna AG (índice 32)
             mapa_atualizacao[t] = row[32] if len(row) > 32 else ""
@@ -90,7 +85,9 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
 
     opps_brutas, cat_novatas = [], []
     if not df.empty:
-        opps_brutas = df[(df['P/L'] > 0) & (df['P/L'] < 12) & (df['P/VP'] < 1.5) & (df['ROE'] >= 8.0)].index.tolist() # O ROE agora é um decimal pequeno (ex: 0.08)
+        opps_brutas = df[
+            (df['P/L'] > 0) & (df['P/L'] < 12) & (df['P/VP'] < 1.5) & (df['ROE'] >= 0.08)
+        ].index.tolist()
         cat_opps = [o for o in opps_brutas if o in todas_originais and o not in cat_fixas and precisa_atualizar(o, mapa_atualizacao, agora_dt, sp_tz)][:5]
         # Adequação dos filtros matemáticos pois as porcentagens viraram decimais puros (Ex: 6.0% agora é 0.06)
         candidatas = df[(df['P/L']>=2)&(df['P/L']<=15)&(df['P/VP']>=0.2)&(df['P/VP']<=1.5)&(df['Div.Yield']>=0.06)&(df['ROE']>=0.10)].index.tolist()
@@ -119,89 +116,163 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
         linha_idx = todas.index(ticker) + 2
         try:
             # 🟢 ALTERAÇÃO 3: Inserção do Sufixo da B3 para o Yahoo Finance (.SA)
-            yf_info = yf.Ticker(f"{ticker}.SA").info
-
-            # 🔴 A MÁGICA ACONTECE AQUI: Ignoramos o Yahoo Finance e usamos o nosso Mapa Fixo!
+            yf_info = yf.Ticker(f"{ticker}.SA").info or {}
             macro_setor, sub_setor = classificar_setor_por_mapa(ticker)
-
-            # A variável 'setor' agora recebe o nome perfeito e em português (Ex: "Materiais Básicos")
             setor = macro_setor
 
-            # Se a sua planilha também tiver uma coluna para Subsetor no futuro, 
-            # a variável 'sub_setor' já está pronta para ser enviada (Ex: "Mineração").
+            fundamentus_ok = (not df.empty) and (ticker in df.index)
+            f = {}
+            if fundamentus_ok:
+                f = df.loc[ticker]
+                if isinstance(f, pd.DataFrame):
+                    f = f.iloc[0]
 
-            preco_yf = formatar(yf_info.get('currentPrice') or yf_info.get('regularMarketPrice') or 0)
-            f = df.loc[ticker] if (not df.empty and ticker in df.index) else {}
-            preco = preco_yf if preco_yf > 0 else formatar(f.get('Cotação', 0))
+            def _fund(col):
+                return converter_numero(f.get(col)) if fundamentus_ok else float("nan")
 
-            # 🔥 Correção da Divisão por Zero
-            lpa_yf = formatar(yf_info.get('trailingEps', 0))
-            vpa_yf = formatar(yf_info.get('bookValue', 0))
+            preco_yf = converter_numero(yf_info.get("currentPrice"))
+            if not eh_valido(preco_yf):
+                preco_yf = converter_numero(yf_info.get("regularMarketPrice"))
+            if not (eh_valido(preco_yf) and preco_yf > 0):
+                preco_yf = None
+            preco_fundamentus = _fund("Cotação")
+            if not (eh_valido(preco_fundamentus) and preco_fundamentus > 0):
+                preco_fundamentus = None
+            preco = preco_yf if preco_yf is not None else preco_fundamentus
 
-            pl = formatar(f.get('P/L', 0)) if f.get('P/L') else ((preco / lpa_yf) if lpa_yf > 0 else 0)
-            pvp = formatar(f.get('P/VP', 0)) if f.get('P/VP') else ((preco / vpa_yf) if vpa_yf > 0 else 0)
-            roe = formatar(f.get('ROE', 0))
+            lpa_yf = converter_numero(yf_info.get("trailingEps"))
+            vpa_yf = converter_numero(yf_info.get("bookValue"))
+            pl = _fund("P/L")
+            if not eh_valido(pl):
+                pl = (
+                    (preco / lpa_yf)
+                    if (eh_valido(preco) and eh_valido(lpa_yf) and lpa_yf != 0)
+                    else float("nan")
+                )
+            pvp = _fund("P/VP")
+            if not eh_valido(pvp):
+                pvp = (
+                    (preco / vpa_yf)
+                    if (eh_valido(preco) and eh_valido(vpa_yf) and vpa_yf != 0)
+                    else float("nan")
+                )
+            roe = _fund("ROE")
+            dy = _fund("Div.Yield")
+            qtd_acoes = converter_numero(yf_info.get("sharesOutstanding"))
+            p_ativo = _fund("P/Ativo")
+            marg_bruta = _fund("Mrg Bruta")
+            marg_ebit = _fund("Mrg Ebit")
+            marg_liq = _fund("Mrg. Líq.")
+            p_ebit = _fund("P/EBIT")
+            ev_ebit = _fund("EV/EBIT")
+            div_liq_patrimonio = _fund("Dív.Líq/ Patrim.")
+            psr = _fund("PSR")
+            p_cap_giro = _fund("P/Cap.Giro")
+            p_at_circ_liq = _fund("P/Ativ Circ.Liq")
+            liq_corrente = _fund("Liq. Corr.")
+            roa = converter_numero(yf_info.get("returnOnAssets"))
+            roic = _fund("ROIC")
+            cagr_rec_5a = _fund("Cresc. Rec.5a")
+            liq_media = _fund("Liq.2meses")
+            peg_ratio = converter_numero(yf_info.get("trailingPegRatio"))
+            valor_mercado = converter_numero(yf_info.get("marketCap"))
 
-            # =========================================================================
-            # 🗺️ MAPEAMENTO COMPLETO (32 Colunas: B até AG)
-            # =========================================================================
-            row_base = [
-                setor,                                    # 00 | B: Setor
-                preco,                                    # 01 | C: Preço
-                formatar(f.get('Div.Yield', 0)),          # 02 | D: DY
-                formatar(yf_info.get('sharesOutstanding', 0)), # 03 | E: Qtd Ações
-                pl,                                       # 04 | F: P/L
-                pvp,                                      # 05 | G: P/VP
-                formatar(f.get('P/Ativo', 0)),            # 06 | H: P/Ativo
-                formatar(f.get('Mrg Bruta', 0)),          # 07 | I: Marg. Bruta
-                formatar(f.get('Mrg Ebit', 0)),           # 08 | J: Marg. EBIT
-                formatar(f.get('Mrg. Líq.', 0)),          # 09 | K: Marg. Líq
-                formatar(f.get('P/EBIT', 0)),             # 10 | L: P/EBIT
-                formatar(f.get('EV/EBIT', 0)),            # 11 | M: EV/EBIT
-                formatar(f.get('Dív.Líq/ Patrim.', 0)),   # 12 | N: Dív.Liq/EBIT
-                formatar(f.get('Dív.Líq/ Patrim.', 0)),   # 13 | O: Dív.Liq/Patri
-                formatar(f.get('PSR', 0)),                # 14 | P: PSR
-                formatar(f.get('P/Cap.Giro', 0)),         # 15 | Q: P/Cap.Giro
-                formatar(f.get('P/Ativ Circ.Liq', 0)),    # 16 | R: P/At.Circ.Liq
-                formatar(f.get('Liq. Corr.', 0)),         # 17 | S: Liq. Corr
-                roe,                                      # 18 | T: ROE
-                formatar(yf_info.get('returnOnAssets', 0)),# 19 | U: ROA
-                formatar(f.get('ROIC', 0)),               # 20 | V: ROIC
-                0,                                        # 21 | W: Reservado
-                0,                                        # 22 | X: Reservado
-                0,                                        # 23 | Y: Reservado
-                formatar(f.get('Cresc. Rec.5a', 0)),      # 24 | Z: CAGR Rec. 5a
-                0,                                        # 25 | AA: Reservado
-                formatar(f.get('Liq.2meses', 0)),         # 26 | AB: Liq. Média
-                vpa_yf,                                   # 27 | AC: VPA
-                lpa_yf,                                   # 28 | AD: LPA
-                formatar(yf_info.get('trailingPegRatio', 0)),# 29 | AE: PEG Ratio
-                formatar(yf_info.get('marketCap', 0)),    # 30 | AF: Valor Mercado
-                f"{agora_sp}"                             # 31 | AG: Carimbo Atualização
-            ]
+            valores = {}
+            if ticker in cat_novatas:
+                valores["A"] = ticker
+            valores["B"] = setor
+            if eh_valido(preco):
+                valores["C"] = preco
+            if eh_valido(dy):
+                valores["D"] = dy
+            if eh_valido(qtd_acoes):
+                valores["E"] = qtd_acoes
+            if eh_valido(pl):
+                valores["F"] = pl
+            if eh_valido(pvp):
+                valores["G"] = pvp
+            if eh_valido(p_ativo):
+                valores["H"] = p_ativo
+            if eh_valido(marg_bruta):
+                valores["I"] = marg_bruta
+            if eh_valido(marg_ebit):
+                valores["J"] = marg_ebit
+            if eh_valido(marg_liq):
+                valores["K"] = marg_liq
+            if eh_valido(p_ebit):
+                valores["L"] = p_ebit
+            if eh_valido(ev_ebit):
+                valores["M"] = ev_ebit
+            if eh_valido(div_liq_patrimonio):
+                valores["N"] = div_liq_patrimonio
+                valores["O"] = div_liq_patrimonio
+            if eh_valido(psr):
+                valores["P"] = psr
+            if eh_valido(p_cap_giro):
+                valores["Q"] = p_cap_giro
+            if eh_valido(p_at_circ_liq):
+                valores["R"] = p_at_circ_liq
+            if eh_valido(liq_corrente):
+                valores["S"] = liq_corrente
+            if eh_valido(roe):
+                valores["T"] = roe
+            if eh_valido(roa):
+                valores["U"] = roa
+            if eh_valido(roic):
+                valores["V"] = roic
+            if eh_valido(cagr_rec_5a):
+                valores["Z"] = cagr_rec_5a
+            if eh_valido(liq_media):
+                valores["AB"] = liq_media
+            if eh_valido(vpa_yf):
+                valores["AC"] = vpa_yf
+            if eh_valido(lpa_yf):
+                valores["AD"] = lpa_yf
+            if eh_valido(peg_ratio):
+                valores["AE"] = peg_ratio
+            if eh_valido(valor_mercado):
+                valores["AF"] = valor_mercado
+            if fundamentus_ok:
+                valores["AG"] = agora_sp
 
-            if ticker in cat_novatas: batch_updates.append({'range': f'A{linha_idx}:AG{linha_idx}', 'values': [[ticker] + row_base]})
-            else: batch_updates.append({'range': f'B{linha_idx}:AG{linha_idx}', 'values': [row_base]})
+            for coluna, valor in valores.items():
+                batch_updates.append(
+                    {"range": f"{coluna}{linha_idx}", "values": [[valor]]}
+                )
 
-            # --- CONSTRUÇÃO DO TELEGRAM ---
-            p_v = precos_antigos.get(ticker, preco)
-            ico = "📈" if preco > p_v else ("📉" if preco < p_v else "➖")
+            preco_velho = precos_antigos.get(ticker)
+            preco_exib = preco if eh_valido(preco) else preco_velho
+            p_v = preco_velho if eh_valido(preco_velho) else preco_exib
+            pl_txt = f"{pl:.1f}" if eh_valido(pl) else "N/D"
+            pvp_txt = f"{pvp:.2f}" if eh_valido(pvp) else "N/D"
+            roe_txt = f"{roe*100:.1f}%" if eh_valido(roe) else "N/D"
+            if eh_valido(preco_exib) and eh_valido(p_v):
+                ico = "📈" if preco_exib > p_v else ("📉" if preco_exib < p_v else "➖")
+                faixa_preco = f"R$ {p_v:.2f} ➔ R$ {preco_exib:.2f} {ico}"
+            elif eh_valido(preco_exib):
+                faixa_preco = f"R$ {preco_exib:.2f}"
+            else:
+                faixa_preco = "N/D"
+            linha_ind = f"P/L: {pl_txt} | P/VP: {pvp_txt} | ROE: {roe_txt}"
 
             if ticker in config.FIXAS_ACOES:
-                txt = f"🏭 *{ticker}*\n   R$ {p_v:.2f} ➔ R$ {preco:.2f} {ico}\n   P/L: {pl:.1f} | P/VP: {pvp:.2f} | ROE: {roe*100:.1f}%"
-                if ticker in opps_brutas: 
+                txt = f"🏭 *{ticker}*\n   {faixa_preco}\n   {linha_ind}"
+                if ticker in opps_brutas:
                     relatorio_fixas_opps.append(f"🚨 *{ticker} EM OPORTUNIDADE!* 🚨\n{txt}")
-                else: 
+                else:
                     relatorio_fixas.append(txt)
             elif ticker in opps_brutas:
-                txt = f"🏭 *{ticker}* (Oportunidade)\n   R$ {preco:.2f}\n   P/L: {pl:.1f} | P/VP: {pvp:.2f} | ROE: {roe*100:.1f}%"
-                relatorio_opps.append(txt)
-            elif ticker in cat_novatas: 
-                txt = f"🏭 *{ticker}* (Nova Garimpada)\n   R$ {preco:.2f}\n   P/L: {pl:.1f} | P/VP: {pvp:.2f} | ROE: {roe*100:.1f}%"
-                relatorio_novatas.append(txt)
-            else: 
-                txt = f"🏭 *{ticker}*\n   R$ {p_v:.2f} ➔ R$ {preco:.2f} {ico}\n   P/L: {pl:.1f} | P/VP: {pvp:.2f} | ROE: {roe*100:.1f}%"
-                relatorio_atualizados.append(txt)
+                relatorio_opps.append(
+                    f"🏭 *{ticker}* (Oportunidade)\n   {faixa_preco}\n   {linha_ind}"
+                )
+            elif ticker in cat_novatas:
+                relatorio_novatas.append(
+                    f"🏭 *{ticker}* (Nova Garimpada)\n   {faixa_preco}\n   {linha_ind}"
+                )
+            else:
+                relatorio_atualizados.append(
+                    f"🏭 *{ticker}*\n   {faixa_preco}\n   {linha_ind}"
+                )
 
             print(f"   ✅ [OK] {ticker} mapeado e processado.")
         except Exception as e:

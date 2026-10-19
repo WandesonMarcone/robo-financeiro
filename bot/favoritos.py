@@ -142,10 +142,9 @@ def _destino_voltar(tipo, admin):
 
 
 def _limite_do_tipo(tipo):
-    """Limite máximo configurado para o tipo (``None`` = sem limite).
+    """Limite máximo de favoritos do tipo (``None`` = sem teto).
 
-    Os valores vêm de ``config.FAVORITOS_LIMITES`` (por tipo, via ambiente).
-    Nenhum número definitivo é assumido aqui.
+    Os valores vêm de ``config.FAVORITOS_LIMITES`` (5 FIIs e 5 ações).
     """
     limites = getattr(config, "FAVORITOS_LIMITES", None) or {}
     return limites.get(tipo)
@@ -368,8 +367,8 @@ def adicionar_favorito(call):
         _responder_callback(call, erro or TEXTO_ACESSO_NEGADO)
         return
 
-    # Limite máximo por tipo (configurável; None = sem limite). Vale para o
-    # usuário comum; o administrador não é limitado nos próprios favoritos.
+    # Teto por tipo (5/5). Vale para o usuário comum; o administrador não é
+    # limitado nos próprios favoritos. Cadastros acima do teto são preservados.
     limite = _limite_do_tipo(tipo)
     if limite is not None and not _e_admin(call):
         try:

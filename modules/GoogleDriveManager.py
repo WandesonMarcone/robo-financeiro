@@ -1,10 +1,19 @@
 import os
 import io
+import logging
 from datetime import datetime
-from io import BytesIO 
+from io import BytesIO
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload
+
+logger = logging.getLogger("robo.drive")
+
+_MIME_PASTA = "application/vnd.google-apps.folder"
+_MIME_ATALHO = "application/vnd.google-apps.shortcut"
+_PASTA_LOGOS_ACOES = "Ações"
+_PASTA_LOGOS_FIIS = "FIIs"
+_LOGOS_FOLDER_PADRAO = "1CwnYl7lq5U49vVr-BZBNC737tfvyyhuW"
 
 class GoogleDriveManager:
     def __init__(self):
@@ -215,43 +224,163 @@ class GoogleDriveManager:
             print(f"❌ Erro ao deletar arquivo: {e}")
             return False
 
-    # ==========================================
-    # OUTROS UPLOADS
-    # ==========================================
-    def salvar_logo_drive(self, ticker: str, conteudo_bytes: bytes) -> str:
+    def _id_pasta_logos(self):
         try:
-            ticker_upper = ticker.upper().strip()
-            nome_arquivo = f"{ticker_upper}.png"
+            import config
+            configurado = getattr(config, "DRIVE_LOGOS_FOLDER_ID", "") or ""
+        except Exception:
+            configurado = ""
+        return (
+            os.environ.get("DRIVE_LOGOS_FOLDER_ID") or configurado or _LOGOS_FOLDER_PADRAO
+        ).strip()
 
-            id_pasta_logos = self._obter_ou_criar_pasta("Logos", parent_id=self.root_folder_id)
+    def _escapar_query(self, valor):
+        return str(valor).replace("\\", "\\\\").replace("'", "\\'")
 
-            query = f"'{id_pasta_logos}' in parents and name = '{nome_arquivo}' and trashed = false"
-            resultados = self.service.files().list(q=query, fields="files(id)").execute().get('files', [])
+    def _listar_drive(self, query, fields="files(id,name,mimeType)"):
+        return (
+            self.service.files()
+            .list(
+                q=query,
+                fields=fields,
+                pageSize=10,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+            )
+            .execute()
+            .get("files", [])
+        )
 
-            if resultados:
-                file_id = resultados[0]['id']
-                return f"https://drive.google.com/uc?export=view&id={file_id}"
+    def resolver_pasta_logos(self, folder_id=None):
+        """Resolve atalho para a pasta real de Ícones B3, sem confundir com Dados Financeiros."""
+        alvo = (folder_id or self._id_pasta_logos()).strip()
+        if not alvo:
+            return None
+        meta = (
+            self.service.files()
+            .get(
+                fileId=alvo,
+                fields="id,name,mimeType,shortcutDetails",
+                supportsAllDrives=True,
+            )
+            .execute()
+        )
+        if meta.get("mimeType") == _MIME_ATALHO:
+            destino = (meta.get("shortcutDetails") or {}).get("targetId")
+            if not destino:
+                logger.warning("Atalho de logos sem destino")
+                return None
+            return self.resolver_pasta_logos(destino)
+        if meta.get("mimeType") != _MIME_PASTA:
+            logger.warning("Destino de logos nao e pasta")
+            return None
+        return {"id": meta.get("id"), "name": meta.get("name")}
 
-            media = MediaIoBaseUpload(BytesIO(conteudo_bytes), mimetype='image/png', resumable=True)
-            file_metadata = {
-                'name': nome_arquivo,
-                'parents': [id_pasta_logos]
-            }
+    def _nome_subpasta_logo(self, tipo):
+        return _PASTA_LOGOS_FIIS if str(tipo or "").lower().startswith("fii") else _PASTA_LOGOS_ACOES
 
-            arquivo_salvo = self.service.files().create(
-                body=file_metadata,
+    def _subpasta_logos(self, tipo, criar=False):
+        raiz = self.resolver_pasta_logos()
+        if not raiz:
+            return None
+        if raiz.get("id") and self.root_folder_id and raiz["id"] == self.root_folder_id:
+            logger.warning("Pasta de logos coincide com DRIVE_ROOT_FOLDER_ID; recusando mistura")
+            return None
+        nome = self._nome_subpasta_logo(tipo)
+        query = (
+            f"name = '{self._escapar_query(nome)}' and mimeType = '{_MIME_PASTA}' "
+            f"and '{raiz['id']}' in parents and trashed = false"
+        )
+        achados = self._listar_drive(query)
+        if achados:
+            return achados[0]["id"]
+        if not criar:
+            return None
+        pasta = (
+            self.service.files()
+            .create(
+                body={
+                    "name": nome,
+                    "mimeType": _MIME_PASTA,
+                    "parents": [raiz["id"]],
+                },
+                fields="id",
+                supportsAllDrives=True,
+            )
+            .execute()
+        )
+        return pasta.get("id")
+
+    def buscar_logo_catalogo(self, ticker: str, tipo: str = ""):
+        """Localiza a logo no catálogo Ícones B3/Ações|FIIs. Não cria pastas."""
+        chave = str(ticker or "").strip().upper()
+        if not chave:
+            return None
+        pasta = self._subpasta_logos(tipo, criar=False)
+        if not pasta:
+            return None
+        for nome in (f"{chave}.png", f"{chave}.jpg", f"{chave}.jpeg", f"{chave}.webp"):
+            query = (
+                f"'{pasta}' in parents and name = '{self._escapar_query(nome)}' "
+                f"and trashed = false"
+            )
+            achados = self._listar_drive(query)
+            if achados:
+                return achados[0]
+        return None
+
+    def baixar_logo_catalogo(self, file_id: str):
+        from googleapiclient.http import MediaIoBaseDownload
+
+        pedido = self.service.files().get_media(
+            fileId=file_id, supportsAllDrives=True
+        )
+        buf = BytesIO()
+        downloader = MediaIoBaseDownload(buf, pedido)
+        concluido = False
+        while not concluido:
+            _, concluido = downloader.next_chunk()
+        return buf.getvalue()
+
+    def salvar_logo_catalogo(self, ticker: str, conteudo_bytes: bytes, tipo: str = "", mime_type: str = "image/png"):
+        """Grava logo nova em Ações/FIIs. Não sobrescreve e não torna pública."""
+        chave = str(ticker or "").strip().upper()
+        if not chave or not conteudo_bytes:
+            return None
+        existente = self.buscar_logo_catalogo(chave, tipo)
+        if existente:
+            return existente
+        pasta = self._subpasta_logos(tipo, criar=True)
+        if not pasta:
+            return None
+        extensao = ".png"
+        mime = mime_type or "image/png"
+        if mime == "image/jpeg":
+            extensao = ".jpg"
+        elif mime == "image/webp":
+            extensao = ".webp"
+        elif mime == "image/gif":
+            extensao = ".gif"
+        nome = f"{chave}{extensao}"
+        media = MediaIoBaseUpload(BytesIO(conteudo_bytes), mimetype=mime, resumable=True)
+        return (
+            self.service.files()
+            .create(
+                body={"name": nome, "parents": [pasta]},
                 media_body=media,
-                fields='id'
-            ).execute()
+                fields="id,name,mimeType",
+                supportsAllDrives=True,
+            )
+            .execute()
+        )
 
-            file_id = arquivo_salvo.get('id')
-            permission = {'type': 'anyone', 'role': 'reader'}
-            self.service.permissions().create(fileId=file_id, body=permission).execute()
-
-            return f"https://drive.google.com/uc?export=view&id={file_id}"
-
-        except Exception as e:
-            print(f"⚠️ Erro ao salvar logo do {ticker} no Drive: {e}")
+    def salvar_logo_drive(self, ticker: str, conteudo_bytes: bytes, tipo: str = "") -> str:
+        """Compatibilidade: grava no catálogo Ícones B3 sem ACL pública."""
+        try:
+            salvo = self.salvar_logo_catalogo(ticker, conteudo_bytes, tipo=tipo)
+            return (salvo or {}).get("id")
+        except Exception:
+            logger.warning("Falha ao salvar logo de %s no Drive", ticker, exc_info=True)
             return None
 
     def upload_pdf(self, caminho_arquivo, nome_arquivo):

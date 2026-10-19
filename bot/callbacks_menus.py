@@ -188,14 +188,21 @@ def callback_geral(call):
             )
 
         elif dados == "menu_ajuda":
+            from bot.telegram_utils import TEXTO_MENU_AJUDA
+
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(
-                InlineKeyboardButton("🧠 Entenda os Comandos", callback_data="ajuda_comandos"),
-                InlineKeyboardButton("🚀 Roadmap de Desenvolvimento", callback_data="ajuda_roadmap"),
-                InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu")
+                InlineKeyboardButton("Comandos", callback_data="ajuda_comandos"),
+                InlineKeyboardButton("Como usar", callback_data="ajuda_roadmap"),
+                InlineKeyboardButton("Voltar ao painel", callback_data="voltar_menu")
             )
-            texto = "ℹ️ *Painel de Ajuda*\n\nProjeto iniciado em Setembro/2025. O sistema está em fase de evolução para um ecossistema completo de análise de ativos."
-            bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            bot.edit_message_text(
+                TEXTO_MENU_AJUDA,
+                chat_id,
+                msg_id,
+                reply_markup=markup,
+                parse_mode="Markdown",
+            )
 
         # =======================================================
         # --- MÓDULO FIIs HIERÁRQUICO DINÂMICO ---

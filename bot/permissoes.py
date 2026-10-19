@@ -28,9 +28,13 @@ NIVEL_ADMIN = 2
 PAPEL_ADMIN = getattr(config, "PAPEL_ADMIN", "admin")
 PAPEL_USUARIO = getattr(config, "PAPEL_USUARIO", "user")
 
-# Ponto de entrada publico do autocadastro. E o unico comando que um usuario
-# ainda nao cadastrado pode executar; todo o restante exige aprovacao.
+# Ponto de entrada publico do autocadastro. Visitantes ainda nao cadastrados
+# tambem podem pedir /help; todo o restante exige aprovacao.
 COMANDO_CADASTRO = "start"
+
+# Ajuda contextual: liberada durante o formulario e para contas ja reconhecidas
+# (pendente, rejeitada, suspensa ou aprovada), sem abrir o restante do menu.
+COMANDO_AJUDA = "help"
 
 # Comando de cancelamento do formulario de autocadastro. So tem efeito enquanto
 # existe um formulario em andamento (ver ``tem_fluxo_cadastro_ativo``).
@@ -231,15 +235,46 @@ def usuario_reconhecido(usuario_id):
         return False
 
 
+def contexto_ajuda(usuario_id):
+    """Resolve ``(papel, status, formulario_ativo)`` para a ajuda contextual.
+
+    Nao concede acesso: so informa o texto. Falha de banco resulta em
+    ``status=None`` (a ajuda continua generica).
+    """
+    formulario_ativo = tem_fluxo_cadastro_ativo(usuario_id)
+    papel = obter_papel(usuario_id)
+    status = None
+    if formulario_ativo:
+        return papel, status, True
+    try:
+        from pipeline_dados.repositorio_usuarios import RepositorioUsuarios
+
+        dto = RepositorioUsuarios().obter_por_telegram_id(usuario_id)
+        if dto is not None:
+            status = dto.status
+    except Exception:
+        logger.debug("Falha ao consultar status para ajuda", exc_info=True)
+    return papel, status, False
+
+
 def e_comando_start(update):
     """True se o update for a mensagem pública de entrada ``/start``."""
+    return _e_comando_publico(update, COMANDO_CADASTRO)
+
+
+def e_comando_ajuda(update):
+    """True se o update for o comando público ``/help``."""
+    return _e_comando_publico(update, COMANDO_AJUDA)
+
+
+def _e_comando_publico(update, comando):
     message = getattr(update, "message", None)
     if message is None:
         return False
     operacao = operacao_de_comando(getattr(message, "text", None))
     if operacao is None:
         return False
-    return operacao[0] == f"comando:/{COMANDO_CADASTRO}"
+    return operacao[0] == f"comando:/{comando}"
 
 
 def tem_fluxo_cadastro_ativo(usuario_id):
@@ -259,8 +294,11 @@ def tem_fluxo_cadastro_ativo(usuario_id):
 
 
 def _e_entrada_publica(nome):
-    """Operações liberadas independentemente de papel (autocadastro público)."""
-    return nome == f"comando:/{COMANDO_CADASTRO}"
+    """Operações liberadas independentemente de papel (autocadastro e ajuda)."""
+    return nome in (
+        f"comando:/{COMANDO_CADASTRO}",
+        f"comando:/{COMANDO_AJUDA}",
+    )
 
 
 def _e_operacao_do_formulario(nome):

@@ -87,22 +87,32 @@ TAMANHO_PAGINA_FAVORITOS = 10
 LIMITE_SEGURANCA_TICKERS = 200
 
 TEXTO_PENDENTE = (
-    "⏳ Solicitação recebida!\n\n"
-    "Seu cadastro está aguardando aprovação do administrador. "
-    "Você será avisado assim que for liberado."
+    "Seu cadastro está aguardando aprovação.\n\n"
+    "Você será informado quando houver uma atualização. "
+    "Não é necessário enviar outros comandos agora.\n\n"
+    "Para ver esta situação de novo, envie /start."
 )
-TEXTO_REJEITADO = "🚫 Seu acesso foi recusado pelo administrador."
-TEXTO_SUSPENSO = "⛔ Seu acesso está suspenso. Fale com o administrador."
+TEXTO_REJEITADO = (
+    "Seu acesso foi recusado pelo administrador.\n\n"
+    "Você não pode usar o menu neste momento. "
+    "Se precisar de uma nova análise, fale com o administrador."
+)
+TEXTO_SUSPENSO = (
+    "Seu acesso está suspenso.\n\n"
+    "O menu permanece bloqueado até o administrador reativar a conta. "
+    "Fale com o administrador se precisar de orientação."
+)
 TEXTO_CADASTRO_INDISPONIVEL = (
-    "⚠️ Não foi possível concluir o cadastro agora. Tente novamente mais tarde."
+    "Não foi possível concluir o cadastro agora. "
+    "Envie /start daqui a pouco para tentar de novo."
 )
 TEXTO_APROVADO = (
-    "✅ Seu acesso foi liberado! Bem-vindo(a).\n\n"
-    "Para acessar o menu principal, toque em *Menu* ou envie /start."
+    "Seu acesso está liberado.\n\n"
+    "Envie /start ou toque em *Menu* para abrir o painel e começar."
 )
 TEXTO_REATIVADO = (
-    "✅ Seu acesso foi reativado.\n\n"
-    "Para acessar o menu principal, toque em *Menu* ou envie /start."
+    "Seu acesso foi reativado.\n\n"
+    "Envie /start ou toque em *Menu* para abrir o painel e começar."
 )
 TEXTO_ESTADO_DESATUALIZADO = (
     "ℹ️ O estado atual desta solicitação não permite esta ação. "
@@ -110,35 +120,51 @@ TEXTO_ESTADO_DESATUALIZADO = (
 )
 
 TEXTO_FORM_NOME = (
-    "📝 *Cadastro de acesso*\n\n"
-    "Vamos registrar sua solicitação. Leva menos de um minuto.\n\n"
-    "1/2 — Informe seu *nome completo*:"
+    "*Robô Financeiro*\n\n"
+    "Acompanhe FIIs e ações pelo Telegram: indicadores, documentos "
+    "e os ativos que você escolher.\n\n"
+    "Este projeto foi iniciado em agosto de 2026.\n\n"
+    "Para usar o sistema, complete o cadastro. Um administrador analisa "
+    "o pedido e avisa você.\n\n"
+    "Próximos passos: nome, e-mail, (opcional) favoritos e confirmação.\n"
+    "Ajuda: envie /help. Para sair sem enviar, envie /cancelar.\n\n"
+    "Você está na etapa de cadastro. Informe seu *nome completo* "
+    "(nome e sobrenome), só com letras e espaços. Envie a mensagem "
+    "para avançar."
 )
 TEXTO_FORM_EMAIL = (
-    "2/2 — Agora informe seu *e-mail* para contato:"
+    "Você está na etapa de cadastro. Informe seu *e-mail* de contato.\n\n"
+    "Usamos o e-mail para identificar o pedido. Digite no formato "
+    "*nome@dominio.com* e envie a mensagem.\n\n"
+    "Se errou o nome, envie /cancelar e depois /start para recomeçar."
 )
 TEXTO_NOME_INVALIDO = (
-    "⚠️ Nome inválido. Informe o *nome completo* (nome e sobrenome), "
-    "usando apenas letras e espaços."
+    "Nome inválido. Informe o *nome completo* (nome e sobrenome), "
+    "usando apenas letras e espaços. Envie de novo para continuar."
 )
 TEXTO_EMAIL_INVALIDO = (
-    "⚠️ E-mail inválido. Informe um endereço no formato *nome@dominio.com*."
+    "E-mail inválido. Informe um endereço no formato *nome@dominio.com* "
+    "e envie de novo para continuar."
 )
 TEXTO_CANCELADO = (
-    "❌ Cadastro cancelado. Quando quiser, envie /start para recomeçar."
+    "Cadastro cancelado. Nenhum pedido foi enviado. "
+    "Quando quiser, envie /start para recomeçar."
 )
 TEXTO_SEM_FAVORITOS = "nenhum selecionado"
-TEXTO_CATALOGO_VAZIO = "📭 Nenhum ativo cadastrado para este tipo no momento."
+TEXTO_CATALOGO_VAZIO = "Nenhum ativo cadastrado para este tipo no momento."
 TEXTO_NADA_PARA_CANCELAR = (
-    "ℹ️ Não há cadastro em andamento. Envie /start para iniciar."
+    "Não há cadastro em andamento. Envie /start para iniciar."
 )
 TEXTO_FORM_EXPIRADO = (
-    "⌛ Este formulário expirou. Envie /start para recomeçar."
+    "Este formulário expirou. Envie /start para recomeçar o cadastro."
 )
 TEXTO_CONFIRMADO = (
-    "✅ Dados confirmados!\n\n"
-    "Sua solicitação foi enviada ao administrador. "
-    "Você será avisado assim que for analisada."
+    "Cadastro concluído. Seu pedido foi enviado ao administrador.\n\n"
+    "Agora o cadastro está aguardando aprovação. "
+    "Você será informado quando houver uma atualização."
+)
+TEXTO_CONFIRMACAO_TEXTO = (
+    "Use os botões acima ou responda *confirmar*, *corrigir* ou *cancelar*."
 )
 
 _RX_NOME = re.compile(r"^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ' .-]*$")
@@ -269,7 +295,7 @@ def _enviar_menu(chat_id, usuario_id=None, from_user=None):
     menu_principal.enviar_painel(chat_id, usuario_id, from_user)
 
 
-def _responder_callback(call, texto):
+def _responder_callback(call, texto=None):
     try:
         bot.answer_callback_query(call.id, text=texto)
     except Exception:
@@ -446,25 +472,20 @@ def _resumo_confirmacao(sessao, chat_id, autor):
     selecionados_fii = ", ".join(sessao.favoritos_fii) or TEXTO_SEM_FAVORITOS
     selecionados_acao = ", ".join(sessao.favoritos_acao) or TEXTO_SEM_FAVORITOS
     linhas = [
-        "🔎 Confira seus dados antes de enviar:",
+        "Confira seus dados antes de enviar.",
         "",
-        f"👤 Nome completo: {sessao.nome}",
-        f"📧 E-mail: {sessao.email}",
-        f"🏢 FIIs escolhidos: {selecionados_fii}",
-        f"📈 Ações escolhidas: {selecionados_acao}",
+        "Você está na etapa de confirmação. Depois do envio, o pedido "
+        "fica aguardando aprovação do administrador.",
         "",
-        "Dados do Telegram que serão anexados:",
-        f"🆔 Telegram User ID: {_id_do_autor(autor)}",
-        f"💬 Chat ID: {chat_id}",
-    ]
-    username = _username_do_autor(autor)
-    linhas.append(
-        f"🔗 Username: @{username}" if username else "🔗 Username: não informado"
-    )
-    linhas += [
+        f"Nome completo: {sessao.nome}",
+        f"E-mail: {sessao.email}",
+        f"FIIs escolhidos: {selecionados_fii}",
+        f"Ações escolhidas: {selecionados_acao}",
         "",
-        "Os favoritos escolhidos só serão ativados após a aprovação do "
-        "administrador.",
+        "Os favoritos são opcionais e só são ativados após a aprovação.",
+        "",
+        "Toque em Confirmar e enviar para concluir, em Corrigir para "
+        "refazer nome e e-mail, ou em Cancelar para sair sem enviar.",
     ]
     return "\n".join(linhas)
 
@@ -473,27 +494,27 @@ def _markup_confirmacao():
     markup = InlineKeyboardMarkup()
     markup.row(
         InlineKeyboardButton(
-            "🏢 Escolher FIIs",
+            "Escolher FIIs",
             callback_data=f"{permissoes.PREFIXO_CALLBACK_FORMULARIO}{ACAO_FORM_FII}",
         ),
         InlineKeyboardButton(
-            "📈 Escolher Ações",
+            "Escolher Ações",
             callback_data=f"{permissoes.PREFIXO_CALLBACK_FORMULARIO}{ACAO_FORM_ACAO}",
         ),
     )
     markup.row(
         InlineKeyboardButton(
-            "✅ Confirmar e enviar",
+            "Confirmar e enviar",
             callback_data=f"{permissoes.PREFIXO_CALLBACK_FORMULARIO}{ACAO_FORM_CONFIRMAR}",
         ),
         InlineKeyboardButton(
-            "✏️ Corrigir",
+            "Corrigir dados",
             callback_data=f"{permissoes.PREFIXO_CALLBACK_FORMULARIO}{ACAO_FORM_CORRIGIR}",
         ),
     )
     markup.row(
         InlineKeyboardButton(
-            "❌ Cancelar",
+            "Cancelar cadastro",
             callback_data=f"{permissoes.PREFIXO_CALLBACK_FORMULARIO}{ACAO_FORM_CANCELAR}",
         )
     )
@@ -551,11 +572,11 @@ def _texto_selecao_favoritos(sessao, tipo, catalogo, pagina):
     limite = _limite_favorito(tipo)
     if not catalogo:
         linhas = [
-            f"⭐ *Escolher {rotulo}*",
+            f"*Escolher {rotulo}*",
             "",
             TEXTO_CATALOGO_VAZIO,
             "",
-            "Toque em ✅ Concluir para voltar à confirmação.",
+            "Toque em Concluir para voltar à confirmação.",
         ]
         return "\n".join(linhas)
     inicio = pagina * TAMANHO_PAGINA_FAVORITOS
@@ -563,14 +584,17 @@ def _texto_selecao_favoritos(sessao, tipo, catalogo, pagina):
         1, (len(catalogo) + TAMANHO_PAGINA_FAVORITOS - 1) // TAMANHO_PAGINA_FAVORITOS
     )
     linhas = [
-        f"⭐ *Escolher {rotulo}*",
+        f"*Escolher {rotulo}*",
+        "",
+        "Toque no ativo para marcar ou desmarcar. Isso é opcional. "
+        "Os favoritos só entram na sua carteira depois da aprovação.",
         "",
         f"Selecionados ({len(selecionados)}"
         + (f"/{limite}" if limite is not None else "")
         + "): "
         + (", ".join(selecionados) if selecionados else TEXTO_SEM_FAVORITOS),
         "",
-        f"Página {pagina + 1}/{total_paginas}. Toque para marcar ou desmarcar.",
+        f"Página {pagina + 1}/{total_paginas}. Toque em Concluir para voltar.",
     ]
     return "\n".join(linhas)
 
@@ -614,7 +638,7 @@ def _markup_selecao_favoritos(sessao, tipo, catalogo, pagina):
     acao_concluir = ACAO_FORM_FII_DONE if tipo == "fii" else ACAO_FORM_ACAO_DONE
     markup.row(
         InlineKeyboardButton(
-            "✅ Concluir", callback_data=f"{prefixo}{acao_concluir}"
+            "Concluir", callback_data=f"{prefixo}{acao_concluir}"
         )
     )
     return markup
@@ -846,8 +870,7 @@ def processar_texto_formulario(message):
         else:
             _enviar_texto(
                 chat_id,
-                "ℹ️ Use os botões acima ou responda *confirmar* / *corrigir* / "
-                "*cancelar*.",
+                TEXTO_CONFIRMACAO_TEXTO,
                 parse_mode="Markdown",
             )
         return

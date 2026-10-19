@@ -195,17 +195,13 @@ Arquivos de topo: `main.py`, `app.py`, `config.py`, `atualizador_documentos.py`
 - `modules/leitor_pdf.py`: extração de texto de PDFs (PyMuPDF + pdfplumber).
 - `modules/module_ia.py`: consultas de IA do bot (`/ia`).
 - `services/dashboard_menus.py`: painéis de oportunidades/favoritos do bot.
-- `services/logo_service.py`: logos dos ativos. Fonte principal é o catálogo
-  público `WandesonMarcone/icones-bolsabr` (pasta plana `icones/`, mais de 3 mil
-  PNGs), consultado por URL `raw.githubusercontent.com` para **não consumir a
-  API de listagem do GitHub**. PETR3 e PETR4 compartilham a identidade visual da
-  Petrobras (`PETR4.png`), sem unir os dados financeiros. Logo.dev (`LOGO_DEV_TOKEN`)
-  é apenas alternativa quando o catálogo não tem a imagem. O `file_id` devolvido
-  pelo Telegram é persistido em `cache_logos_telegram` (ver
-  `pipeline_dados/repositorio_logos.py`), reutilizável após reinícios do bot,
-  associado à empresa para que tickers irmãos compartilhem a mesma logo. Falhas
-  são registradas com expiração (cache negativo). Sem logo, o painel/mensagem
-  degrada para texto sem interromper o bot.
+- `services/logo_service.py`: logos dos ativos. Ordem: Google Drive (pasta
+  `Ícones B3` / `Ações` ou `FIIs`, `DRIVE_LOGOS_FOLDER_ID`) → Logo.dev
+  (`img.logo.dev/ticker:<TICKER>.SA`, `LOGO_DEV_TOKEN`) → texto. Imagens novas
+  do Logo.dev são gravadas no Drive sem ACL pública e sem sobrescrever. PETR3 e
+  PETR4 compartilham a identidade visual da Petrobras, sem unir os dados
+  financeiros. O `file_id` do Telegram é persistido em `cache_logos_telegram`.
+  Falhas usam cache negativo. Sem logo, o painel cai para texto.
 - `pipeline_dados/modelos_catalogo.py`: catálogo central (`empresas`,
   `setores`, `subsetores`, `atividades_economicas`, `empresa_ativos`,
   `empresa_segmentos`, `empresa_atividades`, `sugestoes_catalogo`,
@@ -255,11 +251,11 @@ Operação e funcionalidades opcionais:
 - `PORT` (injetada pelo Render; padrão interno `10000`).
 - `GROQ_API_KEY` (IA; sem ela, apenas as operações de IA falham de forma
   controlada).
-- `LOGO_DEV_TOKEN` (alternativa opcional; GitHub é a fonte principal),
+- `LOGO_DEV_TOKEN` (fallback das logos quando o Drive não tem a imagem),
   `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_BASE_URL`.
-- `LOGO_GITHUB_REPO`, `LOGO_GITHUB_BRANCH`, `LOGO_GITHUB_DIR` (opcionais; padrão
-  `WandesonMarcone/icones-bolsabr`, `main`, `icones`).
-- `CLIENT_ID`, `CLIENT_SECRET`, `REFRESH_TOKEN`, `DRIVE_ROOT_FOLDER_ID`,
+- `CLIENT_ID`, `CLIENT_SECRET`, `REFRESH_TOKEN`, `DRIVE_ROOT_FOLDER_ID`
+  (pasta Dados Financeiros), `DRIVE_LOGOS_FOLDER_ID` (pasta Ícones B3;
+  padrão no código: `1CwnYl7lq5U49vVr-BZBNC737tfvyyhuW`),
   `GOOGLE_CREDS` (Google Drive/Sheets).
 
 Flags de manutenção:

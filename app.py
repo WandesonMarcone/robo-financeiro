@@ -4,6 +4,7 @@ import config
 from modules.utils import conectar_gspread, disparar_alertas
 from modules.scraper_acoes import rodar_garimpo_acoes
 from modules.scraper_fiis import rodar_garimpo_fiis # <--- Importação Corrigida
+from modules.eod_snapshots import tentar_persistir_eod
 
 def executar_auditoria_carteira():
     print("🚀 INICIANDO ARQUITETURA MODULAR DE ALTA PERFORMANCE 🚀")
@@ -42,6 +43,10 @@ def executar_auditoria_carteira():
         disparar_alertas(msg_consolidada)
     else:
         print("✅ Execução concluída com sucesso. (Mercado está estável, sem alertas de distorções).")
+
+    # Persistencia EOD no Neon e opcional e isolada: falha aqui nao desfaz o
+    # Sheets nem altera o agendamento. Desligada sem EOD_SNAPSHOTS=1.
+    tentar_persistir_eod(planilha, agora_dt)
 
 if __name__ == "__main__":
     executar_auditoria_carteira()

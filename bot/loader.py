@@ -63,7 +63,7 @@ class BotAutorizado(telebot.TeleBot):
         """
         if chat_autorizado(update):
             return True
-        if permissoes.e_comando_start(update):
+        if permissoes.e_comando_start(update) or permissoes.e_comando_ajuda(update):
             return True
         usuario_id = permissoes.usuario_id_do_update(update)
         if permissoes.tem_fluxo_cadastro_ativo(usuario_id):

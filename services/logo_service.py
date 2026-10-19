@@ -1,32 +1,8 @@
 """Resolução e cache das logos dos ativos.
 
-O catálogo oficial usado pelo projeto é o repositório público
-``WandesonMarcone/icones-bolsabr`` (fork do catálogo ``icones-b3``), que expõe
-mais de três mil PNGs em uma pasta plana (``icones/<TICKER>.png``).
-
-Decisões importantes deste módulo:
-
-* **Sem listagem pela API do GitHub.** A API de conteúdos/trees é limitada
-  (60 requisições por hora sem autenticação) e ficaria inviável para cada
-  ticker. A resolução usa apenas URLs ``raw.githubusercontent.com``, que não
-  consomem a cota da API;
-* **Mesmo catálogo, sem duplicação.** Nenhuma imagem é copiada para dentro do
-  repositório. PETR3 e PETR4 compartilham a identidade visual da Petrobras
-  (arquivo canônico ``PETR4.png``), mas continuam sendo ativos distintos nos
-  dados financeiros;
-* **Logo.dev é alternativa, não a fonte principal.** Só é consultado quando o
-  repositório não tem a imagem e existe ``LOGO_DEV_TOKEN`` configurado;
-* **Cache em dois níveis.** URLs/imagens (inclusive resultados negativos de
-  rede) ficam em memória. O ``file_id`` devolvido pelo Telegram é persistido no
-  banco (``cache_logos_telegram``) e reutilizado inclusive depois de
-  reinicializações do bot;
-* **Empresa, não ticker, para a logo.** Quando o catálogo central já vinculou
-  PETR3 e PETR4 à mesma empresa, os dois compartilham o ``file_id``. Os dados
-  financeiros continuam separados em ``ativos``;
-* **Falha segura.** Qualquer erro de rede, timeout ou resposta inesperada
-  resulta em ``""`` (sem logo) e nunca interrompe o fluxo do bot. Falhas de
-  envio alimentam um cache negativo com expiração, sem apagar o cache local de
-  URLs.
+Ordem: Google Drive (Ícones B3) → Logo.dev → fallback textual. Identidade
+visual por empresa (PETR3/PETR4). ``file_id`` do Telegram é persistido.
+Falha de logo nunca interrompe o bot. ``LOGO_DEV_TOKEN`` não é logado.
 """
 
 import logging
@@ -42,13 +18,8 @@ from pipeline_dados.repositorio_logos import RepositorioLogos
 
 logger = logging.getLogger("robo.logos")
 
-# Catálogo existente. Pode ser sobrescrito por ambiente sem alterar o código.
-REPO_PADRAO = "WandesonMarcone/icones-bolsabr"
-BRANCH_PADRAO = "main"
-PASTA_PADRAO = "icones"
-
 # Identidade visual compartilhada por classes de ações da mesma empresa. A
-# chave é o ticker consultado e o valor é o arquivo canônico usado para a logo.
+# chave é o ticker consultado e o valor é o ticker canônico usado na logo.
 # Os dados financeiros NÃO são afetados: apenas a busca da imagem é redirecionada.
 IDENTIDADE_VISUAL = {
     "PETR3": "PETR4",
@@ -253,46 +224,18 @@ def registrar_falha_logo(ticker, erro=None, url_origem=None, ttl_segundos=None):
 
 
 # ---------------------------------------------------------------------------
-# Catálogo GitHub / Logo.dev
+# Drive (Ícones B3) → Logo.dev
 # ---------------------------------------------------------------------------
 
-
-def _configuracao_github():
-    repo = os.environ.get("LOGO_GITHUB_REPO", REPO_PADRAO).strip().strip("/")
-    branch = os.environ.get("LOGO_GITHUB_BRANCH", BRANCH_PADRAO).strip()
-    pasta = os.environ.get("LOGO_GITHUB_DIR", PASTA_PADRAO).strip().strip("/")
-    return repo or REPO_PADRAO, branch or BRANCH_PADRAO, pasta
-
-
-def _candidatos_arquivo(ticker):
-    """Nomes de arquivo candidatos, do mais específico ao mais genérico.
-
-    O primeiro candidato é a identidade visual canônica (PETR3 -> PETR4). Em
-    seguida tenta-se o próprio ticker e, por último, a raiz sem dígitos
-    (``KNCR11`` -> ``KNCR``), que existe para alguns ativos no catálogo.
-    """
-    chave = _chave_logo(ticker)
-    candidatos = [chave]
-
-    normalizado = _normalizar_ticker(ticker)
-    if normalizado and normalizado not in candidatos:
-        candidatos.append(normalizado)
-
-    raiz = re.sub(r"\d+$", "", normalizado)
-    if raiz and len(raiz) >= 3 and raiz not in candidatos:
-        candidatos.append(raiz)
-    return candidatos
-
-
-def _urls_github(ticker):
-    repo, branch, pasta = _configuracao_github()
-    base = f"https://raw.githubusercontent.com/{repo}/{branch}"
-    if pasta:
-        base = f"{base}/{pasta}"
-    return [f"{base}/{arquivo}.png" for arquivo in _candidatos_arquivo(ticker)]
+_PNG_ASSINATURA = b"\x89PNG\r\n\x1a\n"
+_JPEG_ASSINATURA = b"\xff\xd8\xff"
+_WEBP_RIFF = b"RIFF"
+_WEBP_WEBP = b"WEBP"
+_GIF_ASSINATURA = b"GIF8"
 
 
 def _url_logo_dev(ticker):
+    """URL existente do Logo.dev (ticker B3 com sufixo ``.SA``)."""
     token = (os.environ.get("LOGO_DEV_TOKEN") or "").strip()
     if not token:
         return None
@@ -305,80 +248,128 @@ def _url_logo_dev(ticker):
     )
 
 
-def _url_disponivel(url, timeout=_TIMEOUT_CURTO):
-    """Confere se a URL devolve uma imagem, sem baixar o conteúdo inteiro."""
+def _url_para_log(url):
+    """Remove querystring (token) antes de qualquer log."""
+    if not url:
+        return ""
+    return str(url).split("?", 1)[0]
+
+
+def _mime_imagem(conteudo, content_type=""):
+    if not conteudo or len(conteudo) < 12:
+        return None
+    if conteudo.startswith(_PNG_ASSINATURA):
+        return "image/png"
+    if conteudo.startswith(_JPEG_ASSINATURA):
+        return "image/jpeg"
+    if conteudo.startswith(_WEBP_RIFF) and conteudo[8:12] == _WEBP_WEBP:
+        return "image/webp"
+    if conteudo.startswith(_GIF_ASSINATURA):
+        return "image/gif"
+    tipo = (content_type or "").split(";", 1)[0].strip().lower()
+    if tipo.startswith("image/") and tipo != "image/svg+xml":
+        return tipo
+    return None
+
+
+def _baixar_imagem_logo_dev(url):
     try:
-        resposta = requests.head(
-            url, headers=_HEADERS, timeout=timeout, allow_redirects=True
+        resposta = requests.get(
+            url, headers=_HEADERS, timeout=5, allow_redirects=True
         )
-        if resposta.status_code == 200:
-            content_type = (resposta.headers.get("Content-Type") or "").lower()
-            # O raw.githubusercontent.com responde image/png; se o servidor não
-            # informar o tipo, aceitamos o 200 para não descartar imagens boas.
-            return not content_type or content_type.startswith("image/")
-        if resposta.status_code in (403, 405):
-            # Alguns proxies/CDNs rejeitam HEAD; faz um GET curto e fecha.
-            resposta = requests.get(
-                url,
-                headers=_HEADERS,
-                timeout=timeout,
-                stream=True,
-                allow_redirects=True,
+        if resposta.status_code != 200:
+            logger.debug(
+                "Logo.dev HTTP %s para %s",
+                resposta.status_code,
+                _url_para_log(url),
             )
-            try:
-                if resposta.status_code == 200:
-                    content_type = (
-                        resposta.headers.get("Content-Type") or ""
-                    ).lower()
-                    return not content_type or content_type.startswith("image/")
-            finally:
-                resposta.close()
+            return None, None
+        mime = _mime_imagem(resposta.content, resposta.headers.get("Content-Type"))
+        if not mime:
+            logger.debug("Logo.dev devolveu conteudo nao-imagem")
+            return None, None
+        return resposta.content, mime
     except requests.RequestException:
-        logger.debug("Logo indisponivel (erro de rede): %s", url)
+        logger.debug("Logo.dev indisponivel (rede): %s", _url_para_log(url))
     except Exception:
-        logger.debug("Falha inesperada ao testar logo: %s", url, exc_info=True)
-    return False
+        logger.debug("Falha inesperada no Logo.dev", exc_info=True)
+    return None, None
 
 
-def _primeira_url_valida(urls):
-    for url in urls:
-        if _url_disponivel(url):
-            return url
-    return ""
-
-
-def _tentar_cache_drive(ticker, url_origem, drive_manager):
-    """Copia opcional para o Drive (mantido por compatibilidade).
-
-    Só é executado quando o chamador passa explicitamente um ``drive_manager``.
-    O painel do bot não usa esse caminho por padrão: o cache preferencial é o
-    ``file_id`` do Telegram.
-    """
-    if drive_manager is None or not url_origem:
+def _resolver_drive_manager(drive_manager):
+    if drive_manager is not None:
+        return drive_manager
+    if not all(
+        (os.environ.get(nome) or "").strip()
+        for nome in ("CLIENT_ID", "CLIENT_SECRET", "REFRESH_TOKEN")
+    ):
         return None
     try:
-        imagem = requests.get(url_origem, headers=_HEADERS, timeout=5)
-        if imagem.status_code != 200:
-            return None
-        return drive_manager.salvar_logo_drive(
-            ticker=_normalizar_ticker(ticker),
-            conteudo_bytes=imagem.content,
-        )
+        from services.dashboard_menus import obter_drive_manager
+
+        return obter_drive_manager()
+    except Exception:
+        logger.debug("Drive manager indisponivel para logos", exc_info=True)
+        return None
+
+
+def _media_drive(arquivo):
+    file_id = (arquivo or {}).get("id")
+    if not file_id:
+        return ""
+    return f"drive:{file_id}"
+
+
+def _consultar_drive(ticker, tipo, drive_manager):
+    if drive_manager is None:
+        return ""
+    try:
+        arquivo = drive_manager.buscar_logo_catalogo(ticker, tipo)
     except Exception:
         logger.warning(
-            "Falha no cache opt-in de logo no Drive (%s)",
-            _normalizar_ticker(ticker),
+            "Falha ao consultar catalogo de logos no Drive (%s)",
+            ticker,
             exc_info=True,
         )
+        return ""
+    return _media_drive(arquivo)
+
+
+def _salvar_no_drive(ticker, tipo, conteudo, mime, drive_manager):
+    if drive_manager is None or not conteudo:
+        return ""
+    try:
+        salvo = drive_manager.salvar_logo_catalogo(
+            ticker, conteudo, tipo=tipo, mime_type=mime or "image/png"
+        )
+        return _media_drive(salvo)
+    except Exception:
+        logger.warning(
+            "Falha ao gravar logo de %s no Drive", ticker, exc_info=True
+        )
+        return ""
+
+
+def obter_bytes_logo_drive(media, drive_manager=None):
+    """Baixa bytes de uma mídia ``drive:<id>`` para envio no Telegram."""
+    if not str(media or "").startswith("drive:"):
+        return None
+    file_id = str(media)[6:]
+    gerente = _resolver_drive_manager(drive_manager)
+    if gerente is None or not file_id:
+        return None
+    try:
+        return gerente.baixar_logo_catalogo(file_id)
+    except Exception:
+        logger.warning("Falha ao baixar logo do Drive", exc_info=True)
         return None
 
 
 def obter_link_logo(ticker: str, tipo: str = "", drive_manager=None) -> str:
-    """Retorna a URL da logo do ativo (ou ``""`` quando não existe).
+    """Resolve a mídia da logo (Drive, Logo.dev ou ``""``).
 
-    ``tipo`` é aceito por compatibilidade com os chamadores atuais, mas o
-    catálogo é plano e não separa FIIs de ações. O parâmetro ``drive_manager`` é
-    opcional e só ativa a cópia para o Drive quando fornecido explicitamente.
+    Prioridade: catálogo Ícones B3 no Drive; se ausente, Logo.dev (e grava no
+    Drive sem sobrescrever). Sem imagem válida, devolve vazio (texto).
     """
     chave = _chave_logo(ticker)
     if not chave:
@@ -388,52 +379,45 @@ def obter_link_logo(ticker: str, tipo: str = "", drive_manager=None) -> str:
         if _cache_valido(chave):
             return _CACHE_LOGOS.get(chave, "")
 
-    url = _primeira_url_valida(_urls_github(ticker))
+    gerente = drive_manager if drive_manager is not None else _resolver_drive_manager(None)
+    url = _consultar_drive(chave, tipo, gerente)
 
     if not url:
         url_logo_dev = _url_logo_dev(ticker)
-        if url_logo_dev and _url_disponivel(url_logo_dev):
-            url = url_logo_dev
-
-    if url and drive_manager is not None:
-        link_drive = _tentar_cache_drive(ticker, url, drive_manager)
-        if link_drive:
-            url = link_drive
+        if url_logo_dev:
+            conteudo, mime = _baixar_imagem_logo_dev(url_logo_dev)
+            if conteudo:
+                gravado = _salvar_no_drive(chave, tipo, conteudo, mime, gerente)
+                url = gravado or url_logo_dev
 
     _guardar_cache(chave, url)
     if url:
-        logger.debug("Logo resolvida para %s: %s", chave, url)
+        logger.debug("Logo resolvida para %s", chave)
     else:
         logger.debug("Sem logo para %s; usando fallback textual", chave)
     return url
 
 
 def obter_media_logo(ticker: str, tipo: str = "", drive_manager=None) -> str:
-    """Mídia pronta para o Telegram: ``file_id`` em cache ou URL da logo.
-
-    O retorno vazio significa "sem logo" e deve ser tratado pelo chamador com
-    um painel/mensagem apenas textual.
-    """
+    """Mídia pronta para o Telegram: ``file_id`` em cache ou URL/Drive da logo."""
     file_id = obter_file_id_logo(ticker)
     if file_id:
         return file_id
     return obter_link_logo(ticker, tipo, drive_manager=drive_manager)
 
 
-def obter_media_logo_rapida(ticker: str) -> str:
-    """Mídia para mensagens operacionais sem pré-verificação de rede.
-
-    Usa o ``file_id`` persistido ou a primeira URL do catálogo. Se houver cache
-    negativo válido, retorna vazio para o chamador cair imediatamente na
-    mensagem textual. Se a imagem não existir, o envio falha e o chamador
-    registra a falha (``registrar_falha_logo``) para expirar a tentativa.
-    """
+def obter_media_logo_rapida(ticker: str, tipo: str = "") -> str:
+    """Mídia operacional: ``file_id``, cache Drive ou URL Logo.dev sem GET extra."""
     file_id = obter_file_id_logo(ticker)
     if file_id:
         return file_id
     chave = _chave_logo(ticker)
     with _LOCK:
-        if _cache_valido(chave) and not _CACHE_LOGOS.get(chave):
-            return ""
-    urls = _urls_github(ticker)
-    return urls[0] if urls else ""
+        if _cache_valido(chave):
+            return _CACHE_LOGOS.get(chave, "")
+    gerente = _resolver_drive_manager(None)
+    no_drive = _consultar_drive(chave, tipo, gerente)
+    if no_drive:
+        _guardar_cache(chave, no_drive)
+        return no_drive
+    return _url_logo_dev(ticker) or ""

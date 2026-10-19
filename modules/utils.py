@@ -1,5 +1,6 @@
 import os
 import json
+import math
 import gspread
 import pandas as pd
 import pytz
@@ -10,6 +11,10 @@ import time
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+_SENTINELAS_AUSENCIA = frozenset(
+    {"", "-", "--", "n/d", "nd", "n/a", "s/n", "none", "nan"}
+)
 
 def get_request_with_retry(url, headers):
     """Uma requisição blindada que tenta 3 vezes antes de desistir."""
@@ -25,16 +30,53 @@ def get_request_with_retry(url, headers):
     return session.get(url, headers=headers, timeout=15)
 
 
+def converter_numero(valor):
+    """Converte valor de fonte para float, preservando zero legitimo.
+
+    Ausencia, sentinela, None, texto invalido, NaN e infinitos viram
+    ``float('nan')``. Nunca devolve 0.0 como substituto de dado faltante.
+    """
+    if valor is None or isinstance(valor, bool):
+        return float("nan")
+    try:
+        if pd.isna(valor):
+            return float("nan")
+    except (TypeError, ValueError):
+        pass
+    if isinstance(valor, (int, float)):
+        numero = float(valor)
+        return numero if math.isfinite(numero) else float("nan")
+
+    texto = str(valor).strip().lower().replace("r$", "").strip()
+    if texto in _SENTINELAS_AUSENCIA:
+        return float("nan")
+
+    eh_percentual = "%" in texto
+    texto = texto.replace("%", "").replace(" ", "")
+    if not texto:
+        return float("nan")
+    if "," in texto:
+        texto = texto.replace(".", "").replace(",", ".")
+    try:
+        numero = float(texto)
+    except (TypeError, ValueError):
+        return float("nan")
+    if not math.isfinite(numero):
+        return float("nan")
+    return numero / 100 if eh_percentual else numero
+
+
+def eh_valido(valor):
+    """True somente para numero finito. Zero e valido; NaN/None/bool nao."""
+    return (
+        isinstance(valor, (int, float))
+        and not isinstance(valor, bool)
+        and math.isfinite(valor)
+    )
+
+
 def formatar(val):
-    try: 
-        if isinstance(val, str):
-            is_percent = '%' in val 
-            val = val.replace('%', '').replace('.', '').replace(',', '.')
-            numero = float(val)
-            return numero / 100 if is_percent else numero
-        return float(val) if val is not None and not pd.isna(val) else 0.0
-    except: 
-        return 0.0
+    return converter_numero(val)
 
 def disparar_alertas(msg):
     """Garante a entrega da notificação via Telegram."""

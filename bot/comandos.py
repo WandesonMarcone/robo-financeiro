@@ -44,13 +44,15 @@ def enviar_ajuda(message):
     """
     autor = getattr(message, "from_user", None)
     autor_id = getattr(autor, "id", None)
-    papel = permissoes.obter_papel(autor_id)
+    papel, status, formulario_ativo = permissoes.contexto_ajuda(autor_id)
     markup = InlineKeyboardMarkup().add(
-        InlineKeyboardButton("🔙 Abrir o menu", callback_data="voltar_menu")
+        InlineKeyboardButton("Abrir o menu", callback_data="voltar_menu")
     )
     bot.send_message(
         message.chat.id,
-        montar_guia_comandos(papel),
+        montar_guia_comandos(
+            papel, status=status, formulario_ativo=formulario_ativo
+        ),
         parse_mode="Markdown",
         reply_markup=markup,
     )

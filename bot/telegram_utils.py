@@ -15,11 +15,11 @@ import config
 logger = logging.getLogger("robo.telegram")
 
 TEXTO_MENU_INICIAL = (
-    "🤖 *Terminal Institucional* 🤖\n"
-    "Selecione o módulo de análise abaixo:"
+    "*Robô Financeiro*\n"
+    "Escolha uma opção no menu para começar."
 )
 
-TITULO_PAINEL = "🛡️ *ROBÔ FINANCEIRO | ESTRATÉGIA FARDADA*"
+TITULO_PAINEL = "*Robô Financeiro*"
 
 NOME_PADRAO = "investidor(a)"
 TEXTO_SEM_FAVORITOS = (
@@ -90,7 +90,9 @@ def montar_painel_inicial(nome, favoritos_fii=None, favoritos_acao=None, incluir
     linhas = [
         TITULO_PAINEL,
         "",
-        f"Olá, {escapar_markdown(nome_limpo)}! 👋",
+        f"Olá, {escapar_markdown(nome_limpo)}.",
+        "",
+        "Seu acesso está liberado. Escolha uma opção no menu para começar.",
         "",
         "Aqui está seu painel de investimentos.",
         "",
@@ -126,8 +128,8 @@ def montar_painel_inicial(nome, favoritos_fii=None, favoritos_acao=None, incluir
         InlineKeyboardButton("⭐ Gerenciar favoritos", callback_data="gerenciar_favoritos")
     )
     markup.row(
-        InlineKeyboardButton("⚙️ Minha conta", callback_data="minha_conta"),
-        InlineKeyboardButton("❓ Ajuda", callback_data="menu_ajuda"),
+        InlineKeyboardButton("Minha conta", callback_data="minha_conta"),
+        InlineKeyboardButton("Ajuda", callback_data="menu_ajuda"),
     )
     return texto, markup
 
@@ -137,9 +139,9 @@ def _montar_painel_admin(nome_limpo, itens_fii, itens_acao):
     linhas = [
         TITULO_PAINEL,
         "",
-        f"Olá, {escapar_markdown(nome_limpo)}! 👋",
+        f"Olá, {escapar_markdown(nome_limpo)}.",
         "",
-        "🔧 *PAINEL ADMINISTRATIVO*",
+        "*Painel administrativo*",
         "",
         "📌 *AÇÕES ADMINISTRATIVAS*",
         "• Central de Controles",
@@ -183,8 +185,8 @@ def _montar_painel_admin(nome_limpo, itens_fii, itens_acao):
         )
     )
     markup.row(
-        InlineKeyboardButton("⚙️ Minha conta", callback_data="minha_conta"),
-        InlineKeyboardButton("❓ Ajuda", callback_data="menu_ajuda"),
+        InlineKeyboardButton("Minha conta", callback_data="minha_conta"),
+        InlineKeyboardButton("Ajuda", callback_data="menu_ajuda"),
     )
     return texto, markup
 
@@ -265,11 +267,12 @@ def construir_menu_inicial(incluir_admin=False):
 # verdade da Ajuda) para não divergir entre o comando ``/help`` e o callback
 # ``ajuda_comandos``.
 COMANDOS_AJUDA_USUARIO = (
-    ("/menu", "Abre o painel principal."),
-    ("/start", "Inicia ou reinicia seu cadastro."),
-    ("/relatorios", "Últimos documentos capturados."),
+    ("/start", "Abre o painel, se o acesso estiver liberado, ou continua o cadastro."),
+    ("/menu", "Abre o painel principal (conta aprovada)."),
+    ("/relatorios", "Últimos documentos dos seus ativos."),
     ("/docs", "Atalho para os últimos documentos."),
-    ("/help", "Mostra este guia de comandos."),
+    ("/help", "Mostra esta ajuda."),
+    ("/cancelar", "Cancela um cadastro em andamento, sem enviar pedido."),
 )
 
 # Comandos exclusivos do administrador. Só aparecem para quem tem o papel
@@ -290,38 +293,108 @@ COMANDOS_AJUDA_ADMIN = (
 )
 
 
-def montar_guia_comandos(papel=None):
-    """Monta o texto do guia de comandos, restrito ao papel do usuário.
+def montar_guia_comandos(papel=None, status=None, formulario_ativo=False):
+    """Monta o texto do guia de comandos, restrito ao papel e ao estado.
 
     Usuários comuns veem apenas os comandos que realmente podem executar; a
     seção administrativa só é incluída quando ``papel`` é o de administrador.
     Função pura (sem banco/serviços) para poder ser testada isoladamente.
     """
-    linhas = ["ℹ️ *Guia de Comandos*", "", "🔹 *Consulta*"]
+    linhas = ["*Ajuda*", "", TEXTO_SOBRE_O_PROJETO, ""]
+    if formulario_ativo:
+        linhas += [
+            "Você está na etapa de cadastro.",
+            "Informe o dado pedido, use os botões da conversa ou envie "
+            "/cancelar para sair sem enviar o pedido.",
+            "Depois do envio, um administrador analisa o pedido.",
+            "",
+        ]
+    elif status == "pendente":
+        linhas += [
+            "Seu cadastro está aguardando aprovação.",
+            "Você será informado quando houver uma atualização.",
+            "Envie /start para ver esta situação de novo.",
+            "",
+        ]
+    elif status == "rejeitado":
+        linhas += [
+            "Seu acesso foi recusado. O menu permanece bloqueado.",
+            "Fale com o administrador se precisar de uma nova análise.",
+            "",
+        ]
+    elif status == "suspenso":
+        linhas += [
+            "Seu acesso está suspenso. O menu permanece bloqueado.",
+            "Fale com o administrador se precisar de orientação.",
+            "",
+        ]
+    elif papel == getattr(config, "PAPEL_ADMIN", "admin"):
+        linhas += [
+            "Seu acesso de administrador está ativo.",
+            "Use o painel ou os comandos abaixo.",
+            "",
+        ]
+    elif papel:
+        linhas += [
+            "Seu acesso está liberado. Escolha uma opção no menu para começar.",
+            "Envie /menu para voltar ao painel.",
+            "",
+        ]
+    else:
+        linhas += [
+            "Para começar, envie /start e complete o cadastro.",
+            "Um administrador analisa o pedido antes de liberar o menu.",
+            "",
+        ]
+    linhas += ["*Comandos*"]
     for comando, descricao in COMANDOS_AJUDA_USUARIO:
         linhas.append(f"`{comando}` — {descricao}")
     if papel == getattr(config, "PAPEL_ADMIN", "admin"):
-        linhas += ["", "🔧 *Administração (somente admin)*"]
+        linhas += ["", "*Administração (somente admin)*"]
         for comando, descricao in COMANDOS_AJUDA_ADMIN:
             linhas.append(f"`{comando}` — {descricao}")
     linhas += [
         "",
-        "Dica: use os menus dinâmicos para navegar pelos setores sem digitar comandos.",
+        "No painel, cada botão abre a função indicada no nome. "
+        "Alertas personalizados por usuário ainda não estão disponíveis.",
     ]
     return "\n".join(linhas)
 
 
+TEXTO_SOBRE_O_PROJETO = (
+    "O Robô Financeiro acompanha FIIs e ações pelo Telegram: indicadores, "
+    "documentos e os ativos que você escolher. "
+    "Este projeto foi iniciado em agosto de 2026."
+)
+
+TEXTO_MENU_AJUDA = (
+    "*Ajuda*\n\n"
+    f"{TEXTO_SOBRE_O_PROJETO}\n\n"
+    "Como usar:\n"
+    "• Cadastro: envie /start, informe nome e e-mail e confirme o pedido.\n"
+    "• Depois da aprovação, envie /start ou /menu para abrir o painel.\n"
+    "• No painel, toque no botão da ação que deseja fazer.\n"
+    "• Para cancelar um cadastro em andamento, envie /cancelar.\n\n"
+    "Se um botão não funcionar, envie /menu. "
+    "Se o cadastro estiver pendente, aguarde o aviso do administrador."
+)
+
+
 TEXTO_CALLBACK_DESCONHECIDO = (
-    "⚠️ Este botão não é mais válido. Envie /menu para recomeçar."
+    "Este botão não é mais válido. Envie /menu para voltar ao painel, "
+    "ou /start se ainda estiver no cadastro."
 )
 TEXTO_ACESSO_NEGADO = (
-    "⛔ Você não tem permissão para executar esta operação."
+    "Você não tem permissão para esta operação. "
+    "Se ainda não concluiu o cadastro, envie /start. "
+    "Se o pedido está em análise, aguarde a aprovação. "
+    "Com o acesso liberado, envie /menu."
 )
 TEXTO_FALHA_COMANDO = (
-    "❌ Não foi possível concluir o comando. Tente novamente ou envie /menu."
+    "Não foi possível concluir o comando. Tente novamente ou envie /menu."
 )
 TEXTO_FALHA_CALLBACK = (
-    "⚠️ Erro ao processar este botão. Envie /menu para recomeçar."
+    "Não foi possível processar este botão. Envie /menu para voltar ao painel."
 )
 
 

@@ -45,6 +45,13 @@ CHATS_AUTORIZADOS = list(
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY") # CONFIG IA(GROQ)
 DATABASE_URL = os.environ.get("DATABASE_URL") # CONFIG BASE DE DADOS
 
+# Pasta do catálogo de logos ("Ícones B3"), distinta de DRIVE_ROOT_FOLDER_ID
+# (Dados Financeiros). O ID informado pelo usuário é o padrão; pode ser
+# sobrescrito por DRIVE_LOGOS_FOLDER_ID sem alterar a raiz documental.
+DRIVE_LOGOS_FOLDER_ID = (
+    os.environ.get("DRIVE_LOGOS_FOLDER_ID") or "1CwnYl7lq5U49vVr-BZBNC737tfvyyhuW"
+).strip()
+
 # ==========================================
 # PREFERÊNCIAS DO MENU: ⭐ MEUS FAVORITOS
 # ==========================================
@@ -58,30 +65,14 @@ FAVORITOS = {
 }
 
 
-def _limite_inteiro(nome_env):
-    """Lê um limite positivo de variável de ambiente (ou ``None`` = sem limite).
-
-    Valores vazios, não numéricos ou menores que 1 são tratados como "sem
-    limite" para não bloquear o cadastro por erro de configuração.
-    """
-    valor = os.environ.get(nome_env)
-    if valor is None or not str(valor).strip():
-        return None
-    try:
-        numero = int(str(valor).strip())
-    except (TypeError, ValueError):
-        return None
-    return numero if numero > 0 else None
-
-
-# Limites máximos de favoritos por usuário, SEPARADOS por tipo. ``None`` significa
-# sem limite. São apenas tetos de quantidade: não restringem quais ativos podem
-# ser acompanhados (isso continua dependendo do catálogo da tabela ``ativos``).
-# Ajustáveis por ambiente (FAVORITOS_LIMITE_FII / FAVORITOS_LIMITE_ACAO) sem
-# alterar código. O valor definitivo é uma decisão de produto pendente.
+# Limites máximos de favoritos por usuário, SEPARADOS por tipo. São apenas tetos
+# de quantidade: não restringem quais ativos podem ser acompanhados (isso
+# continua dependendo do catálogo da tabela ``ativos``). Cadastros já existentes
+# acima do teto não são removidos; novas adições e a seleção no cadastro não
+# ultrapassam 5 por tipo.
 FAVORITOS_LIMITES = {
-    "fii": _limite_inteiro("FAVORITOS_LIMITE_FII"),
-    "acao": _limite_inteiro("FAVORITOS_LIMITE_ACAO"),
+    "fii": 5,
+    "acao": 5,
 }
 
 

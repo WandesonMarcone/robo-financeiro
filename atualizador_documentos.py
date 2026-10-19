@@ -8,19 +8,16 @@ import unicodedata
 from datetime import datetime, timedelta
 import config
 from fnet_scraper import FnetDownloader
-from modules.GoogleDriveManager import GoogleDriveManager
 from modules.utils import conectar_gspread
 from services.logo_service import (
     invalidar_file_id_logo,
+    obter_bytes_logo_drive,
     obter_media_logo_rapida,
     registrar_falha_logo,
     registrar_file_id_logo,
 )
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from pipeline_dados.conexao import obter_session_factory
-import PyPDF2
-import fitz  # 👈 AQUI ESTÁ A BIBLIOTECA DA IA (PyMuPDF)
-from groq import Groq
 from config import MAPA_ISCAS_MASTER, TIPOS_DOC_FII
 
 logger = logging.getLogger("robo.documentos")
@@ -47,6 +44,8 @@ def obter_cliente_groq():
             raise IAIndisponivelError(
                 "GROQ_API_KEY ausente: a operacao de IA nao pode ser executada."
             )
+        from groq import Groq
+
         _cliente_groq = Groq(api_key=chave)
     return _cliente_groq
 
@@ -183,14 +182,24 @@ def _enviar_foto_telegram(chat_id, ticker, foto, legenda, teclado=None, parse_mo
     if not token:
         logger.warning("TELEGRAM_BOT_TOKEN ausente; foto nao enviada.")
         return False
-    payload = {"chat_id": chat_id, "photo": foto, "caption": legenda}
+    payload = {"chat_id": chat_id, "caption": legenda}
     if parse_mode:
         payload["parse_mode"] = parse_mode
     if teclado:
         payload["reply_markup"] = json.dumps(teclado)
     url = f"https://api.telegram.org/bot{token}/sendPhoto"
+    arquivos = None
+    if str(foto).startswith("drive:"):
+        conteudo = obter_bytes_logo_drive(foto)
+        if not conteudo:
+            return False
+        arquivos = {"photo": ("logo.png", conteudo, "image/png")}
+    else:
+        payload["photo"] = foto
     try:
-        resposta = requests.post(url, data=payload, timeout=15)
+        resposta = requests.post(
+            url, data=payload, files=arquivos, timeout=15
+        )
         if resposta.status_code != 200:
             logger.warning(
                 "Telegram recusou foto (status %s); usando fallback textual.",
@@ -202,7 +211,7 @@ def _enviar_foto_telegram(chat_id, ticker, foto, legenda, teclado=None, parse_mo
                     erro=f"HTTP {resposta.status_code}",
                     url_origem=foto,
                 )
-            else:
+            elif not str(foto).startswith("drive:"):
                 invalidar_file_id_logo(
                     ticker, erro=f"HTTP {resposta.status_code}"
                 )
@@ -221,7 +230,7 @@ def _enviar_foto_telegram(chat_id, ticker, foto, legenda, teclado=None, parse_mo
         )
         if str(foto).startswith(("http://", "https://")):
             registrar_falha_logo(ticker, erro=type(e).__name__, url_origem=foto)
-        else:
+        elif not str(foto).startswith("drive:"):
             invalidar_file_id_logo(ticker, erro=type(e).__name__)
         return False
 
@@ -383,6 +392,8 @@ def rotina_de_coleta_b3():
 # CAMADA 2 E 3: PROCESSAMENTO E REVISÃO
 # ==========================================
 def rotina_processar_pendentes():
+    from modules.GoogleDriveManager import GoogleDriveManager
+
     b3 = FnetDownloader()
     drive_manager = GoogleDriveManager()
 
@@ -419,6 +430,8 @@ def rotina_processar_pendentes():
 
             texto_pdf = ""
             try:
+                import PyPDF2
+
                 reader = PyPDF2.PdfReader(temp_filename)
                 if len(reader.pages) > 0: 
                     texto_pdf = reader.pages[0].extract_text() or ""
@@ -512,6 +525,8 @@ def rotina_de_atualizacao_em_massa():
 
 def rotina_processar_acoes():
     """Esteira exclusiva da Inteligência Artificial para documentos da CVM"""
+    from modules.GoogleDriveManager import GoogleDriveManager
+
     drive_manager = GoogleDriveManager()
 
     # 1. 🟢 SESSÃO CURTA PARA A FILA
@@ -556,6 +571,8 @@ def rotina_processar_acoes():
 
             texto_pdf = ""
             try:
+                import PyPDF2
+
                 reader = PyPDF2.PdfReader(temp_filename)
                 if len(reader.pages) > 0: 
                     texto_pdf = reader.pages[0].extract_text() or ""

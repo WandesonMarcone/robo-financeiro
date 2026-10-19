@@ -1,5 +1,4 @@
 import io
-import math
 import random
 import requests
 import pandas as pd
@@ -8,52 +7,13 @@ from datetime import datetime
 import pytz
 import config
 import json
-from modules.utils import precisa_atualizar, get_request_with_retry
+from modules.utils import (
+    precisa_atualizar,
+    get_request_with_retry,
+    converter_numero,
+    eh_valido,
+)
 from bs4 import BeautifulSoup
-
-# Sentinelas de ausência usadas pelas fontes de dados (Fundamentus usa "-").
-_SENTINELAS_AUSENCIA = {"", "-", "--", "n/d", "nd", "n/a", "s/n", "none", "nan"}
-
-
-def converter_numero(valor):
-    """Converte um valor de fonte para float preservando zero legítimo.
-
-    Retorna ``float('nan')`` para valores ausentes, sentinelas (``-``, ``N/D``),
-    ``None``, texto não numérico, ``NaN`` ou infinitos. Um ``0`` real é mantido.
-
-    Aceita formatos brasileiros (``1.234,56``) e percentuais (``11,34%`` -> 0.1134).
-    """
-    if valor is None or isinstance(valor, bool):
-        return float("nan")
-    if isinstance(valor, (int, float)):
-        num = float(valor)
-        return num if math.isfinite(num) else float("nan")
-
-    texto = str(valor).strip().lower().replace("r$", "").strip()
-    if texto in _SENTINELAS_AUSENCIA:
-        return float("nan")
-
-    eh_percentual = "%" in texto
-    texto = texto.replace("%", "").replace(" ", "")
-    if "," in texto:
-        # Formato pt-BR: ponto é separador de milhar, vírgula é decimal.
-        texto = texto.replace(".", "").replace(",", ".")
-    try:
-        num = float(texto)
-    except (TypeError, ValueError):
-        return float("nan")
-    if not math.isfinite(num):
-        return float("nan")
-    return num / 100 if eh_percentual else num
-
-
-def eh_valido(valor):
-    """Indica se o valor é um número finito (zero é considerado válido)."""
-    return (
-        isinstance(valor, (int, float))
-        and not isinstance(valor, bool)
-        and math.isfinite(valor)
-    )
 
 def classificar_fii_e_emoji(setor, ticker):
     """
@@ -77,17 +37,18 @@ def classificar_fii_e_emoji(setor, ticker):
     return "Tijolo", "🧱"
 
 def buscar_dados_profundos_fii(ticker):
-    """
-    Busca 1: O Setor e Porcentagem exata via API JSON (StatusInvest)
-    Busca 2: A Vacância, Imóveis e Inquilinos via HTML
+    """StatusInvest: segmento (JSON) e vacância/imóveis/inquilinos (HTML).
+
+    HTTP 403 (Cloudflare) e demais não-200 são indisponibilidade: nenhum
+    indicador é inventado. Ausência fica em ``None``/NaN, não em zero.
     """
     resultado = {
-        "imoveis_reais": 0,
-        "vacancia_real": 0.0,
-        "principais_inquilinos": "Não informado / Não aplicável",
-        "segmento_real": None
+        "imoveis_reais": None,
+        "vacancia_real": float("nan"),
+        "principais_inquilinos": None,
+        "segmento_real": None,
     }
-    
+
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
@@ -99,7 +60,7 @@ def buscar_dados_profundos_fii(ticker):
         url_json = f"https://statusinvest.com.br/fii/portfolio-segment-chart?ticker={ticker.lower()}"
         headers_json = headers.copy()
         headers_json['X-Requested-With'] = 'XMLHttpRequest'
-        
+
         resp_json = requests.get(url_json, headers=headers_json, timeout=10)
         if resp_json.status_code == 200:
             dados_json = resp_json.json()
@@ -108,6 +69,10 @@ def buscar_dados_profundos_fii(ticker):
                 lista_seg = [f"{d.get('name')} ({d.get('value')}%)" for d in dados_json if 'name' in d and d.get('value') > 0]
                 if lista_seg:
                     resultado["segmento_real"] = " / ".join(lista_seg)
+        elif resp_json.status_code == 403:
+            print(f"StatusInvest JSON 403 (Cloudflare) para {ticker}: fonte indisponível")
+        else:
+            print(f"StatusInvest JSON HTTP {resp_json.status_code} para {ticker}: fonte indisponível")
     except Exception as e:
         print(f"Aviso JSON para {ticker}: {e}")
 
@@ -169,8 +134,13 @@ def buscar_dados_profundos_fii(ticker):
 
                         if lista_inquilinos:
                             resultado["principais_inquilinos"] = ", ".join(lista_inquilinos)
-                        break 
-                        
+                        break
+
+        elif resp_html.status_code == 403:
+            print(f"StatusInvest HTML 403 (Cloudflare) para {ticker}: fonte indisponível")
+        else:
+            print(f"StatusInvest HTML HTTP {resp_html.status_code} para {ticker}: fonte indisponível")
+
     except Exception as e:
         print(f"Erro HTML para {ticker}: {e}")
 
@@ -304,16 +274,15 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             else:
                 tipo, emoji = None, "🏢"
 
-            if eh_valido(vacancia_status) and vacancia_status > 0:
+            if eh_valido(vacancia_status):
                 vacancia = vacancia_status
             else:
                 vacancia = vacancia_fund
 
-            if eh_valido(imoveis_status) and imoveis_status > 0:
+            if eh_valido(imoveis_status):
                 qtd_imoveis = imoveis_status
 
-            if (isinstance(inquilinos_status, str) and inquilinos_status.strip()
-                    and inquilinos_status != "Não informado / Não aplicável"):
+            if (isinstance(inquilinos_status, str) and inquilinos_status.strip()):
                 inquilinos_planilha = inquilinos_status
             else:
                 inquilinos_planilha = None
