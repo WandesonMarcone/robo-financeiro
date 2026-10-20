@@ -357,16 +357,64 @@ def rotina_de_coleta_b3(dias=60, session=None, capturar_tudo=None):
 # ==========================================
 # CAMADA 2 E 3: PROCESSAMENTO E REVISÃO
 # ==========================================
+class ResultadoProcessamento:
+    """Contagens da esteira Drive/IA. Nao afirma sucesso se a fila estiver vazia."""
+
+    def __init__(self, status_fila="PENDENTE"):
+        self.status_fila = status_fila
+        self.fila = 0
+        self.processados = 0
+        self.salvo_drive = 0
+        self.revisao = 0
+        self.erros = 0
+        self.notificados = 0
+        self.erro = None
+
+    def mensagem_telegram(self):
+        etiqueta = self.status_fila
+        if self.erro:
+            return (
+                f"Processamento da fila ({etiqueta}): falha de processamento "
+                f"({self.erro}). Processados: {self.processados}."
+            )
+        if self.fila == 0:
+            return (
+                f"Processamento da fila ({etiqueta}): nenhum documento "
+                f"{etiqueta}. Nada processado."
+            )
+        return (
+            f"Processamento da fila ({etiqueta}).\n"
+            f"Na fila: {self.fila}\n"
+            f"Processados: {self.processados}\n"
+            f"Salvos no Drive: {self.salvo_drive}\n"
+            f"Enviados para revisao: {self.revisao}\n"
+            f"Erros: {self.erros}\n"
+            f"Seguidores notificados: {self.notificados}"
+        )
+
+
 def rotina_processar_pendentes():
+    resultado = ResultadoProcessamento("PENDENTE")
+    session_fila = SessionDB()
+    try:
+        pendentes_ids = [
+            doc.id
+            for doc in session_fila.query(DocumentosQualitativos.id).filter(
+                DocumentosQualitativos.status_processamento == "PENDENTE"
+            ).all()
+        ]
+    finally:
+        session_fila.close()
+
+    resultado.fila = len(pendentes_ids)
+    logger.info("Fila PENDENTE: %s documento(s)", resultado.fila)
+    if not pendentes_ids:
+        return resultado
+
     from modules.GoogleDriveManager import GoogleDriveManager
 
     b3 = FnetDownloader()
     drive_manager = GoogleDriveManager()
-
-    # 1. 🟢 ABRE SESSÃO APENAS PARA PEGAR A FILA
-    session_fila = SessionDB()
-    pendentes_ids = [doc.id for doc in session_fila.query(DocumentosQualitativos.id).filter(DocumentosQualitativos.status_processamento == "PENDENTE").all()]
-    session_fila.close() # 🔴 FECHA IMEDIATAMENTE
 
     print(f"⚙️ Processando {len(pendentes_ids)} documentos na fila...")
 
@@ -389,6 +437,8 @@ def rotina_processar_pendentes():
             if not pdf_bytes:
                 doc_db.status_processamento = "ERRO_DOWNLOAD"
                 session.commit()
+                resultado.erros += 1
+                resultado.processados += 1
                 continue
 
             temp_filename = f"/tmp/{ticker}_{id_doc}.pdf"
@@ -430,6 +480,7 @@ def rotina_processar_pendentes():
                     doc_db.url_pdf = link_gerado
                     doc_db.tipo_documento = nome_limpo
                     doc_db.status_processamento = "SALVO_DRIVE"
+                    resultado.salvo_drive += 1
                     print(f"✅ Sucesso (Auto-save): {ticker} -> {nome_limpo}")
 
                     if "gerencial" in nome_limpo.lower() or "fato" in nome_limpo.lower():
@@ -454,6 +505,7 @@ def rotina_processar_pendentes():
                     }
                 else:
                     doc_db.status_processamento = "ERRO_DRIVE"
+                    resultado.erros += 1
 
             else:
                 print(f"⚠️ IA incerta ({confianca}%). Enviando para revisão manual...")
@@ -465,14 +517,17 @@ def rotina_processar_pendentes():
                 if file_id:
                     doc_db.status_processamento = "AGUARDANDO_REVISAO"
                     doc_db.url_pdf = link_gerado
+                    resultado.revisao += 1
                     enviar_alerta_revisao_telegram(ticker, nome_limpo, link_gerado, file_id, doc_db.id)
                 else:
                     doc_db.status_processamento = "ERRO_DRIVE"
+                    resultado.erros += 1
 
             # 3. 💾 SALVA O PROGRESSO DESTE ARQUIVO E DELETA O TEMPORÁRIO
             session.commit()
+            resultado.processados += 1
             if notificacao:
-                notificar_documento_disponivel(**notificacao)
+                resultado.notificados += notificar_documento_disponivel(**notificacao)
             if os.path.exists(temp_filename): os.remove(temp_filename)
             time.sleep(6) 
 
@@ -480,30 +535,49 @@ def rotina_processar_pendentes():
             # Se der um erro bizarro, cancela SÓ este documento e continua vivo!
             print(f"❌ Erro crítico ao processar o documento {doc_id}: {e}")
             session.rollback()
+            resultado.erros += 1
         finally:
             # 4. 🔴 FECHA A SESSÃO DO ARQUIVO PARA NÃO DAR TIMEOUT
             session.close()
+    logger.info(
+        "Fila PENDENTE encerrada: processados=%s salvo_drive=%s revisao=%s erros=%s notificados=%s",
+        resultado.processados,
+        resultado.salvo_drive,
+        resultado.revisao,
+        resultado.erros,
+        resultado.notificados,
+    )
+    return resultado
 
 def rotina_de_atualizacao_em_massa(dias=60, session=None, capturar_tudo=None):
-    from pipeline_dados.coletor_fnet import STATUS_GRAVADO
-
     resultado = rotina_de_coleta_b3(
         dias=dias, session=session, capturar_tudo=capturar_tudo
     )
-    if resultado.status == STATUS_GRAVADO and resultado.gravados > 0:
-        rotina_processar_pendentes()
+    resultado.processamento = rotina_processar_pendentes()
     return resultado
 
 def rotina_processar_acoes():
     """Esteira exclusiva da Inteligência Artificial para documentos da CVM"""
+    resultado = ResultadoProcessamento("PENDENTE_ACAO")
+    session_fila = SessionDB()
+    try:
+        pendentes_ids = [
+            doc.id
+            for doc in session_fila.query(DocumentosQualitativos.id).filter(
+                DocumentosQualitativos.status_processamento == "PENDENTE_ACAO"
+            ).all()
+        ]
+    finally:
+        session_fila.close()
+
+    resultado.fila = len(pendentes_ids)
+    logger.info("Fila PENDENTE_ACAO: %s documento(s)", resultado.fila)
+    if not pendentes_ids:
+        return resultado
+
     from modules.GoogleDriveManager import GoogleDriveManager
 
     drive_manager = GoogleDriveManager()
-
-    # 1. 🟢 SESSÃO CURTA PARA A FILA
-    session_fila = SessionDB()
-    pendentes_ids = [doc.id for doc in session_fila.query(DocumentosQualitativos.id).filter(DocumentosQualitativos.status_processamento == "PENDENTE_ACAO").all()]
-    session_fila.close()
 
     print(f"⚙️ Processando {len(pendentes_ids)} documentos de AÇÕES na fila...")
 
@@ -529,12 +603,16 @@ def rotina_processar_acoes():
                 if resposta.status_code != 200:
                     doc_db.status_processamento = "ERRO_DOWNLOAD"
                     session.commit()
+                    resultado.erros += 1
+                    resultado.processados += 1
                     continue
                 pdf_bytes = resposta.content
             except Exception as e:
                 print(f"⚠️ Erro ao baixar PDF CVM: {e}")
                 doc_db.status_processamento = "ERRO_DOWNLOAD"
                 session.commit()
+                resultado.erros += 1
+                resultado.processados += 1
                 continue
 
             temp_filename = f"/tmp/{ticker}_cvm_temp.pdf"
@@ -571,7 +649,11 @@ def rotina_processar_acoes():
                 if file_id:
                     doc_db.status_processamento = "AGUARDANDO_REVISAO"
                     doc_db.url_pdf = link_gerado
+                    resultado.revisao += 1
                     print(f"🚧 {ticker} enviado para revisão manual.")
+                else:
+                    doc_db.status_processamento = "ERRO_DRIVE"
+                    resultado.erros += 1
             else:
                 link_gerado = drive_manager.upload_pdf_organizado(
                     caminho_arquivo=temp_filename,
@@ -584,7 +666,8 @@ def rotina_processar_acoes():
                 if link_gerado:
                     doc_db.url_pdf = link_gerado
                     doc_db.tipo_documento = nome_limpo
-                    doc_db.status_processamento = "SALVO_DRIVE" 
+                    doc_db.status_processamento = "SALVO_DRIVE"
+                    resultado.salvo_drive += 1
                     print(f"✅ Sucesso: Drive Atualizado -> {nome_limpo}")
 
                     if "gerencial" in nome_limpo.lower() or "fato" in nome_limpo.lower() or "release" in nome_limpo.lower():
@@ -609,17 +692,29 @@ def rotina_processar_acoes():
                     }
                 else:
                     doc_db.status_processamento = "ERRO_DRIVE"
+                    resultado.erros += 1
 
             # 3. 💾 SALVA O PROGRESSO
             session.commit()
+            resultado.processados += 1
             if notificacao:
-                notificar_documento_disponivel(**notificacao)
+                resultado.notificados += notificar_documento_disponivel(**notificacao)
             if os.path.exists(temp_filename): os.remove(temp_filename)
             time.sleep(3) 
             
         except Exception as e:
             print(f"❌ Erro crítico na ação {doc_id}: {e}")
             session.rollback()
+            resultado.erros += 1
         finally:
             # 4. 🔴 FECHA SESSÃO
             session.close()
+    logger.info(
+        "Fila PENDENTE_ACAO encerrada: processados=%s salvo_drive=%s revisao=%s erros=%s notificados=%s",
+        resultado.processados,
+        resultado.salvo_drive,
+        resultado.revisao,
+        resultado.erros,
+        resultado.notificados,
+    )
+    return resultado

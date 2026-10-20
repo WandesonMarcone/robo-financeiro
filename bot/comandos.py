@@ -181,8 +181,14 @@ def acionar_varredura_manual(message):
     )
 
     def tarefa_pesada_background(janela):
+        import logging
+
+        log_thread = logging.getLogger("robo.varredura")
+        log_thread.info(
+            "Thread FNET iniciada chat_id=%s dias=%s", chat_id, janela
+        )
         try:
-            from pipeline_dados.coletor_fnet import ColetorFnet, STATUS_GRAVADO
+            from pipeline_dados.coletor_fnet import ColetorFnet
             from atualizador_documentos import rotina_processar_pendentes
 
             session = SessionDB()
@@ -191,13 +197,21 @@ def acionar_varredura_manual(message):
             finally:
                 session.close()
             bot.send_message(chat_id, resultado.mensagem_telegram())
-            if resultado.status == STATUS_GRAVADO and resultado.gravados > 0:
-                bot.send_message(
-                    chat_id,
-                    "Documentos novos gravados; processando fila (Drive/IA).",
-                )
-                rotina_processar_pendentes()
+            bot.send_message(
+                chat_id,
+                "Processando fila PENDENTE (Drive/IA), inclusive residual.",
+            )
+            processamento = rotina_processar_pendentes()
+            bot.send_message(chat_id, processamento.mensagem_telegram())
+            log_thread.info(
+                "Thread FNET concluida chat_id=%s gravados=%s fila=%s processados=%s",
+                chat_id,
+                resultado.gravados,
+                processamento.fila,
+                processamento.processados,
+            )
         except Exception as e:
+            log_thread.exception("Thread FNET falhou chat_id=%s", chat_id)
             bot.send_message(
                 chat_id,
                 f"Varredura FNET de FIIs: falha de processamento ou persistencia ({e}).",
@@ -247,13 +261,10 @@ def rodar_ia_acoes(message):
     
     def tarefa_ia_background():
         try:
-            # Importa a nova função que criamos no atualizador
             from atualizador_documentos import rotina_processar_acoes
-            
-            # Dá a partida no motor
-            rotina_processar_acoes()
-            
-            bot.send_message(message.chat.id, "✅ *Processamento de IA (Ações) Concluído!*\nTodos os documentos foram organizados nas pastas do Google Drive.", parse_mode="Markdown")
+
+            resultado = rotina_processar_acoes()
+            bot.send_message(message.chat.id, resultado.mensagem_telegram())
         except Exception as e:
             bot.send_message(message.chat.id, f"❌ Erro fatal no processamento da IA: {str(e)}")
             
@@ -368,15 +379,22 @@ def alimentar_ia_passado(message):
                     
             session.close()
             
-            # 🔴 RELATÓRIO CIRÚRGICO PARA O TELEGRAM
-            txt_final = (
-                f"✅ **Cérebro da IA Atualizado!**\n\n"
-                f"📄 Total de PDFs ocos encontrados: `{len(docs)}`\n"
-                f"🧠 Textos sugados com sucesso: `{lidos}`\n"
-                f"⏭️ Ignorados (Não são relatórios): `{ignorados}`\n"
-                f"❌ Falhas (Link quebrado/Scan): `{erros}`"
-            )
-            bot.send_message(message.chat.id, txt_final, parse_mode="Markdown")
+            if lidos == 0:
+                txt_final = (
+                    f"Alimentacao de IA: nenhum texto extraido.\n"
+                    f"PDFs sem texto: {len(docs)}\n"
+                    f"Ignorados (nao sao relatorios): {ignorados}\n"
+                    f"Falhas (link quebrado/scan): {erros}"
+                )
+            else:
+                txt_final = (
+                    f"Alimentacao de IA concluida.\n"
+                    f"PDFs sem texto: {len(docs)}\n"
+                    f"Textos extraidos: {lidos}\n"
+                    f"Ignorados (nao sao relatorios): {ignorados}\n"
+                    f"Falhas (link quebrado/scan): {erros}"
+                )
+            bot.send_message(message.chat.id, txt_final)
             
         except Exception as e:
             bot.send_message(message.chat.id, f"❌ Erro fatal na tarefa: {e}")

@@ -38,10 +38,13 @@ def varredura_diaria():
         parse_mode="Markdown",
     )
 
-    # 1. Rotina B3/FNET
+    # 1. Rotina B3/FNET + fila PENDENTE residual
     try:
-        resultado = rotina_de_atualizacao_em_massa()
-        _avisar(resultado.mensagem_telegram())
+        resultado_fnet = rotina_de_atualizacao_em_massa()
+        _avisar(resultado_fnet.mensagem_telegram())
+        processamento = getattr(resultado_fnet, "processamento", None)
+        if processamento is not None:
+            _avisar(processamento.mensagem_telegram())
     except Exception as e:
         _avisar(f"❌ Erro na varredura B3: {type(e).__name__}")
 
@@ -50,25 +53,12 @@ def varredura_diaria():
     try:
         session = SessionDB()
         coletor = AcoesCVMReader(session)
-        resultado = coletor.atualizar_acoes()
-        _avisar(resultado.mensagem_telegram())
+        resultado_cvm = coletor.atualizar_acoes()
+        _avisar(resultado_cvm.mensagem_telegram())
     except Exception as e:
         _avisar(f"❌ Erro na varredura CVM: {type(e).__name__}")
     finally:
         if session is not None:
             session.close()
 
-    _avisar(
-        "🏁 *Cofre de dados 100% atualizado!*", parse_mode="Markdown"
-    )
-
-    # ==========================================
-    # 3. NOVO: Processamento Qualitativo (IA)
-    # ==========================================
-    _avisar(
-        "🧠 *Iniciando leitura de PDFs com IA...*", parse_mode="Markdown"
-    )
-    try:
-        _avisar("✅ Leitura de IA finalizada!")
-    except Exception as e:
-        _avisar(f"❌ Erro no Motor de IA: {type(e).__name__}")
+    _avisar("Varredura diaria encerrada (coleta FNET+ITR). IA nao executada neste cron.")
