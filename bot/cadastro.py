@@ -494,27 +494,27 @@ def _markup_confirmacao():
     markup = InlineKeyboardMarkup()
     markup.row(
         InlineKeyboardButton(
-            "Escolher FIIs",
+            "🏢 Escolher FIIs",
             callback_data=f"{permissoes.PREFIXO_CALLBACK_FORMULARIO}{ACAO_FORM_FII}",
         ),
         InlineKeyboardButton(
-            "Escolher Ações",
+            "📈 Escolher Ações",
             callback_data=f"{permissoes.PREFIXO_CALLBACK_FORMULARIO}{ACAO_FORM_ACAO}",
         ),
     )
     markup.row(
         InlineKeyboardButton(
-            "Confirmar e enviar",
+            "✅ Confirmar e enviar",
             callback_data=f"{permissoes.PREFIXO_CALLBACK_FORMULARIO}{ACAO_FORM_CONFIRMAR}",
         ),
         InlineKeyboardButton(
-            "Corrigir dados",
+            "✏️ Corrigir dados",
             callback_data=f"{permissoes.PREFIXO_CALLBACK_FORMULARIO}{ACAO_FORM_CORRIGIR}",
         ),
     )
     markup.row(
         InlineKeyboardButton(
-            "Cancelar cadastro",
+            "❌ Cancelar cadastro",
             callback_data=f"{permissoes.PREFIXO_CALLBACK_FORMULARIO}{ACAO_FORM_CANCELAR}",
         )
     )
@@ -637,9 +637,9 @@ def _markup_selecao_favoritos(sessao, tipo, catalogo, pagina):
         markup.row(*navegacao)
     acao_concluir = ACAO_FORM_FII_DONE if tipo == "fii" else ACAO_FORM_ACAO_DONE
     markup.row(
-        InlineKeyboardButton(
-            "Concluir", callback_data=f"{prefixo}{acao_concluir}"
-        )
+            InlineKeyboardButton(
+                "✅ Concluir", callback_data=f"{prefixo}{acao_concluir}"
+            )
     )
     return markup
 

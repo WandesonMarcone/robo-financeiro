@@ -274,15 +274,47 @@ def _username_atual(dto):
     return str(username).strip().lstrip("@") or None
 
 
+def _texto_hub():
+    return "\n".join(
+        [
+            "⚙️ CENTRAL DE CONTROLES",
+            "Escolha uma area:",
+            "",
+            "👥 Usuarios — solicitacoes e cadastros.",
+            "🔔 Notificacoes — alertas por pessoa ou por FIIs/acoes favoritados.",
+            "⚖️ Central de Revisoes — documentos suspeitos de FIIs.",
+        ]
+    )
+
+
+def _markup_hub():
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("👥 Usuarios", callback_data=f"{PREFIXO_CALLBACK}usuarios")
+    )
+    markup.add(
+        InlineKeyboardButton(
+            "🔔 Notificacoes", callback_data=f"{PREFIXO_CALLBACK}notificacoes"
+        )
+    )
+    markup.add(
+        InlineKeyboardButton(
+            "⚖️ Central de Revisoes", callback_data=f"{PREFIXO_CALLBACK}revisoes"
+        )
+    )
+    markup.add(InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="voltar_menu"))
+    return markup
+
+
 def _texto_home(contagens):
     linhas = [
         "⚙️ CENTRAL DE CONTROLES",
-        "Gestão de acessos pelo Telegram.",
+        "👥 Usuarios — gestao de acessos pelo Telegram.",
         "",
     ]
     for area, (rotulo, _status, icone) in AREAS.items():
         linhas.append(f"{icone} {rotulo}: {contagens[area]}")
-    linhas += ["", "Selecione uma área para gerenciar:"]
+    linhas += ["", "Selecione uma area para gerenciar:"]
     return "\n".join(linhas)
 
 
@@ -295,14 +327,14 @@ def _markup_home(contagens):
                 callback_data=f"{PREFIXO_CALLBACK}area_{area}_0",
             )
         )
-    # Atalho para a decisão de solicitações de troca de favorito (módulo
-    # bot.trocas, callbacks com prefixo próprio ``trocaadm_``).
     markup.add(
         InlineKeyboardButton(
-            "🔁 Solicitações de troca", callback_data="trocaadm_home"
+            "🔁 Solicitacoes de troca", callback_data="trocaadm_home"
         )
     )
-    markup.add(InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="voltar_menu"))
+    markup.add(
+        InlineKeyboardButton("🔙 Voltar", callback_data=f"{PREFIXO_CALLBACK}home")
+    )
     return markup
 
 
@@ -352,7 +384,9 @@ def _markup_area(area, usuarios, pagina, total_paginas):
         )
     if navegacao:
         markup.row(*navegacao)
-    markup.add(InlineKeyboardButton("🔙 Central", callback_data=f"{PREFIXO_CALLBACK}home"))
+    markup.add(
+        InlineKeyboardButton("🔙 Voltar", callback_data=f"{PREFIXO_CALLBACK}usuarios")
+    )
     return markup
 
 
@@ -426,9 +460,18 @@ def _markup_usuario(dto, area, pagina, autor_id):
 # Telas
 # ---------------------------------------------------------------------------
 
+def _tela_hub():
+    return _texto_hub(), _markup_hub()
+
+
 def _tela_home():
     contagens = _contagens()
     return _texto_home(contagens), _markup_home(contagens)
+
+
+def _mostrar_hub(call):
+    _render(call, *_tela_hub())
+    return None
 
 
 def _mostrar_home(call):
@@ -445,6 +488,304 @@ def _mostrar_home(call):
         )
         return TEXTO_ERRO_BANCO
     _render(call, texto, markup)
+    return None
+
+
+def _formatar_valor_alerta(valor):
+    if valor is None:
+        return None
+    texto = format(valor, "f") if hasattr(valor, "as_tuple") else str(valor)
+    if "." in texto:
+        texto = texto.rstrip("0").rstrip(".")
+    return texto or "0"
+
+
+def _linhas_eventos_alerta(eventos):
+    linhas = []
+    for evento in eventos:
+        data = (
+            evento.data_evento.strftime("%d/%m/%Y %H:%M")
+            if evento.data_evento
+            else "Data N/A"
+        )
+        linhas.append(f"🏢 {evento.ticker} — {data}")
+        linhas.append(
+            f"🏷️ {evento.indicador} · {evento.regra} · {evento.severidade}"
+        )
+        if evento.motivo:
+            linhas.append(str(evento.motivo))
+        atual = _formatar_valor_alerta(evento.valor_atual)
+        anterior = _formatar_valor_alerta(evento.valor_anterior)
+        if atual is not None or anterior is not None:
+            partes = []
+            if atual is not None:
+                partes.append(f"atual {atual}")
+            if anterior is not None:
+                partes.append(f"anterior {anterior}")
+            linhas.append(" · ".join(partes))
+        linhas.append("")
+    return linhas
+
+
+def _texto_menu_notificacoes():
+    return "\n".join(
+        [
+            "🔔 NOTIFICACOES",
+            "Alertas importantes. Escolha o recorte:",
+            "",
+            "👤 Por pessoa — alertas dos favoritos de cada usuario.",
+            "🏢 Por FIIs/acoes favoritados — recorte pelos ativos acompanhados.",
+        ]
+    )
+
+
+def _markup_menu_notificacoes():
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton(
+            "👤 Por pessoa", callback_data=f"{PREFIXO_CALLBACK}npessoas_0"
+        )
+    )
+    markup.add(
+        InlineKeyboardButton(
+            "🏢 Por FIIs/acoes favoritados",
+            callback_data=f"{PREFIXO_CALLBACK}nativos",
+        )
+    )
+    markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=f"{PREFIXO_CALLBACK}home"))
+    return markup
+
+
+def _texto_notificacoes():
+    from pipeline_dados.repositorio_alertas import RepositorioAlertas
+    from pipeline_dados.repositorio_favoritos import RepositorioFavoritos
+
+    ids = RepositorioFavoritos().listar_ids_ativos_acompanhados()
+    if not ids:
+        return (
+            "🔔 NOTIFICACOES\n"
+            "Alertas importantes dos FIIs e acoes favoritados por usuarios.\n\n"
+            "Nenhum ativo favoritado. Sem recorte de alertas."
+        )
+    eventos = RepositorioAlertas().listar_por_ativos(ids, limite=15)
+    if not eventos:
+        return (
+            "🔔 NOTIFICACOES\n"
+            "Alertas importantes dos FIIs e acoes favoritados por usuarios.\n\n"
+            "Nenhum evento persistido nesses ativos."
+        )
+    linhas = [
+        "🔔 NOTIFICACOES",
+        "Alertas importantes dos FIIs e acoes favoritados por usuarios.",
+        "Fato persistido; telegram_enviado nao prova entrega.",
+        "",
+    ]
+    linhas.extend(_linhas_eventos_alerta(eventos))
+    return "\n".join(linhas).rstrip()
+
+
+def _markup_notificacoes_ativos():
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("🔄 Atualizar", callback_data=f"{PREFIXO_CALLBACK}nativos")
+    )
+    markup.add(
+        InlineKeyboardButton(
+            "🔙 Voltar", callback_data=f"{PREFIXO_CALLBACK}notificacoes"
+        )
+    )
+    return markup
+
+
+def _pessoas_com_favoritos():
+    from pipeline_dados.repositorio_favoritos import RepositorioFavoritos
+
+    repo_u = RepositorioUsuarios()
+    repo_f = RepositorioFavoritos()
+    pessoas = []
+    total = min(repo_u.contar_por_status(STATUS_APROVADO), 200)
+    deslocamento = 0
+    while deslocamento < total:
+        lote = repo_u.listar_por_status(
+            STATUS_APROVADO, limite=50, deslocamento=deslocamento
+        )
+        if not lote:
+            break
+        for dto in lote:
+            favs = repo_f.listar(dto.id)
+            if favs:
+                pessoas.append((dto, favs))
+        deslocamento += len(lote)
+        if len(lote) < 50:
+            break
+    return pessoas
+
+
+def _rotulo_pessoa_notificacao(dto, favs):
+    nome = dto.nome or "Sem nome"
+    if len(nome) > 22:
+        nome = nome[:21] + "…"
+    return f"👤 {nome} ({len(favs)} ativo(s))"
+
+
+def _texto_notificacoes_pessoas(pessoas, pagina, total_paginas):
+    linhas = [
+        "🔔 NOTIFICACOES",
+        "👤 Por pessoa — alertas dos favoritos de cada usuario.",
+        "",
+    ]
+    if not pessoas:
+        linhas.append("Nenhum usuario aprovado com ativos favoritados.")
+        return "\n".join(linhas)
+    linhas.append(f"Pagina {pagina + 1}/{total_paginas} — toque em uma pessoa:")
+    return "\n".join(linhas)
+
+
+def _markup_notificacoes_pessoas(pessoas, pagina, total_paginas):
+    markup = InlineKeyboardMarkup(row_width=1)
+    for dto, favs in pessoas:
+        markup.add(
+            InlineKeyboardButton(
+                _rotulo_pessoa_notificacao(dto, favs),
+                callback_data=f"{PREFIXO_CALLBACK}npessoa_{dto.id}",
+            )
+        )
+    navegacao = []
+    if pagina > 0:
+        navegacao.append(
+            InlineKeyboardButton(
+                "⬅️ Anterior",
+                callback_data=f"{PREFIXO_CALLBACK}npessoas_{pagina - 1}",
+            )
+        )
+    if pagina < total_paginas - 1:
+        navegacao.append(
+            InlineKeyboardButton(
+                "Próxima ➡️",
+                callback_data=f"{PREFIXO_CALLBACK}npessoas_{pagina + 1}",
+            )
+        )
+    if navegacao:
+        markup.row(*navegacao)
+    markup.add(
+        InlineKeyboardButton(
+            "🔙 Voltar", callback_data=f"{PREFIXO_CALLBACK}notificacoes"
+        )
+    )
+    return markup
+
+
+def _texto_notificacoes_pessoa(dto, favs, eventos):
+    tickers = ", ".join(f.ticker for f in favs) or "nenhum"
+    linhas = [
+        "🔔 NOTIFICACOES",
+        f"👤 {dto.nome or 'Sem nome'}",
+        f"⭐ Favoritos: {tickers}",
+        "Fato persistido; telegram_enviado nao prova entrega.",
+        "",
+    ]
+    if not eventos:
+        linhas.append("Nenhum evento persistido nos favoritos desta pessoa.")
+        return "\n".join(linhas)
+    linhas.extend(_linhas_eventos_alerta(eventos))
+    return "\n".join(linhas).rstrip()
+
+
+def _markup_notificacoes_pessoa(usuario_id):
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton(
+            "🔄 Atualizar", callback_data=f"{PREFIXO_CALLBACK}npessoa_{usuario_id}"
+        )
+    )
+    markup.add(
+        InlineKeyboardButton(
+            "🔙 Voltar", callback_data=f"{PREFIXO_CALLBACK}npessoas_0"
+        )
+    )
+    return markup
+
+
+def _mostrar_notificacoes(call):
+    _render(call, _texto_menu_notificacoes(), _markup_menu_notificacoes())
+    return None
+
+
+def _mostrar_notificacoes_ativos(call):
+    try:
+        texto = _texto_notificacoes()
+    except Exception:
+        logger.warning("CENTRAL - falha ao listar alertas", exc_info=True)
+        texto = TEXTO_ERRO_BANCO
+    _render(call, texto, _markup_notificacoes_ativos())
+    return None
+
+
+def _mostrar_notificacoes_pessoas(call, pagina):
+    try:
+        todas = _pessoas_com_favoritos()
+    except Exception:
+        logger.warning("CENTRAL - falha ao listar pessoas", exc_info=True)
+        _render(
+            call,
+            TEXTO_ERRO_BANCO,
+            InlineKeyboardMarkup().add(
+                InlineKeyboardButton(
+                    "🔙 Voltar", callback_data=f"{PREFIXO_CALLBACK}notificacoes"
+                )
+            ),
+        )
+        return TEXTO_ERRO_BANCO
+    total = len(todas)
+    total_paginas = max(1, (total + TAMANHO_PAGINA - 1) // TAMANHO_PAGINA)
+    pagina = max(0, min(pagina, total_paginas - 1))
+    fatia = todas[pagina * TAMANHO_PAGINA : (pagina + 1) * TAMANHO_PAGINA]
+    _render(
+        call,
+        _texto_notificacoes_pessoas(fatia if total else [], pagina, total_paginas),
+        _markup_notificacoes_pessoas(fatia, pagina, total_paginas),
+    )
+    return None
+
+
+def _mostrar_notificacoes_pessoa(call, usuario_id):
+    from pipeline_dados.repositorio_alertas import RepositorioAlertas
+    from pipeline_dados.repositorio_favoritos import RepositorioFavoritos
+
+    try:
+        dto = RepositorioUsuarios().obter_por_id(usuario_id)
+        favs = RepositorioFavoritos().listar(usuario_id) if dto is not None else []
+        ids = [f.ativo_id for f in favs]
+        eventos = RepositorioAlertas().listar_por_ativos(ids, limite=15) if ids else []
+    except Exception:
+        logger.warning("CENTRAL - falha ao listar alertas da pessoa", exc_info=True)
+        _render(
+            call,
+            TEXTO_ERRO_BANCO,
+            InlineKeyboardMarkup().add(
+                InlineKeyboardButton(
+                    "🔙 Voltar", callback_data=f"{PREFIXO_CALLBACK}npessoas_0"
+                )
+            ),
+        )
+        return TEXTO_ERRO_BANCO
+    if dto is None:
+        return _mostrar_notificacoes_pessoas(call, 0) or TEXTO_USUARIO_INEXISTENTE
+    _render(
+        call,
+        _texto_notificacoes_pessoa(dto, favs, eventos),
+        _markup_notificacoes_pessoa(usuario_id),
+    )
+    return None
+
+
+def _mostrar_revisoes(call):
+    from bot.callbacks_revisao import enviar_painel_tickers
+
+    chat_id, msg_id = _chat_e_message(call)
+    if chat_id is None:
+        return TEXTO_ERRO
+    enviar_painel_tickers(chat_id, msg_id)
     return None
 
 
@@ -540,12 +881,7 @@ def abrir_central(message):
         return
     if chat_id is None:
         return
-    try:
-        texto, markup = _tela_home()
-    except Exception:
-        logger.warning("CENTRAL - falha ao montar home", exc_info=True)
-        cadastro.enviar_texto(chat_id, TEXTO_ERRO_BANCO)
-        return
+    texto, markup = _tela_hub()
     cadastro.enviar_texto(chat_id, texto, reply_markup=markup)
 
 
@@ -570,7 +906,27 @@ def tratar_callback(call):
     acao = partes[1] if len(partes) > 1 else ""
     try:
         if acao == "home":
+            toast = _mostrar_hub(call)
+        elif acao == "usuarios":
             toast = _mostrar_home(call)
+        elif acao == "notificacoes":
+            toast = _mostrar_notificacoes(call)
+        elif acao == "nativos":
+            toast = _mostrar_notificacoes_ativos(call)
+        elif acao == "npessoas":
+            pagina = _num_pagina(partes[2]) if len(partes) >= 3 else 0
+            if pagina is None:
+                toast = TEXTO_SESSAO_INVALIDA
+            else:
+                toast = _mostrar_notificacoes_pessoas(call, pagina)
+        elif acao == "npessoa":
+            usuario_id = _id_usuario(partes[2]) if len(partes) >= 3 else None
+            if usuario_id is None:
+                toast = TEXTO_SESSAO_INVALIDA
+            else:
+                toast = _mostrar_notificacoes_pessoa(call, usuario_id)
+        elif acao == "revisoes":
+            toast = _mostrar_revisoes(call)
         elif acao == "area":
             toast = _tratar_area(call, partes)
         elif acao == "ver":
@@ -580,7 +936,7 @@ def tratar_callback(call):
         elif acao == "do":
             toast = _tratar_do(call, partes)
         else:
-            _mostrar_home(call)
+            _mostrar_hub(call)
             toast = TEXTO_SESSAO_INVALIDA
     except Exception:
         logger.warning("CENTRAL - falha ao processar callback", exc_info=True)

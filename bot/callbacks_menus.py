@@ -198,9 +198,9 @@ def callback_geral(call):
 
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(
-                InlineKeyboardButton("Comandos", callback_data="ajuda_comandos"),
-                InlineKeyboardButton("Como usar", callback_data="ajuda_roadmap"),
-                InlineKeyboardButton("Voltar ao painel", callback_data="voltar_menu")
+                InlineKeyboardButton("📋 Comandos", callback_data="ajuda_comandos"),
+                InlineKeyboardButton("🧭 Como usar", callback_data="ajuda_roadmap"),
+                InlineKeyboardButton("🔙 Voltar ao painel", callback_data="voltar_menu")
             )
             bot.edit_message_text(
                 TEXTO_MENU_AJUDA,
@@ -413,7 +413,8 @@ def callback_geral(call):
             
                 if oportunidades:
                     top_oportunidades = oportunidades[:15] 
-                    botoes_ativos = [InlineKeyboardButton(tkr, callback_data=f"painel_{tkr}_{tipo}") for tkr in top_oportunidades]
+                    icone = "🏢" if is_fii else "📈"
+                    botoes_ativos = [InlineKeyboardButton(f"{icone} {tkr}", callback_data=f"painel_{tkr}_{tipo}") for tkr in top_oportunidades]
                     markup.add(*botoes_ativos)
                     texto = f"🔥 *Top Oportunidades ({'FIIs' if is_fii else 'Ações'})*\n\nEstes ativos passaram na sua peneira."
                 else:

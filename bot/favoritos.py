@@ -280,7 +280,7 @@ def _mostrar_disponiveis(call, tipo, usuario_id, pagina):
     if fatia:
         botoes = [
             InlineKeyboardButton(
-                ticker, callback_data=f"{PREFIXO_ADICIONAR}{ticker}_{tipo}"
+                f"➕ {ticker}", callback_data=f"{PREFIXO_ADICIONAR}{ticker}_{tipo}"
             )
             for ticker in fatia
         ]

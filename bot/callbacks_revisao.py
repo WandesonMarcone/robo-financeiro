@@ -1,3 +1,4 @@
+import json
 import re
 from datetime import datetime
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -25,6 +26,27 @@ def extrair_file_id(url):
     match = re.search(r'/d/([a-zA-Z0-9_-]+)', str(url))
     return match.group(1) if match else None
 
+
+def _texto_dupla_checagem(doc, fallback):
+    """Mostra as duas leituras da IA quando persistidas em ``resumo_ia``."""
+    bruto = getattr(doc, "resumo_ia", None)
+    if not bruto:
+        return f"🤖 **Leitura da IA:** `{fallback}`"
+    try:
+        dados = json.loads(bruto)
+    except (TypeError, ValueError):
+        return f"🤖 **Leitura da IA:** `{fallback}`"
+    c1 = dados.get("checagem_1") or {}
+    c2 = dados.get("checagem_2") or {}
+    if not c1.get("tipo") or not c2.get("tipo"):
+        return f"🤖 **Leitura da IA:** `{fallback}`"
+    acordo = "concordaram" if dados.get("acordo") else "discordaram ou ficaram incertas"
+    return (
+        f"🤖 **Duas checagens da IA** ({acordo})\n"
+        f"1️⃣ `{c1.get('tipo')}` ({c1.get('confianca', 0)}%)\n"
+        f"2️⃣ `{c2.get('tipo')}` ({c2.get('confianca', 0)}%)"
+    )
+
 # O comando e a tela de abertura moram aqui agora, pertinho dos callbacks!
 @bot.message_handler(commands=['revisao'])
 def comando_painel_revisao(message):
@@ -37,10 +59,23 @@ def enviar_painel_tickers(chat_id, message_id=None):
         # Puxa TUDO que está aguardando revisão (sem filtrar por tipo)
         pendentes = session.query(DocumentosQualitativos).filter_by(status_processamento="AGUARDANDO_REVISAO").all()
 
+        markup_voltar = InlineKeyboardMarkup()
+        markup_voltar.add(
+            InlineKeyboardButton("🔙 Voltar", callback_data="adm_home")
+        )
         if not pendentes:
-            msg = "🎉 Excelente! A sua mesa está limpa. Não há documentos aguardando revisão."
-            if message_id: bot.edit_message_text(msg, chat_id, message_id)
-            else: bot.send_message(chat_id, msg)
+            msg = (
+                "⚖️ Central de Revisoes\n"
+                "Documentos de FIIs em que as duas checagens da IA discordaram "
+                "ou ficaram incertas.\n"
+                "Nao ha documentos aguardando revisao."
+            )
+            if message_id:
+                bot.edit_message_text(
+                    msg, chat_id, message_id, reply_markup=markup_voltar
+                )
+            else:
+                bot.send_message(chat_id, msg, reply_markup=markup_voltar)
             return
 
         # Agrupa pelos tickers únicos
@@ -59,8 +94,13 @@ def enviar_painel_tickers(chat_id, message_id=None):
             icone = "🏢" if tipo_ativo == "FII" else "📈"
             
             markup.add(InlineKeyboardButton(text=f"{icone} {t} ({qtd} docs)", callback_data=f"rev_t_{t}"))
+        markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="adm_home"))
 
-        msg = "⚠️ **Central de Revisão Híbrida**\n\nEstes FIIs e Ações possuem documentos pendentes. Selecione um para analisar:"
+        msg = (
+            "⚖️ Central de Revisoes\n"
+            "Documentos de FIIs em que as duas checagens da IA discordaram "
+            "ou ficaram incertas. Selecione um ativo:"
+        )
         if message_id:
             bot.edit_message_text(msg, chat_id, message_id, reply_markup=markup, parse_mode="Markdown")
         else:
@@ -187,7 +227,7 @@ def processar_revisao(call):
                 f"🔍 **Inspecionando Documento**\n\n"
                 f"🏢 **Ativo:** `{doc.ativo.ticker}`\n"
                 f"📅 **Data da Publicação:** `{data_exibicao}`\n"
-                f"🤖 **Leitura da IA:** `{nome_limpo_exibicao.replace('_', ' ')}`\n\n"
+                f"{_texto_dupla_checagem(doc, nome_limpo_exibicao.replace('_', ' '))}\n\n"
             )
 
             if not (doc.url_pdf and doc.url_pdf.startswith("http")):
@@ -264,6 +304,7 @@ def processar_revisao(call):
                 doc.status_processamento = "SALVO_DRIVE"
                 doc.tipo_documento = tipo_nome_limpo
                 doc.url_pdf = novo_link
+                doc.resumo_ia = None
                 session.commit()
 
                 # 3. 🔥 APAGA O ARQUIVO DA PASTA REVISÃO PARA SUMIR DE LÁ
@@ -319,6 +360,7 @@ def processar_revisao(call):
 
             if deletou_drive:
                 doc.status_processamento = "REJEITADO_MANUAL"
+                doc.resumo_ia = None
                 session.commit()
                 
                 m = InlineKeyboardMarkup().add(InlineKeyboardButton(text="🔙 Voltar aos Pendentes", callback_data=f"rev_t_{ticker_atual}"))

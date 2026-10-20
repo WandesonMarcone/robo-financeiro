@@ -134,6 +134,48 @@ def classificar_documento_com_ia(nome_original, texto_extraido):
         )
         return nome_original, 0
 
+
+def _dupla_checagem_fii(nome_original, texto_extraido):
+    """Duas classificacoes independentes, com o detalhe de cada leitura."""
+    tipo1, conf1 = classificar_documento_com_ia(nome_original, texto_extraido)
+    tipo2, conf2 = classificar_documento_com_ia(nome_original, texto_extraido)
+    conf1 = int(conf1 or 0)
+    conf2 = int(conf2 or 0)
+    confianca = min(conf1, conf2)
+    validos = set(TIPOS_DOC_FII.values())
+    acordo = tipo1 == tipo2 and tipo1 in validos and confianca > 0
+    return {
+        "tipo": tipo1 if acordo else nome_original,
+        "confianca": confianca,
+        "acordo": acordo,
+        "checagem_1": (tipo1, conf1),
+        "checagem_2": (tipo2, conf2),
+    }
+
+
+def classificar_documento_fii_dupla(nome_original, texto_extraido):
+    """Duas classificacoes independentes. Auto-save so se ambas concordarem.
+
+    Retorna ``(tipo, confianca, acordo)``. Sem texto, sem chave ou tipos
+    diferentes: ``acordo=False`` e o documento vai para revisao.
+    """
+    detalhes = _dupla_checagem_fii(nome_original, texto_extraido)
+    return detalhes["tipo"], detalhes["confianca"], detalhes["acordo"]
+
+
+def _resumo_dupla_checagem(detalhes):
+    """JSON persistido em ``resumo_ia`` so para a Central de Revisoes."""
+    c1_tipo, c1_conf = detalhes["checagem_1"]
+    c2_tipo, c2_conf = detalhes["checagem_2"]
+    return json.dumps(
+        {
+            "checagem_1": {"tipo": c1_tipo, "confianca": c1_conf},
+            "checagem_2": {"tipo": c2_tipo, "confianca": c2_conf},
+            "acordo": bool(detalhes["acordo"]),
+        },
+        ensure_ascii=False,
+    )
+
 def _chat_administrador():
     """Chat do administrador para alertas operacionais (nunca transmissao ampla)."""
     return (
@@ -235,7 +277,9 @@ def _enviar_foto_telegram(chat_id, ticker, foto, legenda, teclado=None, parse_mo
         return False
 
 
-def enviar_alerta_revisao_telegram(ticker, nome_doc, link_pdf, file_id, db_id):
+def enviar_alerta_revisao_telegram(
+    ticker, nome_doc, link_pdf, file_id, db_id, checagens=None
+):
     """Envia ao administrador a mensagem interativa de revisao manual."""
     chat_id = _chat_administrador()
     if not chat_id:
@@ -249,10 +293,19 @@ def enviar_alerta_revisao_telegram(ticker, nome_doc, link_pdf, file_id, db_id):
         ]
     }
 
+    leituras = f"📄 **Leitura Inicial:** `{nome_doc}`"
+    if checagens and len(checagens) == 2:
+        leituras = (
+            "🤖 **Duas checagens da IA**\n"
+            f"1️⃣ `{checagens[0][0]}` ({checagens[0][1]}%)\n"
+            f"2️⃣ `{checagens[1][0]}` ({checagens[1][1]}%)"
+        )
+
     mensagem = (
         f"🚨 **Documento Suspeito Identificado!**\n\n"
-        f"A B3 diz que é de `{ticker}`, mas a IA precisa de sua ajuda para confirmar.\n"
-        f"📄 **Leitura Inicial:** `{nome_doc}`\n\n"
+        f"A B3 diz que é de `{ticker}`, mas as duas checagens da IA "
+        f"discordaram ou ficaram incertas.\n"
+        f"{leituras}\n\n"
         f"🔗 [Clique aqui para ler o PDF]({link_pdf})\n\n"
         f"O que faremos com ele?"
     )
@@ -457,7 +510,10 @@ def rotina_processar_pendentes():
             # 🤖 CAMADA HÍBRIDA DE IA E AUTO-SAVE
             # ==========================================
             texto_pdf = texto_pdf.strip()
-            nome_ia, confianca = classificar_documento_com_ia(doc_db.tipo_documento, texto_pdf)
+            detalhes = _dupla_checagem_fii(doc_db.tipo_documento, texto_pdf)
+            nome_ia = detalhes["tipo"]
+            confianca = detalhes["confianca"]
+            acordo = detalhes["acordo"]
 
             nome_limpo = "".join([c for c in str(nome_ia).title() if c.isalnum() or c in (' ', '_', '-')]).strip()
             if len(nome_limpo) < 3:
@@ -466,7 +522,7 @@ def rotina_processar_pendentes():
             partes_data = data_ref.split('-')
             mes_pasta = f"{partes_data[2]}-{partes_data[1]}" if len(partes_data) == 3 else datetime.now().strftime("%Y-%m")
 
-            if confianca >= 80 and texto_pdf:
+            if acordo and confianca >= 80 and texto_pdf:
                 print(f"🤖 IA tem {confianca}% de certeza. Auto-salvando '{nome_limpo}' para {ticker}...")
                 link_gerado = drive_manager.upload_pdf_organizado(
                     caminho_arquivo=temp_filename,
@@ -517,8 +573,16 @@ def rotina_processar_pendentes():
                 if file_id:
                     doc_db.status_processamento = "AGUARDANDO_REVISAO"
                     doc_db.url_pdf = link_gerado
+                    doc_db.resumo_ia = _resumo_dupla_checagem(detalhes)
                     resultado.revisao += 1
-                    enviar_alerta_revisao_telegram(ticker, nome_limpo, link_gerado, file_id, doc_db.id)
+                    enviar_alerta_revisao_telegram(
+                        ticker,
+                        nome_limpo,
+                        link_gerado,
+                        file_id,
+                        doc_db.id,
+                        checagens=(detalhes["checagem_1"], detalhes["checagem_2"]),
+                    )
                 else:
                     doc_db.status_processamento = "ERRO_DRIVE"
                     resultado.erros += 1

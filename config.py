@@ -194,7 +194,8 @@ TIPOS_DOC_FII = {
     "7": "Rendimentos",
     "8": "Apresentação Trimestral De Resultados",
     "9": "Proposta Emissão de Cotas",
-    "10": "Outros"
+    "10": "Comunicado ao Mercado",
+    "11": "Outros"
 }
 
 TIPOS_DOC_ACAO = {

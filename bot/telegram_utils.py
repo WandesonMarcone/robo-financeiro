@@ -128,8 +128,8 @@ def montar_painel_inicial(nome, favoritos_fii=None, favoritos_acao=None, incluir
         InlineKeyboardButton("⭐ Gerenciar favoritos", callback_data="gerenciar_favoritos")
     )
     markup.row(
-        InlineKeyboardButton("Minha conta", callback_data="minha_conta"),
-        InlineKeyboardButton("Ajuda", callback_data="menu_ajuda"),
+        InlineKeyboardButton("👤 Minha conta", callback_data="minha_conta"),
+        InlineKeyboardButton("ℹ️ Ajuda", callback_data="menu_ajuda"),
     )
     return texto, markup
 
@@ -185,8 +185,8 @@ def _montar_painel_admin(nome_limpo, itens_fii, itens_acao):
         )
     )
     markup.row(
-        InlineKeyboardButton("Minha conta", callback_data="minha_conta"),
-        InlineKeyboardButton("Ajuda", callback_data="menu_ajuda"),
+        InlineKeyboardButton("👤 Minha conta", callback_data="minha_conta"),
+        InlineKeyboardButton("ℹ️ Ajuda", callback_data="menu_ajuda"),
     )
     return texto, markup
 

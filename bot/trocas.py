@@ -64,10 +64,10 @@ ACAO_REJEITAR = "rejeitar"
 
 # status persistido -> (chave curta, rótulo)
 AREAS_TROCA = {
-    STATUS_TROCA_PENDENTE: ("pend", "Solicitações de troca pendentes"),
-    STATUS_TROCA_APROVADA: ("aprov", "Trocas aprovadas"),
-    STATUS_TROCA_REJEITADA: ("rej", "Trocas rejeitadas"),
-    STATUS_TROCA_EXPIRADA: ("exp", "Trocas expiradas"),
+    STATUS_TROCA_PENDENTE: ("pend", "📥 Solicitações de troca pendentes"),
+    STATUS_TROCA_APROVADA: ("aprov", "✅ Trocas aprovadas"),
+    STATUS_TROCA_REJEITADA: ("rej", "🚫 Trocas rejeitadas"),
+    STATUS_TROCA_EXPIRADA: ("exp", "⌛ Trocas expiradas"),
 }
 _AREA_POR_CHAVE = {chave: status for status, (chave, _rot) in AREAS_TROCA.items()}
 
@@ -210,11 +210,13 @@ def _markup_escolha(saida, tipo, disponiveis, pagina, total_paginas):
     fatia = disponiveis[
         pagina * TAMANHO_PAGINA : pagina * TAMANHO_PAGINA + TAMANHO_PAGINA
     ]
+    icone = "🏢" if _normalizar_tipo(tipo) == "fii" else "📈"
     if fatia:
         markup.add(
             *[
                 InlineKeyboardButton(
-                    ticker, callback_data=f"{PREFIXO_USUARIO}sel_{saida}_{ticker}"
+                    f"{icone} {ticker}",
+                    callback_data=f"{PREFIXO_USUARIO}sel_{saida}_{ticker}",
                 )
                 for ticker in fatia
             ]
@@ -437,7 +439,7 @@ def _markup_admin_home(contagens):
                 callback_data=f"{PREFIXO_ADMIN}area_{chave}_0",
             )
         )
-    markup.add(InlineKeyboardButton("🔙 Central de Controles", callback_data="adm_home"))
+    markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="adm_usuarios"))
     return markup
 
 
@@ -453,7 +455,7 @@ def _mostrar_admin_home(call):
 
 
 def _rotulo_troca(dto):
-    base = f"#{dto.id}: {dto.ticker_saida} → {dto.ticker_entrada}"
+    base = f"🔁 #{dto.id}: {dto.ticker_saida} → {dto.ticker_entrada}"
     return base[:60]
 
 

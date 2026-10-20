@@ -147,6 +147,24 @@ class RepositorioFavoritos:
         finally:
             session.close()
 
+    def listar_ids_ativos_acompanhados(self):
+        """Ids distintos de ativos que algum usuario acompanha.
+
+        Nao inventa ativo: so devolve ids com vinculo e cadastro em ``ativos``.
+        Lista vazia nao e zero de mercado.
+        """
+        session = self._nova_sessao()
+        try:
+            linhas = (
+                session.query(AtivoAcompanhado.ativo_id)
+                .join(Ativo, AtivoAcompanhado.ativo_id == Ativo.id)
+                .distinct()
+                .all()
+            )
+            return [linha[0] for linha in linhas]
+        finally:
+            session.close()
+
     def listar_catalogo(self, tipo):
         """Tickers cadastrados na tabela ``ativos`` para o tipo informado."""
         tipo_enum = MAPA_TIPO.get(str(tipo).lower())

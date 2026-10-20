@@ -65,20 +65,20 @@ def callback_listar_ativos_fii(call):
 
             # 🧠 LÓGICA DO AVISO VISUAL (ASTERISCO)
 
-            texto_botao = ticker
+            texto_botao = f"🏢 {ticker}"
 
             # CENÁRIO 1: Fundo com múltiplos segmentos (Ex: GARE11)
             if len(segmentos_do_fundo) > 1:
                 # Futuro: Aqui você puxará a % raspada ou da coluna da planilha
                 # Ex: porcentagem = linha[10] 
-                texto_botao = f"{ticker} (*Misto/Múltiplo)"
+                texto_botao = f"🏢 {ticker} (*Misto/Múltiplo)"
                 # porcentagem = linha[10].strip() # Extrai o valor real da planilha
                 # texto_botao = f"{ticker} (*{porcentagem}% {nome_setor})"
 
             # CENÁRIO 2: Fundo de Papel (CRI)
             elif tipo_fundo.upper() == "PAPEL":
                 # Futuro: Puxar IPCA/CDI da planilha. Ex: ipca = linha[11], cdi = linha[12]
-                texto_botao = f"{ticker} (*Indexadores)"
+                texto_botao = f"🏢 {ticker} (*Indexadores)"
                 # porcentagem = linha[10].strip() # Extrai o valor real da planilha
                 # texto_botao = f"{ticker} (*{porcentagem}% {nome_setor})"
 
@@ -137,7 +137,7 @@ def callback_ajuda_roadmap(call):
 
     texto = TEXTO_MENU_AJUDA
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("Voltar", callback_data="menu_ajuda"))
+    markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_ajuda"))
     bot.edit_message_text(texto, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: call.data == 'ajuda_comandos')
@@ -156,7 +156,7 @@ def callback_ajuda_comandos(call):
     )
 
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("Voltar à Ajuda", callback_data="menu_ajuda"))
+    markup.add(InlineKeyboardButton("🔙 Voltar à Ajuda", callback_data="menu_ajuda"))
 
     bot.edit_message_text(texto_comandos, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 

@@ -54,7 +54,7 @@ def enviar_ajuda(message):
     autor_id = getattr(autor, "id", None)
     papel, status, formulario_ativo = permissoes.contexto_ajuda(autor_id)
     markup = InlineKeyboardMarkup().add(
-        InlineKeyboardButton("Abrir o menu", callback_data="voltar_menu")
+        InlineKeyboardButton("🏠 Abrir o menu", callback_data="voltar_menu")
     )
     bot.send_message(
         message.chat.id,
