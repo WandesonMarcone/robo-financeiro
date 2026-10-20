@@ -59,7 +59,12 @@ def enviar_painel_tickers(chat_id, message_id=None):
         # Puxa TUDO que está aguardando revisão (sem filtrar por tipo)
         pendentes = session.query(DocumentosQualitativos).filter_by(status_processamento="AGUARDANDO_REVISAO").all()
 
-        markup_voltar = InlineKeyboardMarkup()
+        markup_voltar = InlineKeyboardMarkup(row_width=1)
+        markup_voltar.add(
+            InlineKeyboardButton(
+                "🤖 Classificar com IA", callback_data="rev_ia_lote"
+            )
+        )
         markup_voltar.add(
             InlineKeyboardButton("🔙 Voltar", callback_data="adm_home")
         )
@@ -94,6 +99,11 @@ def enviar_painel_tickers(chat_id, message_id=None):
             icone = "🏢" if tipo_ativo == "FII" else "📈"
             
             markup.add(InlineKeyboardButton(text=f"{icone} {t} ({qtd} docs)", callback_data=f"rev_t_{t}"))
+        markup.add(
+            InlineKeyboardButton(
+                "🤖 Classificar com IA", callback_data="rev_ia_lote"
+            )
+        )
         markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="adm_home"))
 
         msg = (
@@ -119,11 +129,57 @@ def abrir_revisao_pelo_relatorio(call):
     bot.answer_callback_query(call.id)
     enviar_painel_tickers(call.message.chat.id, call.message.message_id)
 
+
+@bot.callback_query_handler(func=lambda call: call.data == "rev_ia_lote")
+def classificar_lote_com_ia(call):
+    """Duas checagens da IA nos documentos genericos/incertos (catalogo fixo)."""
+    bot.answer_callback_query(call.id, "Classificando com as duas checagens da IA...")
+    try:
+        from atualizador_documentos import reclassificar_documentos_genericos
+
+        resumo = reclassificar_documentos_genericos()
+    except Exception:
+        resumo = {"fila": 0, "classificados": 0, "revisao": 0, "sem_texto": 0, "erros": 1, "ia_indisponivel": False}
+    if resumo.get("ia_indisponivel"):
+        texto = (
+            "⚖️ Central de Revisoes\n"
+            "IA indisponivel (GROQ_API_KEY ausente). Nada foi classificado."
+        )
+    elif resumo.get("fila", 0) == 0:
+        texto = (
+            "⚖️ Central de Revisoes\n"
+            "Nenhum documento generico ou incerto para a IA classificar agora."
+        )
+    else:
+        texto = (
+            "⚖️ Central de Revisoes\n"
+            "🤖 Classificacao em lote (duas checagens, catalogo fixo).\n"
+            f"Na fila: {resumo.get('fila', 0)}\n"
+            f"Identificados: {resumo.get('classificados', 0)}\n"
+            f"Ainda em revisao: {resumo.get('revisao', 0)}\n"
+            f"Sem texto no PDF: {resumo.get('sem_texto', 0)}\n"
+            f"Erros: {resumo.get('erros', 0)}"
+        )
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("🔄 Atualizar lista", callback_data="rev_start")
+    )
+    markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="adm_home"))
+    bot.edit_message_text(
+        texto,
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=markup,
+    )
+
+
 # 🧠 O CÉREBRO DA REVISÃO (Lida com todos os cliques dos botões)
 @bot.callback_query_handler(func=lambda call: call.data.startswith('rev_'))
 def processar_revisao(call):
     partes = call.data.split('_')
     acao = partes[1]
+    if acao == 'ia':
+        return
     session = SessionDB()
 
     try:

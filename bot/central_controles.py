@@ -501,8 +501,10 @@ def _formatar_valor_alerta(valor):
 
 
 def _linhas_eventos_alerta(eventos):
+    from pipeline_dados.filtro_alertas import filtrar_eventos_exibicao
+
     linhas = []
-    for evento in eventos:
+    for evento in filtrar_eventos_exibicao(eventos):
         data = (
             evento.data_evento.strftime("%d/%m/%Y %H:%M")
             if evento.data_evento
@@ -567,12 +569,16 @@ def _texto_notificacoes():
             "Alertas importantes dos FIIs e acoes favoritados por usuarios.\n\n"
             "Nenhum ativo favoritado. Sem recorte de alertas."
         )
-    eventos = RepositorioAlertas().listar_por_ativos(ids, limite=15)
+    from pipeline_dados.filtro_alertas import filtrar_eventos_exibicao
+
+    eventos = filtrar_eventos_exibicao(
+        RepositorioAlertas().listar_por_ativos(ids, limite=50)
+    )[:15]
     if not eventos:
         return (
             "🔔 NOTIFICACOES\n"
             "Alertas importantes dos FIIs e acoes favoritados por usuarios.\n\n"
-            "Nenhum evento persistido nesses ativos."
+            "Nenhum evento relevante persistido nesses ativos."
         )
     linhas = [
         "🔔 NOTIFICACOES",
@@ -756,7 +762,15 @@ def _mostrar_notificacoes_pessoa(call, usuario_id):
         dto = RepositorioUsuarios().obter_por_id(usuario_id)
         favs = RepositorioFavoritos().listar(usuario_id) if dto is not None else []
         ids = [f.ativo_id for f in favs]
-        eventos = RepositorioAlertas().listar_por_ativos(ids, limite=15) if ids else []
+        from pipeline_dados.filtro_alertas import filtrar_eventos_exibicao
+
+        eventos = (
+            filtrar_eventos_exibicao(
+                RepositorioAlertas().listar_por_ativos(ids, limite=50)
+            )[:15]
+            if ids
+            else []
+        )
     except Exception:
         logger.warning("CENTRAL - falha ao listar alertas da pessoa", exc_info=True)
         _render(

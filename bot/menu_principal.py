@@ -361,11 +361,14 @@ def texto_novos_documentos(limite=10, tickers_permitidos=None):
         consulta = session.query(DocumentosQualitativos, Ativo).join(
             Ativo, DocumentosQualitativos.ativo_id == Ativo.id
         )
+        consulta = consulta.filter(
+            DocumentosQualitativos.status_processamento.in_(("SALVO_DRIVE", "SALVO"))
+        )
         if tickers_permitidos is not None:
             consulta = consulta.filter(Ativo.ticker.in_(sorted(tickers_permitidos)))
-        ultimos = (
+        candidatos = (
             consulta.order_by(DocumentosQualitativos.data_publicacao.desc())
-            .limit(limite)
+            .limit(max(int(limite) * 5, 20))
             .all()
         )
     except Exception:
@@ -375,11 +378,28 @@ def texto_novos_documentos(limite=10, tickers_permitidos=None):
         if session is not None:
             session.close()
 
+    from pipeline_dados.tipos_documento import normalizar_tipo_documento
+
+    ultimos = []
+    for doc, ativo in candidatos:
+        tipo_ativo = getattr(getattr(ativo, "tipo", None), "name", "FII")
+        tipo_oficial = normalizar_tipo_documento(doc.tipo_documento, tipo_ativo)
+        if not tipo_oficial:
+            continue
+        ultimos.append((doc, ativo, tipo_oficial))
+        if len(ultimos) >= limite:
+            break
+
     if not ultimos:
-        return "📄 *Novos documentos*\n\n📭 Nenhum documento encontrado no banco ainda."
+        return (
+            "📄 *Novos documentos*\n\n"
+            "📭 Nenhum documento classificado encontrado. "
+            "Tipos genericos (Documento, Ago, Age) ficam na "
+            "⚖️ Central de Revisoes para a IA identificar."
+        )
 
     linhas = ["📄 *Novos documentos*", "", "Últimos relatórios capturados:"]
-    for doc, ativo in ultimos:
+    for doc, ativo, tipo_oficial in ultimos:
         data = (
             doc.data_publicacao.strftime("%d/%m/%Y")
             if doc.data_publicacao
@@ -389,7 +409,7 @@ def texto_novos_documentos(limite=10, tickers_permitidos=None):
         linhas.append(
             f"🏢 *{escapar_markdown(ativo.ticker)}* — {escapar_markdown(data)}"
         )
-        linhas.append(f"🏷️ {escapar_markdown(doc.tipo_documento)}")
+        linhas.append(f"🏷️ {escapar_markdown(tipo_oficial)}")
     return "\n".join(linhas)
 
 
@@ -418,15 +438,23 @@ def texto_meus_alertas(usuario_id, limite=10):
         return TEXTO_ATIVOS_VAZIOS
     ids = [favorito.ativo_id for favorito in favoritos]
     try:
-        eventos = RepositorioAlertas().listar_por_ativos(ids, limite=limite)
+        eventos = RepositorioAlertas().listar_por_ativos(
+            ids, limite=max(int(limite) * 5, 20)
+        )
     except Exception:
         logger.warning("MENU - falha ao consultar alertas", exc_info=True)
         return TEXTO_ERRO_BANCO
     if not eventos:
         return TEXTO_ALERTAS_VAZIOS
 
+    from pipeline_dados.filtro_alertas import filtrar_eventos_exibicao
+
+    visiveis = filtrar_eventos_exibicao(eventos)[:limite]
+    if not visiveis:
+        return TEXTO_ALERTAS_VAZIOS
+
     linhas = ["🔔 *Alertas*", "", "Eventos recentes dos seus favoritos:"]
-    for evento in eventos:
+    for evento in visiveis:
         data = (
             evento.data_evento.strftime("%d/%m/%Y %H:%M")
             if evento.data_evento

@@ -19,6 +19,7 @@ from services.logo_service import (
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from pipeline_dados.conexao import obter_session_factory
 from config import MAPA_ISCAS_MASTER, TIPOS_DOC_FII
+from pipeline_dados.tipos_documento import manter_tipo_catalogo
 
 logger = logging.getLogger("robo.documentos")
 
@@ -515,9 +516,8 @@ def rotina_processar_pendentes():
             confianca = detalhes["confianca"]
             acordo = detalhes["acordo"]
 
-            nome_limpo = "".join([c for c in str(nome_ia).title() if c.isalnum() or c in (' ', '_', '-')]).strip()
-            if len(nome_limpo) < 3:
-                nome_limpo = "Documento_FII"
+            oficial = manter_tipo_catalogo(nome_ia, doc_db.tipo_documento, "FII")
+            nome_limpo = oficial or "Outros"
 
             partes_data = data_ref.split('-')
             mes_pasta = f"{partes_data[2]}-{partes_data[1]}" if len(partes_data) == 3 else datetime.now().strftime("%Y-%m")
@@ -782,3 +782,139 @@ def rotina_processar_acoes():
         resultado.notificados,
     )
     return resultado
+
+
+LIMITE_RECLASSIFICACAO = 8
+
+
+def _extrair_texto_primeira_pagina(pdf_bytes):
+    if not pdf_bytes:
+        return ""
+    temp_filename = "/tmp/classificar_lote.pdf"
+    try:
+        with open(temp_filename, "wb") as f:
+            f.write(pdf_bytes)
+        import PyPDF2
+
+        reader = PyPDF2.PdfReader(temp_filename)
+        if not reader.pages:
+            return ""
+        return (reader.pages[0].extract_text() or "").strip()
+    except Exception:
+        return ""
+    finally:
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
+
+
+def _texto_para_classificacao(doc, downloader=None):
+    texto = (getattr(doc, "texto_extraido", None) or "").strip()
+    if texto:
+        return texto
+    id_doc = str(getattr(doc, "id_b3", None) or "").strip()
+    if not id_doc:
+        return ""
+    try:
+        b3 = downloader or FnetDownloader()
+        pdf_bytes = b3.baixar_pdf(id_doc)
+    except Exception:
+        return ""
+    return _extrair_texto_primeira_pagina(pdf_bytes)
+
+
+def reclassificar_documentos_genericos(limite=LIMITE_RECLASSIFICACAO, downloader=None):
+    """Duas checagens da IA nos docs genericos/incertos, sem inventar nomes.
+
+    Aliases conhecidos (Ago, Age, Aviso Ao Mercado) sao mapeados ao catalogo
+    sem IA. O restante so atualiza ``tipo_documento`` se as duas leituras
+    concordarem, o tipo estiver no catalogo e a confianca for >= 80.
+    """
+    from pipeline_dados.tipos_documento import (
+        e_tipo_generico,
+        normalizar_tipo_documento,
+    )
+
+    limite = max(1, min(int(limite or LIMITE_RECLASSIFICACAO), 15))
+    resumo = {
+        "fila": 0,
+        "classificados": 0,
+        "revisao": 0,
+        "sem_texto": 0,
+        "erros": 0,
+        "ia_indisponivel": False,
+    }
+    session = SessionDB()
+    try:
+        candidatos = (
+            session.query(DocumentosQualitativos)
+            .filter(
+                DocumentosQualitativos.status_processamento.in_(
+                    ("AGUARDANDO_REVISAO", "PENDENTE", "SALVO_DRIVE", "SALVO")
+                )
+            )
+            .order_by(DocumentosQualitativos.data_publicacao.desc())
+            .limit(80)
+            .all()
+        )
+        escolhidos = []
+        for doc in candidatos:
+            oficial = normalizar_tipo_documento(doc.tipo_documento, "FII")
+            precisa = (
+                doc.status_processamento == "AGUARDANDO_REVISAO"
+                or e_tipo_generico(doc.tipo_documento)
+                or oficial is None
+                or (oficial and oficial != doc.tipo_documento)
+            )
+            if precisa:
+                escolhidos.append(doc)
+            if len(escolhidos) >= limite:
+                break
+        resumo["fila"] = len(escolhidos)
+        if not escolhidos:
+            return resumo
+
+        for doc in escolhidos:
+            alias = normalizar_tipo_documento(doc.tipo_documento, "FII")
+            if alias and alias != doc.tipo_documento:
+                doc.tipo_documento = alias
+                if doc.status_processamento == "AGUARDANDO_REVISAO":
+                    doc.status_processamento = "SALVO_DRIVE"
+                    doc.resumo_ia = None
+                resumo["classificados"] += 1
+                continue
+            texto = _texto_para_classificacao(doc, downloader=downloader)
+            if texto and not (doc.texto_extraido or "").strip():
+                doc.texto_extraido = texto[:15000]
+            if not texto:
+                resumo["sem_texto"] += 1
+                continue
+            try:
+                detalhes = _dupla_checagem_fii(doc.tipo_documento, texto)
+            except IAIndisponivelError:
+                resumo["ia_indisponivel"] = True
+                resumo["erros"] += 1
+                break
+            except Exception:
+                logger.warning("Falha na dupla checagem do doc %s", doc.id, exc_info=True)
+                resumo["erros"] += 1
+                continue
+            oficial = manter_tipo_catalogo(detalhes["tipo"], doc.tipo_documento, "FII")
+            if detalhes["acordo"] and detalhes["confianca"] >= 80 and oficial:
+                doc.tipo_documento = oficial
+                doc.resumo_ia = None
+                if doc.status_processamento == "AGUARDANDO_REVISAO":
+                    doc.status_processamento = "SALVO_DRIVE"
+                resumo["classificados"] += 1
+            else:
+                doc.status_processamento = "AGUARDANDO_REVISAO"
+                doc.resumo_ia = _resumo_dupla_checagem(detalhes)
+                resumo["revisao"] += 1
+        session.commit()
+        return resumo
+    except Exception:
+        session.rollback()
+        logger.warning("Falha ao reclassificar documentos genericos", exc_info=True)
+        resumo["erros"] += 1
+        return resumo
+    finally:
+        session.close()

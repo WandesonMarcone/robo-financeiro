@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 
 from config import MAPA_ISCAS_MASTER
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos, TipoAtivo
+from pipeline_dados.tipos_documento import normalizar_tipo_documento
 
 STATUS_SEM_INFORMES = "sem_informes"
 STATUS_SEM_ATIVOS = "sem_ativos"
@@ -164,7 +165,8 @@ class ColetorFnet:
             for doc in documentos:
                 id_doc = str(doc.get("id") or "").strip()
                 nome_fundo = doc.get("nome_fundo")
-                tipo_doc = str(doc.get("tipo_doc") or "").strip() or "Documento"
+                tipo_bruto = str(doc.get("tipo_doc") or "").strip() or "Documento"
+                tipo_doc = normalizar_tipo_documento(tipo_bruto, "FII") or tipo_bruto
                 data_pub = _parse_data_ref(doc.get("data_ref"))
 
                 if not id_doc or data_pub is None:
