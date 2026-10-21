@@ -143,13 +143,58 @@ def _responder_callback(call, texto=None):
         logger.debug("Callback expirado ou invalido; seguindo sem answer.", exc_info=True)
 
 
-def _markup_lote_ia():
+def _markup_lote_ia(resumo=None):
     markup = InlineKeyboardMarkup(row_width=1)
+    if int((resumo or {}).get("sem_texto", 0) or 0) > 0:
+        markup.add(
+            InlineKeyboardButton(
+                "📄 IA ler paginas 2 e 3", callback_data="rev_ia_pags"
+            )
+        )
     markup.add(
         InlineKeyboardButton("🔄 Atualizar lista", callback_data="rev_start")
     )
     markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="adm_home"))
     return markup
+
+
+def _linhas_tipos(tipos, limite=4):
+    itens = sorted(
+        (tipos or {}).items(),
+        key=lambda par: (-int(par[1] or 0), par[0]),
+    )
+    saida = []
+    for nome, qtd in itens[:limite]:
+        saida.append(f"{int(qtd or 0)} {nome}")
+    resto = len(itens) - limite
+    if resto > 0:
+        saida.append(f"+{resto} tipo(s)")
+    return saida
+
+
+def _linhas_por_fundo(por_fundo, limite=25):
+    itens = sorted(
+        (por_fundo or {}).items(),
+        key=lambda par: (-int((par[1] or {}).get("examinados", 0) or 0), par[0]),
+    )
+    if not itens:
+        return []
+    linhas = ["", f"Fundos examinados: {len(itens)}"]
+    for ticker, dados in itens[:limite]:
+        exam = int((dados or {}).get("examinados", 0) or 0)
+        rev = int((dados or {}).get("revisao", 0) or 0)
+        sem = int((dados or {}).get("sem_texto", 0) or 0)
+        partes = [f"{exam} exam."]
+        partes.extend(_linhas_tipos((dados or {}).get("tipos")))
+        if rev:
+            partes.append(f"{rev} rev.")
+        if sem:
+            partes.append(f"{sem} sem texto")
+        linhas.append(f"{ticker}: " + " | ".join(partes))
+    resto = len(itens) - limite
+    if resto > 0:
+        linhas.append(f"... e mais {resto} fundo(s)")
+    return linhas
 
 
 def _texto_resumo_lote(resumo, andamento=False):
@@ -171,29 +216,34 @@ def _texto_resumo_lote(resumo, andamento=False):
     extra_ia = ""
     if resumo.get("ia_indisponivel"):
         extra_ia = "\nIA indisponivel no meio do lote; o restante ficou na fila."
-    return (
-        "⚖️ Central de Revisoes\n"
-        f"{titulo}\n"
-        f"Lotes: {resumo.get('lotes', 0)}\n"
-        f"Analisados: {resumo.get('fila', 0)}\n"
-        f"Identificados: {resumo.get('classificados', 0)}\n"
-        f"Ainda em revisao: {resumo.get('revisao', 0)}\n"
-        f"Sem texto no PDF: {resumo.get('sem_texto', 0)}\n"
-        f"Erros: {resumo.get('erros', 0)}"
-        f"{extra_ia}"
-    )
+    linhas = [
+        "⚖️ Central de Revisoes",
+        titulo,
+        f"Lotes: {resumo.get('lotes', 0)}",
+        f"Examinados: {resumo.get('fila', 0)}",
+        f"Identificados: {resumo.get('classificados', 0)}",
+        f"Organizados no Drive: {resumo.get('drive', 0)}",
+        f"Ainda em revisao: {resumo.get('revisao', 0)}",
+        f"Sem texto no PDF: {resumo.get('sem_texto', 0)}",
+        f"Erros: {resumo.get('erros', 0)}",
+    ]
+    if extra_ia:
+        linhas.append(extra_ia.strip())
+    if not andamento:
+        linhas.extend(_linhas_por_fundo(resumo.get("por_fundo")))
+    return "\n".join(linhas)
 
 
-def _editar_mensagem_lote(chat_id, message_id, texto):
+def _editar_mensagem_lote(chat_id, message_id, texto, resumo=None):
     try:
         bot.edit_message_text(
-            texto, chat_id, message_id, reply_markup=_markup_lote_ia()
+            texto, chat_id, message_id, reply_markup=_markup_lote_ia(resumo)
         )
     except Exception:
         logger.debug("Falha ao editar mensagem do lote de IA.", exc_info=True)
 
 
-def _rodar_lote_ia(chat_id, message_id):
+def _rodar_lote_ia(chat_id, message_id, somente_sem_texto=False, pagina_inicial=0):
     resumo = {
         "fila": 0,
         "classificados": 0,
@@ -203,16 +253,24 @@ def _rodar_lote_ia(chat_id, message_id):
         "ia_indisponivel": False,
         "lotes": 0,
         "ids": [],
+        "por_fundo": {},
     }
     try:
         from atualizador_documentos import reclassificar_documentos_genericos_em_lotes
 
         def _progresso(total, _lote):
             _editar_mensagem_lote(
-                chat_id, message_id, _texto_resumo_lote(total, andamento=True)
+                chat_id,
+                message_id,
+                _texto_resumo_lote(total, andamento=True),
+                resumo=total,
             )
 
-        resumo = reclassificar_documentos_genericos_em_lotes(on_lote=_progresso)
+        resumo = reclassificar_documentos_genericos_em_lotes(
+            on_lote=_progresso,
+            somente_sem_texto=somente_sem_texto,
+            pagina_inicial=pagina_inicial,
+        )
     except Exception:
         logger.warning("Falha no lote de classificacao IA", exc_info=True)
     finally:
@@ -220,7 +278,9 @@ def _rodar_lote_ia(chat_id, message_id):
             _lote_ia_lock.release()
         except RuntimeError:
             pass
-    _editar_mensagem_lote(chat_id, message_id, _texto_resumo_lote(resumo))
+    _editar_mensagem_lote(
+        chat_id, message_id, _texto_resumo_lote(resumo), resumo=resumo
+    )
 
 
 @bot.callback_query_handler(func=lambda call: call.data == "rev_ia_lote")
@@ -246,6 +306,35 @@ def classificar_lote_com_ia(call):
     )
     threading.Thread(
         target=_rodar_lote_ia, args=(chat_id, message_id), daemon=True
+    ).start()
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "rev_ia_pags")
+def classificar_paginas_sem_texto(call):
+    """Rele paginas 2 e 3 so dos PDFs que ficaram sem texto."""
+    _responder_callback(call, "Lendo paginas 2 e 3 dos PDFs sem texto...")
+    chat_id = call.message.chat.id
+    message_id = call.message.message_id
+    if not _lote_ia_lock.acquire(blocking=False):
+        _editar_mensagem_lote(
+            chat_id,
+            message_id,
+            "⚖️ Central de Revisoes\n"
+            "🤖 Ja ha uma classificacao em andamento. Aguarde o resultado.",
+        )
+        return
+    _editar_mensagem_lote(
+        chat_id,
+        message_id,
+        "⚖️ Central de Revisoes\n"
+        "📄 Relendo paginas 2 e 3 dos PDFs sem texto, de 3 em 3.\n"
+        "Aguarde; o resumo sera atualizado ao terminar.",
+    )
+    threading.Thread(
+        target=_rodar_lote_ia,
+        args=(chat_id, message_id),
+        kwargs={"somente_sem_texto": True, "pagina_inicial": 1},
+        daemon=True,
     ).start()
 
 

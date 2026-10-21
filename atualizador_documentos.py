@@ -788,9 +788,12 @@ LIMITE_RECLASSIFICACAO = 3
 MAX_LOTES_RECLASSIFICACAO = 40
 TAMANHO_MAX_PDF_CLASSIFICACAO = 1_500_000
 TEXTO_MAX_CLASSIFICACAO = 1500
+PAGINAS_MAX_CLASSIFICACAO = 3
 
 
-def _extrair_texto_primeira_pagina(pdf_bytes):
+def _extrair_texto_paginas(
+    pdf_bytes, max_paginas=PAGINAS_MAX_CLASSIFICACAO, pagina_inicial=0
+):
     if not pdf_bytes:
         return ""
     try:
@@ -800,14 +803,26 @@ def _extrair_texto_primeira_pagina(pdf_bytes):
         reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
         if not reader.pages:
             return ""
-        return (reader.pages[0].extract_text() or "").strip()[:TEXTO_MAX_CLASSIFICACAO]
+        inicio = max(0, int(pagina_inicial or 0))
+        teto = min(len(reader.pages), inicio + max(1, int(max_paginas or 1)))
+        partes = []
+        tamanho = 0
+        for i in range(inicio, teto):
+            trecho = (reader.pages[i].extract_text() or "").strip()
+            if not trecho:
+                continue
+            partes.append(trecho)
+            tamanho += len(trecho)
+            if tamanho >= TEXTO_MAX_CLASSIFICACAO:
+                break
+        return "\n".join(partes).strip()[:TEXTO_MAX_CLASSIFICACAO]
     except Exception:
         return ""
 
 
-def _texto_para_classificacao(doc, downloader=None):
+def _texto_para_classificacao(doc, downloader=None, pagina_inicial=0):
     texto = (getattr(doc, "texto_extraido", None) or "").strip()
-    if texto:
+    if texto and int(pagina_inicial or 0) <= 0:
         return texto[:TEXTO_MAX_CLASSIFICACAO]
     id_doc = str(getattr(doc, "id_b3", None) or "").strip()
     if not id_doc:
@@ -817,7 +832,10 @@ def _texto_para_classificacao(doc, downloader=None):
         pdf_bytes = b3.baixar_pdf(id_doc, max_bytes=TAMANHO_MAX_PDF_CLASSIFICACAO)
     except Exception:
         return ""
-    extraido = _extrair_texto_primeira_pagina(pdf_bytes)
+    paginas = 2 if int(pagina_inicial or 0) > 0 else PAGINAS_MAX_CLASSIFICACAO
+    extraido = _extrair_texto_paginas(
+        pdf_bytes, max_paginas=paginas, pagina_inicial=pagina_inicial
+    )
     del pdf_bytes
     return extraido
 
@@ -853,6 +871,114 @@ def _precisa_reclassificar(doc):
     )
 
 
+def _ticker_doc(doc):
+    ativo = getattr(doc, "ativo", None)
+    ticker = getattr(ativo, "ticker", None) if ativo is not None else None
+    return str(ticker or "").strip().upper() or "?"
+
+
+def _tipo_ativo_doc(doc):
+    ativo = getattr(doc, "ativo", None)
+    tipo = getattr(ativo, "tipo", None) if ativo is not None else None
+    valor = getattr(tipo, "value", tipo)
+    return "ACAO" if str(valor or "").strip().upper() == "ACAO" else "FII"
+
+
+def _file_id_drive(url):
+    match = re.search(r"/d/([a-zA-Z0-9_-]+)", str(url or ""))
+    return match.group(1) if match else None
+
+
+def _mes_ref_do_doc(doc):
+    bruto = str(getattr(doc, "assunto", None) or "").strip().split(" ")[0]
+    bruto = bruto.replace("/", "-")
+    partes = bruto.split("-")
+    if len(partes) == 3:
+        if len(partes[0]) == 4:
+            return f"{partes[0]}-{partes[1].zfill(2)}"
+        if len(partes[2]) == 4:
+            return f"{partes[2]}-{partes[1].zfill(2)}"
+    data = getattr(doc, "data_publicacao", None)
+    if data is not None:
+        try:
+            return data.strftime("%Y-%m")
+        except Exception:
+            pass
+    return datetime.now().strftime("%Y-%m")
+
+
+def _nome_arquivo_drive(tipo, doc):
+    nome = str(tipo or "Outros").replace(" ", "_").replace("/", "-")
+    assunto = str(getattr(doc, "assunto", None) or "").strip().split(" ")[0]
+    assunto = assunto.replace("/", "-") or "Doc"
+    sufixo = f"_{doc.id_b3}" if getattr(doc, "id_b3", None) else ""
+    return f"{nome}_{assunto}{sufixo}.pdf"
+
+
+def _organizar_identificado_no_drive(doc, tipo, drive_manager=None):
+    file_id = _file_id_drive(getattr(doc, "url_pdf", None))
+    if not file_id:
+        return None
+    ticker = _ticker_doc(doc)
+    if ticker == "?":
+        return None
+    try:
+        drive = drive_manager
+        if drive is None:
+            from modules.GoogleDriveManager import GoogleDriveManager
+
+            drive = GoogleDriveManager()
+        return drive.mover_arquivo_da_revisao_por_id(
+            file_id=file_id,
+            ticker=ticker,
+            mes_ref=_mes_ref_do_doc(doc),
+            novo_nome=_nome_arquivo_drive(tipo, doc),
+            tipo_ativo=_tipo_ativo_doc(doc),
+        )
+    except Exception:
+        logger.warning(
+            "Falha ao organizar doc %s no Drive", getattr(doc, "id", None), exc_info=True
+        )
+        return None
+
+
+def _confirmar_identificacao(doc, tipo, resumo, ticker, drive_manager=None):
+    doc.tipo_documento = tipo
+    doc.resumo_ia = None
+    if doc.status_processamento == "AGUARDANDO_REVISAO":
+        doc.status_processamento = "SALVO_DRIVE"
+    link = _organizar_identificado_no_drive(doc, tipo, drive_manager=drive_manager)
+    if link:
+        doc.url_pdf = link
+        doc.status_processamento = "SALVO_DRIVE"
+        resumo["drive"] = int(resumo.get("drive", 0) or 0) + 1
+    resumo["classificados"] += 1
+    _registrar_fundo(resumo, ticker, "identificados", tipo=tipo)
+    return doc
+
+
+def _fundo_vazio():
+    return {
+        "examinados": 0,
+        "identificados": 0,
+        "revisao": 0,
+        "sem_texto": 0,
+        "erros": 0,
+        "tipos": {},
+    }
+
+
+def _registrar_fundo(resumo, ticker, campo, tipo=None):
+    fundo = resumo.setdefault("por_fundo", {}).setdefault(ticker, _fundo_vazio())
+    fundo["examinados"] += 1
+    if campo and campo != "examinados":
+        fundo[campo] = int(fundo.get(campo, 0) or 0) + 1
+    if tipo:
+        tipos = fundo.setdefault("tipos", {})
+        tipos[tipo] = int(tipos.get(tipo, 0) or 0) + 1
+    return fundo
+
+
 def _resumo_lote_vazio():
     return {
         "fila": 0,
@@ -860,20 +986,28 @@ def _resumo_lote_vazio():
         "revisao": 0,
         "sem_texto": 0,
         "erros": 0,
+        "drive": 0,
         "ia_indisponivel": False,
         "ids": [],
         "lotes": 0,
+        "por_fundo": {},
     }
 
 
 def reclassificar_documentos_genericos(
-    limite=LIMITE_RECLASSIFICACAO, downloader=None, excluir_ids=None
+    limite=LIMITE_RECLASSIFICACAO,
+    downloader=None,
+    excluir_ids=None,
+    somente_sem_texto=False,
+    pagina_inicial=0,
+    drive_manager=None,
 ):
     """Duas checagens da IA nos docs genericos/incertos, sem inventar nomes.
 
     Aliases conhecidos (Ago, Age, Aviso Ao Mercado) sao mapeados ao catalogo
     sem IA. O restante so atualiza ``tipo_documento`` se as duas leituras
     concordarem, o tipo estiver no catalogo e a confianca for >= 80.
+    Ao identificar, renomeia e move no Drive pela data de ``assunto``.
     """
     from pipeline_dados.tipos_documento import normalizar_tipo_documento
 
@@ -897,6 +1031,8 @@ def reclassificar_documentos_genericos(
         for doc in candidatos:
             if doc.id in ignorados:
                 continue
+            if somente_sem_texto and (doc.texto_extraido or "").strip():
+                continue
             if _precisa_reclassificar(doc):
                 escolhidos.append(doc)
             if len(escolhidos) >= limite:
@@ -907,41 +1043,45 @@ def reclassificar_documentos_genericos(
 
         for doc in escolhidos:
             resumo["ids"].append(doc.id)
+            ticker = _ticker_doc(doc)
             alias = normalizar_tipo_documento(doc.tipo_documento, "FII")
             if alias and alias != doc.tipo_documento:
-                doc.tipo_documento = alias
-                if doc.status_processamento == "AGUARDANDO_REVISAO":
-                    doc.status_processamento = "SALVO_DRIVE"
-                    doc.resumo_ia = None
-                resumo["classificados"] += 1
+                _confirmar_identificacao(
+                    doc, alias, resumo, ticker, drive_manager=drive_manager
+                )
                 continue
-            texto = _texto_para_classificacao(doc, downloader=downloader)
+            texto = _texto_para_classificacao(
+                doc, downloader=downloader, pagina_inicial=pagina_inicial
+            )
             if texto and not (doc.texto_extraido or "").strip():
                 doc.texto_extraido = texto[:TEXTO_MAX_CLASSIFICACAO]
             if not texto:
                 resumo["sem_texto"] += 1
+                doc.status_processamento = "AGUARDANDO_REVISAO"
+                _registrar_fundo(resumo, ticker, "sem_texto")
                 continue
             try:
                 detalhes = _dupla_checagem_fii(doc.tipo_documento, texto)
             except IAIndisponivelError:
                 resumo["ia_indisponivel"] = True
                 resumo["erros"] += 1
+                _registrar_fundo(resumo, ticker, "erros")
                 break
             except Exception:
                 logger.warning("Falha na dupla checagem do doc %s", doc.id, exc_info=True)
                 resumo["erros"] += 1
+                _registrar_fundo(resumo, ticker, "erros")
                 continue
             oficial = manter_tipo_catalogo(detalhes["tipo"], doc.tipo_documento, "FII")
             if detalhes["acordo"] and detalhes["confianca"] >= 80 and oficial:
-                doc.tipo_documento = oficial
-                doc.resumo_ia = None
-                if doc.status_processamento == "AGUARDANDO_REVISAO":
-                    doc.status_processamento = "SALVO_DRIVE"
-                resumo["classificados"] += 1
+                _confirmar_identificacao(
+                    doc, oficial, resumo, ticker, drive_manager=drive_manager
+                )
             else:
                 doc.status_processamento = "AGUARDANDO_REVISAO"
                 doc.resumo_ia = _resumo_dupla_checagem(detalhes)
                 resumo["revisao"] += 1
+                _registrar_fundo(resumo, ticker, "revisao")
         session.commit()
         resumo["lotes"] = 1
         return resumo
@@ -955,12 +1095,22 @@ def reclassificar_documentos_genericos(
 
 
 def _somar_resumo(total, lote):
-    for chave in ("fila", "classificados", "revisao", "sem_texto", "erros"):
+    for chave in ("fila", "classificados", "revisao", "sem_texto", "erros", "drive"):
         total[chave] = int(total.get(chave, 0) or 0) + int(lote.get(chave, 0) or 0)
     total["ia_indisponivel"] = bool(total.get("ia_indisponivel") or lote.get("ia_indisponivel"))
     total.setdefault("ids", [])
     total["ids"].extend(lote.get("ids") or [])
     total["lotes"] = int(total.get("lotes", 0) or 0) + 1
+    destinos = total.setdefault("por_fundo", {})
+    for ticker, dados in (lote.get("por_fundo") or {}).items():
+        dest = destinos.setdefault(ticker, _fundo_vazio())
+        for chave in ("examinados", "identificados", "revisao", "sem_texto", "erros"):
+            dest[chave] = int(dest.get(chave, 0) or 0) + int(
+                (dados or {}).get(chave, 0) or 0
+            )
+        tipos_dest = dest.setdefault("tipos", {})
+        for nome, qtd in ((dados or {}).get("tipos") or {}).items():
+            tipos_dest[nome] = int(tipos_dest.get(nome, 0) or 0) + int(qtd or 0)
     return total
 
 
@@ -969,6 +1119,9 @@ def reclassificar_documentos_genericos_em_lotes(
     max_lotes=MAX_LOTES_RECLASSIFICACAO,
     downloader=None,
     on_lote=None,
+    somente_sem_texto=False,
+    pagina_inicial=0,
+    drive_manager=None,
 ):
     """Um clique: esvazia a fila em fatias de ``limite`` docs, sem repetir ids."""
     total = _resumo_lote_vazio()
@@ -976,7 +1129,12 @@ def reclassificar_documentos_genericos_em_lotes(
     teto = max(1, min(int(max_lotes or MAX_LOTES_RECLASSIFICACAO), 80))
     for _ in range(teto):
         lote = reclassificar_documentos_genericos(
-            limite=limite, downloader=downloader, excluir_ids=vistos
+            limite=limite,
+            downloader=downloader,
+            excluir_ids=vistos,
+            somente_sem_texto=somente_sem_texto,
+            pagina_inicial=pagina_inicial,
+            drive_manager=drive_manager,
         )
         ids = [i for i in (lote.get("ids") or []) if i is not None]
         if lote.get("fila", 0) == 0 and not ids:
