@@ -15,6 +15,27 @@ _PASTA_LOGOS_ACOES = "Ações"
 _PASTA_LOGOS_FIIS = "FIIs"
 _LOGOS_FOLDER_PADRAO = "1CwnYl7lq5U49vVr-BZBNC737tfvyyhuW"
 
+
+def _erro_arquivo_ausente(erro):
+    """404/410 (ou notFound) do Drive: o arquivo ja nao existe."""
+    status = getattr(erro, "status_code", None) or getattr(erro, "resp", None)
+    if hasattr(status, "status"):
+        status = status.status
+    try:
+        status = int(status)
+    except (TypeError, ValueError):
+        status = None
+    if status in (404, 410):
+        return True
+    texto = str(erro or "").lower()
+    return (
+        "file not found" in texto
+        or "notfound" in texto
+        or "httperror 404" in texto
+        or "httperror 410" in texto
+    )
+
+
 class GoogleDriveManager:
     def __init__(self):
         client_id = os.environ.get('CLIENT_ID')
@@ -215,12 +236,17 @@ class GoogleDriveManager:
             return None
 
     def deletar_arquivo(self, file_id):
-        """Apaga sumariamente o arquivo do Google Drive"""
+        """Apaga o arquivo do Google Drive. 404/410 conta como ja apagado."""
+        if not file_id:
+            return True
         try:
             self.service.files().delete(fileId=file_id).execute()
             print(f"🗑️ Arquivo {file_id} apagado do Drive.")
             return True
         except Exception as e:
+            if _erro_arquivo_ausente(e):
+                print(f"🗑️ Arquivo {file_id} ja nao existia no Drive.")
+                return True
             print(f"❌ Erro ao deletar arquivo: {e}")
             return False
 
