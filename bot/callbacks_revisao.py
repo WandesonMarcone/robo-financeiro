@@ -250,6 +250,7 @@ def _rodar_lote_ia(chat_id, message_id, somente_sem_texto=False, pagina_inicial=
         "revisao": 0,
         "sem_texto": 0,
         "erros": 1,
+        "drive": 0,
         "ia_indisponivel": False,
         "lotes": 0,
         "ids": [],
@@ -266,10 +267,17 @@ def _rodar_lote_ia(chat_id, message_id, somente_sem_texto=False, pagina_inicial=
                 resumo=total,
             )
 
+        drive = None
+        try:
+            drive = obter_drive_manager()
+        except Exception:
+            logger.warning("Drive indisponivel no lote de IA", exc_info=True)
+
         resumo = reclassificar_documentos_genericos_em_lotes(
             on_lote=_progresso,
             somente_sem_texto=somente_sem_texto,
             pagina_inicial=pagina_inicial,
+            drive_manager=drive,
         )
     except Exception:
         logger.warning("Falha no lote de classificacao IA", exc_info=True)
