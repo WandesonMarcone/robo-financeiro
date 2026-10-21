@@ -98,6 +98,9 @@ CALLBACKS_ADMIN_PREFIXOS = (
     "subsetor_fii_",
     "macro_ac_",
     "sub_ac_",
+    # Drill-down de classes da mesma empresa (PETR3/PETR4) na listagem de acoes.
+    "emp_ac_",
+    "emp_sa_",
     # Decisao de trocas de favorito: exclusiva do administrador.
     "trocaadm_",
 )

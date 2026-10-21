@@ -14,6 +14,7 @@ from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos, DadosFinan
 # Serviços Inteligentes (Planilhas e Painéis)
 from services.dashboard_menus import buscar_oportunidades, gerar_painel_ativo, buscar_favoritos, filtrar_ativos_por_setor, extrair_data_real
 from services.planilhas import buscar_dados_planilha_com_cache, buscar_ativo_na_planilha
+from pipeline_dados.identidade_visual import agrupar_tickers_por_empresa, raiz_ticker
 
 logger = logging.getLogger(__name__)
 
@@ -379,16 +380,77 @@ def callback_geral(call):
             # 🔴 Filtra a lista fina: só mostra a empresa se ela existir na planilha
             tickers_validos = [t for t in tickers_do_subsetor if t in tickers_planilha]
             
-            markup = InlineKeyboardMarkup(row_width=3)
+            markup = InlineKeyboardMarkup(row_width=1)
             
             if tickers_validos:
-                for ticker in sorted(tickers_validos):
-                    markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
+                for raiz, membros in agrupar_tickers_por_empresa(tickers_validos):
+                    if len(membros) == 1:
+                        markup.add(InlineKeyboardButton(
+                            f"📈 {membros[0]}",
+                            callback_data=f"painel_{membros[0]}_acao",
+                        ))
+                    else:
+                        rotulo = "/".join(membros)
+                        markup.add(InlineKeyboardButton(
+                            f"📈 {rotulo}",
+                            callback_data=f"emp_ac_{idx_macro}_{idx_sub}_{raiz}",
+                        ))
                 txt = f"📂 **Segmento:** {nome_sub}\nEscolha a empresa para análise:"
             else:
                 txt = f"📭 Nenhuma empresa encontrada na planilha para o segmento **{nome_sub}**."
                 
             markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=f"macro_ac_{idx_macro}"))
+            bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+
+        # --- 4ª CAMADA: CLASSES DA MESMA EMPRESA (PETR3/PETR4) ---
+        elif dados.startswith("emp_ac_"):
+            partes = dados.split("_")
+            if len(partes) != 5:
+                responder_callback_desconhecido(bot, call.id)
+                return
+            try:
+                idx_macro = int(partes[2])
+                idx_sub = int(partes[3])
+            except ValueError:
+                responder_callback_desconhecido(bot, call.id)
+                return
+            raiz = partes[4].strip().upper()
+            if not raiz:
+                responder_callback_desconhecido(bot, call.id)
+                return
+
+            lista_macros = list(MAPA_SETORES_B3.keys())
+            if idx_macro < 0 or idx_macro >= len(lista_macros):
+                responder_callback_desconhecido(bot, call.id)
+                return
+            nome_macro = lista_macros[idx_macro]
+            subsetores = list(MAPA_SETORES_B3[nome_macro].keys())
+            if idx_sub < 0 or idx_sub >= len(subsetores):
+                responder_callback_desconhecido(bot, call.id)
+                return
+            nome_sub = subsetores[idx_sub]
+
+            matriz = buscar_dados_planilha_com_cache("BD_Acoes")
+            tickers_planilha = [linha[0].strip().upper() for linha in matriz[1:] if len(linha) > 0 and linha[0].strip()] if matriz else []
+            tickers_do_subsetor = MAPA_SETORES_B3[nome_macro][nome_sub]
+            membros = sorted(
+                t for t in tickers_do_subsetor
+                if t in tickers_planilha and raiz_ticker(t) == raiz
+            )
+
+            bot.answer_callback_query(call.id, f"Classes {raiz}...")
+            markup = InlineKeyboardMarkup(row_width=1)
+            for ticker in membros:
+                markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
+            markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=f"sub_ac_{idx_macro}_{idx_sub}"))
+            if membros:
+                rotulo = "/".join(membros)
+                txt = (
+                    f"📂 **Classes: {rotulo}**\n"
+                    f"Selecione o ticker (cotação e dados separados por classe):"
+                )
+            else:
+                txt = f"📭 Nenhuma classe encontrada para **{raiz}**."
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
 
         # --- FAVORITOS ---

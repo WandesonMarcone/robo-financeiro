@@ -5,6 +5,7 @@ from bot.telegram_utils import montar_guia_comandos
 from services.planilhas import buscar_dados_planilha_com_cache
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pipeline_dados.banco_dados import DocumentosQualitativos
+from pipeline_dados.identidade_visual import agrupar_tickers_por_empresa, raiz_ticker
 
 # ==========================================
 # ----- BOTÃO TIPO/SETOR FIIS -----
@@ -106,26 +107,58 @@ def callback_listar_ativos_acao(call):
     bot.answer_callback_query(call.id, f"Buscando ações de {nome_setor}...")
 
     matriz = buscar_dados_planilha_com_cache("BD_Acoes")
-    markup = InlineKeyboardMarkup(row_width=3) 
-    botoes_ativos = []
+    markup = InlineKeyboardMarkup(row_width=1)
+    tickers_setor = []
 
     for linha in matriz[1:]:
         # SEGURANÇA: Verifica se a linha tem colunas suficientes
         if len(linha) < 1: continue
             
-        ticker = linha[0].strip()
+        ticker = linha[0].strip().upper()
         # Lê a coluna de setor (Ajustado para índice 1, como você mencionou no código)
         setor_da_linha = linha[1].strip() 
 
         if setor_da_linha == nome_setor:
-            # Adiciona o botão da ação na lista
-            botoes_ativos.append(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
+            tickers_setor.append(ticker)
 
-    # Injeta todos os botões no markup de uma vez
-    markup.add(*botoes_ativos)
+    for raiz, membros in agrupar_tickers_por_empresa(tickers_setor):
+        if len(membros) == 1:
+            markup.add(InlineKeyboardButton(f"📈 {membros[0]}", callback_data=f"painel_{membros[0]}_acao"))
+        else:
+            rotulo = "/".join(membros)
+            markup.add(InlineKeyboardButton(f"📈 {rotulo}", callback_data=f"emp_sa_{raiz}"))
     markup.add(InlineKeyboardButton("🔙 Voltar aos Setores", callback_data="menu_acoes"))
 
-    texto = f"📂 *Ações no setor: {nome_setor}*\n\nSelecione um ativo para analisar:"
+    texto = f"📂 *Ações no setor: {nome_setor}*\n\nSelecione a empresa para analisar:"
+    bot.edit_message_text(texto, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('emp_sa_'))
+def callback_classes_acao_setor(call):
+    """Lista as classes (ON/PN/unit) da empresa agrupada no setor."""
+    raiz = call.data.replace('emp_sa_', '').strip().upper()
+    bot.answer_callback_query(call.id, f"Classes {raiz}...")
+
+    matriz = buscar_dados_planilha_com_cache("BD_Acoes")
+    membros = []
+    for linha in matriz[1:]:
+        if len(linha) < 1:
+            continue
+        ticker = linha[0].strip().upper()
+        if raiz_ticker(ticker) == raiz:
+            membros.append(ticker)
+    membros = sorted(dict.fromkeys(membros))
+
+    markup = InlineKeyboardMarkup(row_width=1)
+    for ticker in membros:
+        markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
+    markup.add(InlineKeyboardButton("🔙 Voltar aos Setores", callback_data="menu_acoes"))
+
+    if membros:
+        rotulo = "/".join(membros)
+        texto = f"📂 *Classes: {rotulo}*\n\nSelecione o ticker (dados separados por classe):"
+    else:
+        texto = f"📭 Nenhuma classe encontrada para **{raiz}**."
     bot.edit_message_text(texto, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
 # ==========================================
