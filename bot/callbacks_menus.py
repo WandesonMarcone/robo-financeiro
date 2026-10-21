@@ -436,6 +436,14 @@ def callback_geral(call):
             tipo_ativo = partes[2] # "fii" ou "acao" 
             gerar_painel_ativo(ticker, tipo_ativo, chat_id, msg_id)
 
+        elif dados.startswith("fii_"):
+            ticker = dados.split("_", 1)[1].strip().upper()
+            gerar_painel_ativo(ticker, "fii", chat_id, msg_id)
+
+        elif dados.startswith("acao_"):
+            ticker = dados.split("_", 1)[1].strip().upper()
+            gerar_painel_ativo(ticker, "acao", chat_id, msg_id)
+
         # ==========================================
         # --- ATALHO: DO PAINEL PARA A REVISÃO ---
         # ==========================================

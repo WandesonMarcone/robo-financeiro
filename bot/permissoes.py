@@ -131,6 +131,8 @@ CALLBACKS_USUARIO_PREFIXOS = (
     "docs_",
     "dnav_",
     "dl_",
+    "fii_",
+    "acao_",
     # Favoritos individuais por usuário (Etapa 3). São operações de nível de
     # usuário; o handler ainda revalida que a conta está aprovada no banco.
     "favadd_",
@@ -409,6 +411,8 @@ CALLBACKS_COM_TICKER = {
     "dl_": 1,
     "ia_": 1,
     "ajuda_cvm_": 2,
+    "fii_": 1,
+    "acao_": 1,
 }
 
 

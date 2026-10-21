@@ -84,7 +84,7 @@ def callback_listar_ativos_fii(call):
 
 
             # Cria o botão com a formatação decidida
-            botoes_ativos.append(InlineKeyboardButton(texto_botao, callback_data=f"fii_{ticker}"))
+            botoes_ativos.append(InlineKeyboardButton(texto_botao, callback_data=f"painel_{ticker}_fii"))
 
     # Adiciona todos os ativos na tela (2 por linha por causa do row_width=2)
     markup.add(*botoes_ativos)
@@ -119,7 +119,7 @@ def callback_listar_ativos_acao(call):
 
         if setor_da_linha == nome_setor:
             # Adiciona o botão da ação na lista
-            botoes_ativos.append(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"acao_{ticker}"))
+            botoes_ativos.append(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
 
     # Injeta todos os botões no markup de uma vez
     markup.add(*botoes_ativos)

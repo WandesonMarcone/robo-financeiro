@@ -419,6 +419,9 @@ def processar_revisao(call):
             bot.answer_callback_query(call.id)
             doc_id = partes[2]
             doc = session.query(DocumentosQualitativos).get(doc_id)
+            if not doc:
+                enviar_painel_tickers(call.message.chat.id, call.message.message_id)
+                return
 
             markup = InlineKeyboardMarkup()
 
@@ -475,6 +478,9 @@ def processar_revisao(call):
             bot.answer_callback_query(call.id)
             doc_id = partes[2]
             doc = session.query(DocumentosQualitativos).get(doc_id)
+            if not doc:
+                enviar_painel_tickers(call.message.chat.id, call.message.message_id)
+                return
             tipo_ativo = getattr(doc.ativo.tipo, 'name', str(doc.ativo.tipo).replace("TipoAtivo.", "")).upper()
 
             markup = InlineKeyboardMarkup()
@@ -504,6 +510,9 @@ def processar_revisao(call):
             bot.answer_callback_query(call.id, "Organizando no Drive...")
 
             doc = session.query(DocumentosQualitativos).get(doc_id)
+            if not doc:
+                enviar_painel_tickers(call.message.chat.id, call.message.message_id)
+                return
             file_id = extrair_file_id(doc.url_pdf)
 
             # Puxa o nome exato dos dicionários do config.py
@@ -538,18 +547,11 @@ def processar_revisao(call):
             )
 
             if novo_link:
-                # 2. ATUALIZA O BANCO
                 doc.status_processamento = "SALVO_DRIVE"
                 doc.tipo_documento = tipo_nome_limpo
                 doc.url_pdf = novo_link
                 doc.resumo_ia = None
                 session.commit()
-
-                # 3. 🔥 APAGA O ARQUIVO DA PASTA REVISÃO PARA SUMIR DE LÁ
-                if file_id:
-                    obter_drive_manager().deletar_arquivo(file_id)
-
-                # --- DAQUI PARA BAIXO SEGUE O SEU CÓDIGO DA CONTAGEM DE PENDENTES QUE JÁ ESTÁ PERFEITO ---
                 ticker = doc.ativo.ticker
                 pendentes_restantes = session.query(DocumentosQualitativos).join(Ativo).filter(
                     Ativo.ticker == ticker, 
@@ -583,26 +585,36 @@ def processar_revisao(call):
             bot.answer_callback_query(call.id, "Apagando do Drive...")
             doc_id = partes[2]
             doc = session.query(DocumentosQualitativos).get(doc_id)
-            
-            # Guardamos o ticker ANTES de deletar para o botão de voltar não quebrar
-            ticker_atual = doc.ativo.ticker 
-            
-            file_id = extrair_file_id(doc.url_pdf)
+            if not doc:
+                m = InlineKeyboardMarkup().add(
+                    InlineKeyboardButton(text="🔙 Voltar à Central", callback_data="rev_start")
+                )
+                bot.edit_message_text(
+                    "🗑️ Documento já não estava na fila.",
+                    call.message.chat.id,
+                    call.message.message_id,
+                    reply_markup=m,
+                )
+                return
 
-            # Só tenta deletar no drive se tiver um link válido
-            deletou_drive = False
-            if file_id:
-                deletou_drive = obter_drive_manager().deletar_arquivo(file_id)
-            else:
-                deletou_drive = True # Se não tem link, considera deletado para podermos apagar do banco
+            ticker_atual = getattr(getattr(doc, "ativo", None), "ticker", None)
+            file_id = extrair_file_id(doc.url_pdf)
+            deletou_drive = obter_drive_manager().deletar_arquivo(file_id) if file_id else True
 
             if deletou_drive:
                 doc.status_processamento = "REJEITADO_MANUAL"
                 doc.resumo_ia = None
                 session.commit()
-                
-                m = InlineKeyboardMarkup().add(InlineKeyboardButton(text="🔙 Voltar aos Pendentes", callback_data=f"rev_t_{ticker_atual}"))
-                bot.edit_message_text(f"🗑️ Documento ignorado e apagado com sucesso.", call.message.chat.id, call.message.message_id, reply_markup=m)
+                voltar = f"rev_t_{ticker_atual}" if ticker_atual else "rev_start"
+                m = InlineKeyboardMarkup().add(
+                    InlineKeyboardButton(text="🔙 Voltar aos Pendentes", callback_data=voltar)
+                )
+                bot.edit_message_text(
+                    "🗑️ Documento ignorado e apagado com sucesso.",
+                    call.message.chat.id,
+                    call.message.message_id,
+                    reply_markup=m,
+                )
             else:
                 bot.answer_callback_query(call.id, "❌ Erro ao apagar no Drive!")
 
