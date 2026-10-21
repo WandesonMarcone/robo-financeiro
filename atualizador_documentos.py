@@ -784,42 +784,41 @@ def rotina_processar_acoes():
     return resultado
 
 
-LIMITE_RECLASSIFICACAO = 8
+LIMITE_RECLASSIFICACAO = 3
+TAMANHO_MAX_PDF_CLASSIFICACAO = 1_500_000
+TEXTO_MAX_CLASSIFICACAO = 1500
 
 
 def _extrair_texto_primeira_pagina(pdf_bytes):
     if not pdf_bytes:
         return ""
-    temp_filename = "/tmp/classificar_lote.pdf"
     try:
-        with open(temp_filename, "wb") as f:
-            f.write(pdf_bytes)
+        import io
         import PyPDF2
 
-        reader = PyPDF2.PdfReader(temp_filename)
+        reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
         if not reader.pages:
             return ""
-        return (reader.pages[0].extract_text() or "").strip()
+        return (reader.pages[0].extract_text() or "").strip()[:TEXTO_MAX_CLASSIFICACAO]
     except Exception:
         return ""
-    finally:
-        if os.path.exists(temp_filename):
-            os.remove(temp_filename)
 
 
 def _texto_para_classificacao(doc, downloader=None):
     texto = (getattr(doc, "texto_extraido", None) or "").strip()
     if texto:
-        return texto
+        return texto[:TEXTO_MAX_CLASSIFICACAO]
     id_doc = str(getattr(doc, "id_b3", None) or "").strip()
     if not id_doc:
         return ""
     try:
         b3 = downloader or FnetDownloader()
-        pdf_bytes = b3.baixar_pdf(id_doc)
+        pdf_bytes = b3.baixar_pdf(id_doc, max_bytes=TAMANHO_MAX_PDF_CLASSIFICACAO)
     except Exception:
         return ""
-    return _extrair_texto_primeira_pagina(pdf_bytes)
+    extraido = _extrair_texto_primeira_pagina(pdf_bytes)
+    del pdf_bytes
+    return extraido
 
 
 def reclassificar_documentos_genericos(limite=LIMITE_RECLASSIFICACAO, downloader=None):
@@ -834,7 +833,7 @@ def reclassificar_documentos_genericos(limite=LIMITE_RECLASSIFICACAO, downloader
         normalizar_tipo_documento,
     )
 
-    limite = max(1, min(int(limite or LIMITE_RECLASSIFICACAO), 15))
+    limite = max(1, min(int(limite or LIMITE_RECLASSIFICACAO), 5))
     resumo = {
         "fila": 0,
         "classificados": 0,
@@ -884,7 +883,7 @@ def reclassificar_documentos_genericos(limite=LIMITE_RECLASSIFICACAO, downloader
                 continue
             texto = _texto_para_classificacao(doc, downloader=downloader)
             if texto and not (doc.texto_extraido or "").strip():
-                doc.texto_extraido = texto[:15000]
+                doc.texto_extraido = texto[:TEXTO_MAX_CLASSIFICACAO]
             if not texto:
                 resumo["sem_texto"] += 1
                 continue

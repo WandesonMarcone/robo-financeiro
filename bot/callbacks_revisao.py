@@ -1,5 +1,7 @@
 import json
+import logging
 import re
+import threading
 from datetime import datetime
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -10,9 +12,12 @@ from atualizador_documentos import SessionDB
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from modules.GoogleDriveManager import GoogleDriveManager
 
+logger = logging.getLogger("robo.revisao")
+
 # O gerenciador do Drive e criado sob demanda para evitar descoberta de rede do
 # Google apenas por importar o modulo (reduz efeitos colaterais em testes).
 _drive_manager = None
+_lote_ia_lock = threading.Lock()
 
 
 def obter_drive_manager():
@@ -130,47 +135,101 @@ def abrir_revisao_pelo_relatorio(call):
     enviar_painel_tickers(call.message.chat.id, call.message.message_id)
 
 
-@bot.callback_query_handler(func=lambda call: call.data == "rev_ia_lote")
-def classificar_lote_com_ia(call):
-    """Duas checagens da IA nos documentos genericos/incertos (catalogo fixo)."""
-    bot.answer_callback_query(call.id, "Classificando com as duas checagens da IA...")
+def _responder_callback(call, texto=None):
+    """Responde o clique sem derrubar o handler se o query ja expirou."""
     try:
-        from atualizador_documentos import reclassificar_documentos_genericos
-
-        resumo = reclassificar_documentos_genericos()
+        bot.answer_callback_query(call.id, texto)
     except Exception:
-        resumo = {"fila": 0, "classificados": 0, "revisao": 0, "sem_texto": 0, "erros": 1, "ia_indisponivel": False}
-    if resumo.get("ia_indisponivel"):
-        texto = (
-            "⚖️ Central de Revisoes\n"
-            "IA indisponivel (GROQ_API_KEY ausente). Nada foi classificado."
-        )
-    elif resumo.get("fila", 0) == 0:
-        texto = (
-            "⚖️ Central de Revisoes\n"
-            "Nenhum documento generico ou incerto para a IA classificar agora."
-        )
-    else:
-        texto = (
-            "⚖️ Central de Revisoes\n"
-            "🤖 Classificacao em lote (duas checagens, catalogo fixo).\n"
-            f"Na fila: {resumo.get('fila', 0)}\n"
-            f"Identificados: {resumo.get('classificados', 0)}\n"
-            f"Ainda em revisao: {resumo.get('revisao', 0)}\n"
-            f"Sem texto no PDF: {resumo.get('sem_texto', 0)}\n"
-            f"Erros: {resumo.get('erros', 0)}"
-        )
+        logger.debug("Callback expirado ou invalido; seguindo sem answer.", exc_info=True)
+
+
+def _markup_lote_ia():
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
         InlineKeyboardButton("🔄 Atualizar lista", callback_data="rev_start")
     )
     markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="adm_home"))
-    bot.edit_message_text(
-        texto,
-        call.message.chat.id,
-        call.message.message_id,
-        reply_markup=markup,
+    return markup
+
+
+def _texto_resumo_lote(resumo):
+    if resumo.get("ia_indisponivel"):
+        return (
+            "⚖️ Central de Revisoes\n"
+            "IA indisponivel (GROQ_API_KEY ausente). Nada foi classificado."
+        )
+    if resumo.get("fila", 0) == 0:
+        return (
+            "⚖️ Central de Revisoes\n"
+            "Nenhum documento generico ou incerto para a IA classificar agora."
+        )
+    return (
+        "⚖️ Central de Revisoes\n"
+        "🤖 Classificacao em lote (duas checagens, catalogo fixo).\n"
+        f"Na fila: {resumo.get('fila', 0)}\n"
+        f"Identificados: {resumo.get('classificados', 0)}\n"
+        f"Ainda em revisao: {resumo.get('revisao', 0)}\n"
+        f"Sem texto no PDF: {resumo.get('sem_texto', 0)}\n"
+        f"Erros: {resumo.get('erros', 0)}"
     )
+
+
+def _editar_mensagem_lote(chat_id, message_id, texto):
+    try:
+        bot.edit_message_text(
+            texto, chat_id, message_id, reply_markup=_markup_lote_ia()
+        )
+    except Exception:
+        logger.debug("Falha ao editar mensagem do lote de IA.", exc_info=True)
+
+
+def _rodar_lote_ia(chat_id, message_id):
+    resumo = {
+        "fila": 0,
+        "classificados": 0,
+        "revisao": 0,
+        "sem_texto": 0,
+        "erros": 1,
+        "ia_indisponivel": False,
+    }
+    try:
+        from atualizador_documentos import reclassificar_documentos_genericos
+
+        resumo = reclassificar_documentos_genericos()
+    except Exception:
+        logger.warning("Falha no lote de classificacao IA", exc_info=True)
+    finally:
+        try:
+            _lote_ia_lock.release()
+        except RuntimeError:
+            pass
+    _editar_mensagem_lote(chat_id, message_id, _texto_resumo_lote(resumo))
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "rev_ia_lote")
+def classificar_lote_com_ia(call):
+    """Duas checagens da IA em segundo plano (catalogo fixo, sem estourar o webhook)."""
+    _responder_callback(call, "Classificando com as duas checagens da IA...")
+    chat_id = call.message.chat.id
+    message_id = call.message.message_id
+    if not _lote_ia_lock.acquire(blocking=False):
+        _editar_mensagem_lote(
+            chat_id,
+            message_id,
+            "⚖️ Central de Revisoes\n"
+            "🤖 Ja ha uma classificacao em andamento. Aguarde o resultado.",
+        )
+        return
+    _editar_mensagem_lote(
+        chat_id,
+        message_id,
+        "⚖️ Central de Revisoes\n"
+        "🤖 Classificando em segundo plano (duas checagens, catalogo fixo).\n"
+        "Aguarde; a lista sera atualizada ao terminar.",
+    )
+    threading.Thread(
+        target=_rodar_lote_ia, args=(chat_id, message_id), daemon=True
+    ).start()
 
 
 # 🧠 O CÉREBRO DA REVISÃO (Lida com todos os cliques dos botões)
