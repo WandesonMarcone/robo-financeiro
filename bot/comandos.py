@@ -90,49 +90,20 @@ def status_banco(message):
 
 @bot.message_handler(commands=['relatorios', 'docs'])
 def enviar_ultimos_relatorios(message):
-    # Usuario comum ve somente documentos dos proprios favoritos ativos; o admin
-    # mantem a visao ampla (``None`` = sem filtro). Falha segura: sem conta
-    # aprovada/favoritos, nada e listado.
+    # Mesmo recorte do botao Novos documentos: so SALVO_DRIVE/SALVO com tipo
+    # do catalogo. Usuario comum ve somente favoritos ativos; o admin mantem
+    # visao ampla. Falha segura: sem conta/favoritos, nada e listado.
     autor = getattr(message, "from_user", None)
     permitidos = permissoes.tickers_permitidos(getattr(autor, "id", None))
-    if permitidos is not None and not permitidos:
-        bot.reply_to(
-            message,
-            "📭 Você ainda não acompanha nenhum ativo. "
-            "Use ⭐ Gerenciar favoritos no /menu para escolher.",
-        )
-        return
-
-    bot.reply_to(message, "🔎 Buscando os últimos documentos no cofre...")
-    session = SessionDB()
-    try:
-        consulta = session.query(DocumentosQualitativos, Ativo)\
-            .join(Ativo, DocumentosQualitativos.ativo_id == Ativo.id)
-        if permitidos is not None:
-            consulta = consulta.filter(Ativo.ticker.in_(sorted(permitidos)))
-        ultimos_docs = consulta\
-            .order_by(DocumentosQualitativos.data_publicacao.desc())\
-            .limit(10).all()
-
-        if not ultimos_docs:
-            bot.send_message(message.chat.id, "📭 Nenhum documento encontrado no banco ainda.")
-            return
-
-        resposta = "📄 **Últimos Relatórios Capturados:**\n\n"
-        for doc, ativo in ultimos_docs:
-            data_formatada = doc.data_publicacao.strftime('%d/%m/%Y')
-            resposta += f"🏢 **{ativo.ticker}** - {data_formatada}\n"
-            resposta += f"🏷️ Tipo: {doc.tipo_documento}\n"
-            if doc.assunto and doc.assunto.strip():
-                resposta += f"📌 Assunto: {doc.assunto}\n"
-            resposta += f"🔗 [Acessar PDF]({doc.url_pdf})\n"
-            resposta += "➖➖➖➖➖➖➖➖➖➖\n"
-
-        bot.send_message(message.chat.id, resposta, parse_mode='Markdown', disable_web_page_preview=True)
-    except Exception as e:
-        bot.send_message(message.chat.id, "❌ Ops! Deu um erro ao tentar ler o banco de dados.")
-    finally:
-        session.close()
+    texto = menu_principal.texto_novos_documentos(
+        tickers_permitidos=permitidos, incluir_links=True
+    )
+    bot.send_message(
+        message.chat.id,
+        texto,
+        parse_mode="Markdown",
+        disable_web_page_preview=True,
+    )
 
 # ==========================================
 # 📊 COMANDOS DE PLANILHA DO GOOGLE E GESTÃO

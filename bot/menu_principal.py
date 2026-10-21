@@ -339,21 +339,32 @@ def texto_minha_conta(telegram_id, papel, dto):
     return "\n".join(linhas)
 
 
-def texto_novos_documentos(limite=10, tickers_permitidos=None):
-    """Lista os últimos documentos capturados, reutilizando a base existente.
+STATUS_DOCS_PUBLICOS = ("SALVO_DRIVE", "SALVO")
+TEXTO_DOCS_VAZIOS = (
+    "📄 *Novos documentos*\n\n"
+    "📭 Nenhum documento classificado encontrado. "
+    "Tipos genericos (Documento, Ago, Age) ficam na "
+    "⚖️ Central de Revisoes para a IA identificar."
+)
 
-    ``tickers_permitidos``: ``None`` = visão ampla (administrador); um conjunto
-    restringe a lista aos tickers informados (favoritos ativos do usuário
-    comum). Conjunto vazio resulta em lista vazia, sem consultar o banco.
+
+def consultar_documentos_classificados(limite=10, tickers_permitidos=None):
+    """Documentos publicos (SALVO_DRIVE/SALVO) com tipo do catalogo.
+
+    ``tickers_permitidos``: ``None`` = visao ampla (admin); conjunto restringe
+    aos favoritos. Conjunto vazio nao consulta o banco. Retorna ``None`` se
+    nao ha favoritos, lista vazia se nada classificado, ou as tuplas
+    ``(doc, ativo, tipo_oficial)``.
     """
     if tickers_permitidos is not None and not tickers_permitidos:
-        return TEXTO_ATIVOS_VAZIOS
+        return None
     try:
         from atualizador_documentos import SessionDB
         from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
+        from pipeline_dados.tipos_documento import normalizar_tipo_documento
     except Exception:
         logger.warning("MENU - base de documentos indisponível", exc_info=True)
-        return TEXTO_ERRO_BANCO
+        raise
 
     session = None
     try:
@@ -362,7 +373,7 @@ def texto_novos_documentos(limite=10, tickers_permitidos=None):
             Ativo, DocumentosQualitativos.ativo_id == Ativo.id
         )
         consulta = consulta.filter(
-            DocumentosQualitativos.status_processamento.in_(("SALVO_DRIVE", "SALVO"))
+            DocumentosQualitativos.status_processamento.in_(STATUS_DOCS_PUBLICOS)
         )
         if tickers_permitidos is not None:
             consulta = consulta.filter(Ativo.ticker.in_(sorted(tickers_permitidos)))
@@ -371,34 +382,23 @@ def texto_novos_documentos(limite=10, tickers_permitidos=None):
             .limit(max(int(limite) * 5, 20))
             .all()
         )
-    except Exception:
-        logger.warning("MENU - falha ao consultar documentos", exc_info=True)
-        return TEXTO_ERRO_BANCO
+        ultimos = []
+        for doc, ativo in candidatos:
+            tipo_ativo = getattr(getattr(ativo, "tipo", None), "name", "FII")
+            tipo_oficial = normalizar_tipo_documento(doc.tipo_documento, tipo_ativo)
+            if not tipo_oficial:
+                continue
+            ultimos.append((doc, ativo, tipo_oficial))
+            if len(ultimos) >= limite:
+                break
+        return ultimos
     finally:
         if session is not None:
             session.close()
 
-    from pipeline_dados.tipos_documento import normalizar_tipo_documento
 
-    ultimos = []
-    for doc, ativo in candidatos:
-        tipo_ativo = getattr(getattr(ativo, "tipo", None), "name", "FII")
-        tipo_oficial = normalizar_tipo_documento(doc.tipo_documento, tipo_ativo)
-        if not tipo_oficial:
-            continue
-        ultimos.append((doc, ativo, tipo_oficial))
-        if len(ultimos) >= limite:
-            break
-
-    if not ultimos:
-        return (
-            "📄 *Novos documentos*\n\n"
-            "📭 Nenhum documento classificado encontrado. "
-            "Tipos genericos (Documento, Ago, Age) ficam na "
-            "⚖️ Central de Revisoes para a IA identificar."
-        )
-
-    linhas = ["📄 *Novos documentos*", "", "Últimos relatórios capturados:"]
+def _formatar_lista_documentos(ultimos, titulo, incluir_links=False):
+    linhas = [titulo, "", "Últimos relatórios capturados:"]
     for doc, ativo, tipo_oficial in ultimos:
         data = (
             doc.data_publicacao.strftime("%d/%m/%Y")
@@ -410,7 +410,34 @@ def texto_novos_documentos(limite=10, tickers_permitidos=None):
             f"🏢 *{escapar_markdown(ativo.ticker)}* — {escapar_markdown(data)}"
         )
         linhas.append(f"🏷️ {escapar_markdown(tipo_oficial)}")
+        if incluir_links:
+            url = str(getattr(doc, "url_pdf", "") or "").strip()
+            if url.startswith("http"):
+                linhas.append(f"🔗 [Acessar PDF]({url})")
     return "\n".join(linhas)
+
+
+def texto_novos_documentos(limite=10, tickers_permitidos=None, incluir_links=False):
+    """Lista os últimos documentos classificados, reutilizando a base existente.
+
+    ``tickers_permitidos``: ``None`` = visão ampla (administrador); um conjunto
+    restringe a lista aos tickers informados (favoritos ativos do usuário
+    comum). Conjunto vazio resulta em lista vazia, sem consultar o banco.
+    """
+    try:
+        ultimos = consultar_documentos_classificados(
+            limite=limite, tickers_permitidos=tickers_permitidos
+        )
+    except Exception:
+        logger.warning("MENU - falha ao consultar documentos", exc_info=True)
+        return TEXTO_ERRO_BANCO
+    if ultimos is None:
+        return TEXTO_ATIVOS_VAZIOS
+    if not ultimos:
+        return TEXTO_DOCS_VAZIOS
+    return _formatar_lista_documentos(
+        ultimos, "📄 *Novos documentos*", incluir_links=incluir_links
+    )
 
 
 def _formatar_valor_alerta(valor):
