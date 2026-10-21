@@ -785,6 +785,7 @@ def rotina_processar_acoes():
 
 
 LIMITE_RECLASSIFICACAO = 3
+MAX_LOTES_RECLASSIFICACAO = 40
 TAMANHO_MAX_PDF_CLASSIFICACAO = 1_500_000
 TEXTO_MAX_CLASSIFICACAO = 1500
 
@@ -821,27 +822,64 @@ def _texto_para_classificacao(doc, downloader=None):
     return extraido
 
 
-def reclassificar_documentos_genericos(limite=LIMITE_RECLASSIFICACAO, downloader=None):
-    """Duas checagens da IA nos docs genericos/incertos, sem inventar nomes.
+def _ja_tem_dupla_checagem(doc):
+    bruto = getattr(doc, "resumo_ia", None)
+    if not bruto:
+        return False
+    try:
+        dados = json.loads(bruto)
+    except (TypeError, ValueError):
+        return False
+    c1 = dados.get("checagem_1") or {}
+    c2 = dados.get("checagem_2") or {}
+    return bool(c1.get("tipo") and c2.get("tipo"))
 
-    Aliases conhecidos (Ago, Age, Aviso Ao Mercado) sao mapeados ao catalogo
-    sem IA. O restante so atualiza ``tipo_documento`` se as duas leituras
-    concordarem, o tipo estiver no catalogo e a confianca for >= 80.
-    """
+
+def _precisa_reclassificar(doc):
     from pipeline_dados.tipos_documento import (
         e_tipo_generico,
         normalizar_tipo_documento,
     )
 
-    limite = max(1, min(int(limite or LIMITE_RECLASSIFICACAO), 5))
-    resumo = {
+    oficial = normalizar_tipo_documento(doc.tipo_documento, "FII")
+    if oficial and oficial != doc.tipo_documento:
+        return True
+    if _ja_tem_dupla_checagem(doc):
+        return False
+    return (
+        doc.status_processamento == "AGUARDANDO_REVISAO"
+        or e_tipo_generico(doc.tipo_documento)
+        or oficial is None
+    )
+
+
+def _resumo_lote_vazio():
+    return {
         "fila": 0,
         "classificados": 0,
         "revisao": 0,
         "sem_texto": 0,
         "erros": 0,
         "ia_indisponivel": False,
+        "ids": [],
+        "lotes": 0,
     }
+
+
+def reclassificar_documentos_genericos(
+    limite=LIMITE_RECLASSIFICACAO, downloader=None, excluir_ids=None
+):
+    """Duas checagens da IA nos docs genericos/incertos, sem inventar nomes.
+
+    Aliases conhecidos (Ago, Age, Aviso Ao Mercado) sao mapeados ao catalogo
+    sem IA. O restante so atualiza ``tipo_documento`` se as duas leituras
+    concordarem, o tipo estiver no catalogo e a confianca for >= 80.
+    """
+    from pipeline_dados.tipos_documento import normalizar_tipo_documento
+
+    limite = max(1, min(int(limite or LIMITE_RECLASSIFICACAO), 5))
+    ignorados = {int(i) for i in (excluir_ids or []) if i is not None}
+    resumo = _resumo_lote_vazio()
     session = SessionDB()
     try:
         candidatos = (
@@ -852,19 +890,14 @@ def reclassificar_documentos_genericos(limite=LIMITE_RECLASSIFICACAO, downloader
                 )
             )
             .order_by(DocumentosQualitativos.data_publicacao.desc())
-            .limit(80)
+            .limit(120)
             .all()
         )
         escolhidos = []
         for doc in candidatos:
-            oficial = normalizar_tipo_documento(doc.tipo_documento, "FII")
-            precisa = (
-                doc.status_processamento == "AGUARDANDO_REVISAO"
-                or e_tipo_generico(doc.tipo_documento)
-                or oficial is None
-                or (oficial and oficial != doc.tipo_documento)
-            )
-            if precisa:
+            if doc.id in ignorados:
+                continue
+            if _precisa_reclassificar(doc):
                 escolhidos.append(doc)
             if len(escolhidos) >= limite:
                 break
@@ -873,6 +906,7 @@ def reclassificar_documentos_genericos(limite=LIMITE_RECLASSIFICACAO, downloader
             return resumo
 
         for doc in escolhidos:
+            resumo["ids"].append(doc.id)
             alias = normalizar_tipo_documento(doc.tipo_documento, "FII")
             if alias and alias != doc.tipo_documento:
                 doc.tipo_documento = alias
@@ -909,6 +943,7 @@ def reclassificar_documentos_genericos(limite=LIMITE_RECLASSIFICACAO, downloader
                 doc.resumo_ia = _resumo_dupla_checagem(detalhes)
                 resumo["revisao"] += 1
         session.commit()
+        resumo["lotes"] = 1
         return resumo
     except Exception:
         session.rollback()
@@ -917,3 +952,43 @@ def reclassificar_documentos_genericos(limite=LIMITE_RECLASSIFICACAO, downloader
         return resumo
     finally:
         session.close()
+
+
+def _somar_resumo(total, lote):
+    for chave in ("fila", "classificados", "revisao", "sem_texto", "erros"):
+        total[chave] = int(total.get(chave, 0) or 0) + int(lote.get(chave, 0) or 0)
+    total["ia_indisponivel"] = bool(total.get("ia_indisponivel") or lote.get("ia_indisponivel"))
+    total.setdefault("ids", [])
+    total["ids"].extend(lote.get("ids") or [])
+    total["lotes"] = int(total.get("lotes", 0) or 0) + 1
+    return total
+
+
+def reclassificar_documentos_genericos_em_lotes(
+    limite=LIMITE_RECLASSIFICACAO,
+    max_lotes=MAX_LOTES_RECLASSIFICACAO,
+    downloader=None,
+    on_lote=None,
+):
+    """Um clique: esvazia a fila em fatias de ``limite`` docs, sem repetir ids."""
+    total = _resumo_lote_vazio()
+    vistos = set()
+    teto = max(1, min(int(max_lotes or MAX_LOTES_RECLASSIFICACAO), 80))
+    for _ in range(teto):
+        lote = reclassificar_documentos_genericos(
+            limite=limite, downloader=downloader, excluir_ids=vistos
+        )
+        ids = [i for i in (lote.get("ids") or []) if i is not None]
+        if lote.get("fila", 0) == 0 and not ids:
+            break
+        vistos.update(ids)
+        _somar_resumo(total, lote)
+        if on_lote:
+            on_lote(dict(total), dict(lote))
+        if lote.get("ia_indisponivel"):
+            break
+        if lote.get("fila", 0) < max(1, int(limite or LIMITE_RECLASSIFICACAO)):
+            break
+        if not ids:
+            break
+    return total

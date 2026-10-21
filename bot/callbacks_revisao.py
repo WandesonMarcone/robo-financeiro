@@ -152,25 +152,35 @@ def _markup_lote_ia():
     return markup
 
 
-def _texto_resumo_lote(resumo):
-    if resumo.get("ia_indisponivel"):
+def _texto_resumo_lote(resumo, andamento=False):
+    if resumo.get("ia_indisponivel") and not resumo.get("lotes"):
         return (
             "⚖️ Central de Revisoes\n"
             "IA indisponivel (GROQ_API_KEY ausente). Nada foi classificado."
         )
-    if resumo.get("fila", 0) == 0:
+    if resumo.get("fila", 0) == 0 and not resumo.get("lotes"):
         return (
             "⚖️ Central de Revisoes\n"
             "Nenhum documento generico ou incerto para a IA classificar agora."
         )
+    titulo = (
+        "🤖 Classificando de 3 em 3 (um clique esvazia a fila)..."
+        if andamento
+        else "🤖 Classificacao concluida (de 3 em 3, catalogo fixo)."
+    )
+    extra_ia = ""
+    if resumo.get("ia_indisponivel"):
+        extra_ia = "\nIA indisponivel no meio do lote; o restante ficou na fila."
     return (
         "⚖️ Central de Revisoes\n"
-        "🤖 Classificacao em lote (duas checagens, catalogo fixo).\n"
-        f"Na fila: {resumo.get('fila', 0)}\n"
+        f"{titulo}\n"
+        f"Lotes: {resumo.get('lotes', 0)}\n"
+        f"Analisados: {resumo.get('fila', 0)}\n"
         f"Identificados: {resumo.get('classificados', 0)}\n"
         f"Ainda em revisao: {resumo.get('revisao', 0)}\n"
         f"Sem texto no PDF: {resumo.get('sem_texto', 0)}\n"
         f"Erros: {resumo.get('erros', 0)}"
+        f"{extra_ia}"
     )
 
 
@@ -191,11 +201,18 @@ def _rodar_lote_ia(chat_id, message_id):
         "sem_texto": 0,
         "erros": 1,
         "ia_indisponivel": False,
+        "lotes": 0,
+        "ids": [],
     }
     try:
-        from atualizador_documentos import reclassificar_documentos_genericos
+        from atualizador_documentos import reclassificar_documentos_genericos_em_lotes
 
-        resumo = reclassificar_documentos_genericos()
+        def _progresso(total, _lote):
+            _editar_mensagem_lote(
+                chat_id, message_id, _texto_resumo_lote(total, andamento=True)
+            )
+
+        resumo = reclassificar_documentos_genericos_em_lotes(on_lote=_progresso)
     except Exception:
         logger.warning("Falha no lote de classificacao IA", exc_info=True)
     finally:
@@ -224,8 +241,8 @@ def classificar_lote_com_ia(call):
         chat_id,
         message_id,
         "⚖️ Central de Revisoes\n"
-        "🤖 Classificando em segundo plano (duas checagens, catalogo fixo).\n"
-        "Aguarde; a lista sera atualizada ao terminar.",
+        "🤖 Classificando em segundo plano, de 3 em 3.\n"
+        "Um clique esvazia a fila. Aguarde; a lista sera atualizada ao terminar.",
     )
     threading.Thread(
         target=_rodar_lote_ia, args=(chat_id, message_id), daemon=True
