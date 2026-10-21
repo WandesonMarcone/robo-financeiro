@@ -85,13 +85,15 @@ def classificar_documento_com_ia(nome_original, texto_extraido):
     if not texto_limpo: 
         return nome_original, 0
 
-    lista_opcoes = ", ".join(TIPOS_DOC_FII.values())
+    lista_opcoes = ", ".join(dict.fromkeys(TIPOS_DOC_FII.values()))
     
     # Prompt de engenharia reversa exigindo JSON
     prompt = (
         f"Você é um analista financeiro sênior avaliando um PDF de Fundo Imobiliário. "
         f"O documento começa assim: '{texto_limpo}'\n\n"
         f"Classifique o documento escolhendo ESTRITAMENTE UMA destas opções: {lista_opcoes}.\n"
+        f"Equivalencias obrigatorias: carta/aviso/comunicado ao cotista = Aviso aos Cotistas; "
+        f"inicio ou encerramento de emissao/distribuicao de cotas = Nova Emissao de Cotas.\n"
         f"Responda EXATAMENTE E APENAS com um objeto JSON válido, contendo as chaves 'tipo' e 'confianca'. "
         f"A chave 'confianca' deve ser um número inteiro de 0 a 100 representando sua certeza."
     )
@@ -791,53 +793,135 @@ TEXTO_MAX_CLASSIFICACAO = 1500
 PAGINAS_MAX_CLASSIFICACAO = 3
 
 
-def _extrair_texto_paginas(
-    pdf_bytes, max_paginas=PAGINAS_MAX_CLASSIFICACAO, pagina_inicial=0
-):
-    if not pdf_bytes:
-        return ""
-    try:
-        import io
-        import PyPDF2
+def _eh_pdf(conteudo):
+    return bool(conteudo) and conteudo.lstrip().startswith(b"%PDF")
 
-        reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
-        if not reader.pages:
-            return ""
+
+def _juntar_paginas(partes):
+    return "\n".join(partes).strip()[:TEXTO_MAX_CLASSIFICACAO]
+
+
+def _extrair_texto_pypdf2(pdf_bytes, max_paginas, pagina_inicial):
+    import io
+    import PyPDF2
+
+    reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
+    if not reader.pages:
+        return ""
+    inicio = max(0, int(pagina_inicial or 0))
+    teto = min(len(reader.pages), inicio + max(1, int(max_paginas or 1)))
+    partes = []
+    tamanho = 0
+    for i in range(inicio, teto):
+        trecho = (reader.pages[i].extract_text() or "").strip()
+        if not trecho:
+            continue
+        partes.append(trecho)
+        tamanho += len(trecho)
+        if tamanho >= TEXTO_MAX_CLASSIFICACAO:
+            break
+    return _juntar_paginas(partes)
+
+
+def _extrair_texto_fitz(pdf_bytes, max_paginas, pagina_inicial):
+    import fitz
+
+    documento = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
         inicio = max(0, int(pagina_inicial or 0))
-        teto = min(len(reader.pages), inicio + max(1, int(max_paginas or 1)))
+        teto = min(len(documento), inicio + max(1, int(max_paginas or 1)))
         partes = []
         tamanho = 0
         for i in range(inicio, teto):
-            trecho = (reader.pages[i].extract_text() or "").strip()
+            trecho = (documento.load_page(i).get_text("text") or "").strip()
             if not trecho:
                 continue
             partes.append(trecho)
             tamanho += len(trecho)
             if tamanho >= TEXTO_MAX_CLASSIFICACAO:
                 break
-        return "\n".join(partes).strip()[:TEXTO_MAX_CLASSIFICACAO]
+        return _juntar_paginas(partes)
+    finally:
+        documento.close()
+
+
+def _extrair_texto_paginas(
+    pdf_bytes, max_paginas=PAGINAS_MAX_CLASSIFICACAO, pagina_inicial=0
+):
+    if not pdf_bytes:
+        return ""
+    try:
+        texto = _extrair_texto_pypdf2(pdf_bytes, max_paginas, pagina_inicial)
+        if texto:
+            return texto
+    except Exception:
+        pass
+    try:
+        return _extrair_texto_fitz(pdf_bytes, max_paginas, pagina_inicial)
     except Exception:
         return ""
 
 
-def _texto_para_classificacao(doc, downloader=None, pagina_inicial=0):
+def _baixar_pdf_fnet(doc, downloader=None):
+    id_doc = str(getattr(doc, "id_b3", None) or "").strip()
+    if not id_doc:
+        return None
+    try:
+        b3 = downloader or FnetDownloader()
+        return b3.baixar_pdf(id_doc, max_bytes=TAMANHO_MAX_PDF_CLASSIFICACAO)
+    except Exception:
+        return None
+
+
+def _baixar_pdf_drive(doc, drive_manager=None):
+    file_id = _file_id_drive(getattr(doc, "url_pdf", None))
+    if not file_id:
+        return None
+    try:
+        drive = drive_manager
+        if drive is None:
+            from modules.GoogleDriveManager import GoogleDriveManager
+
+            drive = GoogleDriveManager()
+        return drive.baixar_arquivo(file_id, max_bytes=TAMANHO_MAX_PDF_CLASSIFICACAO)
+    except Exception:
+        return None
+
+
+def _obter_pdf_classificacao(doc, downloader=None, drive_manager=None):
+    tem_fnet = bool(str(getattr(doc, "id_b3", None) or "").strip())
+    tem_drive = bool(_file_id_drive(getattr(doc, "url_pdf", None)))
+    if not tem_fnet and not tem_drive:
+        return None, "sem_fonte"
+    lixo = None
+    if tem_drive:
+        pdf = _baixar_pdf_drive(doc, drive_manager=drive_manager)
+        if _eh_pdf(pdf):
+            return pdf, None
+        lixo = pdf
+    if tem_fnet:
+        pdf = _baixar_pdf_fnet(doc, downloader=downloader)
+        if _eh_pdf(pdf):
+            return pdf, None
+        lixo = lixo or pdf
+    if lixo:
+        return None, "corrompido"
+    return None, "falha_download"
+
+
+def _texto_para_classificacao(
+    doc, downloader=None, pagina_inicial=0, drive_manager=None
+):
     texto = (getattr(doc, "texto_extraido", None) or "").strip()
     if texto and int(pagina_inicial or 0) <= 0:
         return texto[:TEXTO_MAX_CLASSIFICACAO]
-    id_doc = str(getattr(doc, "id_b3", None) or "").strip()
-    if not id_doc:
-        return ""
-    try:
-        b3 = downloader or FnetDownloader()
-        pdf_bytes = b3.baixar_pdf(id_doc, max_bytes=TAMANHO_MAX_PDF_CLASSIFICACAO)
-    except Exception:
-        return ""
+    pdf_bytes, _motivo = _obter_pdf_classificacao(
+        doc, downloader=downloader, drive_manager=drive_manager
+    )
     paginas = 2 if int(pagina_inicial or 0) > 0 else PAGINAS_MAX_CLASSIFICACAO
-    extraido = _extrair_texto_paginas(
+    return _extrair_texto_paginas(
         pdf_bytes, max_paginas=paginas, pagina_inicial=pagina_inicial
     )
-    del pdf_bytes
-    return extraido
 
 
 def _ja_tem_dupla_checagem(doc):
@@ -957,6 +1041,17 @@ def _confirmar_identificacao(doc, tipo, resumo, ticker, drive_manager=None):
     return doc
 
 
+def _marcar_descartado(doc, resumo, ticker, motivo):
+    doc.status_processamento = "ERRO_DOWNLOAD"
+    doc.resumo_ia = None
+    resumo["descartados"] = int(resumo.get("descartados", 0) or 0) + 1
+    _registrar_fundo(resumo, ticker, "descartados")
+    logger.info(
+        "Doc %s retirado da revisao (%s)", getattr(doc, "id", None), motivo
+    )
+    return doc
+
+
 def _fundo_vazio():
     return {
         "examinados": 0,
@@ -964,6 +1059,7 @@ def _fundo_vazio():
         "revisao": 0,
         "sem_texto": 0,
         "erros": 0,
+        "descartados": 0,
         "tipos": {},
     }
 
@@ -987,6 +1083,7 @@ def _resumo_lote_vazio():
         "sem_texto": 0,
         "erros": 0,
         "drive": 0,
+        "descartados": 0,
         "ia_indisponivel": False,
         "ids": [],
         "lotes": 0,
@@ -1050,9 +1147,22 @@ def reclassificar_documentos_genericos(
                     doc, alias, resumo, ticker, drive_manager=drive_manager
                 )
                 continue
-            texto = _texto_para_classificacao(
-                doc, downloader=downloader, pagina_inicial=pagina_inicial
-            )
+            texto = ""
+            if int(pagina_inicial or 0) <= 0:
+                texto = (doc.texto_extraido or "").strip()[:TEXTO_MAX_CLASSIFICACAO]
+            if not texto:
+                pdf_bytes, motivo = _obter_pdf_classificacao(
+                    doc, downloader=downloader, drive_manager=drive_manager
+                )
+                if motivo:
+                    _marcar_descartado(doc, resumo, ticker, motivo)
+                    continue
+                paginas = (
+                    2 if int(pagina_inicial or 0) > 0 else PAGINAS_MAX_CLASSIFICACAO
+                )
+                texto = _extrair_texto_paginas(
+                    pdf_bytes, max_paginas=paginas, pagina_inicial=pagina_inicial
+                )
             if texto and not (doc.texto_extraido or "").strip():
                 doc.texto_extraido = texto[:TEXTO_MAX_CLASSIFICACAO]
             if not texto:
@@ -1095,7 +1205,15 @@ def reclassificar_documentos_genericos(
 
 
 def _somar_resumo(total, lote):
-    for chave in ("fila", "classificados", "revisao", "sem_texto", "erros", "drive"):
+    for chave in (
+        "fila",
+        "classificados",
+        "revisao",
+        "sem_texto",
+        "erros",
+        "drive",
+        "descartados",
+    ):
         total[chave] = int(total.get(chave, 0) or 0) + int(lote.get(chave, 0) or 0)
     total["ia_indisponivel"] = bool(total.get("ia_indisponivel") or lote.get("ia_indisponivel"))
     total.setdefault("ids", [])
@@ -1104,7 +1222,14 @@ def _somar_resumo(total, lote):
     destinos = total.setdefault("por_fundo", {})
     for ticker, dados in (lote.get("por_fundo") or {}).items():
         dest = destinos.setdefault(ticker, _fundo_vazio())
-        for chave in ("examinados", "identificados", "revisao", "sem_texto", "erros"):
+        for chave in (
+            "examinados",
+            "identificados",
+            "revisao",
+            "sem_texto",
+            "erros",
+            "descartados",
+        ):
             dest[chave] = int(dest.get(chave, 0) or 0) + int(
                 (dados or {}).get(chave, 0) or 0
             )

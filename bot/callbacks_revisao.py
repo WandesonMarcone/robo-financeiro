@@ -184,12 +184,15 @@ def _linhas_por_fundo(por_fundo, limite=25):
         exam = int((dados or {}).get("examinados", 0) or 0)
         rev = int((dados or {}).get("revisao", 0) or 0)
         sem = int((dados or {}).get("sem_texto", 0) or 0)
+        desc = int((dados or {}).get("descartados", 0) or 0)
         partes = [f"{exam} exam."]
         partes.extend(_linhas_tipos((dados or {}).get("tipos")))
         if rev:
             partes.append(f"{rev} rev.")
         if sem:
             partes.append(f"{sem} sem texto")
+        if desc:
+            partes.append(f"{desc} sem link/corrompido")
         linhas.append(f"{ticker}: " + " | ".join(partes))
     resto = len(itens) - limite
     if resto > 0:
@@ -225,6 +228,7 @@ def _texto_resumo_lote(resumo, andamento=False):
         f"Organizados no Drive: {resumo.get('drive', 0)}",
         f"Ainda em revisao: {resumo.get('revisao', 0)}",
         f"Sem texto no PDF: {resumo.get('sem_texto', 0)}",
+        f"Sem link ou corrompidos: {resumo.get('descartados', 0)}",
         f"Erros: {resumo.get('erros', 0)}",
     ]
     if extra_ia:
@@ -251,6 +255,7 @@ def _rodar_lote_ia(chat_id, message_id, somente_sem_texto=False, pagina_inicial=
         "sem_texto": 0,
         "erros": 1,
         "drive": 0,
+        "descartados": 0,
         "ia_indisponivel": False,
         "lotes": 0,
         "ids": [],
@@ -479,7 +484,11 @@ def processar_revisao(call):
                 for id_tipo, nome_tipo in TIPOS_DOC_ACAO.items():
                     markup.add(InlineKeyboardButton(text=f"📂 {nome_tipo}", callback_data=f"rev_typ_{doc.id}_ACAO_{id_tipo}"))
             else:
+                vistos = set()
                 for id_tipo, nome_tipo in TIPOS_DOC_FII.items():
+                    if nome_tipo in vistos:
+                        continue
+                    vistos.add(nome_tipo)
                     markup.add(InlineKeyboardButton(text=f"📂 {nome_tipo}", callback_data=f"rev_typ_{doc.id}_FII_{id_tipo}"))
 
             markup.add(InlineKeyboardButton(text="🔙 Cancelar", callback_data=f"rev_d_{doc.id}"))

@@ -55,8 +55,21 @@ ALIAS_FII = {
     "aviso de rendimentos": "Rendimentos",
     "aviso a cotistas": "Aviso aos Cotistas",
     "aviso aos cotistas": "Aviso aos Cotistas",
+    "carta ao cotista": "Aviso aos Cotistas",
+    "carta aos cotistas": "Aviso aos Cotistas",
+    "carta a cotistas": "Aviso aos Cotistas",
+    "carta cotista": "Aviso aos Cotistas",
+    "carta ao cotitas": "Aviso aos Cotistas",
+    "carta aos cotitas": "Aviso aos Cotistas",
+    "comunicado aos cotistas": "Aviso aos Cotistas",
+    "comunicacao aos cotistas": "Aviso aos Cotistas",
     "nova emissao": "Nova Emissao de Cotas",
     "nova emissao de cotas": "Nova Emissao de Cotas",
+    "emissao de cotas": "Nova Emissao de Cotas",
+    "inicio de distribuicao": "Nova Emissao de Cotas",
+    "inicio de oferta": "Nova Emissao de Cotas",
+    "encerramento de distribuicao": "Nova Emissao de Cotas",
+    "encerramento de oferta": "Nova Emissao de Cotas",
     "proposta de emissao": "Proposta Emissão de Cotas",
     "apresentacao trimestral": "Apresentação Trimestral De Resultados",
     "apresentacao de resultados": "Apresentação Trimestral De Resultados",
@@ -69,10 +82,10 @@ ALIAS_FII = {
     "convocacao": "Edital de Convocacao",
     "ata": "Ata de Assembleia",
     "ata de assembleia": "Ata de Assembleia",
-    "anuncio de inicio": "Anuncio de Inicio de Distribuicao",
-    "anuncio de inicio de distribuicao": "Anuncio de Inicio de Distribuicao",
-    "anuncio de encerramento": "Anuncio de Encerramento",
-    "aviso de encerramento": "Anuncio de Encerramento",
+    "anuncio de inicio": "Nova Emissao de Cotas",
+    "anuncio de inicio de distribuicao": "Nova Emissao de Cotas",
+    "anuncio de encerramento": "Nova Emissao de Cotas",
+    "aviso de encerramento": "Nova Emissao de Cotas",
     "suplemento": "Suplemento",
     "politica de voto": "Politica de Voto",
     "politica de exercicio de direito de voto": "Politica de Voto",
@@ -135,6 +148,28 @@ def e_tipo_generico(tipo):
     return not chave or chave in TIPOS_GENERICOS
 
 
+def _alias_por_familia(chave):
+    if ("cotist" in chave or "cotita" in chave) and any(
+        p in chave for p in ("carta", "aviso", "comunicad", "comunicacao")
+    ):
+        if "mercado" in chave:
+            return None
+        return "Aviso aos Cotistas"
+    if "cota" in chave and any(p in chave for p in ("emissao", "oferta")):
+        return "Nova Emissao de Cotas"
+    if any(
+        p in chave
+        for p in (
+            "inicio de distribuicao",
+            "encerramento de distribuicao",
+            "anuncio de inicio",
+            "anuncio de encerramento",
+        )
+    ):
+        return "Nova Emissao de Cotas"
+    return None
+
+
 def normalizar_tipo_documento(tipo, tipo_ativo="FII"):
     """Devolve nome oficial do catalogo ou None se generico/desconhecido."""
     if e_tipo_generico(tipo):
@@ -148,6 +183,9 @@ def normalizar_tipo_documento(tipo, tipo_ativo="FII"):
     alias = ALIAS_FII.get(chave)
     if alias:
         return alias
+    familia = _alias_por_familia(chave)
+    if familia:
+        return familia
     return _mapa_oficial(catalogo_fii()).get(chave)
 
 

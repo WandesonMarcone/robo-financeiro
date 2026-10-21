@@ -329,6 +329,24 @@ class GoogleDriveManager:
                 return achados[0]
         return None
 
+    def baixar_arquivo(self, file_id, max_bytes=None):
+        from googleapiclient.http import MediaIoBaseDownload
+
+        pedido = self.service.files().get_media(
+            fileId=file_id, supportsAllDrives=True
+        )
+        buf = BytesIO()
+        downloader = MediaIoBaseDownload(buf, pedido)
+        concluido = False
+        while not concluido:
+            _, concluido = downloader.next_chunk()
+            if max_bytes and buf.tell() > int(max_bytes):
+                return None
+        dados = buf.getvalue()
+        if max_bytes and len(dados) > int(max_bytes):
+            return None
+        return dados
+
     def baixar_logo_catalogo(self, file_id: str):
         from googleapiclient.http import MediaIoBaseDownload
 

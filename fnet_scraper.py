@@ -1,6 +1,11 @@
 import requests
 import time
 
+
+def _eh_pdf(conteudo):
+    return bool(conteudo) and conteudo.lstrip().startswith(b"%PDF")
+
+
 class FnetDownloader:
     def __init__(self):
         self.session = requests.Session()
@@ -30,7 +35,8 @@ class FnetDownloader:
                 stream=bool(max_bytes),
             )
             res.raise_for_status()
-            if 'application/pdf' not in res.headers.get('Content-Type', ''):
+            tipo = (res.headers.get("Content-Type") or "").lower()
+            if "html" in tipo or "json" in tipo:
                 res.close()
                 return None
             if max_bytes:
@@ -51,8 +57,9 @@ class FnetDownloader:
                     partes.append(pedaco)
                 conteudo = b"".join(partes)
                 res.close()
-                return conteudo
-            return res.content
+                return conteudo if _eh_pdf(conteudo) else None
+            conteudo = res.content
+            return conteudo if _eh_pdf(conteudo) else None
         except Exception:
             return None
 
