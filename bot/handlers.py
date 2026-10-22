@@ -159,8 +159,8 @@ def callback_classes_acao_setor(call):
     markup.add(InlineKeyboardButton("🔙 Voltar aos Setores", callback_data="menu_acoes"))
 
     if membros:
-        rotulo = "/".join(membros)
-        texto = f"📂 *Classes: {rotulo}*\n\nSelecione o ticker (dados separados por classe):"
+        rotulo = rotulo_grupo(membros, "acao")
+        texto = f"📂 *{rotulo}*\n\nSelecione o ticker (dados separados por classe):"
     else:
         texto = f"📭 Nenhuma classe encontrada para **{raiz}**."
     bot.edit_message_text(texto, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")

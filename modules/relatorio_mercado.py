@@ -12,7 +12,12 @@ import logging
 import re
 
 import config
-from pipeline_dados.identidade_visual import agrupar_tickers_por_empresa, normalizar_ticker
+from pipeline_dados.identidade_visual import (
+    agrupar_tickers_por_empresa,
+    chave_canonica,
+    normalizar_ticker,
+    raiz_ticker,
+)
 
 logger = logging.getLogger("robo.relatorio")
 
@@ -57,20 +62,57 @@ def _resumo_empresa(ticker):
     return obter_resumo_empresa(ticker)
 
 
+def _tickers_mesma_empresa(ticker):
+    """Classes da mesma raiz B3 (PETR3/PETR4), sem misturar BBAS e BBSE.
+
+    A ordem prioriza o ticker pedido e o canonico visual; as demais classes
+    vem do mapa setorial ja existente, nao de uma lista de nomes.
+    """
+    chave = normalizar_ticker(ticker)
+    if not chave:
+        return []
+    vistos = []
+
+    def _incluir(valor):
+        normalizado = normalizar_ticker(valor)
+        if normalizado and normalizado not in vistos:
+            vistos.append(normalizado)
+
+    _incluir(chave)
+    _incluir(chave_canonica(chave))
+    raiz = raiz_ticker(chave)
+    if not raiz:
+        return vistos
+    mapa = getattr(config, "MAPA_SETORES_B3", {}) or {}
+    for subsetores in mapa.values():
+        for lista in (subsetores or {}).values():
+            for outro in lista or []:
+                if raiz_ticker(outro) == raiz:
+                    _incluir(outro)
+    return vistos
+
+
+def _nome_do_catalogo(ticker):
+    try:
+        resumo = _resumo_empresa(ticker)
+    except Exception:
+        logger.debug("Catalogo indisponivel para nome de %s", ticker, exc_info=True)
+        return None
+    if not resumo or not resumo.get("empresa"):
+        return None
+    emp = resumo["empresa"]
+    escolhido = emp.nome_comercial or emp.nome
+    curto = _encurtar_nome(escolhido)
+    return curto or None
+
+
 def nome_empresa(ticker, tipo="acao"):
     """Nome oficial curto, ou ``None`` se nao houver fonte (nao inventa)."""
     chave = normalizar_ticker(ticker)
     if not chave:
         return None
-    try:
-        resumo = _resumo_empresa(chave)
-    except Exception:
-        logger.debug("Catalogo indisponivel para nome de %s", chave, exc_info=True)
-        resumo = None
-    if resumo and resumo.get("empresa"):
-        emp = resumo["empresa"]
-        escolhido = emp.nome_comercial or emp.nome
-        curto = _encurtar_nome(escolhido)
+    for candidato in _tickers_mesma_empresa(chave):
+        curto = _nome_do_catalogo(candidato)
         if curto:
             return curto
     if tipo == "fii":
@@ -89,6 +131,15 @@ def rotulo_ticker(ticker, tipo="acao"):
     return chave
 
 
+def _nome_entre(tickers, tipo="acao"):
+    """Primeiro nome oficial encontrado entre os tickers (nao inventa)."""
+    for ticker in tickers or []:
+        nome = nome_empresa(ticker, tipo)
+        if nome:
+            return nome
+    return None
+
+
 def rotulo_grupo(membros, tipo="acao"):
     """Rotulo de botao: um ticker ou ``Petrobras (PETR3/PETR4)``."""
     presentes = [normalizar_ticker(t) for t in (membros or [])]
@@ -97,7 +148,7 @@ def rotulo_grupo(membros, tipo="acao"):
         return ""
     if len(presentes) == 1:
         return rotulo_ticker(presentes[0], tipo)
-    nome = nome_empresa(presentes[0], tipo)
+    nome = _nome_entre(presentes, tipo)
     classes = "/".join(presentes)
     if nome:
         return f"{nome} ({classes})"
@@ -200,7 +251,7 @@ def agrupar_linhas_por_empresa(itens, tipo="acao"):
         presentes = [t for t in membros if t in por_ticker]
         if not presentes:
             continue
-        nome = nome_empresa(presentes[0], tipo)
+        nome = _nome_entre(presentes, tipo)
         if len(presentes) == 1:
             item = por_ticker[presentes[0]]
             titulo = rotulo_ticker(presentes[0], tipo)

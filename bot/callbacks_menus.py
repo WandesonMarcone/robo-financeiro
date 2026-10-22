@@ -448,9 +448,9 @@ def callback_geral(call):
                 ))
             markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=f"sub_ac_{idx_macro}_{idx_sub}"))
             if membros:
-                rotulo = "/".join(membros)
+                rotulo = rotulo_grupo(membros, "acao")
                 txt = (
-                    f"📂 **Classes: {rotulo}**\n"
+                    f"📂 **{rotulo}**\n"
                     f"Selecione o ticker (cotação e dados separados por classe):"
                 )
             else:
