@@ -6,6 +6,7 @@ from services.planilhas import buscar_dados_planilha_com_cache
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pipeline_dados.banco_dados import DocumentosQualitativos
 from pipeline_dados.identidade_visual import agrupar_tickers_por_empresa, raiz_ticker
+from modules.relatorio_mercado import rotulo_grupo, rotulo_ticker
 
 # ==========================================
 # ----- BOTÃO TIPO/SETOR FIIS -----
@@ -122,10 +123,10 @@ def callback_listar_ativos_acao(call):
             tickers_setor.append(ticker)
 
     for raiz, membros in agrupar_tickers_por_empresa(tickers_setor):
+        rotulo = rotulo_grupo(membros, "acao")
         if len(membros) == 1:
-            markup.add(InlineKeyboardButton(f"📈 {membros[0]}", callback_data=f"painel_{membros[0]}_acao"))
+            markup.add(InlineKeyboardButton(f"📈 {rotulo}", callback_data=f"painel_{membros[0]}_acao"))
         else:
-            rotulo = "/".join(membros)
             markup.add(InlineKeyboardButton(f"📈 {rotulo}", callback_data=f"emp_sa_{raiz}"))
     markup.add(InlineKeyboardButton("🔙 Voltar aos Setores", callback_data="menu_acoes"))
 
@@ -151,7 +152,10 @@ def callback_classes_acao_setor(call):
 
     markup = InlineKeyboardMarkup(row_width=1)
     for ticker in membros:
-        markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
+        markup.add(InlineKeyboardButton(
+            f"📈 {rotulo_ticker(ticker, 'acao')}",
+            callback_data=f"painel_{ticker}_acao",
+        ))
     markup.add(InlineKeyboardButton("🔙 Voltar aos Setores", callback_data="menu_acoes"))
 
     if membros:

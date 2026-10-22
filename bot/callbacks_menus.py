@@ -15,6 +15,7 @@ from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos, DadosFinan
 from services.dashboard_menus import buscar_oportunidades, gerar_painel_ativo, buscar_favoritos, filtrar_ativos_por_setor, extrair_data_real
 from services.planilhas import buscar_dados_planilha_com_cache, buscar_ativo_na_planilha
 from pipeline_dados.identidade_visual import agrupar_tickers_por_empresa, raiz_ticker
+from modules.relatorio_mercado import rotulo_grupo, rotulo_ticker
 
 logger = logging.getLogger(__name__)
 
@@ -384,13 +385,13 @@ def callback_geral(call):
             
             if tickers_validos:
                 for raiz, membros in agrupar_tickers_por_empresa(tickers_validos):
+                    rotulo = rotulo_grupo(membros, "acao")
                     if len(membros) == 1:
                         markup.add(InlineKeyboardButton(
-                            f"📈 {membros[0]}",
+                            f"📈 {rotulo}",
                             callback_data=f"painel_{membros[0]}_acao",
                         ))
                     else:
-                        rotulo = "/".join(membros)
                         markup.add(InlineKeyboardButton(
                             f"📈 {rotulo}",
                             callback_data=f"emp_ac_{idx_macro}_{idx_sub}_{raiz}",
@@ -441,7 +442,10 @@ def callback_geral(call):
             bot.answer_callback_query(call.id, f"Classes {raiz}...")
             markup = InlineKeyboardMarkup(row_width=1)
             for ticker in membros:
-                markup.add(InlineKeyboardButton(f"📈 {ticker}", callback_data=f"painel_{ticker}_acao"))
+                markup.add(InlineKeyboardButton(
+                    f"📈 {rotulo_ticker(ticker, 'acao')}",
+                    callback_data=f"painel_{ticker}_acao",
+                ))
             markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=f"sub_ac_{idx_macro}_{idx_sub}"))
             if membros:
                 rotulo = "/".join(membros)
@@ -458,9 +462,8 @@ def callback_geral(call):
         # tratados por ``bot/favoritos.py`` (favoritos individuais por usuario,
         # persistidos em ``ativos_acompanhados``). Aquele modulo e importado
         # antes deste handler generico, portanto os callbacks chegam la primeiro.
-        # As listas globais ``config.FIXAS_FIIS`` / ``config.FIXAS_ACOES``
-        # continuam existindo para os pipelines (scrapers) e a funcao
-        # ``buscar_favoritos`` foi preservada em ``services/dashboard_menus.py``.
+        # A carteira destacada nas varreduras vem do ranking real de
+        # ``ativos_acompanhados`` (``obter_carteira_popular``).
 
         # --- OPORTUNIDADES ---
         elif dados in ["oportunidades_fiis", "oportunidades_acoes"]:
@@ -474,9 +477,15 @@ def callback_geral(call):
                 markup = InlineKeyboardMarkup(row_width=3)
             
                 if oportunidades:
-                    top_oportunidades = oportunidades[:15] 
+                    top_oportunidades = oportunidades[:15]
                     icone = "🏢" if is_fii else "📈"
-                    botoes_ativos = [InlineKeyboardButton(f"{icone} {tkr}", callback_data=f"painel_{tkr}_{tipo}") for tkr in top_oportunidades]
+                    botoes_ativos = [
+                        InlineKeyboardButton(
+                            f"{icone} {rotulo_ticker(tkr, tipo)}",
+                            callback_data=f"painel_{tkr}_{tipo}",
+                        )
+                        for tkr in top_oportunidades
+                    ]
                     markup.add(*botoes_ativos)
                     texto = f"🔥 *Top Oportunidades ({'FIIs' if is_fii else 'Ações'})*\n\nEstes ativos passaram na sua peneira."
                 else:
