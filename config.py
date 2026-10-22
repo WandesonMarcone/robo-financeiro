@@ -56,13 +56,12 @@ DRIVE_LOGOS_FOLDER_ID = (
 # PREFERÊNCIAS DO MENU: ⭐ MEUS FAVORITOS
 # ==========================================
 
-FIXAS_FIIS = ["GARE11", "MXRF11", "VISC11", "HGLG11", "XPML11"]
-FIXAS_ACOES = ["PETR4", "VALE3", "WEGE3", "ITUB4"]
-# Dicionário de Favoritos que o bot irá consultar
-FAVORITOS = {
-    "fii": FIXAS_FIIS,
-    "acao": FIXAS_ACOES
-}
+# A carteira destacada nas varreduras vem do ranking real de favoritos
+# (``ativos_acompanhados``). Nao ha mais lista hardcoded de FIIs/acoes.
+CARTEIRA_POPULAR_LIMITE = 5
+OPORTUNIDADES_LIMITE = 8
+LIQUIDEZ_MINIMA_FII = 5_000_000
+LIQUIDEZ_MINIMA_ACAO = 5_000_000
 
 
 # Limites máximos de favoritos por usuário, SEPARADOS por tipo. São apenas tetos
@@ -96,7 +95,24 @@ TROCAS_PRAZO_HORAS = _horas_prazo("TROCAS_PRAZO_HORAS", 48)
 
 # --- 🚨 REGRAS FIXAS DEFINIDAS AQUI 🚨 ---
 
-FILTROS_FIXOS = {"fii": {"pvp_min": 0.50, "pvp_max": 1.15, "dy_min": 0.08},"acao": {"pl_min": 2.0, "pl_max": 15.0, "pvp_min": 0.50, "pvp_max": 2.50, "dy_min": 0.06, "roe_min": 0.10}}
+FILTROS_FIXOS = {
+    "fii": {
+        "pvp_min": 0.85,
+        "pvp_max": 1.05,
+        "dy_min": 0.09,
+        "liquidez_min": LIQUIDEZ_MINIMA_FII,
+        "vacancia_max": 0.10,
+    },
+    "acao": {
+        "pl_min": 3.0,
+        "pl_max": 12.0,
+        "pvp_min": 0.50,
+        "pvp_max": 1.80,
+        "dy_min": 0.06,
+        "roe_min": 0.10,
+        "liquidez_min": LIQUIDEZ_MINIMA_ACAO,
+    },
+}
 
 # ==========================================
 # 🗺️ MAPA DE ISCAS MASTER (CATÁLOGO B3)
