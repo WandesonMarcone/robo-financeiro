@@ -18,7 +18,7 @@ Regras:
 import logging
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from pipeline_dados.banco_dados import Ativo, TipoAtivo
@@ -144,6 +144,46 @@ class RepositorioFavoritos:
                 )
                 for vinculo, ativo in consulta.all()
             ]
+        finally:
+            session.close()
+
+    def ranking_mais_acompanhados(self, tipo, limite=5):
+        """Tickers mais salvos como favorito (contas aprovadas e ativas).
+
+        Ordena por quantidade de vinculos em ``ativos_acompanhados``. Nao usa
+        lista hardcoded: se ninguem acompanha o tipo, devolve lista vazia.
+        """
+        tipo_enum = MAPA_TIPO.get(str(tipo).lower() if tipo else "")
+        if tipo_enum is None:
+            return []
+        try:
+            teto = int(limite)
+        except (TypeError, ValueError):
+            teto = 5
+        if teto <= 0:
+            return []
+        session = self._nova_sessao()
+        try:
+            linhas = (
+                session.query(
+                    Ativo.ticker, func.count(AtivoAcompanhado.id).label("n")
+                )
+                .join(AtivoAcompanhado, AtivoAcompanhado.ativo_id == Ativo.id)
+                .join(Usuario, Usuario.id == AtivoAcompanhado.usuario_id)
+                .filter(
+                    Ativo.tipo == tipo_enum,
+                    Usuario.status_cadastro == STATUS_APROVADO,
+                    Usuario.ativo.is_(True),
+                )
+                .group_by(Ativo.ticker)
+                .order_by(func.count(AtivoAcompanhado.id).desc(), Ativo.ticker.asc())
+                .limit(teto)
+                .all()
+            )
+            return [ticker for ticker, _n in linhas if ticker]
+        except Exception:
+            logger.warning("Falha ao montar ranking de favoritos", exc_info=True)
+            return []
         finally:
             session.close()
 
