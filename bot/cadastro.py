@@ -167,6 +167,12 @@ TEXTO_CONFIRMACAO_TEXTO = (
     "Use os botões acima ou responda *confirmar*, *corrigir* ou *cancelar*."
 )
 
+TEXTO_APENAS_TEXTO = (
+    "Durante o cadastro, envie a resposta como texto. "
+    "Para recomeçar, use /start; para sair, use /cancelar."
+)
+
+
 _RX_NOME = re.compile(r"^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ' .-]*$")
 _RX_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
 
@@ -1218,3 +1224,82 @@ def _atualizar_mensagem_admin(call, texto_resultado):
         bot.edit_message_text(texto_resultado, chat_id, msg_id)
     except Exception:
         logger.debug("CADASTRO - falha ao editar mensagem do admin", exc_info=True)
+
+
+def _e_texto_livre_do_chat(message):
+    """Predicado do handler de entrada genérica (texto fora do formulário).
+
+    Uma mensagem de texto que não é comando e não pertence a um formulário em
+    andamento é tratada como pedido de entrada: o painel (admin/usuário) ou o
+    início do autocadastro (visitante). Mensagens com sessão ativa já foram
+    consumidas pelo handler do formulário, registrado antes deste.
+    """
+    texto = getattr(message, "text", None)
+    if not texto or not str(texto).strip():
+        return False
+    if str(texto).strip().startswith("/"):
+        return False
+    chat = getattr(message, "chat", None)
+    if getattr(chat, "type", None) != "private":
+        return False
+    usuario_id = _id_do_autor(message)
+    if usuario_id is None:
+        return False
+    return not sessao_cadastro.tem_sessao_ativa(usuario_id)
+
+
+@bot.message_handler(func=_e_texto_livre_do_chat)
+def processar_texto_livre(message):
+    """Responde a mensagens de texto diferentes de ``/start``.
+
+    Reaproveita o fluxo de ``/start``: o papel é resolvido no servidor
+    (``bot.permissoes``) e o mesmo gate de permissões já foi aplicado pelo
+    loader antes do despacho. Assim, administrador e usuário aprovado recebem o
+    painel, contas pendentes/rejeitadas/suspensas recebem o estado atual e um
+    visitante inicia o autocadastro — sem duplicar regras neste módulo.
+    """
+    iniciar_cadastro(message)
+
+
+def _tipos_de_midia():
+    """Tipos de conteúdo não textuais aceitos pela entrada genérica."""
+    try:
+        from telebot.util import content_type_media
+
+        return list(content_type_media)
+    except Exception:
+        logger.debug("CADASTRO - falha ao carregar tipos de midia", exc_info=True)
+        return ["photo", "document", "sticker", "audio", "voice", "video"]
+
+
+def _e_midia_livre_do_chat(message):
+    """Predicado da entrada genérica para mídia.
+
+    Vale apenas em conversa privada: durante o formulário a mídia não serve de
+    resposta (nome/e-mail são texto) e recebe um aviso, sem reiniciar o
+    cadastro; fora do formulário é tratada como pedido de entrada, exatamente
+    como o texto livre: painel para quem tem acesso, estado atual para contas
+    cadastradas e início do autocadastro para visitantes.
+    """
+    chat = getattr(message, "chat", None)
+    if getattr(chat, "type", None) != "private":
+        return False
+    if _id_do_autor(message) is None:
+        return False
+    return not getattr(message, "text", None)
+
+
+@bot.message_handler(
+    func=_e_midia_livre_do_chat, content_types=_tipos_de_midia()
+)
+def processar_midia_livre(message):
+    """Responde a mídia: aviso no formulário, entrada genérica fora dele."""
+    usuario_id = _id_do_autor(message)
+    if sessao_cadastro.tem_sessao_ativa(usuario_id):
+        if permissoes.obter_papel(usuario_id) is not None:
+            sessao_cadastro.cancelar(usuario_id)
+            iniciar_cadastro(message)
+            return
+        _enviar_texto(_chat_id_da_mensagem(message), TEXTO_APENAS_TEXTO)
+        return
+    iniciar_cadastro(message)

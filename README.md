@@ -164,6 +164,18 @@ Tres areas, callbacks `adm_*` / `rev_*`, navegacao e autorizacao intactas:
 Novos Documentos lista so `SALVO_DRIVE`/`SALVO` com tipo do catalogo
 (Documento, Ago, Age crus nao entram).
 
+### Entrada por mensagem (alem de `/start`)
+
+Qualquer mensagem privada (texto livre ou midia) funciona como entrada:
+
+- administrador e usuario aprovado recebem o painel;
+- conta pendente/rejeitada/suspensa recebe o status atual;
+- visitante inicia o autocadastro (nome -> e-mail -> confirmacao).
+
+O gate de `bot.permissoes` continua sendo aplicado pelo `bot.loader` antes do
+despacho; durante um formulario ativo o texto e consumido pelo formulario e a
+midia recebe um aviso para responder em texto, sem reiniciar o cadastro.
+
 ---
 
 ## 4. Organizacao das pastas e comentario de cada arquivo

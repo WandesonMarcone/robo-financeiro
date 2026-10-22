@@ -65,6 +65,11 @@ class BotAutorizado(telebot.TeleBot):
             return True
         if permissoes.e_comando_start(update) or permissoes.e_comando_ajuda(update):
             return True
+        # Texto livre (ou mídia) em conversa privada é a entrada do autocadastro
+        # (o visitante recebe o formulário em vez de ser descartado). O gate de
+        # permissões continua valendo para todos os comandos e callbacks.
+        if permissoes.e_texto_publico(update) or permissoes.e_mensagem_publica(update):
+            return True
         usuario_id = permissoes.usuario_id_do_update(update)
         if permissoes.tem_fluxo_cadastro_ativo(usuario_id):
             return True

@@ -272,6 +272,53 @@ def e_comando_ajuda(update):
     return _e_comando_publico(update, COMANDO_AJUDA)
 
 
+def e_texto_publico(update):
+    """True para uma mensagem de texto livre em chat privado (sem comando).
+
+    Funciona como entrada pública do autocadastro, ao lado de ``/start``: um
+    visitante que apenas escreve algo recebe o formulário em vez de ser
+    descartado pela allowlist de chats. Só vale para conversas privadas e para
+    texto que não comece com ``/``; comandos continuam sujeitos ao gate normal.
+    """
+    message = getattr(update, "message", None)
+    if message is None:
+        return False
+    chat = getattr(message, "chat", None)
+    if getattr(chat, "type", None) != "private":
+        return False
+    texto = getattr(message, "text", None)
+    if not texto or not str(texto).strip():
+        return False
+    return not str(texto).strip().startswith("/")
+
+
+def e_mensagem_publica(update):
+    """True para uma mensagem privada não textual (mídia/serviço).
+
+    Complementa :func:`e_texto_publico`: um visitante que envia uma foto,
+    figurinha ou documento em conversa privada também recebe a entrada do
+    autocadastro, em vez de ser descartado pela allowlist de chats. Comandos e
+    mensagens de grupo continuam sujeitos ao gate normal.
+    """
+    message = getattr(update, "message", None)
+    if message is None:
+        return False
+    chat = getattr(message, "chat", None)
+    if getattr(chat, "type", None) != "private":
+        return False
+    if getattr(message, "text", None):
+        return False
+    try:
+        from telebot.util import content_type_media
+
+        tipos = content_type_media
+    except Exception:
+        logger.debug("Falha ao carregar tipos de midia", exc_info=True)
+        return False
+    tipo = getattr(message, "content_type", None)
+    return tipo in tipos and tipo != "text"
+
+
 def _e_comando_publico(update, comando):
     message = getattr(update, "message", None)
     if message is None:
