@@ -15,6 +15,7 @@ from modules.relatorio_mercado import (
     agrupar_linhas_por_empresa,
     eh_oportunidade_acao,
     obter_carteira_popular,
+    registrar_nome_capturado,
 )
 from config import MAPA_SETORES_B3
 
@@ -145,6 +146,7 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
         try:
             # 🟢 ALTERAÇÃO 3: Inserção do Sufixo da B3 para o Yahoo Finance (.SA)
             yf_info = yf.Ticker(f"{ticker}.SA").info or {}
+            registrar_nome_capturado(ticker, yf_info)
             macro_setor, sub_setor = classificar_setor_por_mapa(ticker)
             setor = macro_setor
 

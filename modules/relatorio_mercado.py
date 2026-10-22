@@ -1,9 +1,10 @@
 """Carteira popular, nomes de exibicao e filtro de oportunidades.
 
 A carteira destacada nas varreduras vem do ranking real de favoritos
-(``ativos_acompanhados``), nao de listas hardcoded. Nomes oficiais vem do
-catalogo/CVM ou do mapa de iscas; nada e inventado. Oportunidades exigem
-liquidez e, nas acoes, ticker mapeado na B3.
+(``ativos_acompanhados``), nao de listas hardcoded. Nomes oficiais de acoes
+vem do catalogo/CVM ou da captura Yahoo no scraper; nada e inventado. FII
+exibe so o ticker. Oportunidades exigem liquidez e, nas acoes, ticker
+mapeado na B3.
 """
 
 from __future__ import annotations
@@ -25,6 +26,11 @@ _SUFIXOS_SOCIETARIOS = re.compile(
     r"\b(s\.?a\.?|s/a|ltda\.?)\s*$",
     re.IGNORECASE,
 )
+_SUFIXOS_CLASSE = re.compile(
+    r"[\s,\-]*(?:-?(?:ON|PN|PNA|PNB|UNT|UNIT|N[12]))\s*$",
+    re.IGNORECASE,
+)
+_CACHE_NOMES = {}
 
 
 def obter_carteira_popular(tipo, limite=None):
@@ -41,15 +47,26 @@ def obter_carteira_popular(tipo, limite=None):
         return []
 
 
+def limpar_cache_nomes():
+    """Limpa o cache da captura atual (testes / novo ciclo)."""
+    _CACHE_NOMES.clear()
+
+
 def _encurtar_nome(nome):
     texto = re.sub(r"\s+", " ", str(nome or "")).strip()
     if not texto:
         return ""
+    texto = _SUFIXOS_CLASSE.sub("", texto).strip(" .,")
+    if " - " in texto:
+        cauda = texto.rsplit(" - ", 1)[-1].strip()
+        cauda = _SUFIXOS_SOCIETARIOS.sub("", cauda).strip(" .,")
+        if cauda and 1 <= len(cauda.split()) <= 3:
+            texto = cauda
     texto = _SUFIXOS_SOCIETARIOS.sub("", texto).strip(" .,")
     if not texto:
         return str(nome).strip()
     partes = texto.split()
-    if len(partes) >= 3 and partes[0].upper() == "PETROLEO":
+    if len(partes) >= 3 and partes[0].casefold().startswith("petrol"):
         return partes[-1].title() if partes[-1].isupper() else partes[-1]
     if texto.isupper():
         return texto.title()
@@ -141,21 +158,75 @@ def _nome_por_cnpj(ticker):
     return _nome_curto_empresa(emp)
 
 
-def _nome_da_isca(ticker):
-    mapa = getattr(config, "MAPA_ISCAS_MASTER", {}) or {}
-    valor = mapa.get(normalizar_ticker(ticker))
-    if not valor:
+def _persistir_nome_catalogo(ticker, longo, comercial):
+    """Preenche nome comercial vazio da empresa ja cadastrada. Nao cria CNPJ."""
+    comercial = str(comercial or "").strip()
+    if not comercial:
+        return
+    try:
+        from pipeline_dados.repositorio_catalogo import RepositorioCatalogo
+
+        repo = RepositorioCatalogo()
+        emp = repo.obter_empresa_por_ticker(ticker)
+        if emp is None:
+            return
+        if getattr(emp, "nome_comercial", None):
+            return
+        repo.obter_ou_criar_empresa(
+            nome=emp.nome,
+            cnpj=emp.cnpj,
+            nome_comercial=comercial,
+            fonte="yahoo_finance",
+            evidencia=f"Yahoo Finance ({ticker})",
+        )
+    except Exception:
+        logger.debug("Persistencia de nome indisponivel para %s", ticker, exc_info=True)
+
+
+def registrar_nome_capturado(ticker, fonte):
+    """Cacheia e persiste o nome vindo do Yahoo (dict) ou de um texto."""
+    chave = normalizar_ticker(ticker)
+    if not chave:
         return None
-    texto = str(valor).strip()
-    return texto or None
+    display = short = longn = None
+    if isinstance(fonte, dict):
+        display = fonte.get("displayName")
+        short = fonte.get("shortName")
+        longn = fonte.get("longName")
+        bruto = display or short or longn
+    else:
+        bruto = fonte
+    curto = _encurtar_nome(bruto)
+    if (not curto or curto.upper() == chave) and longn and bruto != longn:
+        curto = _encurtar_nome(longn)
+    if not curto or curto.upper() == chave:
+        return None
+    _CACHE_NOMES[chave] = curto
+    raiz = raiz_ticker(chave)
+    if raiz:
+        _CACHE_NOMES.setdefault(raiz, curto)
+    _persistir_nome_catalogo(chave, longn or bruto, curto)
+    return curto
 
 
 def nome_empresa(ticker, tipo="acao"):
-    """Nome oficial curto, ou ``None`` se nao houver fonte (nao inventa)."""
+    """Nome oficial curto, ou ``None`` se nao houver fonte (nao inventa).
+
+    FII nao usa nome comercial: a exibicao e so o ticker.
+    """
+    if tipo == "fii":
+        return None
     chave = normalizar_ticker(ticker)
     if not chave:
         return None
     irmaos = _tickers_mesma_empresa(chave)
+    for candidato in irmaos:
+        cached = _CACHE_NOMES.get(candidato)
+        if cached:
+            return cached
+    raiz = raiz_ticker(chave)
+    if raiz and raiz in _CACHE_NOMES:
+        return _CACHE_NOMES[raiz]
     for candidato in irmaos:
         curto = _nome_do_catalogo(candidato)
         if curto:
@@ -164,19 +235,14 @@ def nome_empresa(ticker, tipo="acao"):
         curto = _nome_por_cnpj(candidato)
         if curto:
             return curto
-    for candidato in irmaos:
-        isca = _nome_da_isca(candidato)
-        if not isca:
-            continue
-        if tipo == "fii":
-            return isca
-        return _encurtar_nome(isca) or isca
     return None
 
 
 def rotulo_ticker(ticker, tipo="acao"):
-    """``Petrobras (PETR4)`` ou so o ticker se nao houver nome oficial."""
+    """Acao: ``Petrobras (PETR4)``. FII: so o ticker."""
     chave = normalizar_ticker(ticker) or str(ticker or "").strip().upper()
+    if tipo == "fii":
+        return chave
     nome = nome_empresa(chave, tipo)
     if nome:
         return f"{nome} ({chave})"
@@ -335,8 +401,10 @@ __all__ = [
     "eh_oportunidade_acao",
     "eh_oportunidade_fii",
     "juntar_blocos",
+    "limpar_cache_nomes",
     "nome_empresa",
     "obter_carteira_popular",
+    "registrar_nome_capturado",
     "rotulo_grupo",
     "rotulo_ticker",
     "ticker_no_mapa_b3",
