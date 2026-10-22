@@ -26,8 +26,16 @@ _SUFIXOS_SOCIETARIOS = re.compile(
     r"\b(s\.?a\.?|s/a|ltda\.?)\s*$",
     re.IGNORECASE,
 )
-_SUFIXOS_CLASSE = re.compile(
-    r"[\s,\-]*(?:-?(?:ON|PN|PNA|PNB|UNT|UNIT|N[12]))\s*$",
+_TOKENS_B3 = (
+    "ON", "PN", "PNA", "PNB", "PNC", "PND", "UNT", "UNIT",
+    "NM", "N1", "N2", "N2M", "EJ", "ED", "EB", "EX",
+)
+_SUFIXOS_B3 = re.compile(
+    r"[\s,\-/]+(?:" + "|".join(_TOKENS_B3) + r")\s*$",
+    re.IGNORECASE,
+)
+_SUFIXO_COLADO = re.compile(
+    r"(?<=[A-Za-z]{3})(?:ON|PN[A-D]?)\s*$",
     re.IGNORECASE,
 )
 _CACHE_NOMES = {}
@@ -52,19 +60,34 @@ def limpar_cache_nomes():
     _CACHE_NOMES.clear()
 
 
+def _tirar_codigos_b3(texto):
+    """Remove ON/PN/NM/EJ e afins (Yahoo/B3), inclusive colados (RENNERON)."""
+    atual = str(texto or "").strip()
+    while atual:
+        novo = _SUFIXOS_B3.sub("", atual).strip(" .,")
+        novo = _SUFIXO_COLADO.sub("", novo).strip(" .,")
+        if novo == atual:
+            break
+        atual = novo
+    return atual
+
+
 def _encurtar_nome(nome):
     texto = re.sub(r"\s+", " ", str(nome or "")).strip()
     if not texto:
         return ""
-    texto = _SUFIXOS_CLASSE.sub("", texto).strip(" .,")
+    texto = _tirar_codigos_b3(texto)
     if " - " in texto:
-        cauda = texto.rsplit(" - ", 1)[-1].strip()
-        cauda = _SUFIXOS_SOCIETARIOS.sub("", cauda).strip(" .,")
+        cauda = _tirar_codigos_b3(
+            _SUFIXOS_SOCIETARIOS.sub("", texto.rsplit(" - ", 1)[-1]).strip(" .,")
+        )
         if cauda and 1 <= len(cauda.split()) <= 3:
             texto = cauda
-    texto = _SUFIXOS_SOCIETARIOS.sub("", texto).strip(" .,")
+    texto = _tirar_codigos_b3(
+        _SUFIXOS_SOCIETARIOS.sub("", texto).strip(" .,")
+    )
     if not texto:
-        return str(nome).strip()
+        return ""
     partes = texto.split()
     if len(partes) >= 3 and partes[0].casefold().startswith("petrol"):
         return partes[-1].title() if partes[-1].isupper() else partes[-1]
@@ -183,8 +206,28 @@ def _persistir_nome_catalogo(ticker, longo, comercial):
         logger.debug("Persistencia de nome indisponivel para %s", ticker, exc_info=True)
 
 
+def _candidato_limpo(valor, ticker):
+    curto = _encurtar_nome(valor)
+    if not curto:
+        return None
+    if curto.upper() == normalizar_ticker(ticker):
+        return None
+    if any(p.upper() in _TOKENS_B3 for p in curto.split()):
+        curto = _tirar_codigos_b3(curto)
+        if curto.isupper():
+            curto = curto.title()
+        curto = _encurtar_nome(curto)
+    if not curto or curto.upper() == normalizar_ticker(ticker):
+        return None
+    return curto
+
+
 def registrar_nome_capturado(ticker, fonte):
-    """Cacheia e persiste o nome vindo do Yahoo (dict) ou de um texto."""
+    """Cacheia e persiste o nome vindo do Yahoo (dict) ou de um texto.
+
+    Prefere o nome comercial limpo (sem ON/PN/NM/EJ). ``shortName`` da B3
+    costuma trazer classe e segmento; ``longName``/``displayName`` sao melhores.
+    """
     chave = normalizar_ticker(ticker)
     if not chave:
         return None
@@ -193,19 +236,22 @@ def registrar_nome_capturado(ticker, fonte):
         display = fonte.get("displayName")
         short = fonte.get("shortName")
         longn = fonte.get("longName")
-        bruto = display or short or longn
+        ordem = (display, longn, short)
     else:
-        bruto = fonte
-    curto = _encurtar_nome(bruto)
-    if (not curto or curto.upper() == chave) and longn and bruto != longn:
-        curto = _encurtar_nome(longn)
-    if not curto or curto.upper() == chave:
+        ordem = (fonte,)
+    curto = None
+    for bruto in ordem:
+        candidato = _candidato_limpo(bruto, chave)
+        if candidato:
+            curto = candidato
+            break
+    if not curto:
         return None
     _CACHE_NOMES[chave] = curto
     raiz = raiz_ticker(chave)
     if raiz:
         _CACHE_NOMES.setdefault(raiz, curto)
-    _persistir_nome_catalogo(chave, longn or bruto, curto)
+    _persistir_nome_catalogo(chave, longn or display or short or curto, curto)
     return curto
 
 
