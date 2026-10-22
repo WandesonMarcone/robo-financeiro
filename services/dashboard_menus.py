@@ -46,23 +46,25 @@ def sanitizar_markdown(texto: str) -> str:
     return texto
 
 def buscar_favoritos(tipo):
-    """Filtra os ativos da planilha que estão na lista de config.FAVORITOS"""
+    """Tickers da planilha que estao no ranking real de favoritos."""
     is_fii = (tipo == 'fii')
     nome_aba = "BD_FIIs" if is_fii else "BD_Acoes"
-    # Acessa a lista configurada no seu arquivo config.py
-    lista_favs = config.FAVORITOS.get(tipo, [])
+    from modules.relatorio_mercado import obter_carteira_popular
+
+    lista_favs = obter_carteira_popular("fii" if is_fii else "acao")
+    if not lista_favs:
+        return []
 
     try:
         matriz = buscar_dados_planilha_com_cache(nome_aba)
         if not matriz: return []
 
-        favoritos_encontrados = []
+        na_planilha = set()
         for linha in matriz[1:]:
             ticker = linha[0].strip().upper()
-            if ticker in lista_favs:
-                favoritos_encontrados.append(ticker)
-        
-        return favoritos_encontrados
+            if ticker:
+                na_planilha.add(ticker)
+        return [t for t in lista_favs if t in na_planilha]
     except Exception as e:
         print(f"Erro ao buscar favoritos: {e}")
         return []
@@ -80,52 +82,43 @@ def converter_numero(valor_string):
         return 0.0
 
 def buscar_oportunidades(tipo):
-    """Vasculha a planilha usando o Cache Rápido para não travar o bot"""
+    """Filtra a planilha com liquidez e, nas acoes, ticker mapeado na B3."""
     is_fii = (tipo == 'fii')
     nome_aba = "BD_FIIs" if is_fii else "BD_Acoes"
+    from modules.relatorio_mercado import eh_oportunidade_acao, eh_oportunidade_fii
 
-    FILTROS_FIXOS = {
-        "fii": {"pvp_min": 0.50, "pvp_max": 1.15, "dy_min": 0.08},
-        "acao": {"pl_min": 2.0, "pl_max": 15.0, "pvp_min": 0.50, "pvp_max": 2.50, "dy_min": 0.06, "roe_min": 0.10}
-    }
-    filtro_atual = FILTROS_FIXOS[tipo]
+    filtro_atual = (getattr(config, "FILTROS_FIXOS", {}) or {}).get(tipo) or {}
+    limite = getattr(config, "OPORTUNIDADES_LIMITE", 8)
 
     try:
-        # Puxa os dados instantaneamente do Cache
         matriz = buscar_dados_planilha_com_cache(nome_aba)
         if not matriz: return []
 
-        oportunidades = []
+        ranqueadas = []
         for linha in matriz[1:]:
             try:
-                ticker = linha[0].strip()
+                ticker = linha[0].strip().upper()
                 if not ticker: continue
 
                 if is_fii:
                     pvp = converter_numero(linha[5])
                     dy = converter_numero(linha[6])
-                    dy_min = filtro_atual['dy_min']
-                    if dy_min < 1 and dy >= 1: dy_min *= 100 
-
-                    if (filtro_atual['pvp_min'] <= pvp <= filtro_atual['pvp_max']) and (dy >= dy_min):
-                        oportunidades.append(ticker)
+                    vacancia = converter_numero(linha[7]) if len(linha) > 7 else None
+                    liquidez = converter_numero(linha[12]) if len(linha) > 12 else None
+                    if eh_oportunidade_fii(pvp, dy, liquidez, vacancia, filtro_atual):
+                        ranqueadas.append((liquidez or 0, ticker))
                 else:
                     dy = converter_numero(linha[3])
                     pl = converter_numero(linha[5])
                     pvp = converter_numero(linha[6])
-                    roe = converter_numero(linha[19])
-
-                    dy_min, roe_min = filtro_atual['dy_min'], filtro_atual['roe_min']
-                    if dy_min < 1 and dy >= 1: dy_min *= 100
-                    if roe_min < 1 and roe >= 1: roe_min *= 100
-
-                    if (filtro_atual['pl_min'] <= pl <= filtro_atual['pl_max']) and \
-                       (filtro_atual['pvp_min'] <= pvp <= filtro_atual['pvp_max']) and \
-                       (dy >= dy_min) and (roe >= roe_min):
-                        oportunidades.append(ticker)
+                    roe = converter_numero(linha[19]) if len(linha) > 19 else 0
+                    liquidez = converter_numero(linha[27]) if len(linha) > 27 else None
+                    if eh_oportunidade_acao(pl, pvp, dy, roe, liquidez, ticker, filtro_atual):
+                        ranqueadas.append((liquidez or 0, ticker))
             except IndexError:
-                pass 
-        return oportunidades
+                pass
+        ranqueadas.sort(reverse=True)
+        return [ticker for _liq, ticker in ranqueadas[:limite]]
     except Exception as e:
         print(f"Erro no filtro de oportunidades: {e}")
         return []
@@ -274,7 +267,8 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
     setor_limpo = sanitizar_markdown(indicadores.get('setor', 'Geral'))
     
     # Se o ticker vier sujo com algum caractere (ex: MXRF11_fii), limpa ele também
-    ticker_limpo = sanitizar_markdown(ticker)
+    from modules.relatorio_mercado import rotulo_ticker as _rotulo_ativo
+    ticker_limpo = sanitizar_markdown(_rotulo_ativo(ticker, tipo))
 
     texto = (
         f"{icone}: **{ticker_limpo}**\n"
