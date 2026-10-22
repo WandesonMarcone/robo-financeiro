@@ -92,6 +92,18 @@ def _tickers_mesma_empresa(ticker):
     return vistos
 
 
+def _nome_curto_empresa(emp):
+    if emp is None:
+        return None
+    escolhido = (
+        getattr(emp, "nome_comercial", None)
+        or getattr(emp, "nome", None)
+        or getattr(emp, "razao_social", None)
+    )
+    curto = _encurtar_nome(escolhido)
+    return curto or None
+
+
 def _nome_do_catalogo(ticker):
     try:
         resumo = _resumo_empresa(ticker)
@@ -100,10 +112,42 @@ def _nome_do_catalogo(ticker):
         return None
     if not resumo or not resumo.get("empresa"):
         return None
-    emp = resumo["empresa"]
-    escolhido = emp.nome_comercial or emp.nome
-    curto = _encurtar_nome(escolhido)
-    return curto or None
+    return _nome_curto_empresa(resumo["empresa"])
+
+
+def _cnpj_conhecido(ticker):
+    chave = normalizar_ticker(ticker)
+    if not chave:
+        return None
+    mapa = getattr(config, "MAPA_CNPJ_B3", {}) or {}
+    for cnpj, tkr in mapa.items():
+        if normalizar_ticker(tkr) == chave:
+            return cnpj
+    return None
+
+
+def _nome_por_cnpj(ticker):
+    """Nome oficial pelo CNPJ do mapa B3, mesmo se o ticker nao estiver vinculado."""
+    cnpj = _cnpj_conhecido(ticker)
+    if not cnpj:
+        return None
+    try:
+        from pipeline_dados.repositorio_catalogo import RepositorioCatalogo
+
+        emp = RepositorioCatalogo().obter_empresa_por_cnpj(cnpj)
+    except Exception:
+        logger.debug("Catalogo CNPJ indisponivel para %s", ticker, exc_info=True)
+        return None
+    return _nome_curto_empresa(emp)
+
+
+def _nome_da_isca(ticker):
+    mapa = getattr(config, "MAPA_ISCAS_MASTER", {}) or {}
+    valor = mapa.get(normalizar_ticker(ticker))
+    if not valor:
+        return None
+    texto = str(valor).strip()
+    return texto or None
 
 
 def nome_empresa(ticker, tipo="acao"):
@@ -111,14 +155,22 @@ def nome_empresa(ticker, tipo="acao"):
     chave = normalizar_ticker(ticker)
     if not chave:
         return None
-    for candidato in _tickers_mesma_empresa(chave):
+    irmaos = _tickers_mesma_empresa(chave)
+    for candidato in irmaos:
         curto = _nome_do_catalogo(candidato)
         if curto:
             return curto
-    if tipo == "fii":
-        isca = (getattr(config, "MAPA_ISCAS_MASTER", {}) or {}).get(chave)
-        if isca:
-            return str(isca).strip()
+    for candidato in irmaos:
+        curto = _nome_por_cnpj(candidato)
+        if curto:
+            return curto
+    for candidato in irmaos:
+        isca = _nome_da_isca(candidato)
+        if not isca:
+            continue
+        if tipo == "fii":
+            return isca
+        return _encurtar_nome(isca) or isca
     return None
 
 
