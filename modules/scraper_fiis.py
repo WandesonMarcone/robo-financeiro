@@ -13,6 +13,11 @@ from modules.utils import (
     converter_numero,
     eh_valido,
 )
+from modules.relatorio_mercado import (
+    eh_oportunidade_fii,
+    obter_carteira_popular,
+    rotulo_ticker,
+)
 from bs4 import BeautifulSoup
 
 def classificar_fii_e_emoji(setor, ticker):
@@ -154,6 +159,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     fila_total = []
     oportunidades_gerais = []
     novatos_garimpados = []
+    cat_opps = []
     
     try:
         # Sem "www": o certificado TLS do Fundamentus só cobre o domínio raiz
@@ -190,23 +196,47 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             except: precos_antigos[t] = 0.0
             mapa_atualizacao[t] = row[17] if len(row) > 17 else "" 
 
-    cat_fixas = [f for f in config.FIXAS_FIIS if f in tickers_planilha and precisa_atualizar(f, mapa_atualizacao, agora_dt, sp_tz)]
+    carteira_popular = obter_carteira_popular("fii")
+    cat_populares = [
+        f for f in carteira_popular
+        if f in tickers_planilha and precisa_atualizar(f, mapa_atualizacao, agora_dt, sp_tz)
+    ]
+    filtro_fii = (getattr(config, "FILTROS_FIXOS", {}) or {}).get("fii") or {}
+    oportunidades_gerais = []
+    novatos_garimpados = []
 
     if not df.empty:
-        df_cacador = df[
-            (df['P/VP'] >= 0.85) & (df['P/VP'] <= 1.01) &
-            (df['Dividend Yield'] >= 0.095) & (df['Liquidez'] >= 5000000) &  
-            (df['Vacância Média'] <= 0.10)                 
+        oportunidades_gerais = [
+            papel for papel, linha in df.iterrows()
+            if eh_oportunidade_fii(
+                linha.get("P/VP"),
+                linha.get("Dividend Yield"),
+                linha.get("Liquidez"),
+                linha.get("Vacância Média"),
+                filtro_fii,
+            )
         ]
-        oportunidades_gerais = df_cacador.sort_values(by='Dividend Yield', ascending=False).index.tolist()
-        novatos_garimpados = [fii for fii in oportunidades_gerais if fii not in tickers_planilha and fii not in cat_fixas][:3]
+        oportunidades_gerais = df.loc[oportunidades_gerais].sort_values(
+            by="Liquidez", ascending=False
+        ).index.tolist() if oportunidades_gerais else []
+        limite_opp = getattr(config, "OPORTUNIDADES_LIMITE", 8)
+        cat_opps = [
+            o for o in oportunidades_gerais
+            if o in tickers_planilha and o not in cat_populares
+            and precisa_atualizar(o, mapa_atualizacao, agora_dt, sp_tz)
+        ][:limite_opp]
+        novatos_garimpados = [
+            fii for fii in oportunidades_gerais
+            if fii not in tickers_planilha and fii not in cat_populares
+        ][:3]
+    else:
+        cat_opps = []
 
-    usadas = set(cat_fixas + novatos_garimpados)
+    usadas = set(cat_populares + cat_opps + novatos_garimpados)
     precisam_urgente = [t for t in tickers_planilha if t not in usadas and precisa_atualizar(t, mapa_atualizacao, agora_dt, sp_tz)]
     cat_desatualizadas = random.sample(precisam_urgente, 2) if len(precisam_urgente) >= 2 else precisam_urgente
 
-    # 2. DEFINIÇÃO DA FILA ANTES DE QUALQUER PRINT
-    fila_total = cat_fixas + novatos_garimpados + cat_desatualizadas
+    fila_total = cat_populares + cat_opps + novatos_garimpados + cat_desatualizadas
     print(f"DEBUG: Tamanho da fila para varredura: {len(fila_total)}")
     
     if not fila_total: 
@@ -343,16 +373,19 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             icone_variacao = "📈" if preco_exib > preco_velho else ("📉" if preco_exib < preco_velho else "➖")
             txt_vacancia = f" | 🏚️ Vacância: {vacancia*100:.1f}%" if (tipo == "Tijolo" and eh_valido(vacancia)) else ""
 
+            rotulo = rotulo_ticker(ticker, "fii")
             if ticker in novatos_garimpados:
-                relatorio_opps.append(f"{emoji} *{ticker}* ({tipo_exib})\n   R$ {preco_exib:.2f}\n   P/VP: {pvp_txt} | DY: {dy_txt}{txt_vacancia}")
-            elif ticker in config.FIXAS_FIIS:
-                texto_ativo = f"{emoji} *{ticker}* ({tipo_exib})\n   R$ {preco_velho:.2f} ➔ R$ {preco_exib:.2f} {icone_variacao}\n   P/VP: {pvp_txt} | DY: {dy_txt}{txt_vacancia}"
+                relatorio_opps.append(f"{emoji} *{rotulo}* ({tipo_exib})\n   R$ {preco_exib:.2f}\n   P/VP: {pvp_txt} | DY: {dy_txt}{txt_vacancia}")
+            elif ticker in carteira_popular:
+                texto_ativo = f"{emoji} *{rotulo}* ({tipo_exib})\n   R$ {preco_velho:.2f} ➔ R$ {preco_exib:.2f} {icone_variacao}\n   P/VP: {pvp_txt} | DY: {dy_txt}{txt_vacancia}"
                 if ticker in oportunidades_gerais:
-                    relatorio_fixas_opps.append(f"🚨 *{ticker} ENTROU EM DESCONTO!* 🚨\n   {texto_ativo}")
+                    relatorio_fixas_opps.append(f"🚨 *{rotulo} ENTROU EM DESCONTO!* 🚨\n   {texto_ativo}")
                 else:
                     relatorio_fixas.append(texto_ativo)
+            elif ticker in oportunidades_gerais:
+                relatorio_opps.append(f"{emoji} *{rotulo}* ({tipo_exib})\n   R$ {preco_exib:.2f}\n   P/VP: {pvp_txt} | DY: {dy_txt}{txt_vacancia}")
             else:
-                relatorio_atualizados.append(f"{emoji} *{ticker}* ({tipo_exib})\n   R$ {preco_velho:.2f} ➔ R$ {preco_exib:.2f} {icone_variacao}\n   P/VP: {pvp_txt} | DY: {dy_txt}{txt_vacancia}")
+                relatorio_atualizados.append(f"{emoji} *{rotulo}* ({tipo_exib})\n   R$ {preco_velho:.2f} ➔ R$ {preco_exib:.2f} {icone_variacao}\n   P/VP: {pvp_txt} | DY: {dy_txt}{txt_vacancia}")
 
             print(f"   ✅ [OK] {ticker} mapeado e processado.")
         except Exception as e:
@@ -365,7 +398,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
 
     msg_blocos = ["🏢 *MOVIMENTAÇÃO DE FIIs* 🏢"]
     if relatorio_fixas_opps: msg_blocos.append("🏆 *ALERTA VIP:*\n" + "\n\n".join(relatorio_fixas_opps))
-    if relatorio_fixas: msg_blocos.append("📌 *SUA CARTEIRA FIXA:*\n" + "\n\n".join(relatorio_fixas))
+    if relatorio_fixas: msg_blocos.append("📌 *CARTEIRA POPULAR:*\n" + "\n\n".join(relatorio_fixas))
     if relatorio_opps: msg_blocos.append("🎯 *TOP OPORTUNIDADES:*\n" + "\n\n".join(relatorio_opps))
     if relatorio_atualizados: msg_blocos.append("🔄 *OUTRAS ATUALIZAÇÕES:*\n" + "\n\n".join(relatorio_atualizados))
     msg_out = "\n\n➖➖➖➖➖➖➖➖➖➖\n\n".join(msg_blocos) if batch_updates else ""

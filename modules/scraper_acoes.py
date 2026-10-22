@@ -11,6 +11,11 @@ from modules.utils import (
     precisa_atualizar,
     get_request_with_retry,
 )
+from modules.relatorio_mercado import (
+    agrupar_linhas_por_empresa,
+    eh_oportunidade_acao,
+    obter_carteira_popular,
+)
 from config import MAPA_SETORES_B3
 
 def classificar_setor_por_mapa(ticker):
@@ -81,26 +86,49 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
             mapa_atualizacao[t] = row[32] if len(row) > 32 else ""
 
     todas = list(todas_originais)
-    cat_fixas = [f for f in config.FIXAS_ACOES if f in todas and precisa_atualizar(f, mapa_atualizacao, agora_dt, sp_tz)]
+    carteira_popular = obter_carteira_popular("acao")
+    cat_populares = [
+        f for f in carteira_popular
+        if f in todas and precisa_atualizar(f, mapa_atualizacao, agora_dt, sp_tz)
+    ]
+    filtro_acao = (getattr(config, "FILTROS_FIXOS", {}) or {}).get("acao") or {}
+    limite_opp = getattr(config, "OPORTUNIDADES_LIMITE", 8)
 
     opps_brutas, cat_novatas = [], []
     if not df.empty:
-        opps_brutas = df[
-            (df['P/L'] > 0) & (df['P/L'] < 12) & (df['P/VP'] < 1.5) & (df['ROE'] >= 0.08)
-        ].index.tolist()
-        cat_opps = [o for o in opps_brutas if o in todas_originais and o not in cat_fixas and precisa_atualizar(o, mapa_atualizacao, agora_dt, sp_tz)][:5]
-        # Adequação dos filtros matemáticos pois as porcentagens viraram decimais puros (Ex: 6.0% agora é 0.06)
-        candidatas = df[(df['P/L']>=2)&(df['P/L']<=15)&(df['P/VP']>=0.2)&(df['P/VP']<=1.5)&(df['Div.Yield']>=0.06)&(df['ROE']>=0.10)].index.tolist()
-        cat_novatas = [c for c in candidatas if c not in todas][:2] 
+        opps_filtradas = [
+            papel for papel, linha in df.iterrows()
+            if eh_oportunidade_acao(
+                linha.get("P/L"),
+                linha.get("P/VP"),
+                linha.get("Div.Yield"),
+                linha.get("ROE"),
+                linha.get("Liq.2meses"),
+                papel,
+                filtro_acao,
+            )
+        ]
+        if opps_filtradas and "Liq.2meses" in df.columns:
+            opps_brutas = df.loc[opps_filtradas].sort_values(
+                by="Liq.2meses", ascending=False
+            ).index.tolist()
+        else:
+            opps_brutas = opps_filtradas
+        cat_opps = [
+            o for o in opps_brutas
+            if o in todas_originais and o not in cat_populares
+            and precisa_atualizar(o, mapa_atualizacao, agora_dt, sp_tz)
+        ][:limite_opp]
+        cat_novatas = [c for c in opps_brutas if c not in todas][:2]
         todas.extend(cat_novatas)
     else:
         cat_opps = []
 
-    usadas = set(cat_fixas + cat_opps + cat_novatas)
+    usadas = set(cat_populares + cat_opps + cat_novatas)
     precisam_urgente = [t for t in todas_originais if t not in usadas and precisa_atualizar(t, mapa_atualizacao, agora_dt, sp_tz)]
     cat_aleatorias = random.sample(precisam_urgente, 3) if len(precisam_urgente) >= 3 else precisam_urgente
 
-    fila = cat_fixas + cat_opps + cat_aleatorias + cat_novatas
+    fila = cat_populares + cat_opps + cat_aleatorias + cat_novatas
     if not fila: return [], "", aba_base
 
     print(f"-> Fila de Ações: {fila}")
@@ -255,24 +283,19 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
                 faixa_preco = "N/D"
             linha_ind = f"P/L: {pl_txt} | P/VP: {pvp_txt} | ROE: {roe_txt}"
 
-            if ticker in config.FIXAS_ACOES:
-                txt = f"🏭 *{ticker}*\n   {faixa_preco}\n   {linha_ind}"
+            corpo = f"   {faixa_preco}\n   {linha_ind}"
+            item = {"ticker": ticker, "corpo": corpo}
+            if ticker in carteira_popular:
                 if ticker in opps_brutas:
-                    relatorio_fixas_opps.append(f"🚨 *{ticker} EM OPORTUNIDADE!* 🚨\n{txt}")
+                    relatorio_fixas_opps.append(item)
                 else:
-                    relatorio_fixas.append(txt)
+                    relatorio_fixas.append(item)
             elif ticker in opps_brutas:
-                relatorio_opps.append(
-                    f"🏭 *{ticker}* (Oportunidade)\n   {faixa_preco}\n   {linha_ind}"
-                )
+                relatorio_opps.append(item)
             elif ticker in cat_novatas:
-                relatorio_novatas.append(
-                    f"🏭 *{ticker}* (Nova Garimpada)\n   {faixa_preco}\n   {linha_ind}"
-                )
+                relatorio_novatas.append(item)
             else:
-                relatorio_atualizados.append(
-                    f"🏭 *{ticker}*\n   {faixa_preco}\n   {linha_ind}"
-                )
+                relatorio_atualizados.append(item)
 
             print(f"   ✅ [OK] {ticker} mapeado e processado.")
         except Exception as e:
@@ -286,12 +309,32 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
             # --------------------------
 
     # --- MONTAGEM MODULAR COM SEPARADOR ---
+    def _bloco(titulo, itens, alerta=False, tag=""):
+        if not itens:
+            return None
+        agrupado = agrupar_linhas_por_empresa(itens, "acao")
+        if alerta:
+            agrupado = [f"🚨 *EM OPORTUNIDADE!* 🚨\n{bloco}" for bloco in agrupado]
+        elif tag:
+            agrupado = [f"🏭 {linha}" if not linha.startswith("🏭") else linha for linha in agrupado]
+        return f"{titulo}\n" + "\n\n".join(agrupado)
+
     msg_blocos = ["🤖 *MOVIMENTAÇÃO DE AÇÕES* 🤖"]
-    if relatorio_fixas_opps: msg_blocos.append("🏆 *ALERTA VIP (Fixas em Oportunidade):*\n" + "\n\n".join(relatorio_fixas_opps))
-    if relatorio_fixas: msg_blocos.append("📌 *CARTEIRA FIXA:*\n" + "\n\n".join(relatorio_fixas))
-    if relatorio_opps: msg_blocos.append("🎯 *OPORTUNIDADES:*\n" + "\n\n".join(relatorio_opps))
-    if relatorio_novatas: msg_blocos.append("🌟 *GARIMPADAS:*\n" + "\n\n".join(relatorio_novatas))
-    if relatorio_atualizados: msg_blocos.append("🔄 *OUTRAS ATUALIZADAS:*\n" + "\n\n".join(relatorio_atualizados))
+    vip = _bloco("🏆 *ALERTA VIP:*", relatorio_fixas_opps, alerta=True)
+    if vip:
+        msg_blocos.append(vip)
+    pop = _bloco("📌 *CARTEIRA POPULAR:*", relatorio_fixas)
+    if pop:
+        msg_blocos.append(pop)
+    opp = _bloco("🎯 *OPORTUNIDADES:*", relatorio_opps)
+    if opp:
+        msg_blocos.append(opp)
+    nov = _bloco("🌟 *GARIMPADAS:*", relatorio_novatas)
+    if nov:
+        msg_blocos.append(nov)
+    out = _bloco("🔄 *OUTRAS ATUALIZADAS:*", relatorio_atualizados)
+    if out:
+        msg_blocos.append(out)
 
     msg_out = "\n\n➖➖➖➖➖➖➖➖➖➖\n\n".join(msg_blocos) if batch_updates else ""
 
