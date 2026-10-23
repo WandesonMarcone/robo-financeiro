@@ -234,17 +234,34 @@ _WEBP_WEBP = b"WEBP"
 _GIF_ASSINATURA = b"GIF8"
 
 
-def _url_logo_dev(ticker):
-    """URL existente do Logo.dev (ticker B3 com sufixo ``.SA``)."""
+def _token_cdn():
+    """Publishable key (pk_) da CDN. ``sk_`` nao autentica em img.logo.dev."""
     token = (os.environ.get("LOGO_DEV_TOKEN") or "").strip()
+    if not token or token.startswith("sk_"):
+        return None
+    return token
+
+
+def _segredo_logo_dev():
+    """Secret key (sk_) da Brand API, so no servidor."""
+    for nome in ("LOGO_DEV_SECRET_KEY", "LOGO_DEV_TOKEN"):
+        valor = (os.environ.get(nome) or "").strip()
+        if valor.startswith("sk_"):
+            return valor
+    return (os.environ.get("LOGO_DEV_SECRET_KEY") or "").strip() or None
+
+
+def _url_logo_dev(ticker):
+    """CDN Logo.dev: ``/ticker/{TICKER}.SA`` (B3). Nao usar ``ticker:``."""
+    token = _token_cdn()
     if not token:
         return None
     chave = _chave_logo(ticker)
     if not chave:
         return None
     return (
-        f"https://img.logo.dev/ticker:{chave}.SA"
-        f"?token={token}&size=200&format=png"
+        f"https://img.logo.dev/ticker/{chave}.SA"
+        f"?token={token}&size=200&format=png&fallback=404"
     )
 
 
@@ -294,6 +311,65 @@ def _baixar_imagem_logo_dev(url):
     except Exception:
         logger.debug("Falha inesperada no Logo.dev", exc_info=True)
     return None, None
+
+
+def _baixar_via_brand_api(ticker):
+    """Arquivo oficial via GET /v2/brands/logo (self-host). Nao usa a CDN."""
+    segredo = _segredo_logo_dev()
+    chave = _chave_logo(ticker)
+    if not segredo or not chave:
+        return None, None
+    consulta = f"https://api.logo.dev/v2/brands/logo?ticker={chave}.SA"
+    try:
+        resposta = requests.get(
+            consulta,
+            headers={"Authorization": f"Bearer {segredo}", "Accept": "application/json"},
+            timeout=15,
+        )
+        if resposta.status_code != 200:
+            logger.debug("Brand API HTTP %s para %s", resposta.status_code, chave)
+            return None, None
+        dados = (resposta.json() or {}).get("data") or {}
+        download = str(dados.get("url") or "").strip()
+        if not download:
+            return None, None
+        separador = "&" if "?" in download else "?"
+        arquivo = requests.get(
+            f"{download}{separador}format=png&size=200",
+            timeout=15,
+            allow_redirects=True,
+        )
+        if arquivo.status_code != 200:
+            logger.debug("Download Brand API HTTP %s para %s", arquivo.status_code, chave)
+            return None, None
+        mime = _mime_imagem(arquivo.content, arquivo.headers.get("Content-Type"))
+        if not mime:
+            return None, None
+        return arquivo.content, mime
+    except requests.RequestException:
+        logger.debug("Brand API indisponivel (rede) para %s", chave)
+    except Exception:
+        logger.debug("Falha inesperada na Brand API", exc_info=True)
+    return None, None
+
+
+def _obter_bytes_logo_dev(ticker):
+    """Bytes para Drive/Telegram: Brand API (sk_) e, se faltar, CDN (pk_)."""
+    conteudo, mime = _baixar_via_brand_api(ticker)
+    if conteudo:
+        return conteudo, mime
+    url = _url_logo_dev(ticker)
+    if not url:
+        return None, None
+    return _baixar_imagem_logo_dev(url)
+
+
+def obter_bytes_logo_url(url):
+    """Baixa bytes de uma URL da CDN para o bot enviar (Telegram nao puxa img.logo.dev)."""
+    if "img.logo.dev" not in str(url or ""):
+        return None
+    conteudo, _mime = _baixar_imagem_logo_dev(url)
+    return conteudo
 
 
 def _resolver_drive_manager(drive_manager):
@@ -383,12 +459,10 @@ def obter_link_logo(ticker: str, tipo: str = "", drive_manager=None) -> str:
     url = _consultar_drive(chave, tipo, gerente)
 
     if not url:
-        url_logo_dev = _url_logo_dev(ticker)
-        if url_logo_dev:
-            conteudo, mime = _baixar_imagem_logo_dev(url_logo_dev)
-            if conteudo:
-                gravado = _salvar_no_drive(chave, tipo, conteudo, mime, gerente)
-                url = gravado or url_logo_dev
+        conteudo, mime = _obter_bytes_logo_dev(ticker)
+        if conteudo:
+            gravado = _salvar_no_drive(chave, tipo, conteudo, mime, gerente)
+            url = gravado or _url_logo_dev(ticker) or ""
 
     _guardar_cache(chave, url)
     if url:

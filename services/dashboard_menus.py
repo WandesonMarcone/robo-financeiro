@@ -12,6 +12,7 @@ from services.planilhas import buscar_dados_planilha_com_cache, buscar_ativo_na_
 from services.logo_service import (
     invalidar_file_id_logo,
     obter_bytes_logo_drive,
+    obter_bytes_logo_url,
     obter_file_id_logo,
     obter_link_logo,
     registrar_falha_logo,
@@ -135,11 +136,14 @@ def _registrar_file_id_do_painel(mensagem, ticker):
 
 
 def _midia_telegram(media_logo):
-    """Converte ``drive:<id>`` em bytes; URLs e file_id seguem como estão."""
+    """Drive e CDN viram bytes; file_id do Telegram segue como esta."""
     if not media_logo:
         return None
-    if str(media_logo).startswith("drive:"):
+    texto = str(media_logo)
+    if texto.startswith("drive:"):
         return obter_bytes_logo_drive(media_logo)
+    if "img.logo.dev" in texto:
+        return obter_bytes_logo_url(texto)
     return media_logo
 
 

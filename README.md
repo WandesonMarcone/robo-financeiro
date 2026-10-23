@@ -227,6 +227,7 @@ midia recebe um aviso para responder em texto, sem reiniciar o cadastro.
 | `modules/GoogleDriveManager.py` | Pastas hierarquicas, upload organizado, `mover_arquivo_da_revisao_por_id`, logos. |
 | `modules/scraper_fiis.py` | Garimpo de FIIs (P/VP, DY, vacancia); fila VIP/popular/oportunidades, sem aleatorio. |
 | `modules/scraper_acoes.py` | Indicadores de acoes (P/L, P/VP, ROE, margens, DY); nome da empresa na coluna AH (Yahoo so na 1a vez). |
+| `modules/relatorio_mercado.py` | Nomes oficiais (AH), hidratacao PETR3/PETR4, filtro de oportunidades e digest FII/acao. |
 | `modules/utils.py` | `conectar_gspread`, conversao numerica, markup `painel_{ticker}_*` e disparo de MOVIMENTACAO. |
 | `modules/leitor_pdf.py` | Extracao de texto (PyMuPDF / pdfplumber); uso legado vs lote leve em `atualizador_documentos`. |
 | `modules/module_ia.py` | Consultas `/ia` do bot (Groq, com fallbacks de provedor). |
@@ -270,7 +271,7 @@ midia recebe um aviso para responder em texto, sem reiniciar o cadastro.
 | `services/orquestrador.py` | `varredura_diaria`: FNET/B3 + CVM; avisos so ao admin; docs nao em broadcast. |
 | `services/planilhas.py` | Leitura do Google Sheets com cache de 5 min. |
 | `services/dashboard_menus.py` | Paineis de oportunidades, favoritos e raio-x do ativo. |
-| `services/logo_service.py` | Drive (Icones B3) -> Logo.dev -> texto; cache de `file_id`. |
+| `services/logo_service.py` | Drive (Icones B3) -> Brand API/CDN (`/ticker/{TICKER}.SA`) -> texto; grava no Drive e envia bytes ao Telegram. |
 | `services/catalogo_empresas.py` | Aplica `MAPA_SETORES_B3` e monta resumo da empresa. |
 | `services/catalogo_ia.py` | Novidades de catalogo assistidas por IA; ambiguos vao para sugestoes. |
 | `services/motor_ia.py` | Leitura de relatorios com IA; importado mas chamada inativa (nao e fluxo ativo). |
@@ -316,7 +317,8 @@ midia recebe um aviso para responder em texto, sem reiniciar o cadastro.
 | `tests/test_menu_principal.py` | Painel inicial, Novos Documentos e Meus Alertas. |
 | `tests/test_permissoes.py` | Papeis, allowlist e bloqueio de callbacks admin. |
 | `tests/test_processamento_fila.py` | Fila, lote IA 3 em 3, Drive mock (mes de assunto, nome, data intacta). |
-| `tests/test_scraper_acoes.py` | Ausencia nao vira zero na planilha de acoes. |
+| `tests/test_relatorio_mercado.py` | Filtro de oportunidades, nomes Petrobras/AH e heranca PETR3/PETR4. |
+| `tests/test_scraper_acoes.py` | Ausencia nao vira zero; coluna AH e heranca PETR3/PETR4 sem reconsultar Yahoo. |
 | `tests/test_scraper_fiis.py` | SSL Fundamentus, conversao e protecao de indicadores. |
 | `tests/test_telegram_stability.py` | Estabilidade de comandos com bot fake. |
 | `tests/test_trocas.py` | Solicitacao e decisao de troca de favorito. |
@@ -358,7 +360,8 @@ Obrigatorias: `TELEGRAM_BOT_TOKEN`, `DATABASE_URL` (normalizada para
 Acesso: `TELEGRAM_ADMIN_ID`, `TELEGRAM_USUARIOS_LIMITADOS`,
 `TELEGRAM_CHATS_AUTORIZADOS`.
 
-Opcionais: `WEBHOOK_BASE_URL`, `PORT`, `GROQ_API_KEY`, `LOGO_DEV_TOKEN`,
+Opcionais: `WEBHOOK_BASE_URL`, `PORT`, `GROQ_API_KEY`, `LOGO_DEV_TOKEN` (pk_ da CDN),
+`LOGO_DEV_SECRET_KEY` (sk_ da Brand API, para gravar no Drive),
 `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_BASE_URL`, `CLIENT_ID`,
 `CLIENT_SECRET`, `REFRESH_TOKEN`, `DRIVE_ROOT_FOLDER_ID`,
 `DRIVE_LOGOS_FOLDER_ID`, `GOOGLE_CREDS`, `EOD_SNAPSHOTS`.
@@ -368,7 +371,8 @@ Flags: `CRIAR_TABELAS=1`, `ROBO_INICIAR_NO_IMPORT=1`.
 ### GitHub Actions (`app.py`)
 
 Secrets: `GOOGLE_CREDENTIALS`, `TELEGRAM_BOT_TOKEN`, `GROQ_API_KEY`,
-`LOGO_DEV_TOKEN`, `CLIENT_ID`, `CLIENT_SECRET`, `REFRESH_TOKEN`,
+`LOGO_DEV_TOKEN` (pk_), `LOGO_DEV_SECRET_KEY` (sk_, opcional para self-host),
+`CLIENT_ID`, `CLIENT_SECRET`, `REFRESH_TOKEN`,
 `DRIVE_ROOT_FOLDER_ID`. `GEMINI_API_KEY` esta no workflow sem uso no codigo.
 
 ---

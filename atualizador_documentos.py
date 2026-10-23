@@ -12,6 +12,7 @@ from modules.utils import conectar_gspread
 from services.logo_service import (
     invalidar_file_id_logo,
     obter_bytes_logo_drive,
+    obter_bytes_logo_url,
     obter_media_logo_rapida,
     registrar_falha_logo,
     registrar_file_id_logo,
@@ -236,6 +237,11 @@ def _enviar_foto_telegram(chat_id, ticker, foto, legenda, teclado=None, parse_mo
     arquivos = None
     if str(foto).startswith("drive:"):
         conteudo = obter_bytes_logo_drive(foto)
+        if not conteudo:
+            return False
+        arquivos = {"photo": ("logo.png", conteudo, "image/png")}
+    elif "img.logo.dev" in str(foto):
+        conteudo = obter_bytes_logo_url(foto)
         if not conteudo:
             return False
         arquivos = {"photo": ("logo.png", conteudo, "image/png")}
