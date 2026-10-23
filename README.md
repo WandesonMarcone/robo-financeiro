@@ -217,7 +217,7 @@ midia recebe um aviso para responder em texto, sem reiniciar o cadastro.
 | `bot/comandos.py` | Comandos (`/menu`, `/revisao`, varreduras forçadas, `/ia`, reset) e relatorio pos-coleta. |
 | `bot/handlers.py` | Callbacks de navegacao financeira (tipo/setor FII, setor acao, docs, downloads). |
 | `bot/callbacks_revisao.py` | Central de Revisoes: lote IA, paginas 2-3, `rev_typ` (Drive), markup e resumo por fundo. |
-| `bot/callbacks_menus.py` | Catch-all de menus/paineis (oportunidades, carteira, dados); registrado por ultimo. |
+| `bot/callbacks_menus.py` | Catch-all: Acoes (setor/segmento/empresa/ticker), oportunidades, carteira, dados. |
 
 ### `modules/` — scrapers, Drive, PDF, IA pontual
 
@@ -225,9 +225,10 @@ midia recebe um aviso para responder em texto, sem reiniciar o cadastro.
 |---|---|
 | `modules/__init__.py` | Pacote; sem logica. |
 | `modules/GoogleDriveManager.py` | Pastas hierarquicas, upload organizado, `mover_arquivo_da_revisao_por_id`, logos. |
-| `modules/scraper_fiis.py` | Garimpo de FIIs (P/VP, DY, vacancia); fila VIP/popular/oportunidades, sem aleatorio. |
-| `modules/scraper_acoes.py` | Indicadores de acoes (P/L, P/VP, ROE, margens, DY); nome da empresa na coluna AH (Yahoo so na 1a vez). |
-| `modules/relatorio_mercado.py` | Nomes oficiais (AH), hidratacao PETR3/PETR4, filtro de oportunidades e digest FII/acao. |
+| `modules/scraper_fiis.py` | Garimpo de FIIs (P/VP, DY, vacancia); fila VIP/popular/oportunidades, sem aleatorio. Novo ticker sempre grava B/C canonicos. |
+| `modules/taxonomia_fiis.py` | Macro Tijolo/Papel/FOF/Hibrido e segmento canonico (coluna B/C da BD_FIIs). |
+| `modules/scraper_acoes.py` | Indicadores de acoes (P/L, P/VP, ROE, margens, DY); nome AH; setor B e subsetor AI (mapa, raiz ou Yahoo). |
+| `modules/relatorio_mercado.py` | Nomes oficiais (AH), menu Acoes (setor/segmento/empresa/ticker, inclui classificados na planilha) e digest FII/acao. |
 | `modules/utils.py` | `conectar_gspread`, conversao numerica, markup `painel_{ticker}_*` e disparo de MOVIMENTACAO. |
 | `modules/leitor_pdf.py` | Extracao de texto (PyMuPDF / pdfplumber); uso legado vs lote leve em `atualizador_documentos`. |
 | `modules/module_ia.py` | Consultas `/ia` do bot (Groq, com fallbacks de provedor). |
@@ -255,7 +256,7 @@ midia recebe um aviso para responder em texto, sem reiniciar o cadastro.
 | `pipeline_dados/repositorio_logos.py` | Cache persistente do `file_id` do Telegram. |
 | `pipeline_dados/tipos_documento.py` | Catalogo oficial FII/acao e aliases FNET (Ago/Age/ITR etc.); sem inventar nomes. |
 | `pipeline_dados/filtro_alertas.py` | Esconde ruido DY (% vs fracao) e duplicatas do mesmo dia; nao apaga fatos. |
-| `pipeline_dados/taxonomia_catalogo.py` | Aliases e validacao da taxonomia B3 usada pela IA de catalogo. |
+| `pipeline_dados/taxonomia_catalogo.py` | Aliases CVM/B3/Yahoo e `classificar_textos_b3` para setor/subsetor de tickers novos. |
 | `pipeline_dados/identidade_visual.py` | Grupos de logo por empresa (PETR3/PETR4); nao une dados financeiros. |
 | `pipeline_dados/coletor_fnet.py` | Varredura FNET: associa ticker FII, grava `assunto=data_ref`, nao cria PENDENTE. |
 | `pipeline_dados/coletor_cvm.py` | ITR de acoes da CVM (ZIP/CSV) associado por CNPJ. |
@@ -271,7 +272,7 @@ midia recebe um aviso para responder em texto, sem reiniciar o cadastro.
 | `services/orquestrador.py` | `varredura_diaria`: FNET/B3 + CVM; avisos so ao admin; docs nao em broadcast. |
 | `services/planilhas.py` | Leitura do Google Sheets com cache de 5 min. |
 | `services/dashboard_menus.py` | Paineis de oportunidades, favoritos e raio-x do ativo. |
-| `services/logo_service.py` | Drive (Icones B3) -> Brand API/CDN (`/ticker/{TICKER}.SA`) -> texto; grava no Drive e envia bytes ao Telegram. |
+| `services/logo_service.py` | Drive (Icones B3/Acoes|FIIs) -> Brand API/CDN so para acoes (`/ticker/{TICKER}.SA`) -> texto; FII nao consulta Logo.dev; envia bytes ao Telegram. |
 | `services/catalogo_empresas.py` | Aplica `MAPA_SETORES_B3` e monta resumo da empresa. |
 | `services/catalogo_ia.py` | Novidades de catalogo assistidas por IA; ambiguos vao para sugestoes. |
 | `services/motor_ia.py` | Leitura de relatorios com IA; importado mas chamada inativa (nao e fluxo ativo). |
@@ -313,13 +314,14 @@ midia recebe um aviso para responder em texto, sem reiniciar o cadastro.
 | `tests/test_eod_snapshots.py` | Writer EOD Sheets->Neon isolado. |
 | `tests/test_favoritos.py` | Repositorio e UI de favoritos. |
 | `tests/test_inicializacao.py` | URL do banco, boot sem Groq, Drive preguicoso no import. |
-| `tests/test_logo_service.py` | Ordem Drive/Logo.dev/texto, PETR3/PETR4, cache. |
+| `tests/test_logo_service.py` | Ordem Drive/Logo.dev/texto, PETR3/PETR4, FII so Drive, cache. |
+| `tests/test_menu_acoes.py` | Setor→Segmento→Empresa→ticker; rotulo so nome; 1 classe vai ao painel. |
 | `tests/test_menu_principal.py` | Painel inicial, Novos Documentos e Meus Alertas. |
 | `tests/test_permissoes.py` | Papeis, allowlist e bloqueio de callbacks admin. |
 | `tests/test_processamento_fila.py` | Fila, lote IA 3 em 3, Drive mock (mes de assunto, nome, data intacta). |
 | `tests/test_relatorio_mercado.py` | Filtro de oportunidades, nomes Petrobras/AH e heranca PETR3/PETR4. |
-| `tests/test_scraper_acoes.py` | Ausencia nao vira zero; coluna AH e heranca PETR3/PETR4 sem reconsultar Yahoo. |
-| `tests/test_scraper_fiis.py` | SSL Fundamentus, conversao e protecao de indicadores. |
+| `tests/test_scraper_acoes.py` | Ausencia nao vira zero; coluna AH/AI; mapa B3; auto-classificacao raiz/Yahoo. |
+| `tests/test_scraper_fiis.py` | SSL Fundamentus, conversao, taxonomia Tijolo/Papel/FOF/Hibrido; novato sem segmento. |
 | `tests/test_telegram_stability.py` | Estabilidade de comandos com bot fake. |
 | `tests/test_trocas.py` | Solicitacao e decisao de troca de favorito. |
 

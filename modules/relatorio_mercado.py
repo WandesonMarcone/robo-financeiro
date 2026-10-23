@@ -359,15 +359,90 @@ def rotulo_grupo(membros, tipo="acao"):
     return classes
 
 
+def rotulo_empresa(membros, tipo="acao"):
+    """Nome da empresa no menu (sem ticker). Nao inventa.
+
+    Um ticker sozinho ou varias classes da mesma raiz usam o nome oficial.
+    Sem nome: o ticker, ou ``PETR3/PETR4`` se houver mais de uma classe.
+    """
+    presentes = [normalizar_ticker(t) for t in (membros or [])]
+    presentes = [t for t in presentes if t]
+    if not presentes:
+        return ""
+    nome = _nome_entre(presentes, tipo)
+    if nome:
+        return nome
+    if len(presentes) == 1:
+        return presentes[0]
+    return "/".join(presentes)
+
+
+def callback_analise_ou_classes(membros, callback_classes):
+    """1 ticker: vai ao painel. Varios: abre a escolha de classes."""
+    presentes = [normalizar_ticker(t) for t in (membros or [])]
+    presentes = [t for t in presentes if t]
+    if len(presentes) == 1:
+        return f"painel_{presentes[0]}_acao"
+    return callback_classes
+
+
 def ticker_no_mapa_b3(ticker):
     chave = normalizar_ticker(ticker)
     if not chave:
         return False
     mapa = getattr(config, "MAPA_SETORES_B3", {}) or {}
+    raiz = raiz_ticker(chave)
     for subsetores in mapa.values():
         for lista in (subsetores or {}).values():
             if chave in lista:
                 return True
+            if raiz and any(raiz_ticker(outro) == raiz for outro in lista or []):
+                return True
+    return False
+
+
+def _indice_subsetor_planilha():
+    return int(getattr(config, "COLUNA_SUBSETOR_ACAO", 34))
+
+
+def tickers_do_segmento_b3(nome_macro, nome_sub, matriz=None):
+    """Tickers do segmento: mapa B3 unido aos classificados na planilha."""
+    mapa = getattr(config, "MAPA_SETORES_B3", {}) or {}
+    do_mapa = list((mapa.get(nome_macro) or {}).get(nome_sub) or [])
+    vistos = []
+    for ticker in do_mapa:
+        chave = normalizar_ticker(ticker)
+        if chave and chave not in vistos:
+            vistos.append(chave)
+    idx_sub = _indice_subsetor_planilha()
+    for linha in (matriz or [])[1:]:
+        if not linha or not str(linha[0]).strip():
+            continue
+        chave = normalizar_ticker(linha[0])
+        if not chave or chave in vistos:
+            continue
+        setor = str(linha[1]).strip() if len(linha) > 1 else ""
+        sub = str(linha[idx_sub]).strip() if len(linha) > idx_sub else ""
+        if setor == nome_macro and sub == nome_sub:
+            vistos.append(chave)
+    return vistos
+
+
+def setor_presente_na_planilha(nome_macro, tickers_planilha, matriz=None):
+    """True se o mapa ou a planilha tiverem ticker daquele macro-setor."""
+    mapa = getattr(config, "MAPA_SETORES_B3", {}) or {}
+    presentes = {normalizar_ticker(t) for t in (tickers_planilha or []) if t}
+    for lista in (mapa.get(nome_macro) or {}).values():
+        if any(normalizar_ticker(t) in presentes for t in lista or []):
+            return True
+    for linha in (matriz or [])[1:]:
+        if not linha or not str(linha[0]).strip():
+            continue
+        if normalizar_ticker(linha[0]) not in presentes:
+            continue
+        setor = str(linha[1]).strip() if len(linha) > 1 else ""
+        if setor == nome_macro:
+            return True
     return False
 
 
@@ -516,8 +591,12 @@ __all__ = [
     "obter_carteira_popular",
     "precisa_buscar_nome",
     "registrar_nome_capturado",
+    "callback_analise_ou_classes",
+    "rotulo_empresa",
     "rotulo_grupo",
     "rotulo_ticker",
+    "setor_presente_na_planilha",
     "ticker_no_mapa_b3",
     "tickers_do_digest",
+    "tickers_do_segmento_b3",
 ]

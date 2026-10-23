@@ -23,21 +23,45 @@ from modules.relatorio_mercado import (
     tickers_do_digest,
 )
 from config import MAPA_SETORES_B3
+from pipeline_dados.identidade_visual import raiz_ticker
+from pipeline_dados.taxonomia_catalogo import classificar_textos_b3
 
-def classificar_setor_por_mapa(ticker):
+SETOR_PADRAO = ("Outros", "Não Classificado")
+
+
+def classificar_setor_por_mapa(ticker, yf_info=None):
+    """Macro e subsetor canonicos: mapa B3, irmaos da mesma raiz, Yahoo.
+
+    Tickers novos (fora do mapa) herdam o setor da raiz (PETR3←PETR4) ou
+    casam ``sector``/``industry`` do Yahoo na taxonomia. Sem fonte, devolve
+    ``Outros`` / ``Não Classificado``.
     """
-    Varre o mapa fixo do config.py e devolve (Macro_Setor, Sub_Setor).
-    Se a ação não estiver no mapa, devolve "Outros".
-    """
-    ticker_limpo = ticker.strip().upper()
+    ticker_limpo = str(ticker or "").strip().upper()
+    if not ticker_limpo:
+        return SETOR_PADRAO
 
     for macro, subsetores in MAPA_SETORES_B3.items():
         for sub, lista_tickers in subsetores.items():
             if ticker_limpo in lista_tickers:
                 return macro, sub
 
-    # Se a ação não estiver mapeada no config.py
-    return "Outros", "Não Classificado"
+    raiz = raiz_ticker(ticker_limpo)
+    if raiz:
+        for macro, subsetores in MAPA_SETORES_B3.items():
+            for sub, lista_tickers in subsetores.items():
+                if any(raiz_ticker(outro) == raiz for outro in lista_tickers):
+                    return macro, sub
+
+    info = yf_info or {}
+    macro, sub = classificar_textos_b3(
+        info.get("sector"),
+        info.get("industry"),
+        info.get("industryDisp"),
+        info.get("sectorDisp"),
+    )
+    if macro and sub:
+        return macro, sub
+    return SETOR_PADRAO
 
 def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     print("📈 [1/5] Iniciando auditoria completa de Ações...")
@@ -164,7 +188,7 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
             nome_novo = None
             if precisa_buscar_nome(ticker):
                 nome_novo = registrar_nome_capturado(ticker, yf_info)
-            macro_setor, sub_setor = classificar_setor_por_mapa(ticker)
+            macro_setor, sub_setor = classificar_setor_por_mapa(ticker, yf_info)
             setor = macro_setor
 
             fundamentus_ok = (not df.empty) and (ticker in df.index)
@@ -228,6 +252,8 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
             if ticker in cat_novatas:
                 valores["A"] = ticker
             valores["B"] = setor
+            if sub_setor and sub_setor != SETOR_PADRAO[1]:
+                valores["AI"] = sub_setor
             if eh_valido(preco):
                 valores["C"] = preco
             if eh_valido(dy):

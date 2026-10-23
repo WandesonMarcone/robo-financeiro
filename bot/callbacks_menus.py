@@ -6,6 +6,7 @@ from bot.loader import bot
 from bot import menu_principal, permissoes
 from bot.telegram_utils import TEXTO_ACESSO_NEGADO, responder_callback_desconhecido
 from config import SPREADSHEET_URL, MAPA_SETORES_B3
+from modules.taxonomia_fiis import dados_linha_fii, MACROS_FII
 
 # Banco de Dados
 from atualizador_documentos import SessionDB
@@ -15,7 +16,13 @@ from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos, DadosFinan
 from services.dashboard_menus import buscar_oportunidades, gerar_painel_ativo, buscar_favoritos, filtrar_ativos_por_setor, extrair_data_real
 from services.planilhas import buscar_dados_planilha_com_cache, buscar_ativo_na_planilha
 from pipeline_dados.identidade_visual import agrupar_tickers_por_empresa, raiz_ticker
-from modules.relatorio_mercado import rotulo_grupo, rotulo_ticker
+from modules.relatorio_mercado import (
+    callback_analise_ou_classes,
+    rotulo_empresa,
+    rotulo_ticker,
+    setor_presente_na_planilha,
+    tickers_do_segmento_b3,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -224,13 +231,16 @@ def callback_geral(call):
             )
 
             try:
-                # Agora ele vai achar a função porque ela está importada corretamente no topo!
                 matriz = buscar_dados_planilha_com_cache("BD_FIIs")
                 if matriz:
-                    # Pega as Macro Categorias da Coluna B
-                    macro_tipos = sorted(list(set(linha[1].strip() for linha in matriz[1:] if len(linha) > 1 and linha[1].strip())))
-                    for macro in macro_tipos:
-                        markup.add(InlineKeyboardButton(f"🏢 {macro}", callback_data=f"macro_fii_{macro}"))
+                    vistos = set()
+                    for linha in matriz[1:]:
+                        _ticker, macro, _seg = dados_linha_fii(linha)
+                        if macro:
+                            vistos.add(macro)
+                    for macro in list(MACROS_FII) + sorted(vistos - set(MACROS_FII)):
+                        if macro in vistos:
+                            markup.add(InlineKeyboardButton(f"🏢 {macro}", callback_data=f"macro_fii_{macro}"))
             except Exception as e:
                 print(f"Erro ao listar macro categorias FII: {e}")
 
@@ -246,23 +256,20 @@ def callback_geral(call):
                 matriz = buscar_dados_planilha_com_cache("BD_FIIs")
                 markup = InlineKeyboardMarkup(row_width=2)
 
-                # Busca na Coluna C (índice 2) os sub-setores pertencentes à Macro clicada (Coluna B)
-                sub_setores = sorted(list(set(
-                    linha[2].strip() for linha in matriz[1:] 
-                    if len(linha) > 2 and linha[1].strip().lower() == macro_escolhida.lower() and linha[2].strip()
+                linhas_macro = []
+                for linha in matriz[1:]:
+                    tkr, tipo, seg = dados_linha_fii(linha)
+                    if tipo.lower() == macro_escolhida.lower():
+                        linhas_macro.append((tkr, tipo, seg))
+                sub_setores = sorted(list(dict.fromkeys(
+                    seg for _tkr, _macro, seg in linhas_macro if seg
                 )))
 
-                # Se houver múltiplos sub-setores (Ex: Tijolo possui Logística, Shoppings, etc)
                 if len(sub_setores) > 1:
                     for sub in sub_setores:
-                        # Passa a Macro e o Sub-setor juntos via '___' para isolar a busca
                         markup.add(InlineKeyboardButton(f"📁 {sub}", callback_data=f"subsetor_fii_{macro_escolhida}___{sub}"))
                 else:
-                    # Se não houver sub-divisões (Ex: Papel), lista os ativos diretamente
-                    tickers = [
-                        linha[0].strip().upper() for linha in matriz[1:] 
-                        if len(linha) > 1 and linha[1].strip().lower() == macro_escolhida.lower()
-                    ]
+                    tickers = [tkr for tkr, _macro, _seg in linhas_macro if tkr]
                     for tkr in sorted(tickers):
                         markup.add(InlineKeyboardButton(f"🏢 {tkr}", callback_data=f"painel_{tkr}_fii"))
 
@@ -279,10 +286,9 @@ def callback_geral(call):
 
             matriz = buscar_dados_planilha_com_cache("BD_FIIs")
 
-            # Filtra ativos onde Coluna B == Macro E Coluna C == Sub-setor
             tickers = [
-                linha[0].strip().upper() for linha in matriz[1:]
-                if len(linha) > 2 and linha[1].strip().lower() == macro.lower() and linha[2].strip().lower() == sub.lower()
+                tkr for tkr, tipo, seg in (dados_linha_fii(linha) for linha in matriz[1:])
+                if tkr and tipo.lower() == macro.lower() and seg.lower() == sub.lower()
             ]
 
             markup = InlineKeyboardMarkup(row_width=3)
@@ -317,20 +323,13 @@ def callback_geral(call):
                 "Consumo Não-Cíclico": "🛒",
                 "Saúde": "🏥",
                 "Bens Industriais": "🚜",
-                "Tecnologia & Telecom": "💻",
+                "Tecnologia e Telecom": "💻",
                 "Agronegócio": "🌱"
             }
 
             lista_macros = list(MAPA_SETORES_B3.keys())
             for idx, macro in enumerate(lista_macros):
-                # 🔴 O PULO DO GATO: Só cria o botão se o setor tiver alguma ação que você possui na planilha!
-                tem_acao = False
-                for subsetor, ativos in MAPA_SETORES_B3[macro].items():
-                    if any(t in tickers_planilha for t in ativos):
-                        tem_acao = True
-                        break
-                
-                if tem_acao:
+                if setor_presente_na_planilha(macro, tickers_planilha, matriz):
                     icone = emojis.get(macro, "📁")
                     markup.add(InlineKeyboardButton(f"{icone} {macro}", callback_data=f"macro_ac_{idx}"))
 
@@ -352,9 +351,7 @@ def callback_geral(call):
             
             subsetores = list(MAPA_SETORES_B3[nome_macro].keys())
             for idx_sub, sub in enumerate(subsetores):
-                ativos_do_sub = MAPA_SETORES_B3[nome_macro][sub]
-                
-                # 🔴 Só cria o botão do subsetor se você tiver alguma empresa dele
+                ativos_do_sub = tickers_do_segmento_b3(nome_macro, sub, matriz)
                 if any(t in tickers_planilha for t in ativos_do_sub):
                     markup.add(InlineKeyboardButton(f"📂 {sub}", callback_data=f"sub_ac_{idx_macro}_{idx_sub}"))
                 
@@ -376,27 +373,20 @@ def callback_geral(call):
             
             bot.answer_callback_query(call.id, f"Buscando empresas...")
             
-            tickers_do_subsetor = MAPA_SETORES_B3[nome_macro][nome_sub]
-            
-            # 🔴 Filtra a lista fina: só mostra a empresa se ela existir na planilha
+            tickers_do_subsetor = tickers_do_segmento_b3(nome_macro, nome_sub, matriz)
             tickers_validos = [t for t in tickers_do_subsetor if t in tickers_planilha]
             
             markup = InlineKeyboardMarkup(row_width=1)
             
             if tickers_validos:
                 for raiz, membros in agrupar_tickers_por_empresa(tickers_validos):
-                    rotulo = rotulo_grupo(membros, "acao")
-                    if len(membros) == 1:
-                        markup.add(InlineKeyboardButton(
-                            f"📈 {rotulo}",
-                            callback_data=f"painel_{membros[0]}_acao",
-                        ))
-                    else:
-                        markup.add(InlineKeyboardButton(
-                            f"📈 {rotulo}",
-                            callback_data=f"emp_ac_{idx_macro}_{idx_sub}_{raiz}",
-                        ))
-                txt = f"📂 **Segmento:** {nome_sub}\nEscolha a empresa para análise:"
+                    markup.add(InlineKeyboardButton(
+                        f"🏢 {rotulo_empresa(membros, 'acao')}",
+                        callback_data=callback_analise_ou_classes(
+                            membros, f"emp_ac_{idx_macro}_{idx_sub}_{raiz}"
+                        ),
+                    ))
+                txt = f"📂 **Segmento:** {nome_sub}\nEscolha a empresa:"
             else:
                 txt = f"📭 Nenhuma empresa encontrada na planilha para o segmento **{nome_sub}**."
                 
@@ -433,7 +423,7 @@ def callback_geral(call):
 
             matriz = buscar_dados_planilha_com_cache("BD_Acoes")
             tickers_planilha = [linha[0].strip().upper() for linha in matriz[1:] if len(linha) > 0 and linha[0].strip()] if matriz else []
-            tickers_do_subsetor = MAPA_SETORES_B3[nome_macro][nome_sub]
+            tickers_do_subsetor = tickers_do_segmento_b3(nome_macro, nome_sub, matriz)
             membros = sorted(
                 t for t in tickers_do_subsetor
                 if t in tickers_planilha and raiz_ticker(t) == raiz
@@ -441,18 +431,18 @@ def callback_geral(call):
 
             bot.answer_callback_query(call.id, f"Classes {raiz}...")
             markup = InlineKeyboardMarkup(row_width=1)
+            if len(membros) == 1:
+                gerar_painel_ativo(membros[0], "acao", chat_id, msg_id)
+                return
             for ticker in membros:
                 markup.add(InlineKeyboardButton(
-                    f"📈 {rotulo_ticker(ticker, 'acao')}",
+                    f"📈 {ticker}",
                     callback_data=f"painel_{ticker}_acao",
                 ))
             markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=f"sub_ac_{idx_macro}_{idx_sub}"))
             if membros:
-                rotulo = rotulo_grupo(membros, "acao")
-                txt = (
-                    f"📂 **{rotulo}**\n"
-                    f"Selecione o ticker (cotação e dados separados por classe):"
-                )
+                nome = rotulo_empresa(membros, "acao")
+                txt = f"📂 **{nome}**\nSelecione o ticker:"
             else:
                 txt = f"📭 Nenhuma classe encontrada para **{raiz}**."
             bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")

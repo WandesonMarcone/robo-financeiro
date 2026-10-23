@@ -1,8 +1,9 @@
 """Resolução e cache das logos dos ativos.
 
-Ordem: Google Drive (Ícones B3) → Logo.dev → fallback textual. Identidade
-visual por empresa (PETR3/PETR4). ``file_id`` do Telegram é persistido.
-Falha de logo nunca interrompe o bot. ``LOGO_DEV_TOKEN`` não é logado.
+Ordem: Google Drive (Ícones B3/Ações|FIIs) → Logo.dev (só ação) → texto.
+Logo.dev cobre empresas (.SA), não cotas de FII. Identidade visual por
+empresa (PETR3/PETR4). ``file_id`` do Telegram é persistido. Falha de logo
+nunca interrompe o bot. ``LOGO_DEV_TOKEN`` não é logado.
 """
 
 import logging
@@ -396,6 +397,32 @@ def _media_drive(arquivo):
     return f"drive:{file_id}"
 
 
+def _eh_fii(tipo="", ticker=""):
+    """Logo.dev cobre empresas (.SA), nao cotas de FII; Drive e o catalogo."""
+    if str(tipo or "").strip().lower().startswith("fii"):
+        return True
+    chave = _normalizar_ticker(ticker)
+    if not chave.endswith("11"):
+        return False
+    try:
+        from config import MAPA_SETORES_B3
+
+        for subsetores in (MAPA_SETORES_B3 or {}).values():
+            for lista in (subsetores or {}).values():
+                if chave in lista:
+                    return False
+    except Exception:
+        return True
+    return True
+
+
+def _tipo_logo(tipo="", ticker=""):
+    if _eh_fii(tipo, ticker):
+        return "fii"
+    texto = str(tipo or "").strip().lower()
+    return texto or "acao"
+
+
 def _consultar_drive(ticker, tipo, drive_manager):
     if drive_manager is None:
         return ""
@@ -444,8 +471,9 @@ def obter_bytes_logo_drive(media, drive_manager=None):
 def obter_link_logo(ticker: str, tipo: str = "", drive_manager=None) -> str:
     """Resolve a mídia da logo (Drive, Logo.dev ou ``""``).
 
-    Prioridade: catálogo Ícones B3 no Drive; se ausente, Logo.dev (e grava no
-    Drive sem sobrescrever). Sem imagem válida, devolve vazio (texto).
+    Prioridade: catálogo Ícones B3 no Drive; se ausente e nao for FII, Logo.dev
+    (e grava no Drive sem sobrescrever). FII nao consulta Logo.dev. Sem imagem
+    válida, devolve vazio (texto).
     """
     chave = _chave_logo(ticker)
     if not chave:
@@ -455,13 +483,14 @@ def obter_link_logo(ticker: str, tipo: str = "", drive_manager=None) -> str:
         if _cache_valido(chave):
             return _CACHE_LOGOS.get(chave, "")
 
+    tipo_logo = _tipo_logo(tipo, ticker)
     gerente = drive_manager if drive_manager is not None else _resolver_drive_manager(None)
-    url = _consultar_drive(chave, tipo, gerente)
+    url = _consultar_drive(chave, tipo_logo, gerente)
 
-    if not url:
+    if not url and not _eh_fii(tipo_logo, ticker):
         conteudo, mime = _obter_bytes_logo_dev(ticker)
         if conteudo:
-            gravado = _salvar_no_drive(chave, tipo, conteudo, mime, gerente)
+            gravado = _salvar_no_drive(chave, tipo_logo, conteudo, mime, gerente)
             url = gravado or _url_logo_dev(ticker) or ""
 
     _guardar_cache(chave, url)
@@ -489,9 +518,12 @@ def obter_media_logo_rapida(ticker: str, tipo: str = "") -> str:
     with _LOCK:
         if _cache_valido(chave):
             return _CACHE_LOGOS.get(chave, "")
+    tipo_logo = _tipo_logo(tipo, ticker)
     gerente = _resolver_drive_manager(None)
-    no_drive = _consultar_drive(chave, tipo, gerente)
+    no_drive = _consultar_drive(chave, tipo_logo, gerente)
     if no_drive:
         _guardar_cache(chave, no_drive)
         return no_drive
+    if _eh_fii(tipo_logo, ticker):
+        return ""
     return _url_logo_dev(ticker) or ""

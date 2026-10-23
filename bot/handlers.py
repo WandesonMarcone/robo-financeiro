@@ -6,7 +6,8 @@ from services.planilhas import buscar_dados_planilha_com_cache
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pipeline_dados.banco_dados import DocumentosQualitativos
 from pipeline_dados.identidade_visual import agrupar_tickers_por_empresa, raiz_ticker
-from modules.relatorio_mercado import rotulo_grupo, rotulo_ticker
+from modules.relatorio_mercado import callback_analise_ou_classes, rotulo_empresa
+from modules.taxonomia_fiis import dados_linha_fii
 
 # ==========================================
 # ----- BOTÃO TIPO/SETOR FIIS -----
@@ -14,20 +15,15 @@ from modules.relatorio_mercado import rotulo_grupo, rotulo_ticker
 @bot.callback_query_handler(func=lambda call: call.data.startswith('tipo_fii_'))
 def callback_selecionar_segmento(call):
     """Lê a planilha, quebra as barras e cria os botões de segmentos únicos"""
-    tipo_selecionado = call.data.split('_')[2]
+    tipo_selecionado = call.data.replace("tipo_fii_", "", 1).strip()
     matriz = buscar_dados_planilha_com_cache("BD_FIIs")
 
     segmentos_unicos = set()
 
     for linha in matriz[1:]:
-        tipo_fundo = linha[1].strip()
-        if tipo_fundo == tipo_selecionado:
-            # A MÁGICA DA LIMPEZA: Corta pela '/' e limpa os espaços invisíveis
-            segmentos_brutos = linha[2].split('/')
-            for seg in segmentos_brutos:
-                seg_limpo = seg.strip()
-                if seg_limpo: # Só adiciona se não for vazio
-                    segmentos_unicos.add(seg_limpo)
+        _ticker, tipo_fundo, segmento = dados_linha_fii(linha)
+        if tipo_fundo.lower() == tipo_selecionado.lower() and segmento:
+            segmentos_unicos.add(segmento)
 
     segmentos_ordenados = sorted(list(segmentos_unicos))
 
@@ -56,14 +52,12 @@ def callback_listar_ativos_fii(call):
         if len(linha) < 3:
             continue
             
-        ticker = linha[0].strip()
-        tipo_fundo = linha[1].strip()
-        
-        # Corta a barra e limpa espaços novamente para comparar corretamente
-        segmentos_do_fundo = [s.strip() for s in linha[2].split('/')]
+        ticker, tipo_fundo, segmento = dados_linha_fii(linha)
+        if not ticker:
+            continue
+        segmentos_do_fundo = [segmento] if segmento else []
 
-        # Verifica se a pasta clicada está dentro dos segmentos deste fundo
-        if nome_setor in segmentos_do_fundo:
+        if nome_setor.lower() == (segmento or "").lower():
 
             # 🧠 LÓGICA DO AVISO VISUAL (ASTERISCO)
 
@@ -123,14 +117,13 @@ def callback_listar_ativos_acao(call):
             tickers_setor.append(ticker)
 
     for raiz, membros in agrupar_tickers_por_empresa(tickers_setor):
-        rotulo = rotulo_grupo(membros, "acao")
-        if len(membros) == 1:
-            markup.add(InlineKeyboardButton(f"📈 {rotulo}", callback_data=f"painel_{membros[0]}_acao"))
-        else:
-            markup.add(InlineKeyboardButton(f"📈 {rotulo}", callback_data=f"emp_sa_{raiz}"))
+        markup.add(InlineKeyboardButton(
+            f"🏢 {rotulo_empresa(membros, 'acao')}",
+            callback_data=callback_analise_ou_classes(membros, f"emp_sa_{raiz}"),
+        ))
     markup.add(InlineKeyboardButton("🔙 Voltar aos Setores", callback_data="menu_acoes"))
 
-    texto = f"📂 *Ações no setor: {nome_setor}*\n\nSelecione a empresa para analisar:"
+    texto = f"📂 *Ações no setor: {nome_setor}*\n\nSelecione a empresa:"
     bot.edit_message_text(texto, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
 
@@ -151,16 +144,23 @@ def callback_classes_acao_setor(call):
     membros = sorted(dict.fromkeys(membros))
 
     markup = InlineKeyboardMarkup(row_width=1)
+    if len(membros) == 1:
+        from services.dashboard_menus import gerar_painel_ativo
+
+        gerar_painel_ativo(
+            membros[0], "acao", call.message.chat.id, call.message.message_id
+        )
+        return
     for ticker in membros:
         markup.add(InlineKeyboardButton(
-            f"📈 {rotulo_ticker(ticker, 'acao')}",
+            f"📈 {ticker}",
             callback_data=f"painel_{ticker}_acao",
         ))
     markup.add(InlineKeyboardButton("🔙 Voltar aos Setores", callback_data="menu_acoes"))
 
     if membros:
-        rotulo = rotulo_grupo(membros, "acao")
-        texto = f"📂 *{rotulo}*\n\nSelecione o ticker (dados separados por classe):"
+        nome = rotulo_empresa(membros, "acao")
+        texto = f"📂 *{nome}*\n\nSelecione o ticker:"
     else:
         texto = f"📭 Nenhuma classe encontrada para **{raiz}**."
     bot.edit_message_text(texto, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")

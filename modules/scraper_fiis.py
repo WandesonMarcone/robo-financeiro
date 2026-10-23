@@ -21,27 +21,7 @@ from modules.relatorio_mercado import (
     tickers_do_digest,
 )
 from bs4 import BeautifulSoup
-
-def classificar_fii_e_emoji(setor, ticker):
-    """
-    Classifica automaticamente o FII baseado no setor REAL extraído do JSON.
-    """
-    s = str(setor).upper()
-    t = str(ticker).upper()
-    
-    # Exceções blindadas para fundos que os sites classificam errado
-    if t in ["MXRF11"]: return "Híbrido", "🧩"
-    if t in ["GARE11"]: return "Tijolo", "🧱"
-    
-    # Classificação baseada no JSON de portfólio
-    if any(x in s for x in ["TÍTULOS", "PAPEL", "RECEBÍVEL", "VALORES MOBILIÁRIOS", "CRI", "LCI", "CRA", "CERTIFICADOS"]): 
-        return "Papel", "📜"
-    if any(x in s for x in ["FUNDO DE FUNDOS", "FOF", "COTAS DE FUNDOS"]): 
-        return "FOF", "🔄"
-    if any(x in s for x in ["HÍBRIDO", "MISTO"]): 
-        return "Híbrido", "🧩"
-        
-    return "Tijolo", "🧱"
+from modules.taxonomia_fiis import classificar_fii
 
 def buscar_dados_profundos_fii(ticker):
     """StatusInvest: segmento (JSON) e vacância/imóveis/inquilinos (HTML).
@@ -303,10 +283,11 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             else:
                 setor = None
 
-            if setor:
-                tipo, emoji = classificar_fii_e_emoji(setor, ticker)
+            ticker_novo = ticker not in tickers_planilha
+            if setor or ticker_novo:
+                tipo, segmento, emoji = classificar_fii(setor or "", ticker)
             else:
-                tipo, emoji = None, "🏢"
+                tipo, segmento, emoji = None, None, "🏢"
 
             if eh_valido(vacancia_status):
                 vacancia = vacancia_status
@@ -330,10 +311,8 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
 
             if ticker in tickers_planilha:
                 linha_idx = tickers_planilha.index(ticker) + 2
-                ticker_novo = False
             else:
                 linha_idx = proxima_linha_vazia
-                ticker_novo = True
 
             # =========================================================================
             # 🗺️ GRAVAÇÃO CÉLULA A CÉLULA (A até R): somente indicadores válidos são
@@ -343,7 +322,10 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             if ticker_novo:
                 valores['A'] = ticker                 # Cria a linha do novo fundo
             if tipo is not None: valores['B'] = tipo
-            if setor is not None: valores['C'] = setor
+            if segmento is not None:
+                valores['C'] = segmento
+            elif setor is not None:
+                valores['C'] = setor
             if eh_valido(preco): valores['D'] = preco
             if eh_valido(numero_cotas): valores['E'] = numero_cotas
             if eh_valido(pvp): valores['F'] = pvp
