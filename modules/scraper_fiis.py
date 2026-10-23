@@ -1,5 +1,4 @@
 import io
-import random
 import requests
 import pandas as pd
 import yfinance as yf
@@ -12,11 +11,14 @@ from modules.utils import (
     get_request_with_retry,
     converter_numero,
     eh_valido,
+    formatar_pct,
 )
 from modules.relatorio_mercado import (
     eh_oportunidade_fii,
+    montar_digest,
     obter_carteira_popular,
     rotulo_ticker,
+    tickers_do_digest,
 )
 from bs4 import BeautifulSoup
 
@@ -183,6 +185,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     tickers_planilha = []
     mapa_atualizacao = {}
     precos_antigos = {}
+    indicadores_antigos = {}
 
     for row in dados_planilha[1:]: 
         if row and row[0].strip():
@@ -194,7 +197,13 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
                     precos_antigos[t] = float(raw_val) if raw_val else 0.0
                 else: precos_antigos[t] = 0.0
             except: precos_antigos[t] = 0.0
-            mapa_atualizacao[t] = row[17] if len(row) > 17 else "" 
+            mapa_atualizacao[t] = row[17] if len(row) > 17 else ""
+            indicadores_antigos[t] = {
+                "pvp": converter_numero(row[5] if len(row) > 5 else None),
+                "dy": converter_numero(row[6] if len(row) > 6 else None),
+                "vacancia": converter_numero(row[7] if len(row) > 7 else None),
+                "liquidez": converter_numero(row[12] if len(row) > 12 else None),
+            } 
 
     carteira_popular = obter_carteira_popular("fii")
     cat_populares = [
@@ -232,20 +241,15 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     else:
         cat_opps = []
 
-    usadas = set(cat_populares + cat_opps + novatos_garimpados)
-    precisam_urgente = [t for t in tickers_planilha if t not in usadas and precisa_atualizar(t, mapa_atualizacao, agora_dt, sp_tz)]
-    cat_desatualizadas = random.sample(precisam_urgente, 2) if len(precisam_urgente) >= 2 else precisam_urgente
-
-    fila_total = cat_populares + cat_opps + novatos_garimpados + cat_desatualizadas
+    fila_total = cat_populares + cat_opps + novatos_garimpados
     print(f"DEBUG: Tamanho da fila para varredura: {len(fila_total)}")
     
     if not fila_total: 
-        return [], "", aba_fiis
+        return [], montar_digest("", [], "fii"), aba_fiis
 
     batch_updates = []
     relatorio_fixas = []
     relatorio_opps = []
-    relatorio_atualizados = []
     relatorio_fixas_opps = []
     proxima_linha_vazia = len(dados_planilha) + 1 
 
@@ -357,7 +361,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             if eh_valido(media_div_mensal): valores['Q'] = media_div_mensal
             # Só carimba a atualização quando o Fundamentus respondeu de fato.
             # Assim uma falha parcial não marca dados antigos como recentes.
-            if fundamentus_ok: valores['R'] = agora_sp
+            if fundamentus_ok: valores['R'] = f"OK {agora_sp}"
 
             for coluna, valor in valores.items():
                 batch_updates.append({'range': f'{coluna}{linha_idx}', 'values': [[valor]]})
@@ -369,23 +373,29 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             preco_exib = preco if eh_valido(preco) else preco_velho
             tipo_exib = tipo if tipo else "N/D"
             pvp_txt = f"{pvp:.2f}" if eh_valido(pvp) else "N/D"
-            dy_txt = f"{dy*100:.1f}%" if eh_valido(dy) else "N/D"
+            dy_txt = formatar_pct(dy)
             icone_variacao = "📈" if preco_exib > preco_velho else ("📉" if preco_exib < preco_velho else "➖")
-            txt_vacancia = f" | 🏚️ Vacância: {vacancia*100:.1f}%" if (tipo == "Tijolo" and eh_valido(vacancia)) else ""
+            txt_vacancia = f" | 🏚️ Vacância: {formatar_pct(vacancia)}" if (tipo == "Tijolo" and eh_valido(vacancia)) else ""
 
             rotulo = rotulo_ticker(ticker, "fii")
             if ticker in novatos_garimpados:
                 relatorio_opps.append(f"{emoji} *{rotulo}* ({tipo_exib})\n   R$ {preco_exib:.2f}\n   P/VP: {pvp_txt} | DY: {dy_txt}{txt_vacancia}")
             elif ticker in carteira_popular:
                 texto_ativo = f"{emoji} *{rotulo}* ({tipo_exib})\n   R$ {preco_velho:.2f} ➔ R$ {preco_exib:.2f} {icone_variacao}\n   P/VP: {pvp_txt} | DY: {dy_txt}{txt_vacancia}"
-                if ticker in oportunidades_gerais:
+                ant = indicadores_antigos.get(ticker) or {}
+                ja_estava_barato = eh_oportunidade_fii(
+                    ant.get("pvp"),
+                    ant.get("dy"),
+                    ant.get("liquidez"),
+                    ant.get("vacancia"),
+                    filtro_fii,
+                )
+                if ticker in oportunidades_gerais and not ja_estava_barato:
                     relatorio_fixas_opps.append(f"🚨 *{rotulo} ENTROU EM DESCONTO!* 🚨\n   {texto_ativo}")
                 else:
                     relatorio_fixas.append(texto_ativo)
             elif ticker in oportunidades_gerais:
                 relatorio_opps.append(f"{emoji} *{rotulo}* ({tipo_exib})\n   R$ {preco_exib:.2f}\n   P/VP: {pvp_txt} | DY: {dy_txt}{txt_vacancia}")
-            else:
-                relatorio_atualizados.append(f"{emoji} *{rotulo}* ({tipo_exib})\n   R$ {preco_velho:.2f} ➔ R$ {preco_exib:.2f} {icone_variacao}\n   P/VP: {pvp_txt} | DY: {dy_txt}{txt_vacancia}")
 
             print(f"   ✅ [OK] {ticker} mapeado e processado.")
         except Exception as e:
@@ -400,7 +410,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     if relatorio_fixas_opps: msg_blocos.append("🏆 *ALERTA VIP:*\n" + "\n\n".join(relatorio_fixas_opps))
     if relatorio_fixas: msg_blocos.append("📌 *CARTEIRA POPULAR:*\n" + "\n\n".join(relatorio_fixas))
     if relatorio_opps: msg_blocos.append("🎯 *TOP OPORTUNIDADES:*\n" + "\n\n".join(relatorio_opps))
-    if relatorio_atualizados: msg_blocos.append("🔄 *OUTRAS ATUALIZAÇÕES:*\n" + "\n\n".join(relatorio_atualizados))
+    tickers_digest = tickers_do_digest(fila_total)
     msg_out = "\n\n➖➖➖➖➖➖➖➖➖➖\n\n".join(msg_blocos) if batch_updates else ""
 
-    return batch_updates, msg_out, aba_fiis
+    return batch_updates, montar_digest(msg_out, tickers_digest, "fii"), aba_fiis

@@ -60,6 +60,49 @@ def limpar_cache_nomes():
     _CACHE_NOMES.clear()
 
 
+def _indice_nome_planilha():
+    return int(getattr(config, "COLUNA_NOME_EMPRESA_ACAO", 33))
+
+
+def _guardar_nome_cache(ticker, curto):
+    chave = normalizar_ticker(ticker)
+    if not chave or not curto:
+        return None
+    _CACHE_NOMES[chave] = curto
+    raiz = raiz_ticker(chave)
+    if raiz:
+        _CACHE_NOMES.setdefault(raiz, curto)
+    return curto
+
+
+def hidratar_nomes_planilha(linhas, indice=None):
+    """Carrega nomes ja gravados na aba BD_Acoes (coluna AH) para o cache.
+
+    Nao consulta Yahoo nem catalogo. Classes da mesma raiz (PETR3/PETR4)
+    herdam o nome do irmao que ja tiver a celula preenchida.
+    """
+    idx = _indice_nome_planilha() if indice is None else indice
+    carregados = 0
+    for row in linhas[1:] if linhas else []:
+        if not row or not str(row[0]).strip():
+            continue
+        chave = normalizar_ticker(row[0])
+        if not chave:
+            continue
+        if idx >= len(row):
+            continue
+        curto = _candidato_limpo(row[idx], chave)
+        if curto:
+            _guardar_nome_cache(chave, curto)
+            carregados += 1
+    return carregados
+
+
+def precisa_buscar_nome(ticker):
+    """True se ainda nao ha nome em cache (planilha/Yahoo desta captura)."""
+    return nome_empresa(ticker, "acao") is None
+
+
 def _tirar_codigos_b3(texto):
     """Remove ON/PN/NM/EJ e afins (Yahoo/B3), inclusive colados (RENNERON)."""
     atual = str(texto or "").strip()
@@ -247,10 +290,7 @@ def registrar_nome_capturado(ticker, fonte):
             break
     if not curto:
         return None
-    _CACHE_NOMES[chave] = curto
-    raiz = raiz_ticker(chave)
-    if raiz:
-        _CACHE_NOMES.setdefault(raiz, curto)
+    _guardar_nome_cache(chave, curto)
     _persistir_nome_catalogo(chave, longn or display or short or curto, curto)
     return curto
 
@@ -442,16 +482,42 @@ def juntar_blocos(titulo, itens, tipo="acao"):
     return f"{titulo}\n" + "\n\n".join(linhas)
 
 
+def tickers_do_digest(*grupos):
+    """Ordem de aparicao no resumo, sem duplicar, sem aleatorio."""
+    vistos = []
+    for grupo in grupos:
+        for item in grupo or []:
+            if isinstance(item, dict):
+                chave = normalizar_ticker(item.get("ticker"))
+            else:
+                chave = normalizar_ticker(item)
+            if chave and chave not in vistos:
+                vistos.append(chave)
+    return vistos
+
+
+def montar_digest(texto, tickers, tipo):
+    return {
+        "texto": texto or "",
+        "tickers": list(tickers or []),
+        "tipo": tipo,
+    }
+
+
 __all__ = [
     "agrupar_linhas_por_empresa",
     "eh_oportunidade_acao",
     "eh_oportunidade_fii",
     "juntar_blocos",
+    "hidratar_nomes_planilha",
     "limpar_cache_nomes",
+    "montar_digest",
     "nome_empresa",
     "obter_carteira_popular",
+    "precisa_buscar_nome",
     "registrar_nome_capturado",
     "rotulo_grupo",
     "rotulo_ticker",
     "ticker_no_mapa_b3",
+    "tickers_do_digest",
 ]

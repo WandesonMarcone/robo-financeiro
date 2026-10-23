@@ -96,9 +96,11 @@ graph TD
 ### Coletor de oportunidades (`app.py`, GitHub Actions)
 
 - Nao e servidor web.
-- Garimpo de FIIs e Acoes, gravacao em lote no Sheets e alerta consolidado.
-- Snapshot EOD no Neon so com `EOD_SNAPSHOTS=1` (falha nao desfaz o Sheets).
-- Cron em `.github/workflows/main.yml`: `0 13,15,17,19,21 * * 1-5` (UTC).
+- Garimpo de FIIs e Acoes, gravacao em lote no Sheets e dois pushes de MOVIMENTACAO (1 FII + 1 acao) so para o admin, com botoes `painel_{TICKER}_fii|acao`.
+- Fila sem amostra aleatoria ("outras"); carimbo `OK dd/mm HH:MM` ativa o throttle de 2h.
+- Canal separado de `alertas_eventos` (hub 🔔). Snapshot EOD no Neon so com `EOD_SNAPSHOTS=1`.
+- Cron em `.github/workflows/main.yml`: `0 13,15,17,19,21 * * 1-5` (UTC). Injeta `DATABASE_URL` para a carteira popular.
+- Nome da empresa em `BD_Acoes` coluna AH: Yahoo so na primeira captura; PETR3/PETR4 reutilizam o mesmo nome.
 
 ### Ordem de registro dos handlers
 
@@ -186,7 +188,7 @@ midia recebe um aviso para responder em texto, sem reiniciar o cadastro.
 |---|---|
 | `README.md` | Este documento: arquitetura, fluxos e inventario de arquivos. |
 | `main.py` | Servidor Flask, webhook Telegram, APScheduler e ordem de import dos handlers. |
-| `app.py` | Garimpo de oportunidades (FIIs/Acoes), gravacao no Sheets e alertas; cron do Actions. |
+| `app.py` | Garimpo de oportunidades (FIIs/Acoes), gravacao no Sheets e 2 digests de MOVIMENTACAO; cron do Actions. |
 | `config.py` | Constantes, papeis, favoritos, `TIPOS_DOC_FII` (ids 0-38), `TIPOS_DOC_ACAO`, mapas B3. |
 | `atualizador_documentos.py` | Ponte B3/banco/IA/Drive: fila, dupla classificacao, lote IA, helpers de Drive. |
 | `fnet_scraper.py` | Download de PDF da FNET com sessao, stream e `max_bytes` (sem /tmp). |
@@ -197,7 +199,7 @@ midia recebe um aviso para responder em texto, sem reiniciar o cadastro.
 
 | Arquivo | Comentario |
 |---|---|
-| `.github/workflows/main.yml` | Cron 5x/dia (seg-sex) que instala deps, monta `credenciais.json` e roda `app.py`. |
+| `.github/workflows/main.yml` | Cron 5x/dia (seg-sex) que instala deps, monta `credenciais.json`, injeta `DATABASE_URL` e roda `app.py`. |
 
 ### `bot/` — Telegram
 
@@ -223,9 +225,9 @@ midia recebe um aviso para responder em texto, sem reiniciar o cadastro.
 |---|---|
 | `modules/__init__.py` | Pacote; sem logica. |
 | `modules/GoogleDriveManager.py` | Pastas hierarquicas, upload organizado, `mover_arquivo_da_revisao_por_id`, logos. |
-| `modules/scraper_fiis.py` | Garimpo de FIIs (P/VP, DY, vacancia) com fallback de fontes. |
-| `modules/scraper_acoes.py` | Indicadores de acoes (P/L, P/VP, ROE, margens, DY) por setor. |
-| `modules/utils.py` | `conectar_gspread`, conversao numerica, disparo de alertas. |
+| `modules/scraper_fiis.py` | Garimpo de FIIs (P/VP, DY, vacancia); fila VIP/popular/oportunidades, sem aleatorio. |
+| `modules/scraper_acoes.py` | Indicadores de acoes (P/L, P/VP, ROE, margens, DY); nome da empresa na coluna AH (Yahoo so na 1a vez). |
+| `modules/utils.py` | `conectar_gspread`, conversao numerica, markup `painel_{ticker}_*` e disparo de MOVIMENTACAO. |
 | `modules/leitor_pdf.py` | Extracao de texto (PyMuPDF / pdfplumber); uso legado vs lote leve em `atualizador_documentos`. |
 | `modules/module_ia.py` | Consultas `/ia` do bot (Groq, com fallbacks de provedor). |
 | `modules/eod_snapshots.py` | Monta payloads EOD a partir das abas; persistencia Neon opcional (`EOD_SNAPSHOTS`). |

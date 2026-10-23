@@ -32,6 +32,10 @@ def buscar_dados_planilha_com_cache(nome_aba):
         # 3. Salva no cache para as próximas chamadas
         CACHE_PLANILHA[nome_aba]["dados"] = dados
         CACHE_PLANILHA[nome_aba]["timestamp"] = agora
+        if nome_aba == "BD_Acoes":
+            from modules.relatorio_mercado import hidratar_nomes_planilha
+
+            hidratar_nomes_planilha(dados)
         
         return dados
     except Exception as e:

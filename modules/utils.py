@@ -78,13 +78,55 @@ def eh_valido(valor):
 def formatar(val):
     return converter_numero(val)
 
-def disparar_alertas(msg):
-    """Garante a entrega da notificação via Telegram."""
-    if not msg or msg.strip() == "": 
+
+def formatar_pct(valor):
+    """Percentual para exibicao. Aceita fracao (0.1154) ou porcento (11.54)."""
+    if not eh_valido(valor):
+        return "N/D"
+    numero = float(valor)
+    if abs(numero) > 1:
+        numero = numero / 100.0
+    return f"{numero * 100:.1f}%"
+
+
+def montar_markup_painel(tickers, tipo):
+    """Botoes para o painel ja existente: painel_{TICKER}_fii|acao."""
+    if not tickers or not tipo:
+        return None
+    tipo_norm = "fii" if str(tipo).strip().lower() == "fii" else "acao"
+    unicos = []
+    vistos = set()
+    for bruto in tickers:
+        chave = str(bruto or "").strip().upper()
+        if not chave or chave in vistos:
+            continue
+        vistos.add(chave)
+        unicos.append(chave)
+    if not unicos:
+        return None
+    from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        *[
+            InlineKeyboardButton(t, callback_data=f"painel_{t}_{tipo_norm}")
+            for t in unicos
+        ]
+    )
+    return markup
+
+
+def disparar_alertas(msg, tickers=None, tipo=None):
+    """Push de MOVIMENTACAO (Sheets+Telegram). Nao grava alertas_eventos."""
+    if not msg or str(msg).strip() == "":
         return
     try:
         bot = telebot.TeleBot(config.TELEGRAM_BOT_TOKEN)
-        bot.send_message(config.TELEGRAM_CHAT_ID, msg, parse_mode='Markdown')
+        kwargs = {"parse_mode": "Markdown"}
+        markup = montar_markup_painel(tickers, tipo)
+        if markup is not None:
+            kwargs["reply_markup"] = markup
+        bot.send_message(config.TELEGRAM_CHAT_ID, msg, **kwargs)
         print("📲 [Telegram] Notificação de ALERTA entregue com sucesso!")
     except Exception as e:
         print(f"⚠️ [Telegram] Erro de conexão ao enviar alerta: {e}")

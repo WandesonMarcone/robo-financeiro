@@ -3,11 +3,43 @@ import pytz
 import config
 from modules.utils import conectar_gspread, disparar_alertas
 from modules.scraper_acoes import rodar_garimpo_acoes
-from modules.scraper_fiis import rodar_garimpo_fiis # <--- Importação Corrigida
+from modules.scraper_fiis import rodar_garimpo_fiis
 from modules.eod_snapshots import tentar_persistir_eod
 
+
+def _texto_digest(pacote):
+    if isinstance(pacote, dict):
+        return str(pacote.get("texto") or "").strip()
+    return str(pacote or "").strip()
+
+
+def _tickers_digest(pacote):
+    if isinstance(pacote, dict):
+        return list(pacote.get("tickers") or [])
+    return []
+
+
+def _tipo_digest(pacote, padrao):
+    if isinstance(pacote, dict):
+        return pacote.get("tipo") or padrao
+    return padrao
+
+
+def _enviar_movimentacao(pacote, tipo):
+    """Push de MOVIMENTACAO (Sheets+Telegram). Nao grava alertas_eventos."""
+    texto = _texto_digest(pacote)
+    if not texto:
+        return False
+    disparar_alertas(
+        texto,
+        tickers=_tickers_digest(pacote),
+        tipo=_tipo_digest(pacote, tipo),
+    )
+    return True
+
+
 def executar_auditoria_carteira():
-    print("🚀 INICIANDO ARQUITETURA MODULAR DE ALTA PERFORMANCE 🚀")
+    print("INICIANDO ARQUITETURA MODULAR DE ALTA PERFORMANCE")
     
     print("[1/5] Conectando ao Banco de Dados (Google Sheets)...")
     gc = conectar_gspread()
@@ -17,37 +49,27 @@ def executar_auditoria_carteira():
     agora_dt = datetime.datetime.now(sp_tz)
     agora_sp = agora_dt.strftime('%d/%m %H:%M')
     
-    # --- TURBO DE FIIS ---
-    print("\n⚡ Acionando Motor de Fundos Imobiliários...")
-    batch_updates_fiis, msg_fiis, aba_fiis = rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz)
+    print("\nAcionando Motor de Fundos Imobiliarios...")
+    batch_updates_fiis, digest_fiis, aba_fiis = rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz)
     
-    # --- TURBO DE AÇÕES ---
-    print("\n⚡ Acionando Motor de Ações Estruturais...")
-    batch_updates_acoes, msg_acoes, aba_acoes = rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz)
+    print("\nAcionando Motor de Acoes Estruturais...")
+    batch_updates_acoes, digest_acoes, aba_acoes = rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz)
     
-    # --- SALVAMENTO EM LOTE E ALERTA CONSOLIDADO ---
-    print("\n[5/5] Consolidando gravação de dados e envio de notificações...")
+    print("\n[5/5] Consolidando gravacao de dados e envio de notificacoes...")
     if batch_updates_fiis:
         aba_fiis.batch_update(batch_updates_fiis)
-        print(f"💾 Sucesso: {len(batch_updates_fiis)} registros de FIIs gravados.")
+        print(f"Sucesso: {len(batch_updates_fiis)} registros de FIIs gravados.")
         
     if batch_updates_acoes:
         aba_acoes.batch_update(batch_updates_acoes)
-        print(f"💾 Sucesso: {len(batch_updates_acoes)} registros de ações gravados.")
+        print(f"Sucesso: {len(batch_updates_acoes)} registros de acoes gravados.")
         
-    msg_consolidada = ""
-    if msg_fiis: msg_consolidada += msg_fiis
-    if msg_acoes: msg_consolidada += msg_acoes
-        
-    if msg_consolidada.strip():
-        disparar_alertas(msg_consolidada)
-    else:
-        print("✅ Execução concluída com sucesso. (Mercado está estável, sem alertas de distorções).")
+    enviou_fii = _enviar_movimentacao(digest_fiis, "fii")
+    enviou_acao = _enviar_movimentacao(digest_acoes, "acao")
+    if not enviou_fii and not enviou_acao:
+        print("Execucao concluida com sucesso. (Mercado esta estavel, sem alertas de distorcoes).")
 
-    # Persistencia EOD no Neon e opcional e isolada: falha aqui nao desfaz o
-    # Sheets nem altera o agendamento. Desligada sem EOD_SNAPSHOTS=1.
     tentar_persistir_eod(planilha, agora_dt)
 
 if __name__ == "__main__":
     executar_auditoria_carteira()
-        

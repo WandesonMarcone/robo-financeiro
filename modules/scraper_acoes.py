@@ -1,5 +1,4 @@
 import io
-import random
 import requests
 import pandas as pd
 import yfinance as yf
@@ -8,14 +7,20 @@ import config
 from modules.utils import (
     converter_numero,
     eh_valido,
+    formatar_pct,
     precisa_atualizar,
     get_request_with_retry,
 )
 from modules.relatorio_mercado import (
     agrupar_linhas_por_empresa,
     eh_oportunidade_acao,
+    hidratar_nomes_planilha,
+    montar_digest,
+    nome_empresa,
     obter_carteira_popular,
+    precisa_buscar_nome,
     registrar_nome_capturado,
+    tickers_do_digest,
 )
 from config import MAPA_SETORES_B3
 
@@ -72,6 +77,9 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     dados_planilha = aba_base.get_all_values()
     # Linha duplicada no original removida (dados_planilha = aba_base.get_all_values())
     todas_originais, mapa_atualizacao, precos_antigos = [], {}, {}
+    indicadores_antigos = {}
+    nomes_planilha = {}
+    idx_nome = int(getattr(config, "COLUNA_NOME_EMPRESA_ACAO", 33))
 
     for row in dados_planilha[1:]:
         if row and row[0].strip() and not row[0].replace(',', '').replace('.', '').isnumeric():
@@ -85,6 +93,17 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
 
             # Mapeamento da Coluna AG (índice 32)
             mapa_atualizacao[t] = row[32] if len(row) > 32 else ""
+            indicadores_antigos[t] = {
+                "pl": converter_numero(row[5] if len(row) > 5 else None),
+                "pvp": converter_numero(row[6] if len(row) > 6 else None),
+                "dy": converter_numero(row[3] if len(row) > 3 else None),
+                "roe": converter_numero(row[19] if len(row) > 19 else None),
+                "liquidez": converter_numero(row[27] if len(row) > 27 else None),
+            }
+            if idx_nome < len(row) and str(row[idx_nome]).strip():
+                nomes_planilha[t] = str(row[idx_nome]).strip()
+
+    hidratar_nomes_planilha(dados_planilha, idx_nome)
 
     todas = list(todas_originais)
     carteira_popular = obter_carteira_popular("acao")
@@ -125,12 +144,9 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     else:
         cat_opps = []
 
-    usadas = set(cat_populares + cat_opps + cat_novatas)
-    precisam_urgente = [t for t in todas_originais if t not in usadas and precisa_atualizar(t, mapa_atualizacao, agora_dt, sp_tz)]
-    cat_aleatorias = random.sample(precisam_urgente, 3) if len(precisam_urgente) >= 3 else precisam_urgente
-
-    fila = cat_populares + cat_opps + cat_aleatorias + cat_novatas
-    if not fila: return [], "", aba_base
+    fila = cat_populares + cat_opps + cat_novatas
+    if not fila:
+        return [], montar_digest("", [], "acao"), aba_base
 
     print(f"-> Fila de Ações: {fila}")
 
@@ -138,7 +154,6 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     relatorio_fixas = []
     relatorio_opps = []
     relatorio_novatas = []
-    relatorio_atualizados = []
     relatorio_fixas_opps = [] 
 
     for ticker in fila:
@@ -146,7 +161,9 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
         try:
             # 🟢 ALTERAÇÃO 3: Inserção do Sufixo da B3 para o Yahoo Finance (.SA)
             yf_info = yf.Ticker(f"{ticker}.SA").info or {}
-            registrar_nome_capturado(ticker, yf_info)
+            nome_novo = None
+            if precisa_buscar_nome(ticker):
+                nome_novo = registrar_nome_capturado(ticker, yf_info)
             macro_setor, sub_setor = classificar_setor_por_mapa(ticker)
             setor = macro_setor
 
@@ -263,7 +280,11 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
             if eh_valido(valor_mercado):
                 valores["AF"] = valor_mercado
             if fundamentus_ok:
-                valores["AG"] = agora_sp
+                valores["AG"] = f"OK {agora_sp}"
+            if ticker not in nomes_planilha:
+                nome_gravar = nome_novo or nome_empresa(ticker, "acao")
+                if nome_gravar:
+                    valores["AH"] = nome_gravar
 
             for coluna, valor in valores.items():
                 batch_updates.append(
@@ -275,7 +296,7 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
             p_v = preco_velho if eh_valido(preco_velho) else preco_exib
             pl_txt = f"{pl:.1f}" if eh_valido(pl) else "N/D"
             pvp_txt = f"{pvp:.2f}" if eh_valido(pvp) else "N/D"
-            roe_txt = f"{roe*100:.1f}%" if eh_valido(roe) else "N/D"
+            roe_txt = formatar_pct(roe)
             if eh_valido(preco_exib) and eh_valido(p_v):
                 ico = "📈" if preco_exib > p_v else ("📉" if preco_exib < p_v else "➖")
                 faixa_preco = f"R$ {p_v:.2f} ➔ R$ {preco_exib:.2f} {ico}"
@@ -288,7 +309,17 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
             corpo = f"   {faixa_preco}\n   {linha_ind}"
             item = {"ticker": ticker, "corpo": corpo}
             if ticker in carteira_popular:
-                if ticker in opps_brutas:
+                ant = indicadores_antigos.get(ticker) or {}
+                ja_estava_barato = eh_oportunidade_acao(
+                    ant.get("pl"),
+                    ant.get("pvp"),
+                    ant.get("dy"),
+                    ant.get("roe"),
+                    ant.get("liquidez"),
+                    ticker,
+                    filtro_acao,
+                )
+                if ticker in opps_brutas and not ja_estava_barato:
                     relatorio_fixas_opps.append(item)
                 else:
                     relatorio_fixas.append(item)
@@ -296,8 +327,6 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
                 relatorio_opps.append(item)
             elif ticker in cat_novatas:
                 relatorio_novatas.append(item)
-            else:
-                relatorio_atualizados.append(item)
 
             print(f"   ✅ [OK] {ticker} mapeado e processado.")
         except Exception as e:
@@ -334,10 +363,8 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     nov = _bloco("🌟 *GARIMPADAS:*", relatorio_novatas)
     if nov:
         msg_blocos.append(nov)
-    out = _bloco("🔄 *OUTRAS ATUALIZADAS:*", relatorio_atualizados)
-    if out:
-        msg_blocos.append(out)
 
     msg_out = "\n\n➖➖➖➖➖➖➖➖➖➖\n\n".join(msg_blocos) if batch_updates else ""
+    tickers_digest = tickers_do_digest(fila)
 
-    return batch_updates, msg_out, aba_base
+    return batch_updates, montar_digest(msg_out, tickers_digest, "acao"), aba_base
