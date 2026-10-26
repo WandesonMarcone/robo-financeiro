@@ -1,7 +1,6 @@
 import os
 import json
-from groq import Groq
-from openai import OpenAI
+
 
 def analisar_fatos_com_ia(prompt: str, system_prompt: str = "Você é um analista financeiro institucional sênior.") -> str:
     """
@@ -11,9 +10,27 @@ def analisar_fatos_com_ia(prompt: str, system_prompt: str = "Você é um analist
     openai_key = os.environ.get("OPENAI_API_KEY")
     openrouter_key = os.environ.get("OPENROUTER_API_KEY")
 
-    groq_client = Groq(api_key=groq_key) if groq_key else None
-    openai_client = OpenAI(api_key=openai_key) if openai_key else None
-    openrouter_client = OpenAI(api_key=openrouter_key, base_url="https://openrouter.ai/api/v1") if openrouter_key else None
+    groq_client = None
+    openai_client = None
+    openrouter_client = None
+    if groq_key:
+        try:
+            from groq import Groq
+
+            groq_client = Groq(api_key=groq_key)
+        except Exception:
+            groq_client = None
+    if openai_key or openrouter_key:
+        try:
+            from openai import OpenAI
+        except Exception:
+            OpenAI = None
+        if OpenAI and openai_key:
+            openai_client = OpenAI(api_key=openai_key)
+        if OpenAI and openrouter_key:
+            openrouter_client = OpenAI(
+                api_key=openrouter_key, base_url="https://openrouter.ai/api/v1"
+            )
 
     modelo_groq = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 
@@ -58,6 +75,59 @@ def construir_prompt_interativo(ticker: str, tipo: str, topico: str, resumo_docs
     # ... (SEU CÓDIGO ORIGINAL SE MANTÉM AQUI) ...
     restricao_formato = "\n\nREGRAS DE FORMATAÇÃO: 1. Seja direto. 2. Máx 3 bullets."
     return f"Ativo: {ticker}\nDocs: {resumo_docs}\nTarefa: {topico}{restricao_formato}"
+
+
+def _limpar_resumo_painel(texto):
+    bruto = str(texto or "").strip()
+    if not bruto or bruto.startswith("❌"):
+        return ""
+    bruto = bruto.replace("```", "").strip().strip('"').strip("'")
+    linhas = [ln.strip() for ln in bruto.splitlines() if ln.strip()]
+    bruto = " ".join(linhas)
+    if not bruto:
+        return ""
+    partes = []
+    atual = []
+    for ch in bruto:
+        atual.append(ch)
+        if ch in ".!?":
+            frase = "".join(atual).strip()
+            if frase:
+                partes.append(frase)
+            atual = []
+            if len(partes) >= 2:
+                break
+    if not partes:
+        partes = [bruto]
+    texto = " ".join(partes).strip()
+    if len(texto) > 280:
+        texto = texto[:277].rsplit(" ", 1)[0].strip() + "..."
+    return texto
+
+
+def gerar_resumo_painel(ticker: str, tipo: str, fatos) -> str:
+    """1-2 frases so com os fatos recebidos. Vazio se nao houver fonte."""
+    lista = [str(item).strip() for item in (fatos or []) if str(item).strip()]
+    if not lista:
+        return ""
+    especie = "FII" if str(tipo or "").strip().lower().startswith("fii") else "acao"
+    system_prompt = (
+        "Voce resume ativos da B3 com base apenas nos fatos fornecidos. "
+        "Nao invente setor, segmento, inquilino, imovel, numero ou opiniao. "
+        "Se os fatos forem insuficientes, responda exatamente VAZIO."
+    )
+    prompt = (
+        f"Ativo: {ticker} ({especie})\n"
+        "Fatos:\n- "
+        + "\n- ".join(lista)
+        + "\n\nEscreva 1 ou 2 frases corridas, em portugues, descrevendo o que o ativo faz. "
+        "Sem markdown, sem titulo, sem repetir o ticker, sem dizer que e um FII/acao de um setor "
+        "a menos que isso esteja nos fatos. Nao use a palavra VAZIO se houver fato util."
+    )
+    bruto = analisar_fatos_com_ia(prompt, system_prompt=system_prompt)
+    if str(bruto or "").strip().upper() == "VAZIO":
+        return ""
+    return _limpar_resumo_painel(bruto)
 
 # --- NOVA FUNÇÃO PARA GERAR O JSON DA IMAGEM ---
 def gerar_resumo_fii_para_imagem(ticker: str, texto_pdf: str):

@@ -226,7 +226,7 @@ midia recebe um aviso para responder em texto, sem reiniciar o cadastro.
 | `modules/__init__.py` | Pacote; sem logica. |
 | `modules/GoogleDriveManager.py` | Pastas hierarquicas, upload organizado, `mover_arquivo_da_revisao_por_id`, logos. |
 | `modules/scraper_fiis.py` | Garimpo de FIIs (P/VP, DY, vacancia); fila VIP/popular/oportunidades, sem aleatorio. Novo ticker sempre grava B/C canonicos. |
-| `modules/taxonomia_fiis.py` | Macro Tijolo/Papel/FOF/Hibrido e segmento canonico (coluna B/C da BD_FIIs). |
+| `modules/taxonomia_fiis.py` | Macro Tijolo/Papel/FOF/Hibrido e segmento canonico (coluna B/C da BD_FIIs); Tijolo inclui Varejo, Desenvolvimento, Fiagro e Infraestrutura. |
 | `modules/scraper_acoes.py` | Indicadores de acoes (P/L, P/VP, ROE, margens, DY); nome AH; setor B e subsetor AI (mapa, raiz ou Yahoo). |
 | `modules/relatorio_mercado.py` | Nomes oficiais (AH), menu Acoes (setor/segmento/empresa/ticker, inclui classificados na planilha) e digest FII/acao. |
 | `modules/utils.py` | `conectar_gspread`, conversao numerica, markup `painel_{ticker}_*` e disparo de MOVIMENTACAO. |
@@ -321,7 +321,7 @@ midia recebe um aviso para responder em texto, sem reiniciar o cadastro.
 | `tests/test_processamento_fila.py` | Fila, lote IA 3 em 3, Drive mock (mes de assunto, nome, data intacta). |
 | `tests/test_relatorio_mercado.py` | Filtro de oportunidades, nomes Petrobras/AH e heranca PETR3/PETR4. |
 | `tests/test_scraper_acoes.py` | Ausencia nao vira zero; coluna AH/AI; mapa B3; auto-classificacao raiz/Yahoo. |
-| `tests/test_scraper_fiis.py` | SSL Fundamentus, conversao, taxonomia Tijolo/Papel/FOF/Hibrido; novato sem segmento. |
+| `tests/test_scraper_fiis.py` | SSL Fundamentus, conversao, taxonomia Tijolo (incl. Varejo/Desenvolvimento/Fiagro/Infraestrutura)/Papel/FOF/Hibrido; novato sem segmento. |
 | `tests/test_telegram_stability.py` | Estabilidade de comandos com bot fake. |
 | `tests/test_trocas.py` | Solicitacao e decisao de troca de favorito. |
 

@@ -1,6 +1,7 @@
 import os
 import io
 import logging
+import re
 from datetime import datetime
 from io import BytesIO
 from google.oauth2.credentials import Credentials
@@ -13,6 +14,18 @@ _MIME_PASTA = "application/vnd.google-apps.folder"
 _MIME_ATALHO = "application/vnd.google-apps.shortcut"
 _PASTA_LOGOS_ACOES = "Ações"
 _PASTA_LOGOS_FIIS = "FIIs"
+_ALIAS_PASTA_FIIS = (
+    "FIIs",
+    "FII",
+    "Fundos Imobiliários",
+    "Fundos Imobiliarios",
+)
+_ALIAS_PASTA_ACOES = (
+    "Ações",
+    "Acoes",
+)
+_EXTENSOES_LOGO = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+_CAMPOS_ARQUIVO_LOGO = "files(id,name,mimeType,shortcutDetails)"
 _LOGOS_FOLDER_PADRAO = "1CwnYl7lq5U49vVr-BZBNC737tfvyyhuW"
 
 
@@ -263,19 +276,56 @@ class GoogleDriveManager:
     def _escapar_query(self, valor):
         return str(valor).replace("\\", "\\\\").replace("'", "\\'")
 
-    def _listar_drive(self, query, fields="files(id,name,mimeType)"):
-        return (
-            self.service.files()
-            .list(
-                q=query,
-                fields=fields,
-                pageSize=10,
-                supportsAllDrives=True,
-                includeItemsFromAllDrives=True,
+    def _listar_drive(self, query, fields=_CAMPOS_ARQUIVO_LOGO, page_size=10):
+        params = {
+            "q": query,
+            "fields": fields,
+            "pageSize": page_size,
+            "supportsAllDrives": True,
+            "includeItemsFromAllDrives": True,
+        }
+        try:
+            return (
+                self.service.files()
+                .list(corpora="allDrives", **params)
+                .execute()
+                .get("files", [])
             )
-            .execute()
-            .get("files", [])
-        )
+        except Exception:
+            logger.debug("Listagem allDrives falhou; tentando Drive pessoal", exc_info=True)
+            return (
+                self.service.files()
+                .list(**params)
+                .execute()
+                .get("files", [])
+            )
+
+    def _resolver_item_logo(self, item, esperar_pasta=False):
+        """Segue atalho ate a pasta ou arquivo real da logo."""
+        atual = item or {}
+        visitados = set()
+        while atual.get("mimeType") == _MIME_ATALHO:
+            destino = (atual.get("shortcutDetails") or {}).get("targetId")
+            if not destino or destino in visitados:
+                return None
+            visitados.add(destino)
+            atual = (
+                self.service.files()
+                .get(
+                    fileId=destino,
+                    fields="id,name,mimeType,shortcutDetails",
+                    supportsAllDrives=True,
+                )
+                .execute()
+            )
+        if esperar_pasta:
+            mime = atual.get("mimeType")
+            if mime and mime != _MIME_PASTA:
+                return None
+            return atual.get("id")
+        if not atual.get("id"):
+            return None
+        return atual
 
     def resolver_pasta_logos(self, folder_id=None):
         """Resolve atalho para a pasta real de Ícones B3, sem confundir com Dados Financeiros."""
@@ -305,6 +355,11 @@ class GoogleDriveManager:
     def _nome_subpasta_logo(self, tipo):
         return _PASTA_LOGOS_FIIS if str(tipo or "").lower().startswith("fii") else _PASTA_LOGOS_ACOES
 
+    def _aliases_subpasta_logo(self, tipo):
+        if str(tipo or "").lower().startswith("fii"):
+            return _ALIAS_PASTA_FIIS
+        return _ALIAS_PASTA_ACOES
+
     def _subpasta_logos(self, tipo, criar=False):
         raiz = self.resolver_pasta_logos()
         if not raiz:
@@ -312,16 +367,18 @@ class GoogleDriveManager:
         if raiz.get("id") and self.root_folder_id and raiz["id"] == self.root_folder_id:
             logger.warning("Pasta de logos coincide com DRIVE_ROOT_FOLDER_ID; recusando mistura")
             return None
-        nome = self._nome_subpasta_logo(tipo)
-        query = (
-            f"name = '{self._escapar_query(nome)}' and mimeType = '{_MIME_PASTA}' "
-            f"and '{raiz['id']}' in parents and trashed = false"
-        )
-        achados = self._listar_drive(query)
-        if achados:
-            return achados[0]["id"]
+        for nome in self._aliases_subpasta_logo(tipo):
+            query = (
+                f"name = '{self._escapar_query(nome)}' "
+                f"and '{raiz['id']}' in parents and trashed = false"
+            )
+            for item in self._listar_drive(query):
+                pasta_id = self._resolver_item_logo(item, esperar_pasta=True)
+                if pasta_id:
+                    return pasta_id
         if not criar:
             return None
+        nome = self._nome_subpasta_logo(tipo)
         pasta = (
             self.service.files()
             .create(
@@ -337,23 +394,63 @@ class GoogleDriveManager:
         )
         return pasta.get("id")
 
+    def _arquivo_logo_bate(self, nome, chave):
+        texto = str(nome or "").strip()
+        if not texto:
+            return False
+        base, ext = os.path.splitext(texto)
+        raiz = re.sub(r"[^A-Z0-9]", "", base.upper())
+        if not raiz.startswith(chave):
+            return False
+        if ext and ext.lower() not in _EXTENSOES_LOGO:
+            return False
+        return True
+
+    def _buscar_logo_na_pasta(self, pasta, chave):
+        for nome in (
+            f"{chave}.png",
+            f"{chave}.jpg",
+            f"{chave}.jpeg",
+            f"{chave}.webp",
+            f"{chave}.gif",
+            chave,
+        ):
+            query = (
+                f"'{pasta}' in parents and name = '{self._escapar_query(nome)}' "
+                f"and trashed = false"
+            )
+            for item in self._listar_drive(query):
+                arquivo = self._resolver_item_logo(item)
+                if arquivo:
+                    return arquivo
+        query = (
+            f"'{pasta}' in parents and name contains '{self._escapar_query(chave)}' "
+            f"and trashed = false"
+        )
+        for item in self._listar_drive(query, page_size=50):
+            if not self._arquivo_logo_bate(item.get("name"), chave):
+                continue
+            arquivo = self._resolver_item_logo(item)
+            if arquivo:
+                return arquivo
+        return None
+
     def buscar_logo_catalogo(self, ticker: str, tipo: str = ""):
         """Localiza a logo no catálogo Ícones B3/Ações|FIIs. Não cria pastas."""
         chave = str(ticker or "").strip().upper()
         if not chave:
             return None
         pasta = self._subpasta_logos(tipo, criar=False)
-        if not pasta:
+        if pasta:
+            achado = self._buscar_logo_na_pasta(pasta, chave)
+            if achado:
+                return achado
+        raiz = self.resolver_pasta_logos()
+        if not raiz or not raiz.get("id"):
             return None
-        for nome in (f"{chave}.png", f"{chave}.jpg", f"{chave}.jpeg", f"{chave}.webp"):
-            query = (
-                f"'{pasta}' in parents and name = '{self._escapar_query(nome)}' "
-                f"and trashed = false"
-            )
-            achados = self._listar_drive(query)
-            if achados:
-                return achados[0]
-        return None
+        if raiz.get("id") and self.root_folder_id and raiz["id"] == self.root_folder_id:
+            return None
+        return self._buscar_logo_na_pasta(raiz["id"], chave)
 
     def baixar_arquivo(self, file_id, max_bytes=None):
         from googleapiclient.http import MediaIoBaseDownload

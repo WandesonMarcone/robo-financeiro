@@ -452,6 +452,116 @@ def descrever_update(update):
     return f"tipo={getattr(update, 'content_type', 'desconhecido')}"
 
 
+LIMITE_CAPTION_TELEGRAM = 1024
+
+
+def mensagem_eh_foto(message):
+    """True se a mensagem do Telegram e uma foto (painel do ativo)."""
+    return bool(message is not None and getattr(message, "photo", None))
+
+
+def _erro_mensagem_intacta(erro):
+    return "message is not modified" in str(erro).lower()
+
+
+def _erro_markdown(erro):
+    texto = str(erro).lower()
+    return (
+        "can't parse entities" in texto
+        or "can't find end of the entity" in texto
+    )
+
+
+def editar_texto_ou_caption(
+    bot_api,
+    chat_id,
+    message_id,
+    texto,
+    reply_markup=None,
+    parse_mode=None,
+    message=None,
+):
+    """Atualiza o texto de um callback, inclusive quando a mensagem e foto.
+
+    O painel do ativo e enviado como foto. ``edit_message_text`` nesses
+    casos e recusado pelo Telegram ("there is no text in the message to
+    edit"). Caption cabe em 1024 caracteres; textos maiores (IA, balancos,
+    listas de PDFs) vao em uma mensagem nova.
+    """
+    if chat_id is None or message_id is None:
+        return False
+
+    kwargs_base = {}
+    if reply_markup is not None:
+        kwargs_base["reply_markup"] = reply_markup
+
+    def _com_caption(modo):
+        kw = dict(kwargs_base)
+        if modo:
+            kw["parse_mode"] = modo
+        bot_api.edit_message_caption(
+            texto, chat_id=chat_id, message_id=message_id, **kw
+        )
+
+    def _com_texto(modo):
+        kw = dict(kwargs_base)
+        if modo:
+            kw["parse_mode"] = modo
+        bot_api.edit_message_text(texto, chat_id, message_id, **kw)
+
+    def _enviar(modo):
+        kw = dict(kwargs_base)
+        if modo:
+            kw["parse_mode"] = modo
+        bot_api.send_message(chat_id, texto, **kw)
+
+    def _tentar(fn, modo):
+        try:
+            fn(modo)
+            return True
+        except Exception as erro:
+            if _erro_mensagem_intacta(erro):
+                return True
+            if modo and _erro_markdown(erro):
+                try:
+                    fn(None)
+                    return True
+                except Exception as erro2:
+                    if _erro_mensagem_intacta(erro2):
+                        return True
+                    logger.debug(
+                        "TELEGRAM - retry sem parse_mode falhou",
+                        exc_info=True,
+                    )
+                    return False
+            logger.debug("TELEGRAM - edicao recusada: %s", erro, exc_info=True)
+            return False
+
+    foto = mensagem_eh_foto(message)
+    cabe_na_caption = len(texto or "") <= LIMITE_CAPTION_TELEGRAM
+    if foto and cabe_na_caption and _tentar(_com_caption, parse_mode):
+        return True
+    if _tentar(_com_texto, parse_mode):
+        return True
+    if cabe_na_caption and _tentar(_com_caption, parse_mode):
+        return True
+    try:
+        _enviar(parse_mode)
+        return True
+    except Exception:
+        if parse_mode:
+            try:
+                _enviar(None)
+                return True
+            except Exception:
+                logger.warning(
+                    "TELEGRAM - fallback de envio falhou", exc_info=True
+                )
+                return False
+        logger.warning("TELEGRAM - fallback de envio falhou", exc_info=True)
+        return False
+
+
 def responder_callback_desconhecido(bot_api, callback_query_id, logger=logger):
     """Responde a um callback que não corresponde a nenhum fluxo conhecido."""
     try:

@@ -1,11 +1,13 @@
 import logging
 
+import io
+import re
 from telebot.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InputFile,
     InputMediaPhoto,
 )
-import re
 import config
 from bot.loader import bot
 from services.planilhas import buscar_dados_planilha_com_cache, buscar_ativo_na_planilha
@@ -45,6 +47,93 @@ def sanitizar_markdown(texto: str) -> str:
     for char in ['_', '*', '`', '[']:
         texto = texto.replace(char, f"\\{char}")
     return texto
+
+
+def _trechos_documentos_resumo(ticker, limite=2, chars=700):
+    session = None
+    try:
+        session = SessionDB()
+        ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+        if not ativo:
+            return []
+        docs = (
+            session.query(DocumentosQualitativos)
+            .filter(
+                DocumentosQualitativos.ativo_id == ativo.id,
+                DocumentosQualitativos.status_processamento == "SALVO_DRIVE",
+            )
+            .order_by(DocumentosQualitativos.data_publicacao.desc())
+            .limit(limite)
+            .all()
+        )
+        trechos = []
+        for doc in docs:
+            data_str = (
+                doc.data_publicacao.strftime("%d/%m/%Y")
+                if doc.data_publicacao
+                else "sem data"
+            )
+            if doc.texto_extraido:
+                conteudo = str(doc.texto_extraido).strip()[:chars]
+            else:
+                conteudo = str(doc.assunto or "").strip()
+            if not conteudo:
+                continue
+            tipo_doc = str(doc.tipo_documento or "Documento").strip()
+            trechos.append(f"{tipo_doc} ({data_str}): {conteudo}")
+        return trechos
+    except Exception:
+        logger.debug("Docs indisponiveis para resumo de %s", ticker, exc_info=True)
+        return []
+    finally:
+        if session is not None:
+            try:
+                session.close()
+            except Exception:
+                pass
+
+
+def _fatos_para_resumo(ticker, tipo, indicadores, descricao=""):
+    fatos = []
+    if descricao:
+        fatos.append(descricao)
+    fatos.extend(_trechos_documentos_resumo(ticker))
+    if not fatos:
+        return []
+    for chave, rotulo in (
+        ("preco", "Preco"),
+        ("dy", "Dividend Yield"),
+        ("pvp", "P/VP"),
+        ("pl", "P/L"),
+        ("roe", "ROE"),
+        ("vpa", "VPA"),
+    ):
+        valor = str((indicadores or {}).get(chave) or "").strip()
+        if valor and valor.upper() not in ("N/A", "ND", "N/D", "-"):
+            fatos.append(f"{rotulo}: {valor}")
+    return fatos
+
+
+def _resumo_via_ia(ticker, tipo, fatos):
+    if not fatos:
+        return ""
+    try:
+        from modules.module_ia import gerar_resumo_painel
+
+        return gerar_resumo_painel(ticker, tipo, fatos) or ""
+    except Exception:
+        logger.debug("IA indisponivel para resumo de %s", ticker, exc_info=True)
+        return ""
+
+
+def montar_resumo_ativo(ticker, tipo, indicadores=None):
+    """Resumo personalizado (IA) com fatos reais; catalogo se a IA falhar."""
+    from modules.relatorio_mercado import descricao_catalogo
+
+    fallback = descricao_catalogo(ticker)
+    fatos = _fatos_para_resumo(ticker, tipo, indicadores, fallback)
+    personalizado = _resumo_via_ia(ticker, tipo, fatos)
+    return personalizado or fallback
 
 def buscar_favoritos(tipo):
     """Tickers da planilha que estao no ranking real de favoritos."""
@@ -135,15 +224,30 @@ def _registrar_file_id_do_painel(mensagem, ticker):
         logger.debug("Falha ao registrar file_id da logo de %s", ticker, exc_info=True)
 
 
+def _foto_telegram(conteudo, nome="logo.png"):
+    """Empacota bytes para o Telegram (recusa buffer cru sem nome)."""
+    if not conteudo:
+        return None
+    if isinstance(conteudo, (bytes, bytearray)):
+        buf = io.BytesIO(bytes(conteudo))
+        buf.name = nome
+        buf.seek(0)
+        try:
+            return InputFile(buf, file_name=nome)
+        except TypeError:
+            return buf
+    return conteudo
+
+
 def _midia_telegram(media_logo):
-    """Drive e CDN viram bytes; file_id do Telegram segue como esta."""
+    """Drive e CDN viram arquivo; file_id do Telegram segue como esta."""
     if not media_logo:
         return None
     texto = str(media_logo)
     if texto.startswith("drive:"):
-        return obter_bytes_logo_drive(media_logo)
+        return _foto_telegram(obter_bytes_logo_drive(media_logo))
     if "img.logo.dev" in texto:
-        return obter_bytes_logo_url(texto)
+        return _foto_telegram(obter_bytes_logo_url(texto))
     return media_logo
 
 
@@ -238,7 +342,7 @@ def _editar_painel_ativo(chat_id, message_id, ticker, texto, texto_com_link, mar
             )
 
 
-def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
+def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None, message=None):
     """Gera o painel do ativo com logo, indicadores e botões existentes.
 
     A logo nunca é obrigatória: quando o catálogo não tem a imagem (ou o
@@ -249,7 +353,7 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
 
     is_fii = (tipo == 'fii')
     icone = "🏢 Fundo" if is_fii else "📈 Ação"
-    voltar_cmd = "menu_fiis" if is_fii else "menu_acoes"
+    voltar_cmd = "voltar_painel"
 
     # O file_id do Telegram evita novo download; a URL só é resolvida quando
     # ainda não há cache do envio anterior.
@@ -261,22 +365,38 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None):
 
     if not indicadores:
         msg_erro = f"❌ Erro: Não encontrei dados para **{ticker}** na planilha."
-        if message_id: bot.edit_message_text(msg_erro, chat_id, message_id, parse_mode="Markdown")
-        else: bot.send_message(chat_id, msg_erro, parse_mode="Markdown")
+        markup_erro = InlineKeyboardMarkup()
+        markup_erro.add(
+            InlineKeyboardButton("🔙 Voltar", callback_data="voltar_painel")
+        )
+        if message_id:
+            from bot.telegram_utils import editar_texto_ou_caption
+
+            editar_texto_ou_caption(
+                bot,
+                chat_id,
+                message_id,
+                msg_erro,
+                reply_markup=markup_erro,
+                parse_mode="Markdown",
+                message=message,
+            )
+        else:
+            bot.send_message(
+                chat_id, msg_erro, reply_markup=markup_erro, parse_mode="Markdown"
+            )
         return
 
-    resumo_ia = f"Ativo monitorado do setor {indicadores.get('setor', 'Geral')}."
-
-    resumo_limpo = sanitizar_markdown(resumo_ia)
-    setor_limpo = sanitizar_markdown(indicadores.get('setor', 'Geral'))
-    
-    # Se o ticker vier sujo com algum caractere (ex: MXRF11_fii), limpa ele também
     from modules.relatorio_mercado import rotulo_ticker as _rotulo_ativo
+
+    resumo_limpo = sanitizar_markdown(montar_resumo_ativo(ticker, tipo, indicadores))
     ticker_limpo = sanitizar_markdown(_rotulo_ativo(ticker, tipo))
 
-    texto = (
-        f"{icone}: **{ticker_limpo}**\n"
-        f"📝 **Resumo:** _{resumo_limpo}_ (Setor: {setor_limpo})\n\n"
+    texto = f"{icone}: **{ticker_limpo}**\n"
+    if resumo_limpo:
+        texto += f"📝 **Resumo:** _{resumo_limpo}_\n"
+    texto += (
+        f"\n"
         f"💰 **Preço:** R$ {indicadores.get('preco', 'N/A')}\n"
         f"💸 **Dividend Yield:** {indicadores.get('dy', 'N/A')}\n"
     )

@@ -1,13 +1,33 @@
 import config
 from bot.loader import bot
 from bot import permissoes
-from bot.telegram_utils import montar_guia_comandos
+from bot.telegram_utils import (
+    editar_texto_ou_caption,
+    mensagem_eh_foto,
+    montar_guia_comandos,
+)
 from services.planilhas import buscar_dados_planilha_com_cache
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pipeline_dados.banco_dados import DocumentosQualitativos
 from pipeline_dados.identidade_visual import agrupar_tickers_por_empresa, raiz_ticker
 from modules.relatorio_mercado import callback_analise_ou_classes, rotulo_empresa
 from modules.taxonomia_fiis import dados_linha_fii
+
+
+def _atualizar_mensagem(call, texto, markup=None, parse_mode="Markdown"):
+    """Edita texto ou caption (painel-foto) sem o Telegram recusar."""
+    mensagem = getattr(call, "message", None)
+    chat = getattr(mensagem, "chat", None) if mensagem is not None else None
+    editar_texto_ou_caption(
+        bot,
+        getattr(chat, "id", None),
+        getattr(mensagem, "message_id", None) if mensagem is not None else None,
+        texto,
+        reply_markup=markup,
+        parse_mode=parse_mode,
+        message=mensagem,
+    )
+
 
 # ==========================================
 # ----- BOTÃO TIPO/SETOR FIIS -----
@@ -32,7 +52,7 @@ def callback_selecionar_segmento(call):
         markup.add(InlineKeyboardButton(f"📂 {seg}", callback_data=f"setor_fii_{seg}"))
 
     markup.add(InlineKeyboardButton("🔙 Voltar aos FIIs", callback_data="menu_fiis"))
-    bot.edit_message_text(f"🏢 *Tipo {tipo_selecionado} - Segmentos:*\n\nSelecione um segmento para ver os ativos:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+    _atualizar_mensagem(call, f"🏢 *Tipo {tipo_selecionado} - Segmentos:*\n\nSelecione um segmento para ver os ativos:", markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('setor_fii_'))
 def callback_listar_ativos_fii(call):
@@ -87,7 +107,7 @@ def callback_listar_ativos_fii(call):
     markup.add(InlineKeyboardButton("🔙 Voltar aos Tipos", callback_data="menu_fiis"))
 
     texto = f"📂 *Ativos no segmento: {nome_setor}*\n\nSelecione um ativo para analisar o painel profundo:"
-    bot.edit_message_text(texto, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+    _atualizar_mensagem(call, texto, markup)
 
 # ==========================================
 # ----- BOTÃO TIPO/SETOR AÇÕES -----
@@ -124,7 +144,7 @@ def callback_listar_ativos_acao(call):
     markup.add(InlineKeyboardButton("🔙 Voltar aos Setores", callback_data="menu_acoes"))
 
     texto = f"📂 *Ações no setor: {nome_setor}*\n\nSelecione a empresa:"
-    bot.edit_message_text(texto, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+    _atualizar_mensagem(call, texto, markup)
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('emp_sa_'))
@@ -148,7 +168,11 @@ def callback_classes_acao_setor(call):
         from services.dashboard_menus import gerar_painel_ativo
 
         gerar_painel_ativo(
-            membros[0], "acao", call.message.chat.id, call.message.message_id
+            membros[0],
+            "acao",
+            call.message.chat.id,
+            call.message.message_id,
+            message=call.message,
         )
         return
     for ticker in membros:
@@ -163,7 +187,7 @@ def callback_classes_acao_setor(call):
         texto = f"📂 *{nome}*\n\nSelecione o ticker:"
     else:
         texto = f"📭 Nenhuma classe encontrada para **{raiz}**."
-    bot.edit_message_text(texto, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+    _atualizar_mensagem(call, texto, markup)
 
 # ==========================================
 # ----- BOTÃO MENU AJUDA -----
@@ -175,7 +199,7 @@ def callback_ajuda_roadmap(call):
     texto = TEXTO_MENU_AJUDA
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_ajuda"))
-    bot.edit_message_text(texto, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+    _atualizar_mensagem(call, texto, markup)
 
 @bot.callback_query_handler(func=lambda call: call.data == 'ajuda_comandos')
 def callback_ajuda_comandos(call):
@@ -195,7 +219,7 @@ def callback_ajuda_comandos(call):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🔙 Voltar à Ajuda", callback_data="menu_ajuda"))
 
-    bot.edit_message_text(texto_comandos, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+    _atualizar_mensagem(call, texto_comandos, markup)
 
 @bot.callback_query_handler(func=lambda call: call.data == "ver_raiox_docs")
 def callback_raiox_docs(call):
@@ -297,7 +321,7 @@ def callback_raiox_docs(call):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("🔙 Fechar Raio-X", callback_data="voltar_menu"))
 
-        bot.edit_message_text(texto_tipos, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+        _atualizar_mensagem(call, texto_tipos, markup)
 
     except Exception as e:
         bot.answer_callback_query(call.id, f"Erro ao gerar Raio-X: {str(e)[:50]}", show_alert=True)
@@ -312,16 +336,27 @@ def callback_menu_inteligencia(call):
     # Se clicar no botão principal de IA, o tópico padrão é "resumo"
     topico = partes[3] if len(partes) > 3 else "resumo"
 
-    # Avisa o usuário que a IA está pensando (Evita que ele ache que travou)
     try:
-        bot.answer_callback_query(call.id, "🧠 Processando dados com IA...")
+        bot.answer_callback_query(call.id, "Processando dados com IA...")
     except Exception as e:
         print(f"Aviso: Timeout do botão no Telegram ignorado. {e}")
 
-    
-    mensagem_espera = f"🧠 **Central de IA: {ticker}**\n\n⏳ _Analisando relatórios e estruturando dados..._"
-    bot.edit_message_text(mensagem_espera, call.message.chat.id, call.message.message_id, parse_mode="Markdown")
+    markup_voltar = InlineKeyboardMarkup()
+    markup_voltar.add(
+        InlineKeyboardButton(
+            f"🔙 Voltar ao Painel do {ticker}",
+            callback_data=f"painel_{ticker}_{tipo}",
+        )
+    )
 
+    if not mensagem_eh_foto(getattr(call, "message", None)):
+        mensagem_espera = (
+            f"🧠 **Central de IA: {ticker}**\n\n"
+            "⏳ _Analisando relatórios e estruturando dados..._"
+        )
+        _atualizar_mensagem(call, mensagem_espera)
+
+    session = None
     try:
         from atualizador_documentos import SessionDB
         from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
@@ -331,7 +366,9 @@ def callback_menu_inteligencia(call):
         ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
 
         if not ativo:
-            bot.edit_message_text(f"❌ Ativo `{ticker}` sem registros.", call.message.chat.id, call.message.message_id)
+            _atualizar_mensagem(
+                call, f"❌ Ativo `{ticker}` sem registros.", markup_voltar
+            )
             return
 
         # Puxa os documentos para contexto
@@ -389,18 +426,15 @@ def callback_menu_inteligencia(call):
         }
         
         texto_final = f"🧠 **Inteligência Artificial: {ticker}**\n📍 *{titulos.get(topico, 'Análise')}*\n\n{resposta_ia}"
-        try:
-            bot.edit_message_text(texto_final, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
-        except Exception as e:
-            if "can't parse entities" in str(e).lower() or "bad request" in str(e).lower():
-                bot.edit_message_text(texto_final, call.message.chat.id, call.message.message_id, reply_markup=markup)
-            else:
-                bot.edit_message_text(f"❌ Erro na IA: `{str(e)[:100]}`", call.message.chat.id, call.message.message_id)
+        _atualizar_mensagem(call, texto_final, markup)
                 
     except Exception as e:
-        bot.edit_message_text(f"❌ Erro na IA: `{str(e)[:150]}`", call.message.chat.id, call.message.message_id)
+        _atualizar_mensagem(
+            call, f"❌ Erro na IA: `{str(e)[:150]}`", markup_voltar
+        )
     finally:
-        session.close()
+        if session is not None:
+            session.close()
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("ajuda_cvm_"))
 def menu_duvidas_cvm(call):
@@ -447,6 +481,6 @@ def menu_duvidas_cvm(call):
     # O botão mais importante: Voltar para a análise da ação!
     markup.add(InlineKeyboardButton(f"🔙 Voltar ao Painel ({ticker})", callback_data=f"painel_{ticker}_acao"))
 
-    bot.edit_message_text(texto, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+    _atualizar_mensagem(call, texto, markup)
 
 

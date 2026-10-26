@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 
 import config
 from pipeline_dados.identidade_visual import (
@@ -38,6 +39,18 @@ _SUFIXO_COLADO = re.compile(
     r"(?<=[A-Za-z]{3})(?:ON|PN[A-D]?)\s*$",
     re.IGNORECASE,
 )
+_GENERICOS_NOME = {
+    "BANCO", "LOJAS", "COMPANHIA", "CIA", "GRUPO", "FUNDO", "HOLDING",
+    "ENERGIA", "CONSTRUTORA", "EMPREENDIMENTOS", "INVESTIMENTOS",
+    "PARTICIPACOES", "INDUSTRIA", "INDUSTRIAS", "SA",
+}
+_PARTICULAS_NOME = {"DO", "DA", "DE", "DOS", "DAS", "E", "THE", "OF"}
+_CAUDA_DESCARTAVEL = {
+    "BRAZIL", "BRASIL", "REALTY", "REALTON", "EMPREENDIMENTOS",
+    "PARTICIPACOES", "INVESTIMENTOS", "HOLDING", "HOLDINGS",
+    "GROUP", "GRUPO", "INC", "CORP", "COMPANY", "UNIBANCO",
+    "SA", "LTDA",
+}
 _CACHE_NOMES = {}
 
 
@@ -115,6 +128,50 @@ def _tirar_codigos_b3(texto):
     return atual
 
 
+def _chave_token_nome(token):
+    texto = unicodedata.normalize("NFKD", str(token or ""))
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    return re.sub(r"[^A-Z0-9]", "", texto.upper())
+
+
+def _token_generico_nome(token):
+    chave = _chave_token_nome(token)
+    return not chave or chave in _GENERICOS_NOME or chave in _PARTICULAS_NOME
+
+
+def _token_distintivo_nome(token):
+    chave = _chave_token_nome(token)
+    if len(chave) < 3 or chave in _GENERICOS_NOME or chave in _PARTICULAS_NOME:
+        return False
+    return True
+
+
+def _token_cauda_descartavel(token):
+    chave = _chave_token_nome(token)
+    return (
+        not chave
+        or chave in _GENERICOS_NOME
+        or chave in _PARTICULAS_NOME
+        or chave in _CAUDA_DESCARTAVEL
+    )
+
+
+def _primeiro_nome_seguro(nome):
+    """Primeiro nome da marca so quando o restante e cauda corporativa."""
+    partes = [p for p in str(nome or "").split() if p]
+    if len(partes) <= 1:
+        return nome
+    chave0 = _chave_token_nome(partes[0])
+    if 1 <= len(chave0) <= 2:
+        return nome
+    resto = partes[1:]
+    if _token_distintivo_nome(partes[0]) and all(_token_cauda_descartavel(p) for p in resto):
+        return partes[0]
+    if _token_generico_nome(partes[0]) and len(resto) == 1 and _token_distintivo_nome(resto[0]):
+        return resto[0]
+    return nome
+
+
 def _encurtar_nome(nome):
     texto = re.sub(r"\s+", " ", str(nome or "")).strip()
     if not texto:
@@ -133,16 +190,36 @@ def _encurtar_nome(nome):
         return ""
     partes = texto.split()
     if len(partes) >= 3 and partes[0].casefold().startswith("petrol"):
-        return partes[-1].title() if partes[-1].isupper() else partes[-1]
-    if texto.isupper():
-        return texto.title()
-    return texto
+        texto = partes[-1].title() if partes[-1].isupper() else partes[-1]
+    elif texto.isupper():
+        texto = texto.title()
+    return _primeiro_nome_seguro(texto)
 
 
 def _resumo_empresa(ticker):
     from services.catalogo_empresas import obter_resumo_empresa
 
     return obter_resumo_empresa(ticker)
+
+
+def descricao_catalogo(ticker):
+    """Primeira atividade CVM/catalogo do ticker. Vazio se nao houver fonte."""
+    try:
+        dados = _resumo_empresa(ticker)
+    except Exception:
+        logger.debug("Catalogo indisponivel para descricao de %s", ticker, exc_info=True)
+        return ""
+    if not dados:
+        return ""
+    for bruto in dados.get("atividades") or []:
+        texto = re.sub(r"\s+", " ", str(bruto or "")).strip()
+        if not texto or texto.upper() in ("N/A", "ND", "N/D", "-"):
+            continue
+        if len(texto) > 220:
+            cortado = texto[:217].rsplit(" ", 1)[0].strip()
+            texto = (cortado or texto[:217].strip()) + "..."
+        return texto
+    return ""
 
 
 def _tickers_mesma_empresa(ticker):

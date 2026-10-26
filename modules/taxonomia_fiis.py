@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import unicodedata
 
 import config
@@ -16,14 +17,14 @@ EMOJI_MACRO_FII = {
 }
 
 EXCECOES_TIPO_FII = {
-    "MXRF11": "Híbrido",
+    "MXRF11": "Papel",
     "GARE11": "Tijolo",
 }
 
 _SEGMENTOS = (
     ("CRI", "Papel", ("TITULOS", "PAPEL", "RECEBIVEL", "VALORES MOBILIARIOS", "CRI", "LCI", "CRA", "CERTIFICADOS")),
     ("Cotas de FIIs", "FOF", ("FUNDO DE FUNDOS", "FOF", "COTAS DE FUNDOS", "COTAS DE FIIS")),
-    ("Misto", "Híbrido", ("HIBRIDO", "MISTO")),
+    ("Misto", "Híbrido", ("HIBRIDO", "MISTO", "MULTIESTRATEGIA", "MULTI ESTRATEGIA", "MULTI-ESTRATEGIA")),
     ("Logística", "Tijolo", ("LOGISTIC", "GALPAO", "INDUSTRIAL")),
     ("Shoppings", "Tijolo", ("SHOPPING", "MALL")),
     ("Lajes Corporativas", "Tijolo", ("LAJE", "CORPORATIV", "ESCRITORIO", "OFFICE")),
@@ -32,7 +33,11 @@ _SEGMENTOS = (
     ("Hotéis", "Tijolo", ("HOTEL", "HOTEIS", "HOSPEDAGEM")),
     ("Educacional", "Tijolo", ("EDUCACIONAL", "ESCOLA", "UNIVERSIDADE", "FACULDADE")),
     ("Hospitais", "Tijolo", ("HOSPITAL", "SAUDE", "CLINICA")),
+    ("Varejo", "Tijolo", ("VAREJO", "VAREJISTA", "HIGH STREET", "HIGHSTREET")),
+    ("Desenvolvimento", "Tijolo", ("DESENVOLVIMENTO", "INCORPORA", "CONSTRUCAO", "ESTOQUE")),
+    ("Fiagro", "Tijolo", ("FIAGRO",)),
     ("Agronegócio", "Tijolo", ("AGRO", "FAZENDA", "RURAL")),
+    ("Infraestrutura", "Tijolo", ("INFRAESTRUTURA", "INFRASTRUCTURE", "INFRA", "RODOVIA", "FERROVIA", "SANEAMENTO", "TRANSMISSAO")),
 )
 
 _SEGMENTO_PADRAO = {
@@ -53,6 +58,18 @@ def _mapa_fiis():
     return getattr(config, "MAPA_SETORES_FII", None) or {}
 
 
+def _palavra_no_texto(chave, palavra):
+    """Casa alias no texto. Tokens curtos (CRI) exigem borda, nao substring."""
+    if not palavra or not chave:
+        return False
+    if len(palavra) <= 3:
+        return re.search(
+            r"(?<![A-Z0-9])" + re.escape(palavra) + r"(?![A-Z0-9])",
+            chave,
+        ) is not None
+    return palavra in chave
+
+
 def _casar_segmentos(texto):
     chave = _sem_acento_upper(texto)
     if not chave:
@@ -60,7 +77,7 @@ def _casar_segmentos(texto):
     achados = []
     vistos = set()
     for canonical, macro, palavras in _SEGMENTOS:
-        if any(palavra in chave for palavra in palavras):
+        if any(_palavra_no_texto(chave, palavra) for palavra in palavras):
             marca = (canonical, macro)
             if marca not in vistos:
                 vistos.add(marca)

@@ -4,7 +4,11 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 # Imports base e configurações
 from bot.loader import bot
 from bot import menu_principal, permissoes
-from bot.telegram_utils import TEXTO_ACESSO_NEGADO, responder_callback_desconhecido
+from bot.telegram_utils import (
+    TEXTO_ACESSO_NEGADO,
+    editar_texto_ou_caption,
+    responder_callback_desconhecido,
+)
 from config import SPREADSHEET_URL, MAPA_SETORES_B3
 from modules.taxonomia_fiis import dados_linha_fii, MACROS_FII
 
@@ -27,6 +31,41 @@ from modules.relatorio_mercado import (
 logger = logging.getLogger(__name__)
 
 
+def _atualizar_mensagem(call, texto, markup=None, parse_mode="Markdown"):
+    """Edita texto ou caption (painel-foto) sem o Telegram recusar."""
+    mensagem = getattr(call, "message", None)
+    chat = getattr(mensagem, "chat", None) if mensagem is not None else None
+    editar_texto_ou_caption(
+        bot,
+        getattr(chat, "id", None),
+        getattr(mensagem, "message_id", None) if mensagem is not None else None,
+        texto,
+        reply_markup=markup,
+        parse_mode=parse_mode,
+        message=mensagem,
+    )
+
+
+def _markup_voltar_ativo(ticker, tipo):
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton(
+            "🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo}"
+        )
+    )
+    return markup
+
+
+def _abrir_painel_ativo(call, ticker, tipo, chat_id, msg_id):
+    try:
+        bot.answer_callback_query(call.id)
+    except Exception:
+        pass
+    gerar_painel_ativo(
+        ticker, tipo, chat_id, msg_id, message=getattr(call, "message", None)
+    )
+
+
 # ==========================================
 # ----- CALLBACKS DO PAINEL PERSONALIZADO -----
 # ==========================================
@@ -41,7 +80,11 @@ def callback_voltar_painel(call):
     menu_principal.responder_callback(call)
     chat_id, message_id = menu_principal.chat_e_message(call)
     menu_principal.editar_painel(
-        chat_id, message_id, getattr(autor, "id", None), autor
+        chat_id,
+        message_id,
+        getattr(autor, "id", None),
+        autor,
+        message=getattr(call, "message", None),
     )
 
 
@@ -199,7 +242,11 @@ def callback_geral(call):
             # anexado apenas para o admin autorizado.
             autor = getattr(call, "from_user", None)
             menu_principal.editar_painel(
-                chat_id, msg_id, getattr(autor, "id", None), autor
+                chat_id,
+                msg_id,
+                getattr(autor, "id", None),
+                autor,
+                message=getattr(call, "message", None),
             )
 
         elif dados == "menu_ajuda":
@@ -211,13 +258,7 @@ def callback_geral(call):
                 InlineKeyboardButton("🧭 Como usar", callback_data="ajuda_roadmap"),
                 InlineKeyboardButton("🔙 Voltar ao painel", callback_data="voltar_menu")
             )
-            bot.edit_message_text(
-                TEXTO_MENU_AJUDA,
-                chat_id,
-                msg_id,
-                reply_markup=markup,
-                parse_mode="Markdown",
-            )
+            _atualizar_mensagem(call, TEXTO_MENU_AJUDA, markup)
 
         # =======================================================
         # --- MÓDULO FIIs HIERÁRQUICO DINÂMICO ---
@@ -245,7 +286,7 @@ def callback_geral(call):
                 print(f"Erro ao listar macro categorias FII: {e}")
 
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
-            bot.edit_message_text("🏢 *Módulo FIIs - Selecione a Categoria:*", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            _atualizar_mensagem(call, "🏢 *Módulo FIIs - Selecione a Categoria:*", markup)
 
         # --- 2ª CAMADA: SUB-SETORES DA MACRO (Coluna C: Logística, Shopping...) ---
         elif call.data.startswith("macro_fii_"):
@@ -274,7 +315,7 @@ def callback_geral(call):
                         markup.add(InlineKeyboardButton(f"🏢 {tkr}", callback_data=f"painel_{tkr}_fii"))
 
                 markup.add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_fiis"))
-                bot.edit_message_text(f"📂 **Categoria:** {macro_escolhida}\nSelecione o segmento:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+                _atualizar_mensagem(call, f"📂 **Categoria:** {macro_escolhida}\nSelecione o segmento:", markup)
             except Exception as e:
                 print(f"Erro ao abrir macro: {e}")
 
@@ -297,7 +338,7 @@ def callback_geral(call):
 
             # Voltar para a Macro correspondente
             markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=f"macro_fii_{macro}"))
-            bot.edit_message_text(f"📂 **Segmento:** {sub}\nEscolha o ativo:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            _atualizar_mensagem(call, f"📂 **Segmento:** {sub}\nEscolha o ativo:", markup)
 
          # --- 1ª CAMADA: MACRO-SETORES DAS AÇÕES (DINÂMICO + FIXO) ---
         elif dados == "menu_acoes":
@@ -334,7 +375,7 @@ def callback_geral(call):
                     markup.add(InlineKeyboardButton(f"{icone} {macro}", callback_data=f"macro_ac_{idx}"))
 
             markup.add(InlineKeyboardButton("🔙 Voltar ao Início", callback_data="voltar_menu"))
-            bot.edit_message_text("📈 *Módulo Ações - Selecione o Setor:*", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            _atualizar_mensagem(call, "📈 *Módulo Ações - Selecione o Setor:*", markup)
 
         # --- 2ª CAMADA: SUB-SETORES (Ocultando vazios) ---
         elif dados.startswith("macro_ac_"):
@@ -356,7 +397,7 @@ def callback_geral(call):
                     markup.add(InlineKeyboardButton(f"📂 {sub}", callback_data=f"sub_ac_{idx_macro}_{idx_sub}"))
                 
             markup.add(InlineKeyboardButton("🔙 Voltar aos Setores", callback_data="menu_acoes"))
-            bot.edit_message_text(f"🏭 **Setor:** {nome_macro}\nSelecione o segmento de atuação:", chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            _atualizar_mensagem(call, f"🏭 **Setor:** {nome_macro}\nSelecione o segmento de atuação:", markup)
 
         # --- 3ª CAMADA: LISTA DE EMPRESAS (Filtro final) ---
         elif dados.startswith("sub_ac_"):
@@ -391,7 +432,7 @@ def callback_geral(call):
                 txt = f"📭 Nenhuma empresa encontrada na planilha para o segmento **{nome_sub}**."
                 
             markup.add(InlineKeyboardButton("🔙 Voltar", callback_data=f"macro_ac_{idx_macro}"))
-            bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            _atualizar_mensagem(call, txt, markup)
 
         # --- 4ª CAMADA: CLASSES DA MESMA EMPRESA (PETR3/PETR4) ---
         elif dados.startswith("emp_ac_"):
@@ -432,7 +473,7 @@ def callback_geral(call):
             bot.answer_callback_query(call.id, f"Classes {raiz}...")
             markup = InlineKeyboardMarkup(row_width=1)
             if len(membros) == 1:
-                gerar_painel_ativo(membros[0], "acao", chat_id, msg_id)
+                _abrir_painel_ativo(call, membros[0], "acao", chat_id, msg_id)
                 return
             for ticker in membros:
                 markup.add(InlineKeyboardButton(
@@ -445,7 +486,7 @@ def callback_geral(call):
                 txt = f"📂 **{nome}**\nSelecione o ticker:"
             else:
                 txt = f"📭 Nenhuma classe encontrada para **{raiz}**."
-            bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            _atualizar_mensagem(call, txt, markup)
 
         # --- FAVORITOS ---
         # Os callbacks ``favoritos_fiis`` / ``favoritos_acoes`` passaram a ser
@@ -482,11 +523,11 @@ def callback_geral(call):
                     texto = "📭 *Nenhuma oportunidade encontrada.*"
 
                 markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
-                bot.edit_message_text(texto, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+                _atualizar_mensagem(call, texto, markup)
             except Exception as e:
                 print(f"Erro ao carregar oportunidades: {e}")
                 markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🔙 Voltar", callback_data=menu_voltar))
-                bot.edit_message_text("❌ Erro ao aplicar os filtros.", chat_id, msg_id, reply_markup=markup)
+                _atualizar_mensagem(call, "❌ Erro ao aplicar os filtros.", markup, parse_mode=None)
 
         # ==========================================
         # --- ROTA DE RETORNO AO PAINEL DO ATIVO ---
@@ -494,16 +535,16 @@ def callback_geral(call):
         elif dados.startswith("painel_"):
             partes = dados.split("_")
             ticker = partes[1]
-            tipo_ativo = partes[2] # "fii" ou "acao" 
-            gerar_painel_ativo(ticker, tipo_ativo, chat_id, msg_id)
+            tipo_ativo = partes[2] # "fii" ou "acao"
+            _abrir_painel_ativo(call, ticker, tipo_ativo, chat_id, msg_id)
 
         elif dados.startswith("fii_"):
             ticker = dados.split("_", 1)[1].strip().upper()
-            gerar_painel_ativo(ticker, "fii", chat_id, msg_id)
+            _abrir_painel_ativo(call, ticker, "fii", chat_id, msg_id)
 
         elif dados.startswith("acao_"):
             ticker = dados.split("_", 1)[1].strip().upper()
-            gerar_painel_ativo(ticker, "acao", chat_id, msg_id)
+            _abrir_painel_ativo(call, ticker, "acao", chat_id, msg_id)
 
         # ==========================================
         # --- ATALHO: DO PAINEL PARA A REVISÃO ---
@@ -535,7 +576,7 @@ def callback_geral(call):
                 f"Este ativo possui documentos escaneados ou suspeitos que a IA não conseguiu ler perfeitamente.\n\n"
                 f"Por favor, acesse a **Central de Revisão** para categorizá-los e enviá-los ao seu Google Drive."
             )
-            bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            _atualizar_mensagem(call, txt, markup)
 
         # ==========================================
         # --- DADOS NÍVEL 1: ESCOLHER O ANO ---
@@ -546,64 +587,96 @@ def callback_geral(call):
             partes = dados.split("_")
             ticker = partes[1]
             tipo_ativo = partes[2]
+            markup_voltar = _markup_voltar_ativo(ticker, tipo_ativo)
 
-            markup = InlineKeyboardMarkup(row_width=3)
             session = SessionDB()
-            ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+            try:
+                ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+                if not ativo:
+                    _atualizar_mensagem(
+                        call,
+                        f"Ativo {ticker} nao encontrado no banco de dados local.",
+                        markup_voltar,
+                        parse_mode=None,
+                    )
+                    return
 
-            if tipo_ativo == "acao":
-                txt = f"📈 **Histórico Financeiro: {ticker}**\n\nSelecione o ano para análise:"
-                if ativo:
-                    balancos = session.query(DadosFinanceirosAcoes).filter(DadosFinanceirosAcoes.ativo_id == ativo.id).all()
+                if tipo_ativo == "acao":
+                    markup = InlineKeyboardMarkup(row_width=3)
+                    txt = f"Historico Financeiro: {ticker}\n\nSelecione o ano para analise:"
+                    balancos = session.query(DadosFinanceirosAcoes).filter(
+                        DadosFinanceirosAcoes.ativo_id == ativo.id
+                    ).all()
                     if balancos:
-                        anos = sorted(list(set([b.data_referencia.strftime("%Y") for b in balancos if b.data_referencia])), reverse=True)
+                        anos = sorted(
+                            list(set(
+                                b.data_referencia.strftime("%Y")
+                                for b in balancos if b.data_referencia
+                            )),
+                            reverse=True,
+                        )
                         for ano in anos:
-                            markup.add(InlineKeyboardButton(f"📅 {ano}", callback_data=f"ano_{ticker}_{tipo_ativo}_{ano}"))
+                            markup.add(
+                                InlineKeyboardButton(
+                                    f"📅 {ano}",
+                                    callback_data=f"ano_{ticker}_{tipo_ativo}_{ano}",
+                                )
+                            )
                     else:
-                        txt = f"📭 _Os balanços CVM (ITR/DFP) de {ticker} ainda não foram processados._"
-                else:
-                    txt = f"📭 _Ativo não encontrado no banco de dados local._"
-            else:
+                        txt = (
+                            f"Os balancos CVM (ITR/DFP) de {ticker} "
+                            "ainda nao foram processados."
+                        )
+                    markup.add(
+                        InlineKeyboardButton(
+                            "🔙 Voltar ao Painel",
+                            callback_data=f"painel_{ticker}_{tipo_ativo}",
+                        )
+                    )
+                    _atualizar_mensagem(call, txt, markup, parse_mode=None)
+                    return
+
                 informes = session.query(DadosFinanceirosFiis).filter(
                     DadosFinanceirosFiis.ativo_id == ativo.id
                 ).order_by(DadosFinanceirosFiis.data_referencia.desc()).limit(4).all()
 
                 if not informes:
-                    markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_fii"))
-                    bot.edit_message_text(f"📊 Dados Estruturais: {ticker}\n\nNenhum dado contábil encontrado na CVM para este fundo ainda.\n\n👉 Execute o comando /forcar_fiis para atualizar os dados.", chat_id, msg_id, reply_markup=markup)
-                    session.close()
+                    _atualizar_mensagem(
+                        call,
+                        f"Dados Estruturais: {ticker}\n\n"
+                        "Nenhum dado contabil encontrado na CVM para este fundo ainda.",
+                        markup_voltar,
+                        parse_mode=None,
+                    )
                     return
 
-                # 🛡️ TEXTO 100% PLANO (Sem Markdown, zero risco de Erro 400 do Telegram)
-                txt = f"Raio-X Contábil: {ticker}\nIndicadores oficiais da CVM\n\n"
-
+                txt = f"Raio-X Contabil: {ticker}\nIndicadores oficiais da CVM\n\n"
                 for inf in informes:
                     mes_ano = inf.data_referencia.strftime("%m/%Y")
-
                     if inf.patrimonio_liquido:
-                        pl_fmt = f"R$ {inf.patrimonio_liquido/1000000000:.2f} Bi" if inf.patrimonio_liquido >= 1000000000 else f"R$ {inf.patrimonio_liquido/1000000:.2f} Mi"
+                        pl_fmt = (
+                            f"R$ {inf.patrimonio_liquido/1000000000:.2f} Bi"
+                            if inf.patrimonio_liquido >= 1000000000
+                            else f"R$ {inf.patrimonio_liquido/1000000:.2f} Mi"
+                        )
                     else:
                         pl_fmt = "N/A"
-
-                    caixa_fmt = f"R$ {inf.disponibilidades_caixa/1000000:.2f} Mi" if inf.disponibilidades_caixa else "N/A"
-                    cotistas = f"{inf.cotistas:,}".replace(",", ".") if inf.cotistas else "N/A"
-
-                    txt += f"Referência: {mes_ano}\n"
-                    txt += f"Patrimônio Líquido: {pl_fmt}\n"
+                    caixa_fmt = (
+                        f"R$ {inf.disponibilidades_caixa/1000000:.2f} Mi"
+                        if inf.disponibilidades_caixa else "N/A"
+                    )
+                    cotistas = (
+                        f"{inf.cotistas:,}".replace(",", ".")
+                        if inf.cotistas else "N/A"
+                    )
+                    txt += f"Referencia: {mes_ano}\n"
+                    txt += f"Patrimonio Liquido: {pl_fmt}\n"
                     txt += f"Total de Cotistas: {cotistas}\n"
-                    txt += f"Caixa / Disponível: {caixa_fmt}\n"
+                    txt += f"Caixa / Disponivel: {caixa_fmt}\n"
                     txt += "--------------------\n"
-
-                markup = InlineKeyboardMarkup()
-                markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_fii"))
-
-            session.close()
-
-            # Envia sem parse_mode para garantir que NUNCA mais dê erro 400
-            try:
-                bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup)
-            except Exception as e:
-                bot.edit_message_text(f"❌ Erro ao exibir dados: {str(e)[:100]}", chat_id, msg_id, reply_markup=markup)
+                _atualizar_mensagem(call, txt, markup_voltar, parse_mode=None)
+            finally:
+                session.close()
 
         # ==========================================
         # --- DADOS NÍVEL 2: ESCOLHER O TRIMESTRE ---
@@ -615,42 +688,44 @@ def callback_geral(call):
             ticker = partes[1]
             tipo_ativo = partes[2]
             ano_escolhido = partes[3]
+            markup_voltar = _markup_voltar_ativo(ticker, tipo_ativo)
 
-            markup = InlineKeyboardMarkup(row_width=1)
             session = SessionDB()
-            ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-
-            balancos = session.query(DadosFinanceirosAcoes).filter(
-                DadosFinanceirosAcoes.ativo_id == ativo.id,
-                DadosFinanceirosAcoes.data_referencia >= f"{ano_escolhido}-01-01",
-                DadosFinanceirosAcoes.data_referencia <= f"{ano_escolhido}-12-31"
-            ).all()
-
-            datas = sorted(list(set([b.data_referencia.strftime("%Y-%m-%d") for b in balancos if b.data_referencia])), reverse=True)
-
-            for dt in datas:
-                ano, mes_num, dia = dt.split('-')
-                if mes_num == '03': tri = '1º Trimestre (ITR)'
-                elif mes_num == '06': tri = '2º Trimestre (ITR)'
-                elif mes_num == '09': tri = '3º Trimestre (ITR)'
-                elif mes_num == '12': tri = '4º Tri / Consolidado Anual (DFP)'
-                else: tri = f'Mês {mes_num}'
-
-                markup.add(InlineKeyboardButton(f"📊 {tri}", callback_data=f"mes_{ticker}_{tipo_ativo}_{dt}"))
-
-            markup.add(InlineKeyboardButton("🔙 Voltar aos Anos", callback_data=f"dados_{ticker}_{tipo_ativo}"))
-            session.close()
-            txt_ano = f"📅 **Exercício {ano_escolhido}: {ticker}**\n\nSelecione o período desejado:"
-
-            # 🛡️ PARAQUEDAS ANTI-ERRO 400
             try:
-                bot.edit_message_text(txt_ano, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-            except Exception as e:
-                if "can't parse entities" in str(e).lower() or "bad request" in str(e).lower():
-                    # Tira o Markdown e manda puro
-                    bot.edit_message_text(txt_ano, chat_id, msg_id, reply_markup=markup)
-                else:
-                    bot.edit_message_text(f"❌ Erro ao exibir anos: {str(e)[:100]}", chat_id, msg_id, reply_markup=markup)
+                ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+                if not ativo:
+                    _atualizar_mensagem(
+                        call,
+                        f"Ativo {ticker} nao encontrado no banco de dados local.",
+                        markup_voltar,
+                        parse_mode=None,
+                    )
+                    return
+
+                markup = InlineKeyboardMarkup(row_width=1)
+                balancos = session.query(DadosFinanceirosAcoes).filter(
+                    DadosFinanceirosAcoes.ativo_id == ativo.id,
+                    DadosFinanceirosAcoes.data_referencia >= f"{ano_escolhido}-01-01",
+                    DadosFinanceirosAcoes.data_referencia <= f"{ano_escolhido}-12-31"
+                ).all()
+
+                datas = sorted(list(set([b.data_referencia.strftime("%Y-%m-%d") for b in balancos if b.data_referencia])), reverse=True)
+
+                for dt in datas:
+                    ano, mes_num, dia = dt.split('-')
+                    if mes_num == '03': tri = '1º Trimestre (ITR)'
+                    elif mes_num == '06': tri = '2º Trimestre (ITR)'
+                    elif mes_num == '09': tri = '3º Trimestre (ITR)'
+                    elif mes_num == '12': tri = '4º Tri / Consolidado Anual (DFP)'
+                    else: tri = f'Mês {mes_num}'
+
+                    markup.add(InlineKeyboardButton(f"📊 {tri}", callback_data=f"mes_{ticker}_{tipo_ativo}_{dt}"))
+
+                markup.add(InlineKeyboardButton("🔙 Voltar aos Anos", callback_data=f"dados_{ticker}_{tipo_ativo}"))
+                txt_ano = f"📅 **Exercício {ano_escolhido}: {ticker}**\n\nSelecione o período desejado:"
+                _atualizar_mensagem(call, txt_ano, markup)
+            finally:
+                session.close()
 
         # ==========================================
         # --- DADOS NÍVEL 3: EXIBIR RAIO-X COMPLETO ---
@@ -665,6 +740,14 @@ def callback_geral(call):
             session = SessionDB()
             try:
                 ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+                if not ativo:
+                    _atualizar_mensagem(
+                        call,
+                        f"Ativo {ticker} nao encontrado no banco de dados local.",
+                        _markup_voltar_ativo(ticker, tipo_ativo),
+                        parse_mode=None,
+                    )
+                    return
                 from datetime import datetime
                 data_formatada = datetime.strptime(data_ref, "%Y-%m-%d").date()
 
@@ -720,7 +803,7 @@ def callback_geral(call):
                     ano_escolhido = data_ref.split('-')[0]
                     txt = f"📭 Os dados não foram encontrados no banco."
                     markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🔙 Voltar", callback_data=f"ano_{ticker}_{tipo_ativo}_{ano_escolhido}"))
-                    bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+                    _atualizar_mensagem(call, txt, markup)
                     return
 
                 ano_escolhido = data_ref.split('-')[0]
@@ -731,14 +814,7 @@ def callback_geral(call):
                     InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}")
                 )
 
-                # 🛡️ PARAQUEDAS ANTI-ERRO 400 OBRIGATÓRIO AQUI TAMBÉM:
-                try:
-                    bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
-                except Exception as e:
-                    if "can't parse entities" in str(e).lower() or "bad request" in str(e).lower():
-                        bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup)
-                    else:
-                        bot.edit_message_text(f"❌ Erro ao exibir: {str(e)[:100]}", chat_id, msg_id, reply_markup=markup)
+                _atualizar_mensagem(call, txt, markup)
             
             except Exception as e:
                 print(f"Erro ao buscar balanço da ação: {e}")
@@ -754,35 +830,35 @@ def callback_geral(call):
             
             partes = dados.split("_")
             ticker = partes[1]
-            tipo_ativo = partes[2] 
+            tipo_ativo = partes[2]
 
             markup = InlineKeyboardMarkup(row_width=2)
             session = SessionDB()
-            ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+            try:
+                ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
 
-            if ativo:
-                # Checa se existe QUALQUER documento salvo para esse ativo
-                tem_docs = session.query(DocumentosQualitativos).filter(
-                    DocumentosQualitativos.ativo_id == ativo.id,
-                    DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")
-                ).first()
+                if ativo:
+                    tem_docs = session.query(DocumentosQualitativos).filter(
+                        DocumentosQualitativos.ativo_id == ativo.id,
+                        DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")
+                    ).first()
 
-                if tem_docs:
-                    # 🔀 A BIFURCAÇÃO MÁGICA
-                    markup.add(
-                        InlineKeyboardButton("📂 Filtrar por Tipo", callback_data=f"dnav_{ticker}_t"),
-                        InlineKeyboardButton("📅 Filtrar por Mês", callback_data=f"dnav_{ticker}_m")
-                    )
-                    txt = f"🗄️ **Arquivo Central: {ticker}**\n\nComo você deseja procurar os documentos?"
+                    if tem_docs:
+                        markup.add(
+                            InlineKeyboardButton("📂 Filtrar por Tipo", callback_data=f"dnav_{ticker}_t"),
+                            InlineKeyboardButton("📅 Filtrar por Mês", callback_data=f"dnav_{ticker}_m")
+                        )
+                        txt = f"🗄️ **Arquivo Central: {ticker}**\n\nComo você deseja procurar os documentos?"
+                    else:
+                        termo = "o fundo" if tipo_ativo == "fii" else "a empresa"
+                        txt = f"📭 **Ainda não há documentos processados para {termo} {ticker}.**"
                 else:
-                    termo = "o fundo" if tipo_ativo == "fii" else "a empresa"
-                    txt = f"📭 **Ainda não há documentos processados para {termo} {ticker}.**"
-            else:
-                txt = f"❌ Ativo **{ticker}** não encontrado no banco de dados."
+                    txt = f"❌ Ativo **{ticker}** não encontrado no banco de dados."
 
-            markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
-            session.close()
-            bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+                markup.add(InlineKeyboardButton("🔙 Voltar ao Painel", callback_data=f"painel_{ticker}_{tipo_ativo}"))
+                _atualizar_mensagem(call, txt, markup)
+            finally:
+                session.close()
 
         # ==========================================
         # --- NÍVEL 2: NAVEGAÇÃO (TIPOS OU MESES) ---
@@ -792,64 +868,79 @@ def callback_geral(call):
             partes = dados.split("_")
             ticker = partes[1]
             modo = partes[2] # 't' para Tipo, 'm' para Mês
+            tipo_voltar = "fii" if ticker.endswith("11") else "acao"
 
             session = SessionDB()
-            ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
-            tipo_ativo = getattr(ativo.tipo, 'name', str(ativo.tipo)).replace("TipoAtivo.", "").lower() if ativo else "acao"
+            try:
+                ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+                if ativo:
+                    tipo_voltar = getattr(ativo.tipo, 'name', str(ativo.tipo)).replace("TipoAtivo.", "").lower()
+                markup_arquivo = InlineKeyboardMarkup()
+                markup_arquivo.add(
+                    InlineKeyboardButton(
+                        "🔙 Voltar ao Arquivo",
+                        callback_data=f"docs_{ticker}_{tipo_voltar}",
+                    )
+                )
+                if not ativo:
+                    _atualizar_mensagem(
+                        call,
+                        f"❌ Ativo **{ticker}** não encontrado no banco de dados.",
+                        markup_arquivo,
+                    )
+                    return
 
-            docs = session.query(DocumentosQualitativos).filter(
-                DocumentosQualitativos.ativo_id == ativo.id,
-                DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")
-            ).all()
+                docs = session.query(DocumentosQualitativos).filter(
+                    DocumentosQualitativos.ativo_id == ativo.id,
+                    DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")
+                ).all()
 
-            markup = InlineKeyboardMarkup(row_width=1)
+                markup = InlineKeyboardMarkup(row_width=1)
+                txt = f"📭 Nenhum documento processado para {ticker}."
 
-            if docs:
-                if modo == 't':
-                    # --- NAVEGAÇÃO POR TIPO ---
-                    tipos_unicos = sorted(list(set([d.tipo_documento for d in docs if d.tipo_documento])))
-                    for tipo_doc in tipos_unicos:
-                        t_low = tipo_doc.lower()
-                        if "gerencial" in t_low: emoji = "📊"
-                        elif "fato" in t_low: emoji = "🚨"
-                        elif "aviso" in t_low or "provento" in t_low: emoji = "💰"
-                        elif "assembleia" in t_low or "vota" in t_low: emoji = "🗳️"
-                        elif "trimestral" in t_low or "informe" in t_low: emoji = "📑"
-                        else: emoji = "📄" 
-                        
-                        # Usa o nome cortado para não estourar o limite de 64 bytes do Telegram
-                        callback_seguro = f"dl_{ticker}_t_{tipo_doc[:25]}"
-                        markup.add(InlineKeyboardButton(f"{emoji} {tipo_doc}", callback_data=callback_seguro))
-                    txt = f"📂 **Filtro por Tipo: {ticker}**\n\nSelecione a categoria:"
+                if docs:
+                    if modo == 't':
+                        tipos_unicos = sorted(list(set([d.tipo_documento for d in docs if d.tipo_documento])))
+                        for tipo_doc in tipos_unicos:
+                            t_low = tipo_doc.lower()
+                            if "gerencial" in t_low: emoji = "📊"
+                            elif "fato" in t_low: emoji = "🚨"
+                            elif "aviso" in t_low or "provento" in t_low: emoji = "💰"
+                            elif "assembleia" in t_low or "vota" in t_low: emoji = "🗳️"
+                            elif "trimestral" in t_low or "informe" in t_low: emoji = "📑"
+                            else: emoji = "📄"
 
-                elif modo == 'm':
-                    # --- NAVEGAÇÃO POR MÊS ---
-                    meses_unicos = []
-                    for d in docs:
-                        mes_str = "0000-00"
-                        if d.assunto and '-' in d.assunto:
-                            p = d.assunto.split(" ")[0].split("-") 
-                            if len(p) == 3: mes_str = f"{p[2]}-{p[1]}" 
-                        elif d.data_publicacao:
-                            mes_str = d.data_publicacao.strftime("%Y-%m")
-                        if mes_str not in meses_unicos: meses_unicos.append(mes_str)
-                    
-                    meses_unicos.sort(reverse=True)
-                    
-                    # Cria a tela com 2 botões por linha para os meses (fica mais bonito)
-                    markup = InlineKeyboardMarkup(row_width=2)
-                    botoes_meses = []
-                    for mes in meses_unicos[:14]: # Mostra até 14 meses
-                        if mes == "0000-00": nome_btn = "📅 Sem Data"
-                        else: nome_btn = f"📅 {mes.split('-')[1]}/{mes.split('-')[0]}"
-                        botoes_meses.append(InlineKeyboardButton(nome_btn, callback_data=f"dl_{ticker}_m_{mes}"))
-                    
-                    markup.add(*botoes_meses)
-                    txt = f"📅 **Filtro por Mês: {ticker}**\n\nSelecione o período (Ano/Mês):"
+                            callback_seguro = f"dl_{ticker}_t_{tipo_doc[:25]}"
+                            markup.add(InlineKeyboardButton(f"{emoji} {tipo_doc}", callback_data=callback_seguro))
+                        txt = f"📂 **Filtro por Tipo: {ticker}**\n\nSelecione a categoria:"
 
-            markup.row(InlineKeyboardButton("🔙 Voltar ao Arquivo", callback_data=f"docs_{ticker}_{tipo_ativo}"))
-            session.close()
-            bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+                    elif modo == 'm':
+                        meses_unicos = []
+                        for d in docs:
+                            mes_str = "0000-00"
+                            if d.assunto and '-' in d.assunto:
+                                p = d.assunto.split(" ")[0].split("-")
+                                if len(p) == 3: mes_str = f"{p[2]}-{p[1]}"
+                            elif d.data_publicacao:
+                                mes_str = d.data_publicacao.strftime("%Y-%m")
+                            if mes_str not in meses_unicos: meses_unicos.append(mes_str)
+
+                        meses_unicos.sort(reverse=True)
+
+                        markup = InlineKeyboardMarkup(row_width=2)
+                        botoes_meses = []
+                        for mes in meses_unicos[:14]:
+                            if mes == "0000-00": nome_btn = "📅 Sem Data"
+                            else: nome_btn = f"📅 {mes.split('-')[1]}/{mes.split('-')[0]}"
+                            botoes_meses.append(InlineKeyboardButton(nome_btn, callback_data=f"dl_{ticker}_m_{mes}"))
+
+                        markup.add(*botoes_meses)
+                        txt = f"📅 **Filtro por Mês: {ticker}**\n\nSelecione o período (Ano/Mês):"
+
+                markup.row(InlineKeyboardButton("🔙 Voltar ao Arquivo", callback_data=f"docs_{ticker}_{tipo_voltar}"))
+                _atualizar_mensagem(call, txt, markup)
+            finally:
+                session.close()
 
         # ==========================================
         # --- NÍVEL 3: LISTAGEM FINAL DE PDFS ---
@@ -863,67 +954,76 @@ def callback_geral(call):
 
             markup = InlineKeyboardMarkup(row_width=1)
             session = SessionDB()
-            ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+            try:
+                ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
+                if not ativo:
+                    markup.add(InlineKeyboardButton("🔙 Voltar aos Filtros", callback_data=f"dnav_{ticker}_{modo}"))
+                    _atualizar_mensagem(
+                        call,
+                        f"❌ Ativo **{ticker}** não encontrado no banco de dados.",
+                        markup,
+                    )
+                    return
 
-            todos_docs = session.query(DocumentosQualitativos).filter(
-                DocumentosQualitativos.ativo_id == ativo.id,
-                DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")
-            ).all()
+                todos_docs = session.query(DocumentosQualitativos).filter(
+                    DocumentosQualitativos.ativo_id == ativo.id,
+                    DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")
+                ).all()
 
-            docs_finais = []
-            if modo == 't':
-                docs_finais = [d for d in todos_docs if d.tipo_documento and d.tipo_documento.startswith(valor)]
-                txt = f"📂 **{valor} ({ticker})**\n\n"
-            else:
-                for d in todos_docs:
-                    mes_str = "0000-00"
-                    if d.assunto and '-' in d.assunto:
-                        p = d.assunto.split(" ")[0].split("-")
-                        if len(p) == 3 and len(p[2]) == 4: mes_str = f"{p[2]}-{p[1]}"
-                        elif len(p) == 3 and len(p[0]) == 4: mes_str = f"{p[0]}-{p[1]}"
-                    elif d.data_publicacao:
-                        mes_str = d.data_publicacao.strftime("%Y-%m")
-                    if mes_str == valor: docs_finais.append(d)
-                
-                txt = f"📅 **Documentos de {valor.split('-')[1]}/{valor.split('-')[0]} ({ticker})**\n\n" if valor != "0000-00" else f"📅 **Documentos Diversos ({ticker})**\n\n"
+                docs_finais = []
+                if modo == 't':
+                    docs_finais = [d for d in todos_docs if d.tipo_documento and d.tipo_documento.startswith(valor)]
+                    txt = f"📂 **{valor} ({ticker})**\n\n"
+                else:
+                    for d in todos_docs:
+                        mes_str = "0000-00"
+                        if d.assunto and '-' in d.assunto:
+                            p = d.assunto.split(" ")[0].split("-")
+                            if len(p) == 3 and len(p[2]) == 4: mes_str = f"{p[2]}-{p[1]}"
+                            elif len(p) == 3 and len(p[0]) == 4: mes_str = f"{p[0]}-{p[1]}"
+                        elif d.data_publicacao:
+                            mes_str = d.data_publicacao.strftime("%Y-%m")
+                        if mes_str == valor: docs_finais.append(d)
 
-            # Dicionário de Resumos Explicativos
-            resumos_genericos = {
-                "fato relevante": "Comunicado oficial sobre decisões estratégicas da gestão.",
-                "demonstrações financeiras": "Balanço contábil auditado com receitas, custos e lucro.",
-                "relatório gerencial": "Relatório de acompanhamento do fundo e seus ativos.",
-                "aviso aos acionistas": "Informativo sobre proventos (dividendos/JCP) e subscrições.",
-                "aviso aos cotistas": "Informativo oficial aos cotistas sobre rendimentos.",
-                "apresentação": "Apresentação em slides detalhando os resultados corporativos."
-            }
+                    txt = f"📅 **Documentos de {valor.split('-')[1]}/{valor.split('-')[0]} ({ticker})**\n\n" if valor != "0000-00" else f"📅 **Documentos Diversos ({ticker})**\n\n"
 
-            for doc in sorted(docs_finais, key=lambda x: x.id, reverse=True):
-                # 🔴 APLICAÇÃO DA NOVA DATA REAL
-                data_limpa = extrair_data_real(doc)
+                resumos_genericos = {
+                    "fato relevante": "Comunicado oficial sobre decisões estratégicas da gestão.",
+                    "demonstrações financeiras": "Balanço contábil auditado com receitas, custos e lucro.",
+                    "relatório gerencial": "Relatório de acompanhamento do fundo e seus ativos.",
+                    "aviso aos acionistas": "Informativo sobre proventos (dividendos/JCP) e subscrições.",
+                    "aviso aos cotistas": "Informativo oficial aos cotistas sobre rendimentos.",
+                    "apresentação": "Apresentação em slides detalhando os resultados corporativos."
+                }
 
-                # Extrai o resumo da IA ou aplica o fallback genérico
-                resumo_texto = getattr(doc, 'resumo_ia', None)
-                if not resumo_texto or resumo_texto.strip() == "":
-                    tipo_low = doc.tipo_documento.lower() if doc.tipo_documento else ""
-                    for chave, desc in resumos_genericos.items():
-                        if chave in tipo_low:
-                            resumo_texto = desc
-                            break
-                    if not resumo_texto:
-                        resumo_texto = "Documento oficial arquivado na nuvem."
+                if not docs_finais:
+                    txt += "Nenhum documento neste filtro."
 
-                # Monta a estrutura limpa e profissional
-                if modo == 'm':
-                    txt += f"📄 **{doc.tipo_documento}**\n"
-                txt += f"📅 **Data:** `{data_limpa}`\n"
-                txt += f"📝 _{resumo_texto}_\n\n"
+                for doc in sorted(docs_finais, key=lambda x: x.id, reverse=True):
+                    data_limpa = extrair_data_real(doc)
 
-                url = doc.url_pdf if (doc.url_pdf and str(doc.url_pdf).startswith("http")) else "https://drive.google.com"
-                markup.add(InlineKeyboardButton(f"🔗 Abrir PDF ({data_limpa})", url=url))
+                    resumo_texto = getattr(doc, 'resumo_ia', None)
+                    if not resumo_texto or resumo_texto.strip() == "":
+                        tipo_low = doc.tipo_documento.lower() if doc.tipo_documento else ""
+                        for chave, desc in resumos_genericos.items():
+                            if chave in tipo_low:
+                                resumo_texto = desc
+                                break
+                        if not resumo_texto:
+                            resumo_texto = "Documento oficial arquivado na nuvem."
 
-            markup.add(InlineKeyboardButton("🔙 Voltar aos Filtros", callback_data=f"dnav_{ticker}_{modo}"))
-            session.close()
-            bot.edit_message_text(txt, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+                    if modo == 'm':
+                        txt += f"📄 **{doc.tipo_documento}**\n"
+                    txt += f"📅 **Data:** `{data_limpa}`\n"
+                    txt += f"📝 _{resumo_texto}_\n\n"
+
+                    url = doc.url_pdf if (doc.url_pdf and str(doc.url_pdf).startswith("http")) else "https://drive.google.com"
+                    markup.add(InlineKeyboardButton(f"🔗 Abrir PDF ({data_limpa})", url=url))
+
+                markup.add(InlineKeyboardButton("🔙 Voltar aos Filtros", callback_data=f"dnav_{ticker}_{modo}"))
+                _atualizar_mensagem(call, txt, markup)
+            finally:
+                session.close()
 
         else:
             # Callback desconhecido (botão antigo/removido): responder em vez de ficar em silêncio

@@ -48,6 +48,7 @@ from bot.telegram_utils import (
     TEXTO_ACESSO_NEGADO,
     TEXTO_MENU_INICIAL,
     construir_menu_inicial,
+    editar_texto_ou_caption,
     escapar_markdown,
     montar_painel_inicial,
     nome_de_exibicao_do_telegram,
@@ -212,7 +213,7 @@ def enviar_painel(chat_id, telegram_id, from_user=None):
         logger.warning("MENU - falha ao enviar painel", exc_info=True)
 
 
-def editar_painel(chat_id, message_id, telegram_id, from_user=None):
+def editar_painel(chat_id, message_id, telegram_id, from_user=None, message=None):
     """Atualiza (edita) a mensagem atual com o painel personalizado.
 
     Evita mensagens duplicadas nos retornos por callback. Se a edição não for
@@ -225,18 +226,19 @@ def editar_painel(chat_id, message_id, telegram_id, from_user=None):
     except Exception:
         logger.warning("MENU - falha ao montar painel", exc_info=True)
         texto, markup = _markup_basico(telegram_id)
-    editar_mensagem(chat_id, message_id, texto, markup)
+    editar_mensagem(chat_id, message_id, texto, markup, message=message)
 
 
-def editar_mensagem(chat_id, message_id, texto, markup):
-    try:
-        _bot().edit_message_text(
-            texto, chat_id, message_id, reply_markup=markup, parse_mode="Markdown"
-        )
-    except Exception as erro:
-        if "message is not modified" in str(erro):
-            return
-        logger.warning("MENU - falha ao editar painel", exc_info=True)
+def editar_mensagem(chat_id, message_id, texto, markup, message=None):
+    editar_texto_ou_caption(
+        _bot(),
+        chat_id,
+        message_id,
+        texto,
+        reply_markup=markup,
+        parse_mode="Markdown",
+        message=message,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +270,9 @@ def editar_callback(call, texto, markup):
     if chat_id is None:
         return
     if message_id is not None:
-        editar_mensagem(chat_id, message_id, texto, markup)
+        editar_mensagem(
+            chat_id, message_id, texto, markup, message=getattr(call, "message", None)
+        )
     else:
         try:
             _bot().send_message(
