@@ -36,6 +36,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           LOGO_DEV_TOKEN: ${{ secrets.LOGO_DEV_TOKEN }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           # Variáveis novas do Google Drive
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
