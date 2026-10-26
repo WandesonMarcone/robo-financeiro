@@ -248,12 +248,35 @@ class GoogleDriveManager:
             print(f"❌ Erro ao aprovar, mover e renomear no Drive: {e}")
             return None
 
+    def arquivo_existe(self, file_id):
+        """True se o arquivo ainda existe no Drive (404/410 = False)."""
+        if not file_id:
+            return False
+        try:
+            meta = (
+                self.service.files()
+                .get(
+                    fileId=file_id,
+                    fields="id,trashed",
+                    supportsAllDrives=True,
+                )
+                .execute()
+            )
+            return bool(meta.get("id")) and not meta.get("trashed")
+        except Exception as e:
+            if _erro_arquivo_ausente(e):
+                return False
+            logger.debug("Falha ao checar arquivo no Drive", exc_info=True)
+            return False
+
     def deletar_arquivo(self, file_id):
         """Apaga o arquivo do Google Drive. 404/410 conta como ja apagado."""
         if not file_id:
             return True
         try:
-            self.service.files().delete(fileId=file_id).execute()
+            self.service.files().delete(
+                fileId=file_id, supportsAllDrives=True
+            ).execute()
             print(f"🗑️ Arquivo {file_id} apagado do Drive.")
             return True
         except Exception as e:
@@ -400,21 +423,20 @@ class GoogleDriveManager:
             return False
         base, ext = os.path.splitext(texto)
         raiz = re.sub(r"[^A-Z0-9]", "", base.upper())
-        if not raiz.startswith(chave):
+        if chave not in raiz:
             return False
         if ext and ext.lower() not in _EXTENSOES_LOGO:
             return False
         return True
 
     def _buscar_logo_na_pasta(self, pasta, chave):
-        for nome in (
-            f"{chave}.png",
-            f"{chave}.jpg",
-            f"{chave}.jpeg",
-            f"{chave}.webp",
-            f"{chave}.gif",
-            chave,
-        ):
+        nomes = []
+        for ext in (".png", ".jpg", ".jpeg", ".webp", ".gif", ""):
+            nomes.append(f"{chave}{ext}")
+            minusculo = f"{chave.lower()}{ext}"
+            if minusculo not in nomes:
+                nomes.append(minusculo)
+        for nome in nomes:
             query = (
                 f"'{pasta}' in parents and name = '{self._escapar_query(nome)}' "
                 f"and trashed = false"
@@ -423,16 +445,21 @@ class GoogleDriveManager:
                 arquivo = self._resolver_item_logo(item)
                 if arquivo:
                     return arquivo
-        query = (
-            f"'{pasta}' in parents and name contains '{self._escapar_query(chave)}' "
-            f"and trashed = false"
-        )
-        for item in self._listar_drive(query, page_size=50):
-            if not self._arquivo_logo_bate(item.get("name"), chave):
+        vistos = set()
+        for trecho in (chave, chave.lower()):
+            if trecho in vistos:
                 continue
-            arquivo = self._resolver_item_logo(item)
-            if arquivo:
-                return arquivo
+            vistos.add(trecho)
+            query = (
+                f"'{pasta}' in parents and name contains '{self._escapar_query(trecho)}' "
+                f"and trashed = false"
+            )
+            for item in self._listar_drive(query, page_size=50):
+                if not self._arquivo_logo_bate(item.get("name"), chave):
+                    continue
+                arquivo = self._resolver_item_logo(item)
+                if arquivo:
+                    return arquivo
         return None
 
     def buscar_logo_catalogo(self, ticker: str, tipo: str = ""):

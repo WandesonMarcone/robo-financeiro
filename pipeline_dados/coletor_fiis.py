@@ -67,6 +67,28 @@ def _int_cvm(valor):
         return None
 
 
+def _valor_coluna(linha, *nomes):
+    """Primeiro valor presente na linha (CSV CVM muda o nome da coluna).
+
+    Coluna existente com valor vazio devolve ``""`` (ausencia vira None no
+    parse numerico). Coluna ausente devolve ``None``.
+    """
+    if not linha:
+        return None
+    mapa = {}
+    for chave, valor in linha.items():
+        limpa = str(chave or "").strip().lstrip("\ufeff").upper()
+        if limpa and limpa not in mapa:
+            mapa[limpa] = valor
+    for nome in nomes:
+        if nome is None:
+            continue
+        chave = str(nome).strip().lstrip("\ufeff").upper()
+        if chave in mapa:
+            return mapa.get(chave)
+    return None
+
+
 class ResultadoColetaFiis:
     """Contagens da coleta. Nao afirma sucesso se nada foi gravado."""
 
@@ -122,11 +144,32 @@ class ResultadoColetaFiis:
         )
 
 
+def _cnpj_cadastro_fii(ativo, session):
+    """CNPJ efetivo do FII: cadastro em ``ativos`` ou, se PENDENTE, o da empresa."""
+    chave = normalizar_cnpj(getattr(ativo, "cnpj", None))
+    if chave:
+        return chave
+    try:
+        from pipeline_dados.modelos_catalogo import Empresa, EmpresaAtivo
+
+        linha = (
+            session.query(Empresa.cnpj)
+            .join(EmpresaAtivo, EmpresaAtivo.empresa_id == Empresa.id)
+            .filter(EmpresaAtivo.ativo_id == ativo.id)
+            .first()
+        )
+    except Exception:
+        return None
+    if not linha:
+        return None
+    return normalizar_cnpj(linha[0])
+
+
 def _mapa_fiis_por_cnpj(session):
     mapa = {}
     consulta = session.query(Ativo).filter(Ativo.tipo == TipoAtivo.FII)
     for ativo in consulta:
-        chave = normalizar_cnpj(ativo.cnpj)
+        chave = _cnpj_cadastro_fii(ativo, session)
         if chave is None:
             continue
         if chave not in mapa:
@@ -150,27 +193,47 @@ def _ler_zip_informes(conteudo):
                     io.TextIOWrapper(arquivo, encoding="latin1"),
                     delimiter=";",
                 )
+                if leitor.fieldnames:
+                    leitor.fieldnames = [
+                        str(n or "").lstrip("\ufeff").strip()
+                        for n in leitor.fieldnames
+                    ]
                 for linha in leitor:
-                    cnpj_fundo = linha.get("CNPJ_Fundo")
-                    data_ref_str = linha.get("DT_COMPTC")
+                    cnpj_fundo = _valor_coluna(
+                        linha, "CNPJ_Fundo", "CNPJ_Fundo_Classe", "CNPJ_FUNDO"
+                    )
+                    data_ref_str = _valor_coluna(linha, "DT_COMPTC", "Data_Competencia")
                     if not cnpj_fundo or not data_ref_str:
                         continue
                     chave = (cnpj_fundo, data_ref_str)
                     if chave not in consolidados:
                         consolidados[chave] = {}
-                    if "VL_PATRIM_LIQ" in linha:
-                        consolidados[chave]["patrimonio_liquido"] = linha.get(
-                            "VL_PATRIM_LIQ"
-                        )
-                        consolidados[chave]["cotistas"] = linha.get("NR_COTISTAS")
-                    if "Ativo_Total" in linha or "VL_TOTAL" in linha:
-                        val_ativo = linha.get("Ativo_Total") or linha.get("VL_TOTAL")
-                        if val_ativo:
-                            consolidados[chave]["ativo_total"] = val_ativo
-                    if "Disponibilidades" in linha:
-                        consolidados[chave]["disponibilidades_caixa"] = linha.get(
-                            "Disponibilidades"
-                        )
+                    patrimonio = _valor_coluna(linha, "VL_PATRIM_LIQ")
+                    if patrimonio is not None:
+                        consolidados[chave]["patrimonio_liquido"] = patrimonio
+                    cotistas = _valor_coluna(
+                        linha, "NR_COTISTAS", "NR_COTST", "NR_COTISTA"
+                    )
+                    if cotistas is not None:
+                        consolidados[chave]["cotistas"] = cotistas
+                    val_ativo = _valor_coluna(linha, "Ativo_Total", "VL_TOTAL")
+                    if val_ativo is not None:
+                        consolidados[chave]["ativo_total"] = val_ativo
+                    caixa = _valor_coluna(linha, "Disponibilidades")
+                    if caixa is not None:
+                        consolidados[chave]["disponibilidades_caixa"] = caixa
+                    rendimento = _valor_coluna(
+                        linha,
+                        "VL_REND_COTA",
+                        "Rendimento_Cota",
+                        "VL_DIST_COTA",
+                        "VL_RENDIMENTO_COTA",
+                        "Valor_Rendimento_Cota",
+                        "VL_DISTRIBUICAO_COTA",
+                        "VL_REND_DIST_COTA",
+                    )
+                    if str(rendimento or "").strip():
+                        consolidados[chave]["rendimento_por_cota"] = rendimento
         return consolidados
 
 
@@ -263,6 +326,13 @@ def processar_informes_fiis_cvm(ano=None, session=None, http_get=None):
                 if "disponibilidades_caixa" in metricas
                 else None
             )
+            rendimento = (
+                _float_cvm(metricas["rendimento_por_cota"])
+                if "rendimento_por_cota" in metricas
+                else None
+            )
+            if rendimento is None:
+                metricas.pop("rendimento_por_cota", None)
 
             try:
                 registro = (
@@ -283,6 +353,8 @@ def processar_informes_fiis_cvm(ano=None, session=None, http_get=None):
                     registro.ativo_total = ativo_total
                 if "disponibilidades_caixa" in metricas:
                     registro.disponibilidades_caixa = caixa
+                if "rendimento_por_cota" in metricas:
+                    registro.rendimento_por_cota = rendimento
                 session.commit()
                 resultado.gravados += 1
             except Exception as erro:

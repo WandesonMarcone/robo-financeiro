@@ -6,6 +6,8 @@ from bot.loader import bot
 from bot import menu_principal, permissoes
 from bot.telegram_utils import (
     TEXTO_ACESSO_NEGADO,
+    markup_menu_ajuda,
+    montar_guia_comandos,
     editar_texto_ou_caption,
     responder_callback_desconhecido,
 )
@@ -250,15 +252,14 @@ def callback_geral(call):
             )
 
         elif dados == "menu_ajuda":
-            from bot.telegram_utils import TEXTO_MENU_AJUDA
-
-            markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(
-                InlineKeyboardButton("📋 Comandos", callback_data="ajuda_comandos"),
-                InlineKeyboardButton("🧭 Como usar", callback_data="ajuda_roadmap"),
-                InlineKeyboardButton("🔙 Voltar ao painel", callback_data="voltar_menu")
+            autor = getattr(call, "from_user", None)
+            papel, status, formulario_ativo = permissoes.contexto_ajuda(
+                getattr(autor, "id", None)
             )
-            _atualizar_mensagem(call, TEXTO_MENU_AJUDA, markup)
+            texto = montar_guia_comandos(
+                papel, status=status, formulario_ativo=formulario_ativo
+            )
+            _atualizar_mensagem(call, texto, markup_menu_ajuda(papel))
 
         # =======================================================
         # --- MÓDULO FIIs HIERÁRQUICO DINÂMICO ---
@@ -641,10 +642,20 @@ def callback_geral(call):
                 ).order_by(DadosFinanceirosFiis.data_referencia.desc()).limit(4).all()
 
                 if not informes:
+                    cnpj_ativo = str(getattr(ativo, "cnpj", "") or "")
+                    if cnpj_ativo.upper().startswith("PENDENTE-"):
+                        detalhe = (
+                            "CNPJ do fundo ainda nao conciliado com a CVM "
+                            "(cadastro PENDENTE). Rode /forcar_fiis depois de "
+                            "vincular o CNPJ real."
+                        )
+                    else:
+                        detalhe = (
+                            "Nenhum dado contabil encontrado na CVM para este fundo ainda."
+                        )
                     _atualizar_mensagem(
                         call,
-                        f"Dados Estruturais: {ticker}\n\n"
-                        "Nenhum dado contabil encontrado na CVM para este fundo ainda.",
+                        f"Dados Estruturais: {ticker}\n\n{detalhe}",
                         markup_voltar,
                         parse_mode=None,
                     )
@@ -669,10 +680,18 @@ def callback_geral(call):
                         f"{inf.cotistas:,}".replace(",", ".")
                         if inf.cotistas else "N/A"
                     )
+                    if inf.rendimento_por_cota is not None:
+                        rend_fmt = (
+                            f"R$ {inf.rendimento_por_cota:.4f}"
+                            .replace(".", ",")
+                        )
+                    else:
+                        rend_fmt = "N/A"
                     txt += f"Referencia: {mes_ano}\n"
                     txt += f"Patrimonio Liquido: {pl_fmt}\n"
                     txt += f"Total de Cotistas: {cotistas}\n"
                     txt += f"Caixa / Disponivel: {caixa_fmt}\n"
+                    txt += f"Rendimento por cota: {rend_fmt}\n"
                     txt += "--------------------\n"
                 _atualizar_mensagem(call, txt, markup_voltar, parse_mode=None)
             finally:

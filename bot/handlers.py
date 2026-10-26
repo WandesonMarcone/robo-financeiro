@@ -3,6 +3,7 @@ from bot.loader import bot
 from bot import permissoes
 from bot.telegram_utils import (
     editar_texto_ou_caption,
+    markup_menu_ajuda,
     mensagem_eh_foto,
     montar_guia_comandos,
 )
@@ -215,10 +216,7 @@ def callback_ajuda_comandos(call):
     texto_comandos = montar_guia_comandos(
         papel, status=status, formulario_ativo=formulario_ativo
     )
-
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🔙 Voltar à Ajuda", callback_data="menu_ajuda"))
-
+    markup = markup_menu_ajuda(papel)
     _atualizar_mensagem(call, texto_comandos, markup)
 
 @bot.callback_query_handler(func=lambda call: call.data == "ver_raiox_docs")
@@ -360,8 +358,7 @@ def callback_menu_inteligencia(call):
     try:
         from atualizador_documentos import SessionDB
         from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
-        from modules.module_ia import analisar_fatos_com_ia, construir_prompt_interativo
-        
+
         session = SessionDB()
         ativo = session.query(Ativo).filter(Ativo.ticker == ticker).first()
 
@@ -371,29 +368,76 @@ def callback_menu_inteligencia(call):
             )
             return
 
-        # Puxa os documentos para contexto
-        docs_recentes = session.query(DocumentosQualitativos)\
-            .filter(DocumentosQualitativos.ativo_id == ativo.id, DocumentosQualitativos.status_processamento == "SALVO_DRIVE")\
-            .order_by(DocumentosQualitativos.data_publicacao.desc()).limit(5).all()
+        from modules.module_ia import (
+            analisar_fatos_com_ia,
+            construir_prompt_interativo,
+            montar_resumo_docs_ia,
+            selecionar_docs_ia,
+        )
+        from services.planilhas import buscar_ativo_na_planilha
 
-        # O ELO PERDIDO: Injetando o texto profundo do PDF na memória da IA
-        resumo_docs = ""
-        for d in docs_recentes:
-            data_str = d.data_publicacao.strftime('%d/%m/%Y') if d.data_publicacao else "Sem Data"
-            
-            # Se o documento tiver texto extraído (RAG), usa os primeiros 3000 caracteres. Senão, usa o assunto.
-            if d.texto_extraido:
-                conteudo = str(d.texto_extraido)[:3000] + "..."
-            else:
-                conteudo = str(d.assunto) if d.assunto else "Sem informações detalhadas."
-                
-            resumo_docs += f"--- {d.tipo_documento} ({data_str}) ---\n{conteudo}\n\n"
+        docs_recentes = (
+            session.query(DocumentosQualitativos)
+            .filter(
+                DocumentosQualitativos.ativo_id == ativo.id,
+                DocumentosQualitativos.status_processamento == "SALVO_DRIVE",
+            )
+            .order_by(DocumentosQualitativos.data_publicacao.desc())
+            .limit(20)
+            .all()
+        )
+        docs_ia = selecionar_docs_ia(docs_recentes, tipo)
+        resumo_docs = montar_resumo_docs_ia(docs_ia)
 
-        if not resumo_docs.strip():
-            resumo_docs = "Nenhum documento detalhado no banco de dados para este ativo."
+        indicadores = buscar_ativo_na_planilha(
+            ticker, str(tipo or "").lower().startswith("fii")
+        ) or {}
+        eh_fii = str(tipo or "").lower().startswith("fii")
+        ordem_fatos = (
+            (
+                ("dy", "Dividend Yield"),
+                ("div_mensal", "Dividendo mensal"),
+                ("preco", "Preco"),
+                ("pvp", "P/VP"),
+                ("vpa", "VPA"),
+            )
+            if eh_fii
+            else (
+                ("preco", "Preco"),
+                ("dy", "Dividend Yield"),
+                ("div_mensal", "Dividendo mensal"),
+                ("pvp", "P/VP"),
+                ("vpa", "VPA"),
+                ("pl", "P/L"),
+                ("roe", "ROE"),
+            )
+        )
+        fatos = []
+        for chave, rotulo in ordem_fatos:
+            valor = str(indicadores.get(chave) or "").strip()
+            if valor and valor.upper() not in ("N/A", "ND", "N/D", "-"):
+                fatos.append(f"{rotulo}: {valor}")
+        if eh_fii:
+            try:
+                from pipeline_dados.banco_dados import DadosFinanceirosFiis
 
-        # Pede para o novo módulo de IA montar a pergunta exata
-        prompt = construir_prompt_interativo(ticker, tipo, topico, resumo_docs)
+                informe = (
+                    session.query(DadosFinanceirosFiis)
+                    .filter(DadosFinanceirosFiis.ativo_id == ativo.id)
+                    .order_by(DadosFinanceirosFiis.data_referencia.desc())
+                    .first()
+                )
+                if informe is not None and informe.rendimento_por_cota is not None:
+                    fatos.insert(
+                        0 if not fatos else min(2, len(fatos)),
+                        f"Rendimento por cota (CVM): {informe.rendimento_por_cota}",
+                    )
+            except Exception:
+                pass
+
+        prompt = construir_prompt_interativo(
+            ticker, tipo, topico, resumo_docs, fatos=fatos
+        )
         
         # Dispara para a Groq/OpenAI
         resposta_ia = analisar_fatos_com_ia(prompt)

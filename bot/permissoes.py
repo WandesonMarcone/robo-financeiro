@@ -56,6 +56,7 @@ COMANDOS_ADMIN = frozenset(
         "forcar_fiis",
         "alimentar_ia",
         "mapear_nomes",
+        "auditar_drive",
         "resetar_docs",
         "revisao",
         "controles",
@@ -76,6 +77,18 @@ CALLBACKS_ADMIN_EXATOS = frozenset(
         "confirmar_reset",
         "cancelar_reset",
         "iniciar_revisao_pendencias",
+        "cmd_status",
+        "cmd_forcar_varredura",
+        "cmd_forcar_docs_acoes",
+        "cmd_processar_acoes_ia",
+        "cmd_forcar_cvm",
+        "cmd_forcar_fiis",
+        "cmd_alimentar_ia",
+        "cmd_auditar_drive",
+        "cmd_mapear_nomes",
+        "cmd_resetar_docs",
+        "cmd_revisao",
+        "cmd_controles",
         # Consulta geral de indicadores: navega por TODOS os ativos monitorados
         # (setores, oportunidades). Exclusiva do administrador; o usuario comum
         # acessa apenas os paineis dos proprios favoritos.
@@ -115,6 +128,12 @@ CALLBACKS_USUARIO_EXATOS = frozenset(
         "favoritos_acoes",
         "ajuda_roadmap",
         "ajuda_comandos",
+        "cmd_start",
+        "cmd_menu",
+        "cmd_relatorios",
+        "cmd_docs",
+        "cmd_help",
+        "cmd_cancelar",
         # Atalhos do painel inicial personalizado. As telas que devolvem dados
         # (carteira, conta, documentos) revalidam a conta aprovada no handler.
         "novos_documentos",

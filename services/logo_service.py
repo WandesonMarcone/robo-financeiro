@@ -53,17 +53,21 @@ def _normalizar_ticker(ticker):
     return re.sub(r"[^A-Z0-9]", "", texto)
 
 
-def _chave_logo(ticker):
+def _chave_logo(ticker, tipo=""):
     """Chave canonica de identidade visual (empresa quando conhecida).
 
     Primeiro aplica o grupo visual local (compatibilidade e funcionamento sem
     banco). Se o ticker nao pertence a um grupo fixo, consulta o catalogo para
     usar o ticker canonico da empresa, de modo que tickers irmaos (PETR3/PETR4
     ou quaisquer outros vinculados a mesma empresa) compartilhem a logo.
+    FIIs nao compartilham identidade: cada cota tem o proprio arquivo no
+    catalogo Drive (Ícones B3/FIIs).
     """
     normalizado = _normalizar_ticker(ticker)
     if not normalizado:
         return ""
+    if _eh_fii(tipo, normalizado):
+        return normalizado
     visual = chave_canonica(normalizado)
     if visual != normalizado:
         return visual
@@ -462,10 +466,14 @@ def obter_bytes_logo_drive(media, drive_manager=None):
     if gerente is None or not file_id:
         return None
     try:
-        return gerente.baixar_logo_catalogo(file_id)
+        conteudo = gerente.baixar_logo_catalogo(file_id)
     except Exception:
         logger.warning("Falha ao baixar logo do Drive", exc_info=True)
         return None
+    if not _mime_imagem(conteudo):
+        logger.warning("Logo do Drive nao e imagem valida")
+        return None
+    return conteudo
 
 
 def obter_link_logo(ticker: str, tipo: str = "", drive_manager=None) -> str:
@@ -475,7 +483,8 @@ def obter_link_logo(ticker: str, tipo: str = "", drive_manager=None) -> str:
     (e grava no Drive sem sobrescrever). FII nao consulta Logo.dev. Sem imagem
     válida, devolve vazio (texto).
     """
-    chave = _chave_logo(ticker)
+    tipo_logo = _tipo_logo(tipo, ticker)
+    chave = _chave_logo(ticker, tipo_logo)
     if not chave:
         return ""
 
@@ -483,7 +492,6 @@ def obter_link_logo(ticker: str, tipo: str = "", drive_manager=None) -> str:
         if _cache_valido(chave):
             return _CACHE_LOGOS.get(chave, "")
 
-    tipo_logo = _tipo_logo(tipo, ticker)
     gerente = drive_manager if drive_manager is not None else _resolver_drive_manager(None)
     url = _consultar_drive(chave, tipo_logo, gerente)
 
@@ -514,11 +522,11 @@ def obter_media_logo_rapida(ticker: str, tipo: str = "") -> str:
     file_id = obter_file_id_logo(ticker)
     if file_id:
         return file_id
-    chave = _chave_logo(ticker)
+    tipo_logo = _tipo_logo(tipo, ticker)
+    chave = _chave_logo(ticker, tipo_logo)
     with _LOCK:
         if _cache_valido(chave):
             return _CACHE_LOGOS.get(chave, "")
-    tipo_logo = _tipo_logo(tipo, ticker)
     gerente = _resolver_drive_manager(None)
     no_drive = _consultar_drive(chave, tipo_logo, gerente)
     if no_drive:

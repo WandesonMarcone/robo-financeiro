@@ -265,32 +265,88 @@ def construir_menu_inicial(incluir_admin=False):
 
 # Comandos disponíveis para todo usuário autorizado. Lista única (fonte de
 # verdade da Ajuda) para não divergir entre o comando ``/help`` e o callback
-# ``ajuda_comandos``.
+# ``ajuda_comandos``. Terceiro item: callback ``cmd_`` para executar no toque
+# (None = so texto; precisa de argumento).
 COMANDOS_AJUDA_USUARIO = (
-    ("/start", "Abre o painel, se o acesso estiver liberado, ou continua o cadastro."),
-    ("/menu", "Abre o painel principal (conta aprovada)."),
-    ("/relatorios", "Últimos documentos dos seus ativos."),
-    ("/docs", "Atalho para os últimos documentos."),
-    ("/help", "Mostra esta ajuda."),
-    ("/cancelar", "Cancela um cadastro em andamento, sem enviar pedido."),
+    ("/start", "Abre o painel, se o acesso estiver liberado, ou continua o cadastro.", "cmd_start"),
+    ("/menu", "Abre o painel principal (conta aprovada).", "cmd_menu"),
+    ("/relatorios", "Últimos documentos dos seus ativos.", "cmd_relatorios"),
+    ("/docs", "Atalho para os últimos documentos.", "cmd_docs"),
+    ("/help", "Mostra esta ajuda.", "cmd_help"),
+    ("/cancelar", "Cancela um cadastro em andamento, sem enviar pedido.", "cmd_cancelar"),
 )
 
 # Comandos exclusivos do administrador. Só aparecem para quem tem o papel
 # ``admin``; continuam sendo validados pelo controle central de permissões.
 COMANDOS_AJUDA_ADMIN = (
-    ("/status", "Saúde do banco de dados."),
-    ("/adicionar TICKER", "Adiciona um ativo ao monitoramento."),
-    ("/forcar_varredura [DIAS]", "Varredura FNET de FIIs (padrao: 60 dias)."),
-    ("/forcar_docs_acoes [ANO]", "Baixa PDFs de acoes na CVM (padrao: ano civil corrente)."),
-    ("/processar_acoes_ia", "Processa PDFs de ações com a IA."),
-    ("/forcar_cvm [ANO]", "Coleta ITR de acoes da CVM (padrao: ano civil corrente)."),
-    ("/forcar_fiis [ANO]", "Coleta informes mensais de FIIs (padrao: ano civil corrente)."),
-    ("/alimentar_ia", "Extrai texto de PDFs antigos."),
-    ("/mapear_nomes", "Cataloga os nomes de fundos da B3."),
-    ("/resetar_docs", "Apaga registros de documentos (irreversível)."),
-    ("/revisao", "Abre a fila de revisão manual."),
-    ("/controles", "Abre a Central de Controles."),
+    ("/status", "Saúde do banco de dados.", "cmd_status"),
+    ("/adicionar TICKER", "Adiciona um ativo ao monitoramento.", None),
+    ("/forcar_varredura [DIAS]", "Varredura FNET de FIIs (padrao: 60 dias).", "cmd_forcar_varredura"),
+    ("/forcar_docs_acoes [ANO]", "Baixa PDFs de acoes na CVM (padrao: ano civil corrente).", "cmd_forcar_docs_acoes"),
+    ("/processar_acoes_ia", "Processa PDFs de ações com a IA.", "cmd_processar_acoes_ia"),
+    ("/forcar_cvm [ANO]", "Coleta ITR de acoes da CVM (padrao: ano civil corrente).", "cmd_forcar_cvm"),
+    ("/forcar_fiis [ANO]", "Coleta informes mensais de FIIs (padrao: ano civil corrente).", "cmd_forcar_fiis"),
+    ("/alimentar_ia", "Extrai texto de PDFs antigos.", "cmd_alimentar_ia"),
+    ("/auditar_drive", "Remove duplicatas e PDFs mortos (Drive + banco).", "cmd_auditar_drive"),
+    ("/mapear_nomes", "Cataloga os nomes de fundos da B3.", "cmd_mapear_nomes"),
+    ("/resetar_docs", "Apaga registros de documentos (irreversível).", "cmd_resetar_docs"),
+    ("/revisao", "Abre a fila de revisão manual.", "cmd_revisao"),
+    ("/controles", "Abre a Central de Controles.", "cmd_controles"),
 )
+
+
+def _rotulo_comando_ajuda(comando):
+    texto = str(comando or "").strip()
+    if texto.startswith("/"):
+        texto = texto[1:]
+    return texto.split()[0] if texto else ""
+
+
+def comandos_ajuda_para(papel=None):
+    itens = list(COMANDOS_AJUDA_USUARIO)
+    if papel == getattr(config, "PAPEL_ADMIN", "admin"):
+        itens += list(COMANDOS_AJUDA_ADMIN)
+    return itens
+
+
+def _botoes_comandos_ajuda(papel=None):
+    botoes = []
+    for comando, _desc, callback in comandos_ajuda_para(papel):
+        if not callback:
+            continue
+        botoes.append(
+            InlineKeyboardButton(_rotulo_comando_ajuda(comando), callback_data=callback)
+        )
+    return botoes
+
+
+def _preencher_filas_markup(markup, botoes, row_width=2):
+    fila = []
+    for botao in botoes:
+        fila.append(botao)
+        if len(fila) == row_width:
+            markup.row(*fila)
+            fila = []
+    if fila:
+        markup.row(*fila)
+    return markup
+
+
+def markup_guia_comandos(papel=None, voltar="menu_ajuda"):
+    """Botoes que disparam o comando no toque (sem digitar)."""
+    markup = InlineKeyboardMarkup(row_width=2)
+    _preencher_filas_markup(markup, _botoes_comandos_ajuda(papel))
+    markup.add(InlineKeyboardButton("Voltar a Ajuda", callback_data=voltar))
+    return markup
+
+
+def markup_menu_ajuda(papel=None):
+    """Ajuda: comandos clicaveis, como usar e volta ao painel."""
+    markup = InlineKeyboardMarkup(row_width=2)
+    _preencher_filas_markup(markup, _botoes_comandos_ajuda(papel))
+    markup.row(InlineKeyboardButton("Como usar", callback_data="ajuda_roadmap"))
+    markup.row(InlineKeyboardButton("Voltar ao painel", callback_data="voltar_menu"))
+    return markup
 
 
 def montar_guia_comandos(papel=None, status=None, formulario_ativo=False):
@@ -347,15 +403,16 @@ def montar_guia_comandos(papel=None, status=None, formulario_ativo=False):
             "",
         ]
     linhas += ["*Comandos*"]
-    for comando, descricao in COMANDOS_AJUDA_USUARIO:
+    for comando, descricao, _cb in COMANDOS_AJUDA_USUARIO:
         linhas.append(f"`{comando}` — {descricao}")
     if papel == getattr(config, "PAPEL_ADMIN", "admin"):
         linhas += ["", "*Administração (somente admin)*"]
-        for comando, descricao in COMANDOS_AJUDA_ADMIN:
+        for comando, descricao, _cb in COMANDOS_AJUDA_ADMIN:
             linhas.append(f"`{comando}` — {descricao}")
     linhas += [
         "",
-        "No painel, cada botão abre a função indicada no nome. "
+        "Toque em um botao abaixo para executar. "
+        "Comandos com TICKER ou ANO continuam digitados. "
         "Alertas personalizados por usuário ainda não estão disponíveis.",
     ]
     return "\n".join(linhas)

@@ -71,10 +71,132 @@ def analisar_fatos_com_ia(prompt: str, system_prompt: str = "Você é um analist
 
     return f"❌ Erro crítico na IA. Último erro: {ultimo_erro}"
 
-def construir_prompt_interativo(ticker: str, tipo: str, topico: str, resumo_docs: str) -> str:
-    # ... (SEU CÓDIGO ORIGINAL SE MANTÉM AQUI) ...
-    restricao_formato = "\n\nREGRAS DE FORMATAÇÃO: 1. Seja direto. 2. Máx 3 bullets."
-    return f"Ativo: {ticker}\nDocs: {resumo_docs}\nTarefa: {topico}{restricao_formato}"
+_TERMOS_RENDIMENTO = (
+    "dividend yield",
+    "dividend",
+    "rendiment",
+    "yield",
+    " dy",
+    "provento",
+    "distribuicao",
+    "distribuição",
+    "r$/cota",
+    "por cota",
+)
+
+
+def _data_doc_ia(doc):
+    return getattr(doc, "data_publicacao", None) or getattr(doc, "id", 0) or 0
+
+
+def _eh_tipo_fii(tipo):
+    valor = getattr(tipo, "value", tipo)
+    texto = str(valor or "").strip().lower()
+    return texto.startswith("fii") or texto.endswith("fii")
+
+
+def selecionar_docs_ia(docs, tipo=""):
+    """Prioriza o ultimo Relatorio Gerencial do FII; senao os 5 mais recentes."""
+    lista = list(docs or [])
+    if not lista:
+        return []
+    lista = sorted(lista, key=_data_doc_ia, reverse=True)
+    if _eh_tipo_fii(tipo):
+        gerenciais = [
+            d
+            for d in lista
+            if "gerencial" in str(getattr(d, "tipo_documento", "") or "").lower()
+        ]
+        escolhidos = []
+        if gerenciais:
+            escolhidos.append(gerenciais[0])
+        for doc in lista:
+            tipo_doc = str(getattr(doc, "tipo_documento", "") or "").lower()
+            if "rendiment" in tipo_doc and doc not in escolhidos:
+                escolhidos.append(doc)
+                break
+        if escolhidos:
+            return escolhidos
+    return lista[:5]
+
+
+def _trecho_rendimento(texto, janela=500):
+    """Recorte do gerencial em torno de DY/dividendo (tabelas costumam vir no fim)."""
+    bruto = str(texto or "")
+    if not bruto:
+        return ""
+    lower = bruto.lower()
+    melhor = -1
+    for termo in _TERMOS_RENDIMENTO:
+        idx = lower.find(termo)
+        if idx >= 0 and (melhor < 0 or idx < melhor):
+            melhor = idx
+    if melhor < 0:
+        return ""
+    ini = max(0, melhor - 80)
+    fim = min(len(bruto), melhor + janela)
+    return " ".join(bruto[ini:fim].split())
+
+
+def montar_resumo_docs_ia(docs):
+    partes = []
+    for doc in docs or []:
+        data = getattr(doc, "data_publicacao", None)
+        data_str = data.strftime("%d/%m/%Y") if data else "Sem Data"
+        texto = str(getattr(doc, "texto_extraido", None) or "")
+        if texto:
+            conteudo = texto[:3000] + ("..." if len(texto) > 3000 else "")
+            trecho = _trecho_rendimento(texto)
+            if trecho and trecho not in conteudo:
+                conteudo = (
+                    "Trecho de rendimento/dividendo:\n"
+                    + trecho
+                    + "\n\n"
+                    + conteudo
+                )
+        else:
+            conteudo = str(getattr(doc, "assunto", None) or "Sem informacoes detalhadas.")
+        tipo_doc = getattr(doc, "tipo_documento", None) or "Documento"
+        partes.append(f"--- {tipo_doc} ({data_str}) ---\n{conteudo}")
+    return "\n\n".join(partes) if partes else "Nenhum documento detalhado no banco de dados para este ativo."
+
+
+def construir_prompt_interativo(ticker: str, tipo: str, topico: str, resumo_docs: str, fatos=None) -> str:
+    especie = "FII" if _eh_tipo_fii(tipo) else "acao"
+    linhas_fatos = [str(item).strip() for item in (fatos or []) if str(item).strip()]
+    bloco_fatos = "\n".join(f"- {item}" for item in linhas_fatos) or "- nenhum indicador estruturado"
+    tarefas = {
+        "resumo": (
+            "Resumo objetivo. Se for FII, o primeiro bullet DEVE ser o rendimento "
+            "(Dividend Yield e/ou dividendo por cota). Extraia do relatorio gerencial "
+            "ou dos FATOS; nao invente."
+        ),
+        "proventos": (
+            "Foque em rendimentos. Cite DY e valor por cota extraidos dos FATOS ou do "
+            "relatorio gerencial. Se nao houver, diga que a distribuicao nao consta nas fontes."
+        ),
+        "dividendos": (
+            "Foque na politica de dividendos. Cite DY se estiver nos FATOS ou nos docs. "
+            "Nao invente valor."
+        ),
+        "visao": "Descreva o que o fundo faz e os ativos citados nos docs, sem inventar setor.",
+        "riscos": "Liste riscos citados nas fontes. Sem inventar.",
+        "negocios": "Descreva o modelo de negocios com base nas fontes.",
+        "saude": "Resuma a saude financeira so com numeros presentes nas fontes.",
+        "parecer": "Parecer curto com base nas fontes. Sem inventar numero.",
+    }
+    tarefa = tarefas.get(str(topico or "resumo"), tarefas["resumo"])
+    regras = (
+        "Nao invente numero, setor, inquilino ou imovel. "
+        "Se DY/dividendo nao estiver nos FATOS nem nos docs, diga que nao consta. "
+        "Maximo 4 bullets. Seja direto."
+    )
+    return (
+        f"Ativo: {ticker} ({especie})\n"
+        f"FATOS (planilha; so use se presentes):\n{bloco_fatos}\n\n"
+        f"Docs:\n{resumo_docs}\n\n"
+        f"Tarefa: {tarefa}\n{regras}"
+    )
 
 
 def _limpar_resumo_painel(texto):
@@ -110,7 +232,7 @@ def gerar_resumo_painel(ticker: str, tipo: str, fatos) -> str:
     lista = [str(item).strip() for item in (fatos or []) if str(item).strip()]
     if not lista:
         return ""
-    especie = "FII" if str(tipo or "").strip().lower().startswith("fii") else "acao"
+    especie = "FII" if _eh_tipo_fii(tipo) else "acao"
     system_prompt = (
         "Voce resume ativos da B3 com base apenas nos fatos fornecidos. "
         "Nao invente setor, segmento, inquilino, imovel, numero ou opiniao. "

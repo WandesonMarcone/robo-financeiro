@@ -63,9 +63,15 @@ def _trechos_documentos_resumo(ticker, limite=2, chars=700):
                 DocumentosQualitativos.status_processamento == "SALVO_DRIVE",
             )
             .order_by(DocumentosQualitativos.data_publicacao.desc())
-            .limit(limite)
+            .limit(20)
             .all()
         )
+        try:
+            from modules.module_ia import selecionar_docs_ia
+
+            docs = selecionar_docs_ia(docs, getattr(ativo, "tipo", None))[:limite]
+        except Exception:
+            docs = docs[:limite]
         trechos = []
         for doc in docs:
             data_str = (
@@ -93,24 +99,46 @@ def _trechos_documentos_resumo(ticker, limite=2, chars=700):
                 pass
 
 
+def _indicadores_fatos(tipo, indicadores):
+    from modules.module_ia import _eh_tipo_fii
+
+    eh_fii = _eh_tipo_fii(tipo)
+    ordem = (
+        (
+            ("dy", "Dividend Yield"),
+            ("div_mensal", "Dividendo mensal"),
+            ("preco", "Preco"),
+            ("pvp", "P/VP"),
+            ("vpa", "VPA"),
+        )
+        if eh_fii
+        else (
+            ("preco", "Preco"),
+            ("dy", "Dividend Yield"),
+            ("div_mensal", "Dividendo mensal"),
+            ("pvp", "P/VP"),
+            ("pl", "P/L"),
+            ("roe", "ROE"),
+            ("vpa", "VPA"),
+        )
+    )
+    fatos = []
+    for chave, rotulo in ordem:
+        valor = str((indicadores or {}).get(chave) or "").strip()
+        if valor and valor.upper() not in ("N/A", "ND", "N/D", "-"):
+            fatos.append(f"{rotulo}: {valor}")
+    return fatos
+
+
 def _fatos_para_resumo(ticker, tipo, indicadores, descricao=""):
     fatos = []
     if descricao:
         fatos.append(descricao)
     fatos.extend(_trechos_documentos_resumo(ticker))
-    if not fatos:
+    indicadores_fatos = _indicadores_fatos(tipo, indicadores)
+    if not fatos and not indicadores_fatos:
         return []
-    for chave, rotulo in (
-        ("preco", "Preco"),
-        ("dy", "Dividend Yield"),
-        ("pvp", "P/VP"),
-        ("pl", "P/L"),
-        ("roe", "ROE"),
-        ("vpa", "VPA"),
-    ):
-        valor = str((indicadores or {}).get(chave) or "").strip()
-        if valor and valor.upper() not in ("N/A", "ND", "N/D", "-"):
-            fatos.append(f"{rotulo}: {valor}")
+    fatos.extend(indicadores_fatos)
     return fatos
 
 
@@ -251,21 +279,56 @@ def _midia_telegram(media_logo):
     return media_logo
 
 
+def _caption_painel(texto):
+    from bot.telegram_utils import LIMITE_CAPTION_TELEGRAM
+
+    bruto = str(texto or "")
+    if len(bruto) <= LIMITE_CAPTION_TELEGRAM:
+        return bruto
+    return bruto[: LIMITE_CAPTION_TELEGRAM - 3].rstrip() + "..."
+
+
+def _erro_markdown_painel(erro):
+    texto = str(erro or "").lower()
+    return (
+        "can't parse entities" in texto
+        or "can't find end of the entity" in texto
+        or "caption is too long" in texto
+    )
+
+
 def _enviar_painel_ativo(chat_id, ticker, texto, texto_com_link, markup, media_logo):
     """Envia o painel como foto (com legenda) ou texto, com fallback seguro."""
     foto = _midia_telegram(media_logo)
     if foto:
+        caption = _caption_painel(texto)
         try:
             mensagem = bot.send_photo(
                 chat_id,
                 foto,
-                caption=texto,
+                caption=caption,
                 reply_markup=markup,
                 parse_mode="Markdown",
             )
             _registrar_file_id_do_painel(mensagem, ticker)
             return
         except Exception as erro:
+            if _erro_markdown_painel(erro):
+                try:
+                    mensagem = bot.send_photo(
+                        chat_id,
+                        foto,
+                        caption=caption,
+                        reply_markup=markup,
+                    )
+                    _registrar_file_id_do_painel(mensagem, ticker)
+                    return
+                except Exception:
+                    logger.debug(
+                        "Painel de %s: retry da logo sem Markdown falhou",
+                        ticker,
+                        exc_info=True,
+                    )
             logger.warning(
                 "Painel de %s: envio da logo falhou; usando texto", ticker,
                 exc_info=True,
@@ -289,10 +352,11 @@ def _editar_painel_ativo(chat_id, message_id, ticker, texto, texto_com_link, mar
     """Edita o painel preservando a logo quando a mensagem atual é uma foto."""
     foto = _midia_telegram(media_logo)
     if foto:
+        caption = _caption_painel(texto)
         try:
             bot.edit_message_media(
                 InputMediaPhoto(
-                    media=foto, caption=texto, parse_mode="Markdown"
+                    media=foto, caption=caption, parse_mode="Markdown"
                 ),
                 chat_id=chat_id,
                 message_id=message_id,
@@ -300,6 +364,21 @@ def _editar_painel_ativo(chat_id, message_id, ticker, texto, texto_com_link, mar
             )
             return
         except Exception as erro:
+            if _erro_markdown_painel(erro):
+                try:
+                    bot.edit_message_media(
+                        InputMediaPhoto(media=foto, caption=caption),
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        reply_markup=markup,
+                    )
+                    return
+                except Exception:
+                    logger.debug(
+                        "Painel de %s: retry da edicao sem Markdown falhou",
+                        ticker,
+                        exc_info=True,
+                    )
             if (
                 not str(media_logo).startswith(("http://", "https://", "drive:"))
             ):
@@ -403,6 +482,8 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None, message=None):
 
     if is_fii:
         texto += f"⚖️ **P/VP:** {indicadores.get('pvp', 'N/A')}\n💵 **VPA:** {indicadores.get('vpa', 'N/A')}"
+        div_mensal = str(indicadores.get("div_mensal") or "").strip() or "N/A"
+        texto += f"\n🪙 **Div. mensal:** {div_mensal}"
     else:
         texto += f"📊 **P/L:** {indicadores.get('pl', 'N/A')} | ⚖️ **P/VP:** {indicadores.get('pvp', 'N/A')}\n📈 **ROE:** {indicadores.get('roe', 'N/A')}"
 

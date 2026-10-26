@@ -1281,3 +1281,177 @@ def reclassificar_documentos_genericos_em_lotes(
         if not ids:
             break
     return total
+
+
+def _data_chave_doc(doc):
+    """Data usada para detectar duplicata (assunto, senao publicacao)."""
+    bruto = str(getattr(doc, "assunto", None) or "").strip().split(" ")[0]
+    bruto = bruto.replace("/", "-")
+    partes = bruto.split("-")
+    if len(partes) == 3:
+        if len(partes[0]) == 4:
+            return (
+                f"{partes[0]}-{partes[1].zfill(2)}-{partes[2].zfill(2)}"
+            )
+        if len(partes[2]) == 4:
+            return (
+                f"{partes[2]}-{partes[1].zfill(2)}-{partes[0].zfill(2)}"
+            )
+    data = getattr(doc, "data_publicacao", None)
+    if data is not None:
+        try:
+            return data.strftime("%Y-%m-%d")
+        except Exception:
+            pass
+    return _mes_ref_do_doc(doc)
+
+
+def _chave_duplicata_doc(doc):
+    tipo = str(getattr(doc, "tipo_documento", "") or "").strip().casefold()
+    try:
+        from pipeline_dados.tipos_documento import normalizar_tipo_documento
+
+        oficial = normalizar_tipo_documento(doc.tipo_documento, _tipo_ativo_doc(doc))
+        if oficial:
+            tipo = str(oficial).strip().casefold()
+    except Exception:
+        pass
+    return (getattr(doc, "ativo_id", None), tipo, _data_chave_doc(doc))
+
+
+def _melhor_duplicata(docs):
+    def _nota(doc):
+        texto = 1 if str(getattr(doc, "texto_extraido", "") or "").strip() else 0
+        status = str(getattr(doc, "status_processamento", "") or "")
+        salvo = 1 if "SALVO_DRIVE" in status.upper() else 0
+        return (texto, salvo, int(getattr(doc, "id", 0) or 0))
+
+    return max(docs, key=_nota)
+
+
+def auditar_documentos_drive(session=None, drive_manager=None):
+    """Remove duplicatas (mesmo ticker, tipo e mes) no Drive e no banco.
+
+    Tambem apaga registros cujo PDF ja nao existe no Drive, para o botao
+    deixar de apontar para um arquivo morto.
+    """
+    resumo = {
+        "examinados": 0,
+        "grupos_duplicados": 0,
+        "duplicatas_drive": 0,
+        "duplicatas_banco": 0,
+        "pdfs_mortos": 0,
+        "falhas": 0,
+    }
+    session_propria = session is None
+    if session_propria:
+        session = SessionDB()
+    drive = drive_manager
+    try:
+        docs = (
+            session.query(DocumentosQualitativos)
+            .order_by(DocumentosQualitativos.id.asc())
+            .all()
+        )
+        resumo["examinados"] = len(docs)
+        if not docs:
+            return resumo
+        if drive is None:
+            from modules.GoogleDriveManager import GoogleDriveManager
+
+            drive = GoogleDriveManager()
+
+        grupos = {}
+        for doc in docs:
+            grupos.setdefault(_chave_duplicata_doc(doc), []).append(doc)
+
+        for _chave, itens in grupos.items():
+            if len(itens) < 2:
+                continue
+            resumo["grupos_duplicados"] += 1
+            keeper = _melhor_duplicata(itens)
+            file_id_keeper = _file_id_drive(getattr(keeper, "url_pdf", None))
+            for extra in itens:
+                if extra is keeper or extra.id == keeper.id:
+                    continue
+                file_id = _file_id_drive(getattr(extra, "url_pdf", None))
+                if file_id and file_id != file_id_keeper:
+                    try:
+                        if drive.deletar_arquivo(file_id):
+                            resumo["duplicatas_drive"] += 1
+                        else:
+                            resumo["falhas"] += 1
+                            continue
+                    except Exception:
+                        resumo["falhas"] += 1
+                        logger.warning(
+                            "Falha ao apagar duplicata %s no Drive",
+                            extra.id,
+                            exc_info=True,
+                        )
+                        continue
+                try:
+                    session.delete(extra)
+                    resumo["duplicatas_banco"] += 1
+                except Exception:
+                    resumo["falhas"] += 1
+                    logger.warning(
+                        "Falha ao apagar duplicata %s no banco",
+                        extra.id,
+                        exc_info=True,
+                    )
+
+        vivos = (
+            session.query(DocumentosQualitativos)
+            .order_by(DocumentosQualitativos.id.asc())
+            .all()
+        )
+        for doc in vivos:
+            file_id = _file_id_drive(getattr(doc, "url_pdf", None))
+            if not file_id:
+                continue
+            try:
+                existe = drive.arquivo_existe(file_id)
+            except Exception:
+                resumo["falhas"] += 1
+                continue
+            if existe:
+                continue
+            try:
+                session.delete(doc)
+                resumo["pdfs_mortos"] += 1
+            except Exception:
+                resumo["falhas"] += 1
+
+        session.commit()
+        return resumo
+    except Exception:
+        session.rollback()
+        resumo["falhas"] += 1
+        logger.warning("Falha na auditoria do Drive", exc_info=True)
+        return resumo
+    finally:
+        if session_propria:
+            session.close()
+
+
+def mensagem_auditoria_drive(resumo):
+    dados = resumo or {}
+    duplicatas = int(dados.get("duplicatas_banco", 0) or 0)
+    drive = int(dados.get("duplicatas_drive", 0) or 0)
+    mortos = int(dados.get("pdfs_mortos", 0) or 0)
+    falhas = int(dados.get("falhas", 0) or 0)
+    if duplicatas == 0 and mortos == 0 and falhas == 0:
+        return (
+            "Auditoria Drive: nenhuma duplicata nem PDF morto. "
+            f"Documentos examinados: {int(dados.get('examinados', 0) or 0)}."
+        )
+    return (
+        "Auditoria Drive concluida.\n"
+        f"Documentos examinados: {int(dados.get('examinados', 0) or 0)}\n"
+        f"Grupos com duplicata: {int(dados.get('grupos_duplicados', 0) or 0)}\n"
+        f"Duplicatas apagadas no Drive: {drive}\n"
+        f"Duplicatas apagadas no banco: {duplicatas}\n"
+        f"PDFs mortos removidos do banco: {mortos}\n"
+        f"Falhas: {falhas}"
+    )

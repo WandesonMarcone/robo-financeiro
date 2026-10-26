@@ -1,5 +1,7 @@
 import threading
 import time
+from types import SimpleNamespace
+
 import requests
 import config
 import fitz
@@ -7,13 +9,11 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import func, or_
 from bot.loader import bot
 from bot import menu_principal, permissoes
-from bot.telegram_utils import montar_guia_comandos
+from bot.telegram_utils import markup_menu_ajuda, montar_guia_comandos
 from atualizador_documentos import SessionDB 
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from pipeline_dados.coletor_fiis import ano_padrao_coleta, processar_informes_fiis_cvm
 from modules.utils import conectar_gspread
-
-from modules.scraper_fiis import rodar_garimpo_fiis # <--- Importe o arquivo que corrigimos
 
 
 def _ano_do_comando(message):
@@ -53,16 +53,13 @@ def enviar_ajuda(message):
     autor = getattr(message, "from_user", None)
     autor_id = getattr(autor, "id", None)
     papel, status, formulario_ativo = permissoes.contexto_ajuda(autor_id)
-    markup = InlineKeyboardMarkup().add(
-        InlineKeyboardButton("🏠 Abrir o menu", callback_data="voltar_menu")
-    )
     bot.send_message(
         message.chat.id,
         montar_guia_comandos(
             papel, status=status, formulario_ativo=formulario_ativo
         ),
         parse_mode="Markdown",
-        reply_markup=markup,
+        reply_markup=markup_menu_ajuda(papel),
     )
 
 @bot.message_handler(commands=['status'])
@@ -426,6 +423,100 @@ def comando_mapear_nomes_b3(message):
 
     thread = threading.Thread(target=tarefa_pesada)
     thread.start()
+
+def _mensagem_de_callback(call, texto):
+    mensagem = getattr(call, "message", None)
+    return SimpleNamespace(
+        chat=getattr(mensagem, "chat", None),
+        from_user=getattr(call, "from_user", None),
+        text=texto,
+        message_id=getattr(mensagem, "message_id", None),
+    )
+
+
+@bot.callback_query_handler(func=lambda call: str(getattr(call, "data", "") or "").startswith("cmd_"))
+def callback_executar_comando(call):
+    """Ajuda: toque executa o comando, sem digitar."""
+    dados = str(getattr(call, "data", "") or "")
+    mapa = {
+        "cmd_start": ("/start", None),
+        "cmd_menu": ("/menu", enviar_menu),
+        "cmd_relatorios": ("/relatorios", enviar_ultimos_relatorios),
+        "cmd_docs": ("/docs", enviar_ultimos_relatorios),
+        "cmd_help": ("/help", enviar_ajuda),
+        "cmd_cancelar": ("/cancelar", None),
+        "cmd_status": ("/status", status_banco),
+        "cmd_forcar_varredura": ("/forcar_varredura", acionar_varredura_manual),
+        "cmd_forcar_docs_acoes": ("/forcar_docs_acoes", rodar_docs_acoes),
+        "cmd_processar_acoes_ia": ("/processar_acoes_ia", rodar_ia_acoes),
+        "cmd_forcar_cvm": ("/forcar_cvm", rodar_cvm),
+        "cmd_forcar_fiis": ("/forcar_fiis", cmd_forcar_fiis),
+        "cmd_alimentar_ia": ("/alimentar_ia", alimentar_ia_passado),
+        "cmd_auditar_drive": ("/auditar_drive", cmd_auditar_drive),
+        "cmd_mapear_nomes": ("/mapear_nomes", comando_mapear_nomes_b3),
+        "cmd_resetar_docs": ("/resetar_docs", limpar_banco_documentos),
+        "cmd_revisao": ("/revisao", None),
+        "cmd_controles": ("/controles", None),
+    }
+    try:
+        bot.answer_callback_query(call.id, "Executando...")
+    except Exception:
+        pass
+    item = mapa.get(dados)
+    if not item:
+        return
+    texto, handler = item
+    mensagem = _mensagem_de_callback(call, texto)
+    if handler is not None:
+        handler(mensagem)
+        return
+    if dados == "cmd_start":
+        from bot import cadastro
+
+        cadastro.iniciar_cadastro(mensagem)
+        return
+    if dados == "cmd_cancelar":
+        from bot import cadastro
+
+        cadastro.cancelar_cadastro(mensagem)
+        return
+    if dados == "cmd_revisao":
+        from bot import callbacks_revisao
+
+        callbacks_revisao.comando_painel_revisao(mensagem)
+        return
+    if dados == "cmd_controles":
+        from bot import central_controles
+
+        central_controles.abrir_central(mensagem)
+
+
+@bot.message_handler(commands=['auditar_drive'])
+def cmd_auditar_drive(message):
+    chat_id = message.chat.id
+    bot.reply_to(
+        message,
+        "Auditoria do Drive em segundo plano: duplicatas (mesmo ticker, tipo e data) "
+        "e PDFs ja apagados no Drive. Aguarde o aviso de conclusao.",
+    )
+
+    def tarefa():
+        try:
+            from atualizador_documentos import (
+                auditar_documentos_drive,
+                mensagem_auditoria_drive,
+            )
+
+            resumo = auditar_documentos_drive()
+            bot.send_message(chat_id, mensagem_auditoria_drive(resumo))
+        except Exception as e:
+            bot.send_message(
+                chat_id,
+                f"Auditoria Drive: falha de processamento ou persistencia ({e}).",
+            )
+
+    threading.Thread(target=tarefa).start()
+
 
 @bot.message_handler(commands=['resetar_docs'])
 def limpar_banco_documentos(message):
