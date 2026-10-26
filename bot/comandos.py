@@ -292,82 +292,28 @@ def cmd_forcar_fiis(message):
 
 @bot.message_handler(commands=['alimentar_ia'])
 def alimentar_ia_passado(message):
-    bot.send_message(message.chat.id, "⏳ *Iniciando a Varredura Profunda!* Procurando PDFs antigos...", parse_mode="Markdown")
+    chat_id = message.chat.id
+    bot.send_message(
+        chat_id,
+        "Alimentacao de IA em segundo plano: extrai texto de PDFs antigos "
+        "(inicio, fim e trecho de rendimento). Aguarde o aviso de conclusao.",
+    )
 
     def tarefa_leitura():
         try:
-            from pipeline_dados.banco_dados import DocumentosQualitativos
-            from atualizador_documentos import SessionDB
-            from sqlalchemy import or_
-            import requests
-            import fitz
-            import io
+            from atualizador_documentos import (
+                alimentar_textos_pendentes,
+                mensagem_alimentacao_ia,
+            )
 
-            session = SessionDB()
-            
-            # 🔴 CORREÇÃO 1: Pega documentos com coluna Nula (None) OU Vazia ("")
-            docs = session.query(DocumentosQualitativos).filter(
-                or_(DocumentosQualitativos.texto_extraido == None, DocumentosQualitativos.texto_extraido == ""),
-                DocumentosQualitativos.url_pdf != None
-            ).all()
-
-            lidos = 0
-            ignorados = 0
-            erros = 0
-            
-            for doc in docs:
-                nome_low = str(doc.tipo_documento).lower()
-                
-                # 🔴 CORREÇÃO 2: Inclusão de "apresenta" (MXRF11) e "informe"
-                if "gerencial" in nome_low or "fato" in nome_low or "release" in nome_low or "apresenta" in nome_low or "informe" in nome_low:
-                    try:
-                        resp = requests.get(doc.url_pdf, timeout=15)
-                        if resp.status_code == 200:
-                            pdf_mem = io.BytesIO(resp.content)
-                            doc_fitz = fitz.open(stream=pdf_mem, filetype="pdf")
-                            
-                            # Sugando o texto
-                            texto = "".join([pagina.get_text("text") + "\n" for pagina in doc_fitz[:12]])
-                            texto_limpo = " ".join(texto.split())[:15000]
-                            
-                            if texto_limpo:
-                                doc.texto_extraido = texto_limpo
-                                lidos += 1
-                                session.commit()
-                            else:
-                                erros += 1
-                            doc_fitz.close()
-                        else:
-                            erros += 1
-                    except Exception as e:
-                        erros += 1
-                        pass
-                else:
-                    ignorados += 1
-                    
-            session.close()
-            
-            if lidos == 0:
-                txt_final = (
-                    f"Alimentacao de IA: nenhum texto extraido.\n"
-                    f"PDFs sem texto: {len(docs)}\n"
-                    f"Ignorados (nao sao relatorios): {ignorados}\n"
-                    f"Falhas (link quebrado/scan): {erros}"
-                )
-            else:
-                txt_final = (
-                    f"Alimentacao de IA concluida.\n"
-                    f"PDFs sem texto: {len(docs)}\n"
-                    f"Textos extraidos: {lidos}\n"
-                    f"Ignorados (nao sao relatorios): {ignorados}\n"
-                    f"Falhas (link quebrado/scan): {erros}"
-                )
-            bot.send_message(message.chat.id, txt_final)
-            
+            resumo = alimentar_textos_pendentes()
+            bot.send_message(chat_id, mensagem_alimentacao_ia(resumo))
         except Exception as e:
-            bot.send_message(message.chat.id, f"❌ Erro fatal na tarefa: {e}")
+            bot.send_message(
+                chat_id,
+                f"Alimentacao de IA: falha de processamento ou persistencia ({e}).",
+            )
 
-    import threading
     threading.Thread(target=tarefa_leitura).start()
 
 @bot.message_handler(commands=['mapear_nomes'])

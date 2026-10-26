@@ -2,13 +2,12 @@ import json
 import logging
 import re
 import threading
-from datetime import datetime
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Imports da nossa nova arquitetura
 from bot.loader import bot
 from config import TIPOS_DOC_FII, TIPOS_DOC_ACAO
-from atualizador_documentos import SessionDB
+from atualizador_documentos import SessionDB, confirmar_classificacao_manual
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from modules.GoogleDriveManager import GoogleDriveManager
 
@@ -513,37 +512,13 @@ def processar_revisao(call):
             if not doc:
                 enviar_painel_tickers(call.message.chat.id, call.message.message_id)
                 return
-            file_id = extrair_file_id(doc.url_pdf)
-
-            # Puxa o nome exato dos dicionários do config.py
             if tipo_cat == "ACAO":
                 tipo_nome_limpo = TIPOS_DOC_ACAO.get(tipo_id, "Documento_Acao")
             else:
                 tipo_nome_limpo = TIPOS_DOC_FII.get(tipo_id, "Outros")
 
-            mes_ref = datetime.now().strftime("%Y-%m")
-            if doc.assunto and '-' in doc.assunto:
-                assunto_limpo = doc.assunto.split(" ")[0] 
-                p = assunto_limpo.split('-')
-                if len(p) == 3: 
-                    if len(p[2]) == 4: mes_ref = f"{p[2]}-{p[1]}" 
-                    elif len(p[0]) == 4: mes_ref = f"{p[0]}-{p[1]}" 
-
-            assunto_limpo_pdf = doc.assunto.split(" ")[0] if doc.assunto else "Doc"
-            sufixo = f"_{doc.id_b3}" if doc.id_b3 else ""
-
-            nome_drive = tipo_nome_limpo.replace(' ', '_').replace('/', '')
-            novo_nome_pdf = f"{nome_drive}_{assunto_limpo_pdf}{sufixo}.pdf"
-
-            tipo_ativo_str = "ACAO" if tipo_cat == "ACAO" else "FII"
-
-            # 1. MOVER CORRETAMENTE DA REVISÃO PARA A PASTA OFICIAL DO ATIVO NO DRIVE
-            novo_link = obter_drive_manager().mover_arquivo_da_revisao_por_id(
-                file_id=file_id,
-                ticker=doc.ativo.ticker,
-                mes_ref=mes_ref,
-                novo_nome=novo_nome_pdf,
-                tipo_ativo=tipo_ativo_str
+            novo_link = confirmar_classificacao_manual(
+                doc, tipo_nome_limpo, drive_manager=obter_drive_manager()
             )
 
             if novo_link:

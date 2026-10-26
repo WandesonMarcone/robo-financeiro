@@ -73,8 +73,21 @@ class GoogleDriveManager:
         """Busca uma pasta por nome. Se não existir, cria automaticamente."""
         parent_id = parent_id or self.root_folder_id
 
-        query = f"name = '{nome_pasta}' and mimeType = 'application/vnd.google-apps.folder' and '{parent_id}' in parents and trashed = false"
-        results = self.service.files().list(q=query, fields="files(id)").execute()
+        query = (
+            f"name = '{nome_pasta}' and mimeType = 'application/vnd.google-apps.folder' "
+            f"and '{parent_id}' in parents and trashed = false"
+        )
+        results = (
+            self.service.files()
+            .list(
+                q=query,
+                fields="files(id)",
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+                corpora="allDrives",
+            )
+            .execute()
+        )
         arquivos = results.get('files', [])
 
         if arquivos:
@@ -85,7 +98,11 @@ class GoogleDriveManager:
             'mimeType': 'application/vnd.google-apps.folder',
             'parents': [parent_id] if parent_id else []
         }
-        pasta = self.service.files().create(body=metadata, fields='id').execute()
+        pasta = (
+            self.service.files()
+            .create(body=metadata, fields='id', supportsAllDrives=True)
+            .execute()
+        )
         return pasta.get('id')
 
     def _limpar_e_extrair_ano_mes(self, mes_ref):
@@ -146,7 +163,8 @@ class GoogleDriveManager:
             arquivo_upado = self.service.files().create(
                 body=file_metadata,
                 media_body=media,
-                fields='id, webViewLink'
+                fields='id, webViewLink',
+                supportsAllDrives=True,
             ).execute()
 
             return arquivo_upado.get('webViewLink')
@@ -175,7 +193,8 @@ class GoogleDriveManager:
             arquivo_upado = self.service.files().create(
                 body=file_metadata,
                 media_body=media,
-                fields='id, webViewLink'
+                fields='id, webViewLink',
+                supportsAllDrives=True,
             ).execute()
 
             # Retorna uma tupla com o ID e o link
@@ -198,14 +217,17 @@ class GoogleDriveManager:
 
             print(f"📦 Movendo arquivo {file_id} para Documentos/{pasta_tipo}/{ticker}/{ano}/{mes}...")
 
-            file = self.service.files().get(fileId=file_id, fields='parents').execute()
+            file = self.service.files().get(
+                fileId=file_id, fields='parents', supportsAllDrives=True
+            ).execute()
             previous_parents = ",".join(file.get('parents', []))
 
             file_movido = self.service.files().update(
                 fileId=file_id,
                 addParents=mes_id,
                 removeParents=previous_parents,
-                fields='id, webViewLink'
+                fields='id, webViewLink',
+                supportsAllDrives=True,
             ).execute()
 
             print("✅ Movimentação concluída com sucesso!")
@@ -225,20 +247,24 @@ class GoogleDriveManager:
             pasta_ano_id = self._obter_ou_criar_pasta(ano, parent_id=pasta_ticker_id)
             pasta_mes_id = self._obter_ou_criar_pasta(mes, parent_id=pasta_ano_id)
 
-            arquivo_atual = self.service.files().get(fileId=file_id, fields='parents').execute()
+            arquivo_atual = self.service.files().get(
+                fileId=file_id, fields='parents', supportsAllDrives=True
+            ).execute()
             pastas_antigas = ",".join(arquivo_atual.get('parents', []))
 
             self.service.files().update(
                 fileId=file_id,
-                addParents=pasta_mes_id,          
-                removeParents=pastas_antigas,     
-                fields='id, parents'
+                addParents=pasta_mes_id,
+                removeParents=pastas_antigas,
+                fields='id, parents',
+                supportsAllDrives=True,
             ).execute()
 
             arquivo_renomeado = self.service.files().update(
                 fileId=file_id,
                 body={'name': novo_nome},
-                fields='webViewLink'
+                fields='webViewLink',
+                supportsAllDrives=True,
             ).execute()
 
             print(f"✅ Arquivo {novo_nome} aprovado e movido com sucesso para a nova estrutura!")
@@ -559,10 +585,17 @@ class GoogleDriveManager:
                 'parents': [self.root_folder_id] if self.root_folder_id else []
             }
             media = MediaFileUpload(caminho_arquivo, mimetype='application/pdf', resumable=True)
-            arquivo = self.service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+            arquivo = self.service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id',
+                supportsAllDrives=True,
+            ).execute()
             file_id = arquivo.get('id')
             self.service.permissions().create(fileId=file_id, body={'type': 'anyone', 'role': 'reader'}).execute()
-            link_final = self.service.files().get(fileId=file_id, fields='webViewLink').execute()
+            link_final = self.service.files().get(
+                fileId=file_id, fields='webViewLink', supportsAllDrives=True
+            ).execute()
             return link_final.get('webViewLink')
         except Exception as e:
             return None

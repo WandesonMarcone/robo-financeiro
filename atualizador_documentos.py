@@ -550,14 +550,13 @@ def rotina_processar_pendentes():
                     if "gerencial" in nome_limpo.lower() or "fato" in nome_limpo.lower():
                         print(f"🧠 Sugando texto profundo do PDF para a IA...")
                         try:
-                            import fitz
-                            doc_fitz = fitz.open(temp_filename)
-                            texto_completo = "".join([pagina.get_text("text") + "\n" for pagina in doc_fitz[:12]])
-                            doc_db.texto_extraido = " ".join(texto_completo.split())[:15000]
-                            doc_fitz.close()
+                            with open(temp_filename, "rb") as arquivo_pdf:
+                                doc_db.texto_extraido = extrair_texto_rag(arquivo_pdf.read())
+                            if not doc_db.texto_extraido:
+                                doc_db.texto_extraido = _compactar_texto_rag(texto_pdf)
                         except Exception as e:
                             print(f"⚠️ Erro ao extrair RAG ({type(e).__name__}). Plano B (PyPDF2)...")
-                            doc_db.texto_extraido = texto_pdf[:15000] if texto_pdf else None
+                            doc_db.texto_extraido = _compactar_texto_rag(texto_pdf)
                     else:
                         doc_db.texto_extraido = None
                     notificacao = {
@@ -745,14 +744,13 @@ def rotina_processar_acoes():
                     if "gerencial" in nome_limpo.lower() or "fato" in nome_limpo.lower() or "release" in nome_limpo.lower():
                         print(f"🧠 Sugando texto profundo do PDF para a IA...")
                         try:
-                            import fitz
-                            doc_fitz = fitz.open(temp_filename)
-                            texto_completo = "".join([pagina.get_text("text") + "\n" for pagina in doc_fitz[:15]])
-                            doc_db.texto_extraido = " ".join(texto_completo.split())[:15000]
-                            doc_fitz.close()
+                            with open(temp_filename, "rb") as arquivo_pdf:
+                                doc_db.texto_extraido = extrair_texto_rag(arquivo_pdf.read())
+                            if not doc_db.texto_extraido:
+                                doc_db.texto_extraido = _compactar_texto_rag(texto_pdf)
                         except Exception as e:
                             print(f"⚠️ Erro ao extrair RAG ({type(e).__name__}). Plano B...")
-                            doc_db.texto_extraido = texto_pdf[:15000] if texto_pdf else None
+                            doc_db.texto_extraido = _compactar_texto_rag(texto_pdf)
                     else:
                         doc_db.texto_extraido = None
                     notificacao = {
@@ -797,20 +795,26 @@ MAX_LOTES_RECLASSIFICACAO = 40
 TAMANHO_MAX_PDF_CLASSIFICACAO = 1_500_000
 TEXTO_MAX_CLASSIFICACAO = 1500
 PAGINAS_MAX_CLASSIFICACAO = 3
+TAMANHO_MAX_PDF_RAG = 8_000_000
+TEXTO_MAX_RAG = 15000
+PAGINAS_MAX_RAG = 80
+_TIPOS_RAG = ("gerencial", "fato", "release", "apresenta", "informe")
 
 
 def _eh_pdf(conteudo):
     return bool(conteudo) and conteudo.lstrip().startswith(b"%PDF")
 
 
-def _juntar_paginas(partes):
-    return "\n".join(partes).strip()[:TEXTO_MAX_CLASSIFICACAO]
+def _juntar_paginas(partes, limite=None):
+    teto = TEXTO_MAX_CLASSIFICACAO if limite is None else int(limite)
+    return "\n".join(partes).strip()[:teto]
 
 
-def _extrair_texto_pypdf2(pdf_bytes, max_paginas, pagina_inicial):
+def _extrair_texto_pypdf2(pdf_bytes, max_paginas, pagina_inicial, limite_chars=None):
     import io
     import PyPDF2
 
+    teto_chars = TEXTO_MAX_CLASSIFICACAO if limite_chars is None else int(limite_chars)
     reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
     if not reader.pages:
         return ""
@@ -824,14 +828,15 @@ def _extrair_texto_pypdf2(pdf_bytes, max_paginas, pagina_inicial):
             continue
         partes.append(trecho)
         tamanho += len(trecho)
-        if tamanho >= TEXTO_MAX_CLASSIFICACAO:
+        if tamanho >= teto_chars:
             break
-    return _juntar_paginas(partes)
+    return _juntar_paginas(partes, limite=teto_chars)
 
 
-def _extrair_texto_fitz(pdf_bytes, max_paginas, pagina_inicial):
+def _extrair_texto_fitz(pdf_bytes, max_paginas, pagina_inicial, limite_chars=None):
     import fitz
 
+    teto_chars = TEXTO_MAX_CLASSIFICACAO if limite_chars is None else int(limite_chars)
     documento = fitz.open(stream=pdf_bytes, filetype="pdf")
     try:
         inicio = max(0, int(pagina_inicial or 0))
@@ -844,28 +849,210 @@ def _extrair_texto_fitz(pdf_bytes, max_paginas, pagina_inicial):
                 continue
             partes.append(trecho)
             tamanho += len(trecho)
-            if tamanho >= TEXTO_MAX_CLASSIFICACAO:
+            if tamanho >= teto_chars:
                 break
-        return _juntar_paginas(partes)
+        return _juntar_paginas(partes, limite=teto_chars)
     finally:
         documento.close()
 
 
 def _extrair_texto_paginas(
-    pdf_bytes, max_paginas=PAGINAS_MAX_CLASSIFICACAO, pagina_inicial=0
+    pdf_bytes,
+    max_paginas=PAGINAS_MAX_CLASSIFICACAO,
+    pagina_inicial=0,
+    limite_chars=None,
 ):
     if not pdf_bytes:
         return ""
     try:
-        texto = _extrair_texto_pypdf2(pdf_bytes, max_paginas, pagina_inicial)
+        texto = _extrair_texto_pypdf2(
+            pdf_bytes, max_paginas, pagina_inicial, limite_chars=limite_chars
+        )
         if texto:
             return texto
     except Exception:
         pass
     try:
-        return _extrair_texto_fitz(pdf_bytes, max_paginas, pagina_inicial)
+        return _extrair_texto_fitz(
+            pdf_bytes, max_paginas, pagina_inicial, limite_chars=limite_chars
+        )
     except Exception:
         return ""
+
+
+def _compactar_texto_rag(texto, limite=None):
+    teto = TEXTO_MAX_RAG if limite is None else int(limite)
+    bruto = " ".join(str(texto or "").split())
+    if not bruto:
+        return ""
+    if len(bruto) <= teto:
+        return bruto
+    try:
+        from modules.module_ia import _trecho_rendimento
+
+        trecho = _trecho_rendimento(bruto, janela=700)
+    except Exception:
+        trecho = ""
+    reserva = min(len(trecho) + 80, 900) if trecho else 0
+    resto = max(teto - reserva - 20, 1000)
+    cabeca = resto // 2
+    cauda = resto - cabeca
+    inicio = bruto[:cabeca].rstrip()
+    fim = bruto[-cauda:].lstrip()
+    partes = [inicio]
+    if trecho and trecho not in inicio and trecho not in fim:
+        partes.append("Trecho de rendimento/dividendo:\n" + trecho)
+    partes.append(fim)
+    return "\n\n[...]\n\n".join(partes)[:teto]
+
+
+def extrair_texto_rag(pdf_bytes):
+    """Texto para analise: PDF inteiro compactado (inicio, fim e DY)."""
+    bruto = _extrair_texto_paginas(
+        pdf_bytes,
+        max_paginas=PAGINAS_MAX_RAG,
+        pagina_inicial=0,
+        limite_chars=400_000,
+    )
+    return _compactar_texto_rag(bruto)
+
+
+def _eh_doc_rag(doc):
+    nome = str(getattr(doc, "tipo_documento", "") or "").lower()
+    return any(trecho in nome for trecho in _TIPOS_RAG)
+
+
+def _prioridade_rag(doc):
+    nome = str(getattr(doc, "tipo_documento", "") or "").lower()
+    if "gerencial" in nome:
+        return 0
+    if "fato" in nome:
+        return 1
+    if "release" in nome:
+        return 2
+    if "apresenta" in nome:
+        return 3
+    if "informe" in nome:
+        return 4
+    return 9
+
+
+def _obter_pdf_rag(doc, drive_manager=None):
+    """PDF para RAG: Drive (shared drive) primeiro; HTTP so se nao houver file_id."""
+    file_id = _file_id_drive(getattr(doc, "url_pdf", None))
+    if file_id:
+        try:
+            drive = drive_manager
+            if drive is None:
+                from modules.GoogleDriveManager import GoogleDriveManager
+
+                drive = GoogleDriveManager()
+            pdf = drive.baixar_arquivo(file_id, max_bytes=TAMANHO_MAX_PDF_RAG)
+            if _eh_pdf(pdf):
+                return pdf
+        except Exception:
+            logger.debug("Falha ao baixar PDF RAG do Drive", exc_info=True)
+        return None
+    url = str(getattr(doc, "url_pdf", "") or "").strip()
+    if url.startswith(("http://", "https://")):
+        try:
+            resp = requests.get(url, timeout=30)
+            if resp.status_code == 200 and _eh_pdf(resp.content):
+                return resp.content
+        except Exception:
+            logger.debug("Falha HTTP ao baixar PDF RAG", exc_info=True)
+    return None
+
+
+def _texto_rag_incompleto(doc):
+    texto = (getattr(doc, "texto_extraido", None) or "").strip()
+    if "[...]" in texto:
+        return False
+    return len(texto) <= TEXTO_MAX_CLASSIFICACAO
+
+
+def _preencher_texto_rag(doc, drive_manager=None):
+    """Texto completo (inicio + fim + DY) so para gerencial/fato/informe."""
+    if not _eh_doc_rag(doc) or not _texto_rag_incompleto(doc):
+        return False
+    try:
+        pdf = _obter_pdf_rag(doc, drive_manager=drive_manager)
+        texto = extrair_texto_rag(pdf) if pdf else ""
+        if texto:
+            doc.texto_extraido = texto
+            return True
+    except Exception:
+        logger.debug(
+            "Falha ao extrair texto RAG do doc %s",
+            getattr(doc, "id", None),
+            exc_info=True,
+        )
+    return False
+
+
+def alimentar_textos_pendentes(session=None, drive_manager=None, limite=None):
+    """Preenche ``texto_extraido`` de PDFs antigos (inicio + fim + DY).
+
+    Pega docs sem texto e os classificados na mao/IA que so tem o trecho
+    curto da classificacao (<= ``TEXTO_MAX_CLASSIFICACAO``). Prioridade:
+    Relatorio Gerencial, depois Fato Relevante.
+    """
+    from sqlalchemy import or_, func
+
+    resumo = {"examinados": 0, "lidos": 0, "ignorados": 0, "erros": 0}
+    session_propria = session is None
+    if session_propria:
+        session = SessionDB()
+    try:
+        consulta = session.query(DocumentosQualitativos).filter(
+            DocumentosQualitativos.url_pdf != None,
+            or_(
+                DocumentosQualitativos.texto_extraido == None,
+                DocumentosQualitativos.texto_extraido == "",
+                func.length(DocumentosQualitativos.texto_extraido)
+                <= TEXTO_MAX_CLASSIFICACAO,
+            ),
+        )
+        docs = consulta.all()
+        docs.sort(key=_prioridade_rag)
+        if limite:
+            docs = docs[: int(limite)]
+        resumo["examinados"] = len(docs)
+        for doc in docs:
+            if not _eh_doc_rag(doc):
+                resumo["ignorados"] += 1
+                continue
+            try:
+                if _preencher_texto_rag(doc, drive_manager=drive_manager):
+                    resumo["lidos"] += 1
+                    session.commit()
+                else:
+                    resumo["erros"] += 1
+            except Exception:
+                session.rollback()
+                resumo["erros"] += 1
+                logger.debug("Falha ao alimentar texto do doc %s", getattr(doc, "id", None), exc_info=True)
+        return resumo
+    finally:
+        if session_propria:
+            session.close()
+
+
+def mensagem_alimentacao_ia(resumo):
+    dados = resumo or {}
+    lidos = int(dados.get("lidos", 0) or 0)
+    prefixo = (
+        "Alimentacao de IA concluida."
+        if lidos
+        else "Alimentacao de IA: nenhum texto extraido."
+    )
+    return (
+        f"{prefixo}\n"
+        f"PDFs sem texto: {int(dados.get('examinados', 0) or 0)}\n"
+        f"Textos extraidos: {lidos}\n"
+        f"Ignorados (nao sao relatorios): {int(dados.get('ignorados', 0) or 0)}\n"
+        f"Falhas (link quebrado/scan): {int(dados.get('erros', 0) or 0)}"
+    )
 
 
 def _baixar_pdf_fnet(doc, downloader=None):
@@ -997,12 +1184,24 @@ def _mes_ref_do_doc(doc):
     return datetime.now().strftime("%Y-%m")
 
 
+def _data_nome_arquivo(doc):
+    assunto = str(getattr(doc, "assunto", None) or "").strip().split(" ")[0]
+    assunto = assunto.replace("/", "-")
+    if assunto:
+        return assunto
+    data = getattr(doc, "data_publicacao", None)
+    if data is not None:
+        try:
+            return data.strftime("%d-%m-%Y")
+        except Exception:
+            pass
+    return "Doc"
+
+
 def _nome_arquivo_drive(tipo, doc):
     nome = str(tipo or "Outros").replace(" ", "_").replace("/", "-")
-    assunto = str(getattr(doc, "assunto", None) or "").strip().split(" ")[0]
-    assunto = assunto.replace("/", "-") or "Doc"
     sufixo = f"_{doc.id_b3}" if getattr(doc, "id_b3", None) else ""
-    return f"{nome}_{assunto}{sufixo}.pdf"
+    return f"{nome}_{_data_nome_arquivo(doc)}{sufixo}.pdf"
 
 
 def _organizar_identificado_no_drive(doc, tipo, drive_manager=None):
@@ -1042,9 +1241,22 @@ def _confirmar_identificacao(doc, tipo, resumo, ticker, drive_manager=None):
         doc.url_pdf = link
         doc.status_processamento = "SALVO_DRIVE"
         resumo["drive"] = int(resumo.get("drive", 0) or 0) + 1
+    _preencher_texto_rag(doc, drive_manager=drive_manager)
     resumo["classificados"] += 1
     _registrar_fundo(resumo, ticker, "identificados", tipo=tipo)
     return doc
+
+
+def confirmar_classificacao_manual(doc, tipo, drive_manager=None):
+    """Classificacao humana: move/renomeia no Drive (tipo + data B3) e puxa texto RAG."""
+    doc.tipo_documento = tipo
+    doc.resumo_ia = None
+    link = _organizar_identificado_no_drive(doc, tipo, drive_manager=drive_manager)
+    if link:
+        doc.url_pdf = link
+        doc.status_processamento = "SALVO_DRIVE"
+    _preencher_texto_rag(doc, drive_manager=drive_manager)
+    return link
 
 
 def _marcar_descartado(doc, resumo, ticker, motivo):
