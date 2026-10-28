@@ -1,7 +1,12 @@
 import datetime
 import pytz
 import config
-from modules.utils import conectar_gspread, disparar_alertas
+from modules.utils import (
+    conectar_gspread,
+    disparar_alertas,
+    mensagem_indices_b3,
+    notificar_seguidores_ticker,
+)
 from modules.scraper_acoes import rodar_garimpo_acoes
 from modules.scraper_fiis import rodar_garimpo_fiis
 from modules.eod_snapshots import tentar_persistir_eod
@@ -25,6 +30,12 @@ def _tipo_digest(pacote, padrao):
     return padrao
 
 
+def _itens_digest(pacote):
+    if isinstance(pacote, dict):
+        return list(pacote.get("itens") or [])
+    return []
+
+
 def _enviar_movimentacao(pacote, tipo):
     """Push de MOVIMENTACAO (Sheets+Telegram). Nao grava alertas_eventos."""
     texto = _texto_digest(pacote)
@@ -36,6 +47,14 @@ def _enviar_movimentacao(pacote, tipo):
         tipo=_tipo_digest(pacote, tipo),
     )
     return True
+
+
+def _enviar_favoritos(pacote, tipo):
+    """Aviso individual a quem favoritou o ticker (admin incluso)."""
+    itens = _itens_digest(pacote)
+    if not itens:
+        return 0
+    return notificar_seguidores_ticker(itens, tipo)
 
 
 def executar_auditoria_carteira():
@@ -66,6 +85,14 @@ def executar_auditoria_carteira():
         
     enviou_fii = _enviar_movimentacao(digest_fiis, "fii")
     enviou_acao = _enviar_movimentacao(digest_acoes, "acao")
+    _enviar_favoritos(digest_fiis, "fii")
+    _enviar_favoritos(digest_acoes, "acao")
+    try:
+        texto_indices = mensagem_indices_b3()
+        disparar_alertas(texto_indices)
+        print(texto_indices.replace("\n", " | "))
+    except Exception as e:
+        print(f"Falha ao obter IFIX/Ibovespa: {type(e).__name__}")
     if not enviou_fii and not enviou_acao:
         print("Execucao concluida com sucesso. (Mercado esta estavel, sem alertas de distorcoes).")
 

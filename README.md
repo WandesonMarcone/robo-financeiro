@@ -7,7 +7,7 @@ painel no Google Sheets e opera pelo bot do Telegram.
 
 Dois processos independentes:
 
-- `main.py` no Render: Flask + webhook do Telegram + varredura documental diaria.
+- `main.py` no Render: Flask + webhook do Telegram + crons documentais (APScheduler).
 - `app.py` no GitHub Actions: garimpo de oportunidades (FIIs/Acoes) e alertas.
 
 Nao ha `admin.md` neste repositorio. Detalhes de schema ficam em
@@ -38,7 +38,7 @@ graph TD
     subgraph Operacao
         BOT["Bot Telegram bot/"]
         WEB["Flask main.py"]
-        SCH["APScheduler seg-sex 08:00"]
+        SCH["APScheduler America/Sao_Paulo"]
         ACT["Cron GitHub Actions 5x/dia"]
     end
     subgraph Pipeline
@@ -88,16 +88,26 @@ graph TD
 ### Servidor (`main.py`, Render)
 
 - Flask: webhook do Telegram e rota raiz de status.
-- APScheduler: varredura documental segunda a sexta as 08:00 America/Sao_Paulo.
-- `create_all` so com `CRIAR_TABELAS=1`. Importar `main` nao agenda jobs nem
-  registra webhook, salvo `ROBO_INICIAR_NO_IMPORT=1`.
-- Local: `python main.py`.
+- APScheduler (America/Sao_Paulo), no processo vivo do Gunicorn:
+  - `varredura_diaria` (FNET + CVM ITR): segunda a sexta 08:00
+  - `coleta_informes_fiis` (`/forcar_fiis`): dia 12, 09:00
+  - `coleta_docs_acoes` (`/forcar_docs_acoes`): terca 09:30
+  - `processar_ia_acoes` (`/processar_acoes_ia`): terca 10:00
+  - `alimentar_ia` (`/alimentar_ia`): segunda a sexta 10:00
+  - `auditar_drive` (`/auditar_drive`): sabado 09:00
+- `/mapear_nomes` e `/resetar_docs` nao entram no cron.
+- `create_all` so com `CRIAR_TABELAS=1`. Importar `main` em testes nao agenda
+  jobs nem registra webhook. Em Gunicorn/Render o boot chama
+  `inicializar_aplicacao()` sem exigir `ROBO_INICIAR_NO_IMPORT=1` (a flag
+  continua como opt-in extra).
+- Local: `python main.py`. Preferir 1 worker no Gunicorn para nao duplicar crons.
 
 ### Coletor de oportunidades (`app.py`, GitHub Actions)
 
 - Nao e servidor web.
 - Garimpo de FIIs e Acoes, gravacao em lote no Sheets e dois pushes de MOVIMENTACAO (1 FII + 1 acao) so para o admin, com botoes `painel_{TICKER}_fii|acao`.
-- Fila sem amostra aleatoria ("outras"); carimbo `OK dd/mm HH:MM` ativa o throttle de 2h.
+- Fila sem amostra aleatoria ("outras"); carimbo `OK dd/mm HH:MM` ativa o throttle de 1h.
+- Toda rodada envia IFIX e Ibovespa (Yahoo: `IFIX.SA` e `^BVSP`) ao admin, mesmo sem MOVIMENTACAO.
 - Canal separado de `alertas_eventos` (hub 🔔). Snapshot EOD no Neon so com `EOD_SNAPSHOTS=1`.
 - Cron em `.github/workflows/main.yml`: `0 13,15,17,19,21 * * 1-5` (UTC). Injeta `DATABASE_URL` para a carteira popular.
 - Nome da empresa em `BD_Acoes` coluna AH: Yahoo so na primeira captura; PETR3/PETR4 reutilizam o mesmo nome.
@@ -368,7 +378,8 @@ Opcionais: `WEBHOOK_BASE_URL`, `PORT`, `GROQ_API_KEY`, `LOGO_DEV_TOKEN` (pk_ da 
 `CLIENT_SECRET`, `REFRESH_TOKEN`, `DRIVE_ROOT_FOLDER_ID`,
 `DRIVE_LOGOS_FOLDER_ID`, `GOOGLE_CREDS`, `EOD_SNAPSHOTS`.
 
-Flags: `CRIAR_TABELAS=1`, `ROBO_INICIAR_NO_IMPORT=1`.
+Flags: `CRIAR_TABELAS=1`. `ROBO_INICIAR_NO_IMPORT=1` e opt-in extra;
+Gunicorn/Render ja disparam o boot completo sem a flag.
 
 ### GitHub Actions (`app.py`)
 

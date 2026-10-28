@@ -648,11 +648,12 @@ def tickers_do_digest(*grupos):
     return vistos
 
 
-def montar_digest(texto, tickers, tipo):
+def montar_digest(texto, tickers, tipo, itens=None):
     return {
         "texto": texto or "",
         "tickers": list(tickers or []),
         "tipo": tipo,
+        "itens": list(itens or []),
     }
 
 

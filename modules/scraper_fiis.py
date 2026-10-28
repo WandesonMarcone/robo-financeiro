@@ -231,6 +231,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     relatorio_fixas = []
     relatorio_opps = []
     relatorio_fixas_opps = []
+    itens_individuais = []
     proxima_linha_vazia = len(dados_planilha) + 1 
 
     for ticker in fila_total:
@@ -360,6 +361,17 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             txt_vacancia = f" | 🏚️ Vacância: {formatar_pct(vacancia)}" if (tipo == "Tijolo" and eh_valido(vacancia)) else ""
 
             rotulo = rotulo_ticker(ticker, "fii")
+            texto_ind = (
+                f"{emoji} *{rotulo}* ({tipo_exib})\n"
+                f"   R$ {preco_velho:.2f} ➔ R$ {preco_exib:.2f} {icone_variacao}\n"
+                f"   P/VP: {pvp_txt} | DY: {dy_txt}{txt_vacancia}"
+            )
+            itens_individuais.append(
+                {
+                    "ticker": ticker,
+                    "texto": f"📌 *{ticker}*\nEsta e a situacao atual:\n{texto_ind}",
+                }
+            )
             if ticker in novatos_garimpados:
                 relatorio_opps.append(f"{emoji} *{rotulo}* ({tipo_exib})\n   R$ {preco_exib:.2f}\n   P/VP: {pvp_txt} | DY: {dy_txt}{txt_vacancia}")
             elif ticker in carteira_popular:
@@ -395,4 +407,4 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     tickers_digest = tickers_do_digest(fila_total)
     msg_out = "\n\n➖➖➖➖➖➖➖➖➖➖\n\n".join(msg_blocos) if batch_updates else ""
 
-    return batch_updates, montar_digest(msg_out, tickers_digest, "fii"), aba_fiis
+    return batch_updates, montar_digest(msg_out, tickers_digest, "fii", itens_individuais), aba_fiis

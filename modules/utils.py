@@ -116,9 +116,12 @@ def montar_markup_painel(tickers, tipo):
     return markup
 
 
-def disparar_alertas(msg, tickers=None, tipo=None):
+def disparar_alertas(msg, tickers=None, tipo=None, chat_id=None):
     """Push de MOVIMENTACAO (Sheets+Telegram). Nao grava alertas_eventos."""
     if not msg or str(msg).strip() == "":
+        return
+    destino = chat_id if chat_id is not None else config.TELEGRAM_CHAT_ID
+    if destino is None:
         return
     try:
         bot = telebot.TeleBot(config.TELEGRAM_BOT_TOKEN)
@@ -126,10 +129,58 @@ def disparar_alertas(msg, tickers=None, tipo=None):
         markup = montar_markup_painel(tickers, tipo)
         if markup is not None:
             kwargs["reply_markup"] = markup
-        bot.send_message(config.TELEGRAM_CHAT_ID, msg, **kwargs)
+        bot.send_message(destino, msg, **kwargs)
         print("📲 [Telegram] Notificação de ALERTA entregue com sucesso!")
     except Exception as e:
         print(f"⚠️ [Telegram] Erro de conexão ao enviar alerta: {e}")
+
+
+def _destino_telegram(usuario):
+    return getattr(usuario, "telegram_chat_id", None) or getattr(
+        usuario, "telegram_user_id", None
+    )
+
+
+def notificar_seguidores_ticker(itens, tipo, repo=None, enviar=None):
+    """Aviso individual a quem favoritou o ticker (admin incluso).
+
+    Nao grava alertas_eventos. Sem seguidor, nada e enviado.
+    """
+    if not itens:
+        return 0
+    if repo is None:
+        try:
+            from pipeline_dados.repositorio_favoritos import RepositorioFavoritos
+
+            repo = RepositorioFavoritos()
+        except Exception:
+            return 0
+    disparar = enviar or disparar_alertas
+    enviados = 0
+    for item in itens:
+        if not isinstance(item, dict):
+            continue
+        ticker = str(item.get("ticker") or "").strip().upper()
+        texto = str(item.get("texto") or "").strip()
+        if not ticker or not texto:
+            continue
+        try:
+            resolvido = repo.resolver_ativo(ticker)
+        except Exception:
+            continue
+        if not resolvido:
+            continue
+        try:
+            seguidores = repo.usuarios_que_acompanham(resolvido[0])
+        except Exception:
+            continue
+        for usuario in seguidores or []:
+            destino = _destino_telegram(usuario)
+            if destino is None:
+                continue
+            disparar(texto, tickers=[ticker], tipo=tipo, chat_id=destino)
+            enviados += 1
+    return enviados
 
 def conectar_gspread():
     google_creds = os.environ.get('GOOGLE_CREDS')
@@ -159,8 +210,104 @@ def precisa_atualizar(ticker, mapa_atualizacao, agora_dt, sp_tz):
         if dt_af > agora_dt: 
             dt_af = dt_af.replace(year=agora_dt.year - 1)
 
-        if (agora_dt - dt_af).total_seconds() < 7200:
-            return False 
+        janela = int(getattr(config, "THROTTLE_ATUALIZACAO_SEGUNDOS", 3600) or 3600)
+        if (agora_dt - dt_af).total_seconds() < janela:
+            return False
     except:
-        pass 
+        pass
     return True
+
+
+def _ticker_yahoo(simbolo):
+    import yfinance as yf
+
+    return yf.Ticker(simbolo)
+
+
+def _numero_yahoo(obj, *nomes):
+    for nome in nomes:
+        try:
+            valor = obj.get(nome) if isinstance(obj, dict) else getattr(obj, nome, None)
+        except Exception:
+            valor = None
+        numero = converter_numero(valor)
+        if eh_valido(numero):
+            return numero
+    return float("nan")
+
+
+def buscar_cotacao_yahoo(simbolo, ticker_factory=None):
+    """Ultimo preco e fechamento anterior. Sem rede nos testes (factory injetavel)."""
+    factory = ticker_factory or _ticker_yahoo
+    try:
+        ticker = factory(simbolo)
+    except Exception:
+        return float("nan"), float("nan")
+
+    last = float("nan")
+    prev = float("nan")
+    try:
+        last = _numero_yahoo(
+            ticker.fast_info, "last_price", "lastPrice", "regularMarketPrice"
+        )
+        prev = _numero_yahoo(
+            ticker.fast_info, "previous_close", "previousClose", "regularMarketPreviousClose"
+        )
+    except Exception:
+        pass
+    if eh_valido(last):
+        return last, prev
+    try:
+        hist = ticker.history(period="5d")
+        closes = hist["Close"].dropna() if hist is not None and not hist.empty else None
+        if closes is not None and len(closes) >= 1:
+            last = converter_numero(closes.iloc[-1])
+            if len(closes) >= 2:
+                prev = converter_numero(closes.iloc[-2])
+    except Exception:
+        pass
+    return last, prev
+
+
+def formatar_pontos(valor, casas=2):
+    if not eh_valido(valor):
+        return "N/D"
+    texto = f"{float(valor):,.{casas}f}"
+    return texto.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _linha_indice(nome, preco, anterior):
+    if not eh_valido(preco):
+        return f"{nome}: N/D"
+    if eh_valido(anterior) and float(anterior) != 0:
+        variacao = (float(preco) - float(anterior)) / float(anterior) * 100.0
+        sinal = "+" if variacao > 0 else ""
+        icone = "📈" if variacao > 0 else ("📉" if variacao < 0 else "➖")
+        return (
+            f"{nome}: {formatar_pontos(preco)} "
+            f"({sinal}{variacao:.2f}%) {icone}"
+        )
+    return f"{nome}: {formatar_pontos(preco)}"
+
+
+def buscar_indices_b3(ticker_factory=None):
+    factory = ticker_factory or _ticker_yahoo
+    ifix_preco, ifix_ant = buscar_cotacao_yahoo("IFIX.SA", ticker_factory=factory)
+    ibov_preco, ibov_ant = buscar_cotacao_yahoo("^BVSP", ticker_factory=factory)
+    return [
+        ("IFIX", ifix_preco, ifix_ant),
+        ("Ibovespa", ibov_preco, ibov_ant),
+    ]
+
+
+def montar_mensagem_indices(indices):
+    linhas = ["*Indices B3*"]
+    for item in indices or []:
+        if len(item) < 3:
+            continue
+        linhas.append(_linha_indice(item[0], item[1], item[2]))
+    return "\n".join(linhas)
+
+
+def mensagem_indices_b3(ticker_factory=None):
+    return montar_mensagem_indices(buscar_indices_b3(ticker_factory=ticker_factory))

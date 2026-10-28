@@ -6,7 +6,7 @@ Neon e opcional, isolada e desligada por padrao (``EOD_SNAPSHOTS``).
 
 import logging
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytz
 
@@ -19,6 +19,7 @@ ABA_ACOES = "BD_Acoes"
 ABA_FIIS = "BD_FIIs"
 FUSO_SP = "America/Sao_Paulo"
 FONTE_SHEETS = "Google Sheets"
+HORA_FECHAMENTO_EOD = 18
 
 # Indices 0-based das abas, alinhados ao scraper (A=0).
 # Colunas sem correspondente no Neon nao entram no mapa.
@@ -82,15 +83,35 @@ def eod_habilitado():
     }
 
 
-def data_referencia_eod(agora_dt=None):
-    """Data civil em America/Sao_Paulo. Nao e fechamento oficial B3."""
+def _agora_sp(agora_dt=None):
     if agora_dt is None:
-        agora_dt = datetime.now(pytz.timezone(FUSO_SP))
-    elif getattr(agora_dt, "tzinfo", None) is None:
-        agora_dt = pytz.timezone(FUSO_SP).localize(agora_dt)
-    else:
-        agora_dt = agora_dt.astimezone(pytz.timezone(FUSO_SP))
-    return agora_dt.date() if hasattr(agora_dt, "date") else date.today()
+        return datetime.now(pytz.timezone(FUSO_SP))
+    if getattr(agora_dt, "tzinfo", None) is None:
+        return pytz.timezone(FUSO_SP).localize(agora_dt)
+    return agora_dt.astimezone(pytz.timezone(FUSO_SP))
+
+
+def data_referencia_eod(agora_dt=None):
+    """Data do pregao em America/Sao_Paulo, nao a data civil da madrugada.
+
+    Antes das 18:00, o ultimo pregao encerrado e o dia util anterior.
+    Sabado/domingo recuam para a sexta.
+    """
+    agora_dt = _agora_sp(agora_dt)
+    dia = agora_dt.date() if hasattr(agora_dt, "date") else date.today()
+    if agora_dt.hour < HORA_FECHAMENTO_EOD:
+        dia = dia - timedelta(days=1)
+    while dia.weekday() > 4:
+        dia = dia - timedelta(days=1)
+    return dia
+
+
+def eod_apos_fechamento(agora_dt=None):
+    """True no dia util apos 18:00 BRT (janela de snapshot de fechamento)."""
+    agora_dt = _agora_sp(agora_dt)
+    if agora_dt.weekday() > 4:
+        return False
+    return agora_dt.hour >= HORA_FECHAMENTO_EOD
 
 
 def _celula(linha, indice):
@@ -226,6 +247,11 @@ def persistir_catalogo_sheets(planilha, agora_dt=None, session_factory=None):
 def tentar_persistir_eod(planilha, agora_dt=None, session_factory=None):
     """Ponto unico chamado pelo app. No-op se a flag nao estiver ligada."""
     if not eod_habilitado():
+        return None
+    if not eod_apos_fechamento(agora_dt):
+        logger.info(
+            "EOD snapshots: fora da janela pos-fechamento; persistencia omitida"
+        )
         return None
     return persistir_catalogo_sheets(
         planilha, agora_dt=agora_dt, session_factory=session_factory

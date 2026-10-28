@@ -178,7 +178,8 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     relatorio_fixas = []
     relatorio_opps = []
     relatorio_novatas = []
-    relatorio_fixas_opps = [] 
+    relatorio_fixas_opps = []
+    itens_individuais = []
 
     for ticker in fila:
         linha_idx = todas.index(ticker) + 2
@@ -334,6 +335,12 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
 
             corpo = f"   {faixa_preco}\n   {linha_ind}"
             item = {"ticker": ticker, "corpo": corpo}
+            itens_individuais.append(
+                {
+                    "ticker": ticker,
+                    "texto": f"📌 *{ticker}*\nEsta e a situacao atual:\n{corpo}",
+                }
+            )
             if ticker in carteira_popular:
                 ant = indicadores_antigos.get(ticker) or {}
                 ja_estava_barato = eh_oportunidade_acao(
@@ -393,4 +400,4 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     msg_out = "\n\n➖➖➖➖➖➖➖➖➖➖\n\n".join(msg_blocos) if batch_updates else ""
     tickers_digest = tickers_do_digest(fila)
 
-    return batch_updates, montar_digest(msg_out, tickers_digest, "acao"), aba_base
+    return batch_updates, montar_digest(msg_out, tickers_digest, "acao", itens_individuais), aba_base

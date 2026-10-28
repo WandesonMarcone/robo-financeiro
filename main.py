@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 import time
 
 import pytz
@@ -35,7 +36,15 @@ import bot.callbacks_revisao
 import bot.callbacks_menus
 
 # 4. Serviços (Orquestrador)
-from services.orquestrador import varredura_diaria
+from services.orquestrador import (
+    alimentar_ia,
+    auditar_drive,
+    coleta_docs_acoes,
+    coleta_informes_fiis,
+    processar_ia_acoes,
+    snapshot_eod,
+    varredura_diaria,
+)
 
 # 5. Banco de Dados (conexão centralizada e normalizada)
 from pipeline_dados.banco_dados import Base
@@ -121,12 +130,103 @@ def configurar_webhook():
     logger.info("Webhook configurado para %s/<token oculto>", base)
 
 
-def iniciar_agendador():
-    """Registra e inicia a varredura diária."""
-    scheduler.add_job(
-        varredura_diaria, CronTrigger(day_of_week='mon-fri', hour=8, minute=0)
+def _em_teste():
+    """Importacao em unittest/pytest nao deve agendar jobs nem registrar webhook."""
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return True
+    return any(
+        nome in sys.modules
+        for nome in ("unittest", "pytest", "_pytest")
     )
+
+
+def _eh_wsgi_producao():
+    """Gunicorn (e equivalentes) importam o modulo sem ``__main__``.
+
+    Sem isso o agendador so subia com ``ROBO_INICIAR_NO_IMPORT=1`` ou
+    ``python main.py``, e o cron das 08:00 nunca disparava no Render.
+    """
+    if _em_teste():
+        return False
+    if __name__ == "__main__":
+        return False
+    if "gunicorn" in sys.modules:
+        return True
+    servidor = (os.environ.get("SERVER_SOFTWARE") or "").lower()
+    if "gunicorn" in servidor:
+        return True
+    if os.environ.get("RENDER"):
+        return True
+    return any(
+        chave.startswith("GUNICORN_") or chave.startswith("RENDER_")
+        for chave in os.environ
+    )
+
+
+def registrar_jobs():
+    """Jobs combinados; ids fixos para reentrada segura no mesmo processo."""
+    jobs = (
+        (
+            "varredura_diaria",
+            varredura_diaria,
+            CronTrigger(day_of_week="mon-fri", hour=8, minute=0),
+        ),
+        (
+            "coleta_informes_fiis",
+            coleta_informes_fiis,
+            CronTrigger(day=12, hour=9, minute=0),
+        ),
+        (
+            "coleta_docs_acoes",
+            coleta_docs_acoes,
+            CronTrigger(day_of_week="tue", hour=9, minute=30),
+        ),
+        (
+            "processar_ia_acoes",
+            processar_ia_acoes,
+            CronTrigger(day_of_week="tue", hour=10, minute=0),
+        ),
+        (
+            "alimentar_ia",
+            alimentar_ia,
+            CronTrigger(day_of_week="mon-fri", hour=10, minute=0),
+        ),
+        (
+            "auditar_drive",
+            auditar_drive,
+            CronTrigger(day_of_week="sat", hour=9, minute=0),
+        ),
+        (
+            "snapshot_eod",
+            snapshot_eod,
+            CronTrigger(day_of_week="mon-fri", hour=19, minute=0),
+        ),
+    )
+    for job_id, funcao, trigger in jobs:
+        scheduler.add_job(
+            funcao,
+            trigger,
+            id=job_id,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=3600,
+        )
+
+
+def iniciar_agendador():
+    """Registra os crons e inicia o APScheduler (timezone America/Sao_Paulo)."""
+    if scheduler.running:
+        logger.info("Agendador ja em execucao; jobs nao reinsercidos.")
+        return
+    registrar_jobs()
     scheduler.start()
+    logger.info(
+        "Agendador iniciado: varredura_diaria seg-sex 08:00; "
+        "fiis dia 12 09:00; docs_acoes ter 09:30; ia_acoes ter 10:00; "
+        "alimentar_ia seg-sex 10:00; auditar_drive sab 09:00; "
+        "snapshot_eod seg-sex 19:00."
+    )
 
 
 def inicializar_aplicacao():
@@ -142,10 +242,9 @@ def main():
     app.run(host="0.0.0.0", port=porta)
 
 
-# Compatibilidade: servidores WSGI (ex.: gunicorn main:app) podem optar por
-# reproduzir o boot completo definindo ROBO_INICIAR_NO_IMPORT=1. Por padrão a
-# importação não agenda jobs nem mexe no webhook/banco, para não afetar testes.
-if _flag_ativa("ROBO_INICIAR_NO_IMPORT"):
+# Importacao em testes permanece limpa. Em Gunicorn/Render o boot completo
+# roda sem exigir ROBO_INICIAR_NO_IMPORT. A flag continua como opt-in extra.
+if _flag_ativa("ROBO_INICIAR_NO_IMPORT") or _eh_wsgi_producao():
     inicializar_aplicacao()
 
 
