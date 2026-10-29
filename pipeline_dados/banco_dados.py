@@ -30,6 +30,9 @@ class DadosFinanceirosAcoes(Base):
     ativo_id: Mapped[int] = mapped_column(ForeignKey('ativos.id'), nullable=False)
     data_referencia: Mapped[date] = mapped_column(Date, nullable=False)
     tipo_doc: Mapped[str] = mapped_column(String(10), nullable=False) # Ex: 'ITR', 'DFP'
+    # Momento em que o dado foi efetivamente persistido pela coleta.
+    # Permanece opcional para preservar os registros históricos existentes.
+    data_coleta: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
     # --- BALANÇO PATRIMONIAL ---
     ativo_total: Mapped[Optional[float]] = mapped_column(Float)
