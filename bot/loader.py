@@ -135,6 +135,30 @@ class BotAutorizado(telebot.TeleBot):
             tipo_midia=type(photo).__name__,
         )
 
+    def send_document(self, chat_id, document, *args, **kwargs):
+        return self._auditoria_saida(
+            "send_document",
+            lambda: telebot.TeleBot.send_document(
+                self, chat_id, document, *args, **kwargs
+            ),
+            chat_id,
+            kwargs.get("caption"),
+            tipo_midia=type(document).__name__,
+        )
+
+    def reply_to(self, message, text, *args, **kwargs):
+        chat = getattr(message, "chat", None)
+        chat_id = getattr(chat, "id", None)
+        return self._auditoria_saida(
+            "reply_to",
+            lambda: telebot.TeleBot.reply_to(
+                self, message, text, *args, **kwargs
+            ),
+            chat_id,
+            text,
+            message_id=getattr(message, "message_id", None),
+        )
+
     def edit_message_text(self, text, chat_id=None, message_id=None, *args, **kwargs):
         return self._auditoria_saida(
             "edit_message_text",
