@@ -7,6 +7,7 @@ corrente (``datetime.now().year``).
 
 import csv
 import io
+import unicodedata
 import zipfile
 from datetime import datetime
 
@@ -87,6 +88,17 @@ def _valor_coluna(linha, *nomes):
         if chave in mapa:
             return mapa.get(chave)
     return None
+
+
+def _normalizar_nome_fii(valor):
+    """Normaliza nomes para uma conciliação conservadora por texto."""
+    texto = str(valor or "").upper().strip()
+    sem_acento = "".join(
+        c
+        for c in unicodedata.normalize("NFD", texto)
+        if unicodedata.category(c) != "Mn"
+    )
+    return " ".join(sem_acento.split())
 
 
 class ResultadoColetaFiis:
@@ -177,6 +189,29 @@ def _mapa_fiis_por_cnpj(session):
     return mapa
 
 
+def _mapa_fiis_por_nome(session):
+    """Cria aliases de nomes somente para FIIs sem CNPJ cadastrado.
+
+    O alias vem do catalogo mantido para a associacao dos documentos FNET.
+    Ele nunca substitui o CNPJ quando ha mais de uma correspondencia.
+    """
+    from config import MAPA_ISCAS_MASTER
+
+    mapa = {}
+    for ativo in session.query(Ativo).filter(Ativo.tipo == TipoAtivo.FII):
+        if _cnpj_cadastro_fii(ativo, session):
+            continue
+        ticker = str(getattr(ativo, "ticker", "") or "").strip().upper()
+        alias = MAPA_ISCAS_MASTER.get(ticker)
+        if not alias:
+            continue
+        alias_normalizado = _normalizar_nome_fii(alias)
+        if len(alias_normalizado) < 5:
+            continue
+        mapa.setdefault(alias_normalizado, []).append(ativo)
+    return mapa
+
+
 def _ler_zip_informes(conteudo):
     with zipfile.ZipFile(io.BytesIO(conteudo)) as pacote:
         nomes = [
@@ -213,6 +248,14 @@ def _ler_zip_informes(conteudo):
                     chave = (cnpj_fundo, data_ref_str)
                     if chave not in consolidados:
                         consolidados[chave] = {}
+                    nome_fundo = _valor_coluna(
+                        linha,
+                        "Nome_Fundo_Classe",
+                        "Nome_Fundo",
+                        "NM_FUNDO",
+                    )
+                    if str(nome_fundo or "").strip():
+                        consolidados[chave]["nome_fundo"] = nome_fundo
                     patrimonio = _valor_coluna(
                         linha, "Patrimonio_Liquido", "VL_PATRIM_LIQ"
                     )
@@ -300,6 +343,7 @@ def processar_informes_fiis_cvm(ano=None, session=None, http_get=None):
             return resultado
 
         mapa_cnpj = _mapa_fiis_por_cnpj(session)
+        mapa_nome = _mapa_fiis_por_nome(session)
         informes_com_metrica = 0
 
         for (cnpj_fundo, data_ref_str), metricas in consolidados.items():
@@ -322,6 +366,14 @@ def processar_informes_fiis_cvm(ano=None, session=None, http_get=None):
 
             informes_com_metrica += 1
             ativo = mapa_cnpj.get(cnpj_limpo)
+            if ativo is None:
+                nome_fundo = _normalizar_nome_fii(metricas.get("nome_fundo"))
+                candidatos = []
+                for alias, ativos in mapa_nome.items():
+                    if alias in nome_fundo:
+                        candidatos.extend(ativos)
+                if len(candidatos) == 1:
+                    ativo = candidatos[0]
             if ativo is None:
                 resultado.sem_ativo += 1
                 continue
