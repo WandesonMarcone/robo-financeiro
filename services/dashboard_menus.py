@@ -155,13 +155,12 @@ def _resumo_via_ia(ticker, tipo, fatos):
 
 
 def montar_resumo_ativo(ticker, tipo, indicadores=None):
-    """Resumo personalizado (IA) com fatos reais; catalogo se a IA falhar."""
+    """Resumo rápido do catálogo; a IA fica disponível no botão de análise."""
     from modules.relatorio_mercado import descricao_catalogo
 
-    fallback = descricao_catalogo(ticker)
-    fatos = _fatos_para_resumo(ticker, tipo, indicadores, fallback)
-    personalizado = _resumo_via_ia(ticker, tipo, fatos)
-    return personalizado or fallback
+    # O painel principal não espera um provedor externo. Isso mantém os
+    # indicadores responsivos mesmo quando a IA leva vários segundos.
+    return descricao_catalogo(ticker) or ""
 
 def buscar_favoritos(tipo):
     """Tickers da planilha que estao no ranking real de favoritos."""
