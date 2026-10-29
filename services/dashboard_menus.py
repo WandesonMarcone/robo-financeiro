@@ -22,6 +22,7 @@ from services.logo_service import (
 )
 from atualizador_documentos import SessionDB
 from pipeline_dados.banco_dados import DocumentosQualitativos, Ativo
+from pipeline_dados.modelos_resumos import ResumoAtivo
 
 # O gerenciador do Drive e criado sob demanda: instancia-lo na importacao
 # disparava a descoberta de rede do Google apenas por carregar o modulo. A
@@ -155,13 +156,29 @@ def _resumo_via_ia(ticker, tipo, fatos):
 
 
 def montar_resumo_ativo(ticker, tipo, indicadores=None):
-    """Resumo rápido do catálogo; a IA fica disponível no botão de análise."""
+    """Retorna o resumo previamente gerado, sem chamar a IA no painel."""
     from modules.relatorio_mercado import descricao_catalogo
 
-    # O painel principal não espera um provedor externo. Isso mantém os
-    # indicadores responsivos mesmo quando a IA leva vários segundos.
+    session = None
+    try:
+        session = SessionDB()
+        registro = (
+            session.query(ResumoAtivo)
+            .join(Ativo, Ativo.id == ResumoAtivo.ativo_id)
+            .filter(Ativo.ticker == ticker, ResumoAtivo.status == "GERADO")
+            .first()
+        )
+        if registro and registro.resumo:
+            return registro.resumo
+    except Exception:
+        logger.debug("Resumo persistido indisponivel para %s", ticker, exc_info=True)
+    finally:
+        if session is not None:
+            try:
+                session.close()
+            except Exception:
+                pass
     return descricao_catalogo(ticker) or ""
-
 def buscar_favoritos(tipo):
     """Tickers da planilha que estao no ranking real de favoritos."""
     is_fii = (tipo == 'fii')
