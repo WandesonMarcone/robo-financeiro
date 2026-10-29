@@ -354,7 +354,7 @@ def _editar_painel_ativo(chat_id, message_id, ticker, texto, texto_com_link, mar
     if foto:
         caption = _caption_painel(texto)
         try:
-            bot.edit_message_media(
+            mensagem_editada = bot.edit_message_media(
                 InputMediaPhoto(
                     media=foto, caption=caption, parse_mode="Markdown"
                 ),
@@ -362,16 +362,18 @@ def _editar_painel_ativo(chat_id, message_id, ticker, texto, texto_com_link, mar
                 message_id=message_id,
                 reply_markup=markup,
             )
+            _registrar_file_id_do_painel(mensagem_editada, ticker)
             return
         except Exception as erro:
             if _erro_markdown_painel(erro):
                 try:
-                    bot.edit_message_media(
+                    mensagem_editada = bot.edit_message_media(
                         InputMediaPhoto(media=foto, caption=caption),
                         chat_id=chat_id,
                         message_id=message_id,
                         reply_markup=markup,
                     )
+                    _registrar_file_id_do_painel(mensagem_editada, ticker)
                     return
                 except Exception:
                     logger.debug(

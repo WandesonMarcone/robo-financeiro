@@ -89,6 +89,7 @@ class FnetDownloader:
                     descricao_fundo = item.get('descricaoFundo', '').upper()
                     id_doc = item.get('id')
                     data_ref = item.get('dataReferencia', '').replace('/', '-')
+                    data_entrega = item.get('dataEntrega', '')
 
                     # A ETIQUETA PERFEITA CONTINUA AQUI
                     tipo_doc = item.get('tipoDocumento', 'Documento Sem Tipo').strip().title()
@@ -97,6 +98,8 @@ class FnetDownloader:
                         documentos_gerais.append({
                             'id': str(id_doc),
                             'data_ref': data_ref,
+                            'data_referencia': data_ref,
+                            'data_entrega': data_entrega,
                             'nome_fundo': descricao_fundo,
                             'tipo_doc': tipo_doc
                         })

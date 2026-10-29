@@ -130,6 +130,18 @@ def _parse_data_ref(valor):
     return None
 
 
+def _data_referencia_documento(doc):
+    """Retorna a data de referência informada pela B3/FNET.
+
+    ``dataEntrega`` é a data/hora de protocolo e não deve ser usada para
+    definir o mês de competência. O campo legado ``data_ref`` permanece como
+    fallback para manter compatibilidade com coletores antigos e fixtures.
+    """
+    return _parse_data_ref(
+        doc.get("data_referencia") or doc.get("data_ref")
+    )
+
+
 class ColetorFnet:
     """Varredura FNET. Nao acessa Google Sheets nem Telegram."""
 
@@ -167,9 +179,9 @@ class ColetorFnet:
                 nome_fundo = doc.get("nome_fundo")
                 tipo_bruto = str(doc.get("tipo_doc") or "").strip() or "Documento"
                 tipo_doc = normalizar_tipo_documento(tipo_bruto, "FII") or tipo_bruto
-                data_pub = _parse_data_ref(doc.get("data_ref"))
+                data_referencia = _data_referencia_documento(doc)
 
-                if not id_doc or data_pub is None:
+                if not id_doc or data_referencia is None:
                     resultado.ignorados_validacao += 1
                     continue
                 if id_doc in vistos:
@@ -195,9 +207,17 @@ class ColetorFnet:
                         DocumentosQualitativos(
                             ativo_id=ativo.id,
                             id_b3=id_doc,
-                            data_publicacao=data_pub,
+                            # O modelo legado chama o campo de
+                            # ``data_publicacao``, mas para FNET ele guarda
+                            # a dataReferencia oficial da B3. Ela é a base
+                            # correta para o agrupamento mensal.
+                            data_publicacao=data_referencia,
                             tipo_documento=tipo_doc,
-                            assunto=str(doc.get("data_ref") or ""),
+                            assunto=str(
+                                doc.get("data_referencia")
+                                or doc.get("data_ref")
+                                or ""
+                            ),
                             status_processamento="PENDENTE",
                         )
                     )
