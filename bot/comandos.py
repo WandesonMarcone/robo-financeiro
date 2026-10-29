@@ -290,6 +290,34 @@ def cmd_forcar_fiis(message):
 
     threading.Thread(target=background_coleta, args=(ano_escolhido,)).start()
 
+@bot.message_handler(commands=['gerar_resumos_ia'])
+def cmd_gerar_resumos_ia(message):
+    """Gera os resumos atuais em segundo plano; cada ativo substitui o anterior."""
+    chat_id = message.chat.id
+    bot.reply_to(
+        message,
+        "🤖 Geração dos resumos iniciada em segundo plano. "
+        "O resumo atual de cada ativo será substituído, sem criar histórico.",
+    )
+
+    def tarefa_resumos():
+        try:
+            from services.resumos_ativos import (
+                gerar_resumos_ativos,
+                mensagem_resultado_resumos,
+            )
+
+            resultado = gerar_resumos_ativos()
+            bot.send_message(chat_id, mensagem_resultado_resumos(resultado))
+        except Exception as erro:
+            bot.send_message(
+                chat_id,
+                f"Geração de resumos: falha de processamento ({type(erro).__name__}).",
+            )
+
+    threading.Thread(target=tarefa_resumos, daemon=True).start()
+
+
 @bot.message_handler(commands=['alimentar_ia'])
 def alimentar_ia_passado(message):
     chat_id = message.chat.id
@@ -397,6 +425,7 @@ def callback_executar_comando(call):
         "cmd_processar_acoes_ia": ("/processar_acoes_ia", rodar_ia_acoes),
         "cmd_forcar_cvm": ("/forcar_cvm", rodar_cvm),
         "cmd_forcar_fiis": ("/forcar_fiis", cmd_forcar_fiis),
+        "cmd_gerar_resumos_ia": ("/gerar_resumos_ia", cmd_gerar_resumos_ia),
         "cmd_alimentar_ia": ("/alimentar_ia", alimentar_ia_passado),
         "cmd_auditar_drive": ("/auditar_drive", cmd_auditar_drive),
         "cmd_mapear_nomes": ("/mapear_nomes", comando_mapear_nomes_b3),
