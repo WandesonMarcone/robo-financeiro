@@ -116,7 +116,7 @@ class ResultadoColetaAcoes:
                 f"Coleta CVM ITR ({ano}) concluida.\n"
                 f"Registros gravados: {self.gravados}\n"
                 f"Informes no arquivo: {self.informes_encontrados}\n"
-                f"Sem ativo correspondente: {self.sem_ativo}\n"
+                f"Informes fora do cadastro de ativos: {self.sem_ativo}\n"
                 f"Ignorados por validacao: {self.ignorados_validacao}\n"
                 f"Falhas de persistencia: {self.falhas_persistencia}"
             )
@@ -239,6 +239,7 @@ class AcoesCVMReader:
 
             mapa_cnpj = _mapa_acoes_por_cnpj(session)
             informes_com_metrica = 0
+            momento_coleta = datetime.utcnow()
 
             for (cnpj_cia, data_ref_str), metricas in consolidados.items():
                 if not metricas:
@@ -283,10 +284,15 @@ class AcoesCVMReader:
                             tipo_doc="ITR",
                         )
                         session.add(registro)
+                    registro.data_coleta = momento_coleta
                     for campo in CAMPOS_BANCO:
                         if campo in metricas and metricas[campo] is not None:
                             setattr(registro, campo, metricas[campo])
                     session.commit()
+                    # O contador só aumenta depois do commit. O ID confirma
+                    # que o SQLAlchemy efetivou o INSERT/UPDATE no banco.
+                    if registro.id is None:
+                        raise RuntimeError("persistencia sem identificador")
                     resultado.gravados += 1
                 except Exception as erro:
                     session.rollback()
