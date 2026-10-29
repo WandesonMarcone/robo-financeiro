@@ -202,21 +202,34 @@ def _ler_zip_informes(conteudo):
                     cnpj_fundo = _valor_coluna(
                         linha, "CNPJ_Fundo", "CNPJ_Fundo_Classe", "CNPJ_FUNDO"
                     )
-                    data_ref_str = _valor_coluna(linha, "DT_COMPTC", "Data_Competencia")
+                    data_ref_str = _valor_coluna(
+                        linha,
+                        "Data_Referencia",
+                        "DT_COMPTC",
+                        "Data_Competencia",
+                    )
                     if not cnpj_fundo or not data_ref_str:
                         continue
                     chave = (cnpj_fundo, data_ref_str)
                     if chave not in consolidados:
                         consolidados[chave] = {}
-                    patrimonio = _valor_coluna(linha, "VL_PATRIM_LIQ")
+                    patrimonio = _valor_coluna(
+                        linha, "Patrimonio_Liquido", "VL_PATRIM_LIQ"
+                    )
                     if patrimonio is not None:
                         consolidados[chave]["patrimonio_liquido"] = patrimonio
                     cotistas = _valor_coluna(
-                        linha, "NR_COTISTAS", "NR_COTST", "NR_COTISTA"
+                        linha,
+                        "Total_Numero_Cotistas",
+                        "NR_COTISTAS",
+                        "NR_COTST",
+                        "NR_COTISTA",
                     )
                     if cotistas is not None:
                         consolidados[chave]["cotistas"] = cotistas
-                    val_ativo = _valor_coluna(linha, "Ativo_Total", "VL_TOTAL")
+                    val_ativo = _valor_coluna(
+                        linha, "Valor_Ativo", "Ativo_Total", "VL_TOTAL"
+                    )
                     if val_ativo is not None:
                         consolidados[chave]["ativo_total"] = val_ativo
                     caixa = _valor_coluna(linha, "Disponibilidades")
@@ -234,6 +247,11 @@ def _ler_zip_informes(conteudo):
                     )
                     if str(rendimento or "").strip():
                         consolidados[chave]["rendimento_por_cota"] = rendimento
+                    cotas_emitidas = _valor_coluna(
+                        linha, "Cotas_Emitidas", "Quantidade_Cotas_Emitidas"
+                    )
+                    if cotas_emitidas is not None:
+                        consolidados[chave]["cotas_emitidas"] = cotas_emitidas
         return consolidados
 
 
@@ -331,6 +349,11 @@ def processar_informes_fiis_cvm(ano=None, session=None, http_get=None):
                 if "rendimento_por_cota" in metricas
                 else None
             )
+            cotas_emitidas = (
+                _float_cvm(metricas["cotas_emitidas"])
+                if "cotas_emitidas" in metricas
+                else None
+            )
             if rendimento is None:
                 metricas.pop("rendimento_por_cota", None)
 
@@ -355,6 +378,8 @@ def processar_informes_fiis_cvm(ano=None, session=None, http_get=None):
                     registro.disponibilidades_caixa = caixa
                 if "rendimento_por_cota" in metricas:
                     registro.rendimento_por_cota = rendimento
+                if "cotas_emitidas" in metricas:
+                    registro.cotas_emitidas = cotas_emitidas
                 session.commit()
                 resultado.gravados += 1
             except Exception as erro:
