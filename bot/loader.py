@@ -1,4 +1,6 @@
 import logging
+import os
+import time
 
 import telebot
 
@@ -45,6 +47,142 @@ class BotAutorizado(telebot.TeleBot):
     logs: cada update autorizado e o resultado final dos handlers são
     registrados; tentativas negadas também são registradas, sem expor tokens.
     """
+
+    def _auditoria_chat(self, chat_id):
+        """Retorna um identificador seguro para os logs de auditoria."""
+        if chat_id is None:
+            return "-"
+        valor = str(chat_id)
+        return f"***{valor[-4:]}" if len(valor) > 4 else "***"
+
+    def _auditoria_conteudo_ativa(self, chat_id):
+        """Libera texto completo apenas para o chat de auditoria configurado.
+
+        O registro estrutural continua ativo para todos os chats. O conteúdo
+        completo fica restrito ao chat definido em TELEGRAM_AUDITORIA_CHAT_ID
+        (por padrão, o administrador) ou quando TELEGRAM_AUDITORIA_DETALHADA
+        estiver explicitamente habilitado.
+        """
+        detalhada = str(
+            os.environ.get("TELEGRAM_AUDITORIA_DETALHADA", "")
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        chat_auditoria = (
+            os.environ.get("TELEGRAM_AUDITORIA_CHAT_ID")
+            or getattr(config, "TELEGRAM_ADMIN_ID", "")
+        ).strip()
+        return detalhada or (chat_id is not None and str(chat_id) == chat_auditoria)
+
+    def _auditoria_saida(self, acao, executor, chat_id=None, texto=None, **dados):
+        """Registra início, sucesso e falha de cada resposta enviada."""
+        chat_log = self._auditoria_chat(chat_id)
+        update = getattr(self, "_update_em_processamento", None)
+        origem = descrever_update(update) if update is not None else "sem_update"
+        conteudo = ""
+        if texto is not None and self._auditoria_conteudo_ativa(chat_id):
+            conteudo = f" texto={str(texto)!r}"
+        inicio = time.perf_counter()
+        logger.info(
+            "TELEGRAM AUDITORIA - inicio acao=%s chat=%s origem=%s%s dados=%s",
+            acao,
+            chat_log,
+            origem,
+            conteudo,
+            dados or "-",
+        )
+        try:
+            resultado = executor()
+        except Exception as erro:
+            logger.exception(
+                "TELEGRAM AUDITORIA - falha acao=%s chat=%s origem=%s "
+                "duracao_ms=%.1f erro=%s",
+                acao,
+                chat_log,
+                origem,
+                (time.perf_counter() - inicio) * 1000,
+                str(erro),
+            )
+            raise
+        logger.info(
+            "TELEGRAM AUDITORIA - sucesso acao=%s chat=%s origem=%s "
+            "duracao_ms=%.1f resultado=%s",
+            acao,
+            chat_log,
+            origem,
+            (time.perf_counter() - inicio) * 1000,
+            type(resultado).__name__,
+        )
+        return resultado
+
+    def send_message(self, chat_id, text, *args, **kwargs):
+        return self._auditoria_saida(
+            "send_message",
+            lambda: telebot.TeleBot.send_message(
+                self, chat_id, text, *args, **kwargs
+            ),
+            chat_id,
+            text,
+            parse_mode=kwargs.get("parse_mode"),
+        )
+
+    def send_photo(self, chat_id, photo, *args, **kwargs):
+        return self._auditoria_saida(
+            "send_photo",
+            lambda: telebot.TeleBot.send_photo(
+                self, chat_id, photo, *args, **kwargs
+            ),
+            chat_id,
+            kwargs.get("caption"),
+            tipo_midia=type(photo).__name__,
+        )
+
+    def edit_message_text(self, text, chat_id=None, message_id=None, *args, **kwargs):
+        return self._auditoria_saida(
+            "edit_message_text",
+            lambda: telebot.TeleBot.edit_message_text(
+                self, text, chat_id, message_id, *args, **kwargs
+            ),
+            chat_id,
+            text,
+            message_id=message_id,
+            parse_mode=kwargs.get("parse_mode"),
+        )
+
+    def edit_message_caption(
+        self, caption, chat_id=None, message_id=None, *args, **kwargs
+    ):
+        return self._auditoria_saida(
+            "edit_message_caption",
+            lambda: telebot.TeleBot.edit_message_caption(
+                self, caption, chat_id, message_id, *args, **kwargs
+            ),
+            chat_id,
+            caption,
+            message_id=message_id,
+            parse_mode=kwargs.get("parse_mode"),
+        )
+
+    def edit_message_media(self, media, chat_id=None, message_id=None, *args, **kwargs):
+        caption = getattr(media, "caption", None)
+        return self._auditoria_saida(
+            "edit_message_media",
+            lambda: telebot.TeleBot.edit_message_media(
+                self, media, chat_id, message_id, *args, **kwargs
+            ),
+            chat_id,
+            caption,
+            message_id=message_id,
+            tipo_midia=type(media).__name__,
+        )
+
+    def answer_callback_query(self, callback_query_id, *args, **kwargs):
+        return self._auditoria_saida(
+            "answer_callback_query",
+            lambda: telebot.TeleBot.answer_callback_query(
+                self, callback_query_id, *args, **kwargs
+            ),
+            texto=kwargs.get("text") or (args[0] if args else None),
+            show_alert=kwargs.get("show_alert"),
+        )
 
     def _chat_autorizado(self, update):
         """Allowlist de chats, ampliada pelo autocadastro.
