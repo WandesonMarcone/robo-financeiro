@@ -21,7 +21,11 @@ from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from pipeline_dados.conexao import obter_session_factory
 from config import MAPA_ISCAS_MASTER, TIPOS_DOC_FII
 from pipeline_dados.tipos_documento import manter_tipo_catalogo
-from modules.module_ia import IAIndisponivelError, analisar_fatos_com_ia
+from modules.module_ia import (
+    IAIndisponivelError,
+    analisar_fatos_com_ia,
+    analisar_fatos_com_dupla_ia,
+)
 
 logger = logging.getLogger("robo.documentos")
 
@@ -73,64 +77,72 @@ def normalizar_texto(texto):
 # 🚨 TRAVA 1: CLASSIFICAÇÃO HÍBRIDA COM IA (AUTO-SAVE)
 # ==========================================
 def classificar_documento_com_ia(nome_original, texto_extraido):
-    if not texto_extraido:
-        return nome_original, 0
-
-    texto_limpo = re.sub(r'[^\\x20-\\x7E\\u00A0-\\u00FF]', ' ', str(texto_extraido)).strip()
-    texto_limpo = texto_limpo[:1500]
-    if not texto_limpo:
-        return nome_original, 0
-
-    lista_opcoes = ", ".join(dict.fromkeys(TIPOS_DOC_FII.values()))
-    prompt = (
-        f"Você é um analista financeiro sênior avaliando um PDF de Fundo Imobiliário. "
-        f"O documento começa assim: '{texto_limpo}'\\n\\n"
-        f"Classifique o documento escolhendo ESTRITAMENTE UMA destas opções: {lista_opcoes}.\\n"
-        f"Equivalencias obrigatorias: carta/aviso/comunicado ao cotista = Aviso aos Cotistas; "
-        f"inicio ou encerramento de emissao/distribuicao de cotas = Nova Emissao de Cotas.\\n"
-        f"Responda EXATAMENTE E APENAS com um objeto JSON válido, contendo as chaves "
-        f"'tipo' e 'confianca'. A chave 'confianca' deve ser um número inteiro de 0 a 100."
+    """Primeira opinião da cadeia; a dupla usa provedores independentes."""
+    resposta = analisar_fatos_com_ia(
+        _prompt_classificacao_documento(nome_original, texto_extraido),
+        system_prompt="Você é um classificador documental. Retorne apenas JSON válido.",
+        response_format={"type": "json_object"},
+        falhar_se_indisponivel=True,
     )
-
-    try:
-        resposta_str = analisar_fatos_com_ia(
-            prompt,
-            system_prompt="Você é um classificador documental. Retorne apenas JSON válido.",
-            response_format={"type": "json_object"},
-            falhar_se_indisponivel=True,
-        )
-        dados_ia = json.loads(resposta_str)
-        tipo_ia = dados_ia.get("tipo", nome_original)
-        confianca_ia = int(dados_ia.get("confianca", 0))
-        if tipo_ia not in TIPOS_DOC_FII.values():
-            return nome_original, 0
-        return tipo_ia, confianca_ia
-    except IAIndisponivelError:
-        raise
-    except Exception as erro:
-        logger.warning(
-            "Erro ao consultar IA para classificacao hibrida (%s). "
-            "Mantendo classificacao original.",
-            type(erro).__name__,
-        )
+    dados_ia = json.loads(resposta)
+    tipo_ia = dados_ia.get("tipo", nome_original)
+    confianca_ia = int(dados_ia.get("confianca", 0) or 0)
+    if tipo_ia not in TIPOS_DOC_FII.values():
         return nome_original, 0
+    return tipo_ia, confianca_ia
+
+
+def _prompt_classificacao_documento(nome_original, texto_extraido):
+    texto_limpo = re.sub(r"[^\\x20-\\x7E\\u00A0-\\u00FF]", " ", str(texto_extraido or "")).strip()
+    return (
+        f"Você é um analista financeiro sênior avaliando um PDF. "
+        f"O documento é associado a '{nome_original}' e estas são as primeiras "
+        f"12 páginas (ou o texto disponível):\\n{texto_limpo[:TEXTO_MAX_CLASSIFICACAO]}\\n\\n"
+        f"Classifique estritamente em: {', '.join(dict.fromkeys(TIPOS_DOC_FII.values()))}. "
+        "Carta/aviso/comunicado ao cotista = Aviso aos Cotistas; "
+        "início ou encerramento de emissão/distribuição = Nova Emissão de Cotas. "
+        "Responda somente JSON válido com tipo e confiança (0 a 100)."
+    )
 
 
 def _dupla_checagem_fii(nome_original, texto_extraido):
-    """Duas classificacoes independentes, com o detalhe de cada leitura."""
-    tipo1, conf1 = classificar_documento_com_ia(nome_original, texto_extraido)
-    tipo2, conf2 = classificar_documento_com_ia(nome_original, texto_extraido)
-    conf1 = int(conf1 or 0)
-    conf2 = int(conf2 or 0)
+    """Duas opiniões independentes, com rastreabilidade dos provedores."""
+    resposta_1, resposta_2 = analisar_fatos_com_dupla_ia(
+        _prompt_classificacao_documento(nome_original, texto_extraido),
+        system_prompt="Você é um classificador documental. Retorne apenas JSON válido.",
+        response_format={"type": "json_object"},
+    )
+
+    def interpretar(resposta):
+        bruto, provedor, modelo = resposta
+        dados = json.loads(bruto)
+        tipo = dados.get("tipo", nome_original)
+        confianca = int(dados.get("confianca", 0) or 0)
+        if tipo not in TIPOS_DOC_FII.values():
+            tipo, confianca = nome_original, 0
+        return tipo, confianca, provedor, modelo
+
+    tipo1, conf1, provedor1, modelo1 = interpretar(resposta_1)
+    tipo2, conf2, provedor2, modelo2 = interpretar(resposta_2)
     confianca = min(conf1, conf2)
-    validos = set(TIPOS_DOC_FII.values())
-    acordo = tipo1 == tipo2 and tipo1 in validos and confianca > 0
+    acordo = (
+        provedor1 != provedor2
+        and tipo1 == tipo2
+        and tipo1 in set(TIPOS_DOC_FII.values())
+        and confianca > 0
+    )
     return {
         "tipo": tipo1 if acordo else nome_original,
         "confianca": confianca,
         "acordo": acordo,
-        "checagem_1": (tipo1, conf1),
-        "checagem_2": (tipo2, conf2),
+        "checagem_1": {
+            "tipo": tipo1, "confianca": conf1,
+            "provedor": provedor1, "modelo": modelo1,
+        },
+        "checagem_2": {
+            "tipo": tipo2, "confianca": conf2,
+            "provedor": provedor2, "modelo": modelo2,
+        },
     }
 
 
@@ -146,12 +158,20 @@ def classificar_documento_fii_dupla(nome_original, texto_extraido):
 
 def _resumo_dupla_checagem(detalhes):
     """JSON persistido em ``resumo_ia`` so para a Central de Revisoes."""
-    c1_tipo, c1_conf = detalhes["checagem_1"]
-    c2_tipo, c2_conf = detalhes["checagem_2"]
+    c1 = detalhes["checagem_1"]
+    c2 = detalhes["checagem_2"]
+    c1_tipo, c1_conf = c1["tipo"], c1["confianca"]
+    c2_tipo, c2_conf = c2["tipo"], c2["confianca"]
     return json.dumps(
         {
-            "checagem_1": {"tipo": c1_tipo, "confianca": c1_conf},
-            "checagem_2": {"tipo": c2_tipo, "confianca": c2_conf},
+            "checagem_1": {
+                "tipo": c1_tipo, "confianca": c1_conf,
+                "provedor": c1.get("provedor"), "modelo": c1.get("modelo"),
+            },
+            "checagem_2": {
+                "tipo": c2_tipo, "confianca": c2_conf,
+                "provedor": c2.get("provedor"), "modelo": c2.get("modelo"),
+            },
             "acordo": bool(detalhes["acordo"]),
         },
         ensure_ascii=False,
@@ -790,9 +810,9 @@ def rotina_processar_acoes():
 
 LIMITE_RECLASSIFICACAO = 3
 MAX_LOTES_RECLASSIFICACAO = 40
-TAMANHO_MAX_PDF_CLASSIFICACAO = 1_500_000
-TEXTO_MAX_CLASSIFICACAO = 1500
-PAGINAS_MAX_CLASSIFICACAO = 3
+TAMANHO_MAX_PDF_CLASSIFICACAO = 4_000_000
+TEXTO_MAX_CLASSIFICACAO = 12_000
+PAGINAS_MAX_CLASSIFICACAO = 12
 TAMANHO_MAX_PDF_RAG = 8_000_000
 TEXTO_MAX_RAG = 15000
 PAGINAS_MAX_RAG = 80
@@ -1125,7 +1145,7 @@ def _ja_tem_dupla_checagem(doc):
         return False
     c1 = dados.get("checagem_1") or {}
     c2 = dados.get("checagem_2") or {}
-    return bool(c1.get("tipo") and c2.get("tipo"))
+    return bool(c1.get("tipo") and c2.get("tipo") and c1.get("provedor") and c2.get("provedor"))
 
 
 def _precisa_reclassificar(doc):
@@ -1399,7 +1419,7 @@ def reclassificar_documentos_genericos(
                 _registrar_fundo(resumo, ticker, "erros")
                 continue
             oficial = manter_tipo_catalogo(detalhes["tipo"], doc.tipo_documento, "FII")
-            if detalhes["acordo"] and detalhes["confianca"] >= 80 and oficial:
+            if detalhes["acordo"] and detalhes["confianca"] >= 90 and oficial:
                 _confirmar_identificacao(
                     doc, oficial, resumo, ticker, drive_manager=drive_manager
                 )

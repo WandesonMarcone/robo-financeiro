@@ -111,7 +111,7 @@ def segmento_fii_canonico(texto, tipo=None, ticker=""):
             return _SEGMENTO_PADRAO["Híbrido"]
         if macro_seg == macro:
             return canonical
-    return _SEGMENTO_PADRAO.get(macro, "Outros")
+    return _SEGMENTO_PADRAO.get(macro, "N/D")
 
 
 def classificar_fii(setor, ticker=""):
@@ -126,7 +126,8 @@ def classificar_fii(setor, ticker=""):
     elif macros:
         tipo = macros[0]
     else:
-        tipo = "Tijolo"
+        # Ausência de fonte não prova que o FII seja de tijolo.
+        tipo = "N/D"
     segmento = segmento_fii_canonico(setor, tipo, ticker)
     return tipo, segmento, EMOJI_MACRO_FII.get(tipo, "🏢")
 

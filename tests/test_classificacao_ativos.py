@@ -38,5 +38,11 @@ class ClassificacaoAtivosTest(unittest.TestCase):
         self.assertIn("não use DY", p)
         self.assertIn("não classifique automaticamente como Tijolo", p)
 
+    def test_taxonomia_nao_inventa_tijolo(self):
+        from modules.taxonomia_fiis import classificar_fii
+        tipo, segmento, _emoji = classificar_fii("", "DESCONHECIDO11")
+        self.assertEqual(tipo, "N/D")
+        self.assertEqual(segmento, "N/D")
+
 if __name__ == "__main__":
     unittest.main()

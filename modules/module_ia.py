@@ -168,10 +168,13 @@ def analisar_fatos_com_ia(
     system_prompt: str = "Você é um analista financeiro institucional sênior.",
     response_format=None,
     falhar_se_indisponivel=False,
+    provedores_excluidos=None,
+    retornar_metadados=False,
 ) -> str:
     """Executa a cadeia de provedores usando apenas modelos ativos."""
     clientes = _clientes_configurados()
     modelos = _modelos_disponiveis(clientes)
+    excluidos = {str(x).lower() for x in (provedores_excluidos or ())}
     fila_modelos = [
         ("groq", modelos.get("groq", {}).get("modelo")),
         ("openrouter", modelos.get("openrouter", {}).get("modelo")),
@@ -181,7 +184,7 @@ def analisar_fatos_com_ia(
 
     for provedor, modelo in fila_modelos:
         cliente = clientes.get(provedor)
-        if not cliente or not modelo:
+        if provedor in excluidos or not cliente or not modelo:
             continue
         try:
             argumentos = {
@@ -195,7 +198,10 @@ def analisar_fatos_com_ia(
             if response_format is not None:
                 argumentos["response_format"] = response_format
             response = cliente.chat.completions.create(**argumentos)
-            return response.choices[0].message.content
+            conteudo = response.choices[0].message.content
+            if retornar_metadados:
+                return conteudo, provedor, modelo
+            return conteudo
         except Exception as erro:
             ultimo_erro = f"{provedor}:{modelo}:{type(erro).__name__}"
             continue
@@ -205,6 +211,36 @@ def analisar_fatos_com_ia(
             "Nenhum provedor/modelo de IA disponível para esta operação."
         )
     return f"❌ Erro crítico na IA. Último erro: {ultimo_erro or 'nenhum provedor configurado'}"
+
+
+def analisar_fatos_com_dupla_ia(
+    prompt: str,
+    system_prompt: str = "Você é um analista financeiro institucional sênior.",
+    response_format=None,
+):
+    """Executa duas opiniões independentes e informa os provedores usados.
+
+    A segunda tentativa exclui o provedor da primeira. Se só houver um
+    provedor/modelo configurado, a resposta fica explicitamente incompleta;
+    nenhum consenso é fabricado.
+    """
+    primeira = analisar_fatos_com_ia(
+        prompt,
+        system_prompt=system_prompt,
+        response_format=response_format,
+        falhar_se_indisponivel=True,
+        retornar_metadados=True,
+    )
+    _, provedor_1, _modelo_1 = primeira
+    segunda = analisar_fatos_com_ia(
+        prompt,
+        system_prompt=system_prompt,
+        response_format=response_format,
+        falhar_se_indisponivel=True,
+        provedores_excluidos={provedor_1},
+        retornar_metadados=True,
+    )
+    return primeira, segunda
 
 
 _TERMOS_RENDIMENTO = (
