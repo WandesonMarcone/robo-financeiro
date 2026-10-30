@@ -83,6 +83,23 @@ class DadosFinanceirosFiis(Base):
 
     ativo: Mapped["Ativo"] = relationship(back_populates="dados_fiis")
 
+class TarefaLonga(Base):
+    """Estado persistente de comandos demorados do Telegram."""
+
+    __tablename__ = 'tarefas_longas'
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tipo: Mapped[str] = mapped_column(String(60), nullable=False)
+    ano: Mapped[Optional[int]] = mapped_column(Integer)
+    chat_id: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    iniciado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
+    concluido_em: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    resultado: Mapped[Optional[str]] = mapped_column(Text)
+    erro: Mapped[Optional[str]] = mapped_column(Text)
+
+
 class DocumentosQualitativos(Base):
     __tablename__ = 'documentos_qualitativos'
     __table_args__ = (UniqueConstraint('ativo_id', 'url_pdf', name='uix_docs_url'),)
