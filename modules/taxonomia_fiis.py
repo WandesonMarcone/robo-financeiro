@@ -100,7 +100,11 @@ def tipo_macro_fii(texto, ticker=""):
 
 def segmento_fii_canonico(texto, tipo=None, ticker=""):
     """Segmento canonico da coluna C (StatusInvest/Fundamentus ou ja canonico)."""
-    macro = tipo if tipo in MACROS_FII else tipo_macro_fii(tipo or texto, ticker)
+    macro = (
+        tipo
+        if tipo in MACROS_FII or tipo == "N/D"
+        else tipo_macro_fii(texto, ticker)
+    )
     chave = _sem_acento_upper(texto)
     mapa = _mapa_fiis()
     for nome in mapa.get(macro, []):
