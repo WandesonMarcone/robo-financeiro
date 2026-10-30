@@ -30,6 +30,9 @@ class DadosFinanceirosAcoes(Base):
     ativo_id: Mapped[int] = mapped_column(ForeignKey('ativos.id'), nullable=False)
     data_referencia: Mapped[date] = mapped_column(Date, nullable=False)
     tipo_doc: Mapped[str] = mapped_column(String(10), nullable=False) # Ex: 'ITR', 'DFP'
+    # Momento em que o dado foi efetivamente persistido pela coleta.
+    # Permanece opcional para preservar os registros históricos existentes.
+    data_coleta: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
     # --- BALANÇO PATRIMONIAL ---
     ativo_total: Mapped[Optional[float]] = mapped_column(Float)
@@ -79,6 +82,23 @@ class DadosFinanceirosFiis(Base):
     despesas_taxas: Mapped[Optional[float]] = mapped_column(Float)        # Taxas de adm/gestão no período
 
     ativo: Mapped["Ativo"] = relationship(back_populates="dados_fiis")
+
+class TarefaLonga(Base):
+    """Estado persistente de comandos demorados do Telegram."""
+
+    __tablename__ = 'tarefas_longas'
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tipo: Mapped[str] = mapped_column(String(60), nullable=False)
+    ano: Mapped[Optional[int]] = mapped_column(Integer)
+    chat_id: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    iniciado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now)
+    concluido_em: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    resultado: Mapped[Optional[str]] = mapped_column(Text)
+    erro: Mapped[Optional[str]] = mapped_column(Text)
+
 
 class DocumentosQualitativos(Base):
     __tablename__ = 'documentos_qualitativos'
