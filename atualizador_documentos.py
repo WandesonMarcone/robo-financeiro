@@ -21,6 +21,7 @@ from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from pipeline_dados.conexao import obter_session_factory
 from config import MAPA_ISCAS_MASTER, TIPOS_DOC_FII
 from pipeline_dados.tipos_documento import manter_tipo_catalogo
+from modules.module_ia import IAIndisponivelError, analisar_fatos_com_ia
 
 logger = logging.getLogger("robo.documentos")
 
@@ -28,10 +29,6 @@ logger = logging.getLogger("robo.documentos")
 # carrega normalmente e funcionalidades que nao usam IA continuam disponiveis. O
 # erro controlado so surge quando uma operacao de IA e realmente solicitada.
 _cliente_groq = None
-
-
-class IAIndisponivelError(RuntimeError):
-    """Erro controlado quando uma operacao exige IA e nao ha credencial."""
 
 
 def obter_cliente_groq():
@@ -76,65 +73,45 @@ def normalizar_texto(texto):
 # 🚨 TRAVA 1: CLASSIFICAÇÃO HÍBRIDA COM IA (AUTO-SAVE)
 # ==========================================
 def classificar_documento_com_ia(nome_original, texto_extraido):
-    if not texto_extraido: 
-        return nome_original, 0 
+    if not texto_extraido:
+        return nome_original, 0
 
-    # 🛡️ HIGIENIZADOR: Remove caracteres invisíveis que dão Erro 400
-    texto_limpo = re.sub(r'[^\x20-\x7E\u00A0-\u00FF]', ' ', str(texto_extraido)).strip()
-    texto_limpo = texto_limpo[:1500] # Aumentei um pouco para a IA ter mais contexto
-
-    if not texto_limpo: 
+    texto_limpo = re.sub(r'[^\\x20-\\x7E\\u00A0-\\u00FF]', ' ', str(texto_extraido)).strip()
+    texto_limpo = texto_limpo[:1500]
+    if not texto_limpo:
         return nome_original, 0
 
     lista_opcoes = ", ".join(dict.fromkeys(TIPOS_DOC_FII.values()))
-    
-    # Prompt de engenharia reversa exigindo JSON
     prompt = (
         f"Você é um analista financeiro sênior avaliando um PDF de Fundo Imobiliário. "
-        f"O documento começa assim: '{texto_limpo}'\n\n"
-        f"Classifique o documento escolhendo ESTRITAMENTE UMA destas opções: {lista_opcoes}.\n"
+        f"O documento começa assim: '{texto_limpo}'\\n\\n"
+        f"Classifique o documento escolhendo ESTRITAMENTE UMA destas opções: {lista_opcoes}.\\n"
         f"Equivalencias obrigatorias: carta/aviso/comunicado ao cotista = Aviso aos Cotistas; "
-        f"inicio ou encerramento de emissao/distribuicao de cotas = Nova Emissao de Cotas.\n"
-        f"Responda EXATAMENTE E APENAS com um objeto JSON válido, contendo as chaves 'tipo' e 'confianca'. "
-        f"A chave 'confianca' deve ser um número inteiro de 0 a 100 representando sua certeza."
+        f"inicio ou encerramento de emissao/distribuicao de cotas = Nova Emissao de Cotas.\\n"
+        f"Responda EXATAMENTE E APENAS com um objeto JSON válido, contendo as chaves "
+        f"'tipo' e 'confianca'. A chave 'confianca' deve ser um número inteiro de 0 a 100."
     )
 
     try:
-        client = obter_cliente_groq()
-    except IAIndisponivelError:
-        logger.warning(
-            "IA indisponivel (GROQ_API_KEY ausente). Classificacao automatica "
-            "ignorada e documento mantido como '%s'.",
-            nome_original,
+        resposta_str = analisar_fatos_com_ia(
+            prompt,
+            system_prompt="Você é um classificador documental. Retorne apenas JSON válido.",
+            response_format={"type": "json_object"},
+            falhar_se_indisponivel=True,
         )
-        return nome_original, 0
-
-    try:
-        chat = client.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
-            model="llama-3.3-70b-versatile",
-            response_format={"type": "json_object"} # 🚀 Força a Groq a cuspir JSON puro
-        )
-        resposta_str = chat.choices[0].message.content
-        
-        # Transforma a resposta da IA em um dicionário Python
         dados_ia = json.loads(resposta_str)
         tipo_ia = dados_ia.get("tipo", nome_original)
         confianca_ia = int(dados_ia.get("confianca", 0))
-
-        # Validação: se a IA inventar uma palavra que não está na lista, zera a confiança
         if tipo_ia not in TIPOS_DOC_FII.values():
             return nome_original, 0
-
         return tipo_ia, confianca_ia
-
-    except Exception as e:
-        # Loga apenas o tipo da excecao: mensagens de SDK podem conter detalhes
-        # da requisicao e nunca devem expor credenciais.
+    except IAIndisponivelError:
+        raise
+    except Exception as erro:
         logger.warning(
             "Erro ao consultar IA para classificacao hibrida (%s). "
             "Mantendo classificacao original.",
-            type(e).__name__,
+            type(erro).__name__,
         )
         return nome_original, 0
 
@@ -435,9 +412,14 @@ class ResultadoProcessamento:
     def mensagem_telegram(self):
         etiqueta = self.status_fila
         if self.erro:
+            pendentes = max(0, self.fila - self.processados)
             return (
-                f"Processamento da fila ({etiqueta}): falha de processamento "
-                f"({self.erro}). Processados: {self.processados}."
+                f"Processamento da fila ({etiqueta}) interrompido.\\n"
+                f"Motivo: {self.erro}\\n"
+                f"Na fila: {self.fila}\\n"
+                f"Processados: {self.processados}\\n"
+                f"Pendentes preservados: {pendentes}\\n"
+                f"Erros: {self.erros}"
             )
         if self.fila == 0:
             return (
@@ -700,8 +682,24 @@ def rotina_processar_acoes():
 
             texto_pdf = texto_pdf.strip()
 
-            nome_ia = classificar_documento_com_ia(doc_db.tipo_documento, texto_pdf)
-            
+            try:
+                nome_ia = classificar_documento_com_ia(
+                    doc_db.tipo_documento, texto_pdf
+                )
+            except IAIndisponivelError:
+                resultado.erro = (
+                    "IA indisponivel: nenhum provedor/modelo respondeu. "
+                    "A fila foi pausada e os documentos pendentes foram preservados."
+                )
+                logger.warning(
+                    "Fila PENDENTE_ACAO pausada por indisponibilidade de IA; "
+                    "processados=%s pendentes=%s",
+                    resultado.processados,
+                    max(0, resultado.fila - resultado.processados),
+                )
+                session.rollback()
+                break
+
             # Corrige a tupla de retorno caso a IA das ações não retorne a confiança
             if isinstance(nome_ia, tuple):
                 nome_ia = nome_ia[0]

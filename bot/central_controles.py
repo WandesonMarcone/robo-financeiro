@@ -283,6 +283,7 @@ def _texto_hub():
             "👥 Usuarios — solicitacoes e cadastros.",
             "🔔 Notificacoes — alertas por pessoa ou por FIIs/acoes favoritados.",
             "⚖️ Central de Revisoes — documentos suspeitos de FIIs.",
+            "🤖 Status das IAs — provedores e modelos disponíveis.",
         ]
     )
 
@@ -300,6 +301,11 @@ def _markup_hub():
     markup.add(
         InlineKeyboardButton(
             "⚖️ Central de Revisoes", callback_data=f"{PREFIXO_CALLBACK}revisoes"
+        )
+    )
+    markup.add(
+        InlineKeyboardButton(
+            "🤖 Status das IAs", callback_data=f"{PREFIXO_CALLBACK}ia"
         )
     )
     markup.add(InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="voltar_menu"))
@@ -793,6 +799,54 @@ def _mostrar_notificacoes_pessoa(call, usuario_id):
     return None
 
 
+def _texto_ia_status():
+    from modules.module_ia import status_provedores_ia
+
+    linhas = [
+        "🤖 STATUS DAS INTELIGÊNCIAS ARTIFICIAIS",
+        "",
+        "O status é verificado no momento em que esta tela é aberta.",
+        "",
+    ]
+    rotulos = {
+        "NAO_CONFIGURADO": "❌ não configurada",
+        "ACESSO_VALIDADO": "✅ acesso validado",
+        "MODELO_INDISPONIVEL": "⚠️ modelo indisponível",
+    }
+    for item in status_provedores_ia():
+        status = rotulos.get(item["status"], "⚠️ indisponível")
+        modelo = item.get("modelo") or "nenhum modelo selecionado"
+        linhas.append(f"{status} — {item['provedor']}")
+        linhas.append(f"Modelo: {modelo}")
+        linhas.append("")
+    return "\n".join(linhas).rstrip()
+
+
+def _markup_ia_status():
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton(
+            "🔄 Verificar novamente", callback_data=f"{PREFIXO_CALLBACK}ia"
+        )
+    )
+    markup.add(
+        InlineKeyboardButton(
+            "🔙 Voltar", callback_data=f"{PREFIXO_CALLBACK}home"
+        )
+    )
+    return markup
+
+
+def _mostrar_ia(call):
+    try:
+        texto = _texto_ia_status()
+    except Exception:
+        logger.warning("CENTRAL - falha ao consultar status das IAs", exc_info=True)
+        texto = "⚠️ Não foi possível consultar o status das IAs agora."
+    _render(call, texto, _markup_ia_status())
+    return None
+
+
 def _mostrar_revisoes(call):
     from bot.callbacks_revisao import enviar_painel_tickers
 
@@ -941,6 +995,8 @@ def tratar_callback(call):
                 toast = _mostrar_notificacoes_pessoa(call, usuario_id)
         elif acao == "revisoes":
             toast = _mostrar_revisoes(call)
+        elif acao == "ia":
+            toast = _mostrar_ia(call)
         elif acao == "area":
             toast = _tratar_area(call, partes)
         elif acao == "ver":

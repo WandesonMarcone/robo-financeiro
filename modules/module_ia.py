@@ -1,75 +1,211 @@
 import os
 import json
+import time
 
 
-def analisar_fatos_com_ia(prompt: str, system_prompt: str = "Você é um analista financeiro institucional sênior.") -> str:
-    """
-    Executa a análise testando uma cadeia modular de provedores e modelos (Groq -> OpenRouter -> OpenAI).
-    """
+class IAIndisponivelError(RuntimeError):
+    """Erro controlado quando nenhum provedor/modelo de IA está disponível."""
+
+
+_CACHE_MODELOS = {}
+_CACHE_TTL_SEGUNDOS = 300
+
+_MODELOS_GROQ = ("openai/gpt-oss-120b", "openai/gpt-oss-20b")
+_MODELOS_OPENROUTER = (
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "meta-llama/llama-3.3-70b-instruct",
+)
+_MODELOS_OPENAI = ("gpt-4o-mini", "gpt-4.1-mini")
+
+
+def _ids_modelos(resposta):
+    itens = getattr(resposta, "data", None) or []
+    ids = []
+    for item in itens:
+        identificador = getattr(item, "id", None)
+        if identificador:
+            ids.append(str(identificador))
+    return set(ids)
+
+
+def _listar_modelos(provedor, cliente):
+    agora = time.monotonic()
+    cache = _CACHE_MODELOS.get(provedor)
+    if cache and agora - cache["instante"] < _CACHE_TTL_SEGUNDOS:
+        return cache["ids"]
+    ids = _ids_modelos(cliente.models.list())
+    _CACHE_MODELOS[provedor] = {"instante": agora, "ids": ids}
+    return ids
+
+
+def _modelo_configurado(nome_env):
+    valor = os.environ.get(nome_env)
+    return str(valor).strip() if valor and str(valor).strip() else None
+
+
+def _escolher_modelo(ids, configurado, preferidos):
+    candidatos = []
+    if configurado:
+        candidatos.append(configurado)
+    candidatos.extend(preferidos)
+    for candidato in candidatos:
+        if candidato in ids:
+            return candidato
+    # Fallback controlado: só usa modelos de chat conhecidos, nunca embeddings,
+    # áudio ou moderação. A ordenação fica a cargo da lista de candidatos acima.
+    prefixos = ("gpt-", "openai/gpt-", "meta-llama/", "qwen/")
+    proibidos = ("embedding", "moderation", "whisper", "tts", "dall-e")
+    elegiveis = sorted(
+        modelo for modelo in ids
+        if modelo.startswith(prefixos) and not any(x in modelo.lower() for x in proibidos)
+    )
+    return elegiveis[0] if elegiveis else None
+
+
+def _clientes_configurados():
+    clientes = {}
     groq_key = os.environ.get("GROQ_API_KEY")
     openai_key = os.environ.get("OPENAI_API_KEY")
     openrouter_key = os.environ.get("OPENROUTER_API_KEY")
 
-    groq_client = None
-    openai_client = None
-    openrouter_client = None
     if groq_key:
         try:
             from groq import Groq
-
-            groq_client = Groq(api_key=groq_key)
+            clientes["groq"] = Groq(api_key=groq_key)
         except Exception:
-            groq_client = None
-    if openai_key or openrouter_key:
+            pass
+
+    try:
+        from openai import OpenAI
+    except Exception:
+        OpenAI = None
+
+    if OpenAI and openrouter_key:
         try:
-            from openai import OpenAI
-        except Exception:
-            OpenAI = None
-        if OpenAI and openai_key:
-            openai_client = OpenAI(api_key=openai_key)
-        if OpenAI and openrouter_key:
-            openrouter_client = OpenAI(
-                api_key=openrouter_key, base_url="https://openrouter.ai/api/v1"
+            clientes["openrouter"] = OpenAI(
+                api_key=openrouter_key,
+                base_url="https://openrouter.ai/api/v1",
             )
+        except Exception:
+            pass
+    if OpenAI and openai_key:
+        try:
+            clientes["openai"] = OpenAI(api_key=openai_key)
+        except Exception:
+            pass
+    return clientes
 
-    modelo_groq = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 
+def _modelos_disponiveis(clientes):
+    configuracoes = {
+        "groq": ("GROQ_MODEL", _MODELOS_GROQ),
+        "openrouter": ("OPENROUTER_MODEL", _MODELOS_OPENROUTER),
+        "openai": ("OPENAI_MODEL", _MODELOS_OPENAI),
+    }
+    resultados = {}
+    for provedor, cliente in clientes.items():
+        nome_env, preferidos = configuracoes[provedor]
+        try:
+            ids = _listar_modelos(provedor, cliente)
+            modelo = _escolher_modelo(
+                ids, _modelo_configurado(nome_env), preferidos
+            )
+            resultados[provedor] = {"modelo": modelo, "ids": ids}
+        except Exception as erro:
+            resultados[provedor] = {
+                "modelo": None,
+                "ids": set(),
+                "erro": type(erro).__name__,
+            }
+    return resultados
+
+
+def status_provedores_ia():
+    """Retorna status seguro dos provedores, sem expor chaves ou mensagens sensíveis."""
+    clientes = _clientes_configurados()
+    configuracoes = {
+        "groq": ("Groq", "GROQ_API_KEY"),
+        "openrouter": ("OpenRouter", "OPENROUTER_API_KEY"),
+        "openai": ("OpenAI", "OPENAI_API_KEY"),
+    }
+    modelos = _modelos_disponiveis(clientes)
+    resultado = []
+    for provedor, (rotulo, chave_env) in configuracoes.items():
+        if provedor not in clientes:
+            resultado.append({
+                "provedor": rotulo,
+                "status": "NAO_CONFIGURADO",
+                "modelo": _modelo_configurado(
+                    {"groq": "GROQ_MODEL", "openrouter": "OPENROUTER_MODEL", "openai": "OPENAI_MODEL"}[provedor]
+                ),
+                "variavel": chave_env,
+            })
+            continue
+        dados = modelos.get(provedor) or {}
+        if dados.get("modelo"):
+            resultado.append({
+                "provedor": rotulo,
+                "status": "ACESSO_VALIDADO",
+                "modelo": dados["modelo"],
+                "variavel": chave_env,
+            })
+        else:
+            resultado.append({
+                "provedor": rotulo,
+                "status": "MODELO_INDISPONIVEL",
+                "modelo": _modelo_configurado(
+                    {"groq": "GROQ_MODEL", "openrouter": "OPENROUTER_MODEL", "openai": "OPENAI_MODEL"}[provedor]
+                ),
+                "variavel": chave_env,
+                "erro": dados.get("erro"),
+            })
+    return resultado
+
+
+def analisar_fatos_com_ia(
+    prompt: str,
+    system_prompt: str = "Você é um analista financeiro institucional sênior.",
+    response_format=None,
+    falhar_se_indisponivel=False,
+) -> str:
+    """Executa a cadeia de provedores usando apenas modelos ativos."""
+    clientes = _clientes_configurados()
+    modelos = _modelos_disponiveis(clientes)
     fila_modelos = [
-        ("groq", modelo_groq),
-        ("openrouter", "meta-llama/llama-3.3-70b-instruct"), 
-        ("openai", "gpt-4o-mini")
+        ("groq", modelos.get("groq", {}).get("modelo")),
+        ("openrouter", modelos.get("openrouter", {}).get("modelo")),
+        ("openai", modelos.get("openai", {}).get("modelo")),
     ]
-
-    ultimo_erro = ""
+    ultimo_erro = None
 
     for provedor, modelo in fila_modelos:
+        cliente = clientes.get(provedor)
+        if not cliente or not modelo:
+            continue
         try:
-            if provedor == "groq" and groq_client:
-                response = groq_client.chat.completions.create(
-                    messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}],
-                    model=modelo, temperature=0.1 # Temperatura 0.1 para JSON mais preciso
-                )
-                return response.choices[0].message.content
-
-            elif provedor == "openrouter" and openrouter_client:
-                response = openrouter_client.chat.completions.create(
-                    messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}],
-                    model=modelo, temperature=0.1
-                )
-                return response.choices[0].message.content
-
-            elif provedor == "openai" and openai_client:
-                response = openai_client.chat.completions.create(
-                    messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}],
-                    model=modelo, temperature=0.1
-                )
-                return response.choices[0].message.content
-
-        except Exception as e:
-            ultimo_erro = f"Provedor '{provedor}' com modelo '{modelo}' falhou: {str(e)}"
+            argumentos = {
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                "model": modelo,
+                "temperature": 0.1,
+            }
+            if response_format is not None:
+                argumentos["response_format"] = response_format
+            response = cliente.chat.completions.create(**argumentos)
+            return response.choices[0].message.content
+        except Exception as erro:
+            ultimo_erro = f"{provedor}:{modelo}:{type(erro).__name__}"
             continue
 
-    return f"❌ Erro crítico na IA. Último erro: {ultimo_erro}"
+    if falhar_se_indisponivel:
+        raise IAIndisponivelError(
+            "Nenhum provedor/modelo de IA disponível para esta operação."
+        )
+    return f"❌ Erro crítico na IA. Último erro: {ultimo_erro or 'nenhum provedor configurado'}"
+
 
 _TERMOS_RENDIMENTO = (
     "dividend yield",
