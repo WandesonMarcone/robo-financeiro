@@ -10,7 +10,11 @@ from modules.utils import (
 )
 from modules.scraper_acoes import rodar_garimpo_acoes
 from modules.scraper_fiis import rodar_garimpo_fiis
-from modules.eod_snapshots import eod_apos_fechamento, tentar_persistir_eod
+from modules.eod_snapshots import (
+    eod_apos_fechamento,
+    eod_habilitado,
+    tentar_persistir_eod,
+)
 from pipeline_dados.repositorio_indices import persistir_indices_diarios
 
 
@@ -64,7 +68,7 @@ def tentar_persistir_indices_eod(agora_dt):
 
     Falhas no novo armazenamento não interrompem a varredura principal.
     """
-    if not eod_apos_fechamento(agora_dt):
+    if not eod_habilitado() or not eod_apos_fechamento(agora_dt):
         return None
     registros = buscar_indices_b3_ohlc()
     if not registros:
