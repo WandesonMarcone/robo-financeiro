@@ -1,0 +1,4 @@
+-- Definição; não executar automaticamente no boot.
+CREATE TABLE IF NOT EXISTS classificacoes_ativos (id BIGSERIAL PRIMARY KEY, ativo_id INTEGER NOT NULL REFERENCES ativos(id), tipo_ativo VARCHAR(10) NOT NULL, classe VARCHAR(40), segmento VARCHAR(120), subtipo VARCHAR(80), indexadores JSONB NOT NULL DEFAULT '[]'::jsonb, estrategias JSONB NOT NULL DEFAULT '[]'::jsonb, confianca INTEGER NOT NULL DEFAULT 0 CHECK (confianca BETWEEN 0 AND 100), fonte VARCHAR(80), evidencia TEXT, status VARCHAR(20) NOT NULL DEFAULT 'pendente', vigente BOOLEAN NOT NULL DEFAULT TRUE, analisado_em TIMESTAMP, proxima_analise_em DATE, criado_em TIMESTAMP NOT NULL DEFAULT NOW(), atualizado_em TIMESTAMP NOT NULL DEFAULT NOW());
+CREATE UNIQUE INDEX IF NOT EXISTS uix_classificacoes_ativos_vigente ON classificacoes_ativos (ativo_id) WHERE vigente = TRUE;
+CREATE INDEX IF NOT EXISTS ix_classificacoes_ativos_proxima_analise ON classificacoes_ativos (proxima_analise_em) WHERE vigente = TRUE;
