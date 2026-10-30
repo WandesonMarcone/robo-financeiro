@@ -290,6 +290,77 @@ def _linha_indice(nome, preco, anterior):
     return f"{nome}: {formatar_pontos(preco)}"
 
 
+
+def buscar_ohlc_diario_yahoo(simbolo, ticker_factory=None):
+    """Retorna a última vela diária disponível e o fechamento anterior.
+
+    A fonte é o Yahoo Finance; portanto o resultado não é chamado de cotação
+    oficial B3. A data do pregão vem do índice da série retornada.
+    """
+    factory = ticker_factory or _ticker_yahoo
+    try:
+        ticker = factory(simbolo)
+        historico = ticker.history(
+            period="10d", interval="1d", auto_adjust=False
+        )
+        if historico is None or historico.empty or "Close" not in historico:
+            return None
+        historico = historico.dropna(subset=["Close"])
+        if historico.empty:
+            return None
+        atual = historico.iloc[-1]
+        anterior = historico.iloc[-2] if len(historico) >= 2 else None
+
+        def numero_linha(linha, coluna):
+            if linha is None or coluna not in linha:
+                return None
+            numero = converter_numero(linha[coluna])
+            return numero if eh_valido(numero) else None
+
+        indice = historico.index[-1]
+        data_pregao = indice.date() if hasattr(indice, "date") else indice
+        fechamento = numero_linha(atual, "Close")
+        fechamento_anterior = numero_linha(anterior, "Close")
+        variacao = None
+        if (
+            eh_valido(fechamento)
+            and eh_valido(fechamento_anterior)
+            and fechamento_anterior != 0
+        ):
+            variacao = (
+                (fechamento - fechamento_anterior)
+                / fechamento_anterior
+                * 100.0
+            )
+        return {
+            "data_pregao": data_pregao,
+            "abertura": numero_linha(atual, "Open"),
+            "maxima": numero_linha(atual, "High"),
+            "minima": numero_linha(atual, "Low"),
+            "fechamento": fechamento,
+            "fechamento_anterior": fechamento_anterior,
+            "variacao_percentual": variacao,
+            "fonte": "Yahoo Finance - OHLC diário",
+        }
+    except Exception:
+        return None
+
+
+def buscar_indices_b3_ohlc(ticker_factory=None):
+    """Busca a última vela diária disponível do IFIX e Ibovespa."""
+    configuracoes = (
+        ("IFIX", "IFIX.SA"),
+        ("Ibovespa", "^BVSP"),
+    )
+    registros = []
+    for indice, simbolo in configuracoes:
+        registro = buscar_ohlc_diario_yahoo(
+            simbolo, ticker_factory=ticker_factory
+        )
+        if registro is not None:
+            registros.append({"indice": indice, **registro})
+    return registros
+
 def buscar_indices_b3(ticker_factory=None):
     factory = ticker_factory or _ticker_yahoo
     ifix_preco, ifix_ant = buscar_cotacao_yahoo("IFIX.SA", ticker_factory=factory)
