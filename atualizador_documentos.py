@@ -31,10 +31,6 @@ logger = logging.getLogger("robo.documentos")
 _cliente_groq = None
 
 
-class IAIndisponivelError(RuntimeError):
-    """Erro controlado quando uma operacao exige IA e nao ha credencial."""
-
-
 def obter_cliente_groq():
     """Cria o cliente Groq sob demanda ou falha com erro controlado.
 
