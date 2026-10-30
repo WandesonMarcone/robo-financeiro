@@ -50,6 +50,7 @@ from services.orquestrador import (
 from pipeline_dados.banco_dados import Base
 from pipeline_dados.conexao import obter_engine
 from pipeline_dados.modelos_catalogo import BaseCatalogo
+from services.tarefas_longas import retomar_tarefas_interrompidas
 
 logger = logging.getLogger("robo.main")
 
@@ -234,6 +235,7 @@ def inicializar_aplicacao():
     criar_tabelas_se_solicitado()
     iniciar_agendador()
     configurar_webhook()
+    retomar_tarefas_interrompidas()
 
 
 def main():
