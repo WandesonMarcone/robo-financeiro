@@ -2,6 +2,7 @@ import datetime
 import pytz
 import config
 from modules.utils import (
+    buscar_indices_b3_ohlc,
     conectar_gspread,
     disparar_alertas,
     mensagem_indices_b3,
@@ -9,7 +10,12 @@ from modules.utils import (
 )
 from modules.scraper_acoes import rodar_garimpo_acoes
 from modules.scraper_fiis import rodar_garimpo_fiis
-from modules.eod_snapshots import tentar_persistir_eod
+from modules.eod_snapshots import (
+    eod_apos_fechamento,
+    eod_habilitado,
+    tentar_persistir_eod,
+)
+from pipeline_dados.repositorio_indices import persistir_indices_diarios
 
 
 def _texto_digest(pacote):
@@ -57,6 +63,37 @@ def _enviar_favoritos(pacote, tipo):
     return notificar_seguidores_ticker(itens, tipo)
 
 
+def tentar_persistir_indices_eod(agora_dt):
+    """Persiste uma linha diária por índice somente após o fechamento.
+
+    Falhas no novo armazenamento não interrompem a varredura principal.
+    """
+    if not eod_habilitado() or not eod_apos_fechamento(agora_dt):
+        return None
+    registros = buscar_indices_b3_ohlc()
+    if not registros:
+        print("OHLC dos índices indisponível; nada persistido.")
+        return None
+    por_data = {}
+    for registro in registros:
+        por_data.setdefault(registro["data_pregao"], []).append(registro)
+    resultados = []
+    for data_pregao, lote in por_data.items():
+        try:
+            resultado = persistir_indices_diarios(lote, data_pregao)
+            resultados.append(resultado)
+            print(
+                f"Índices EOD: {resultado.get('gravados', 0)} registros "
+                f"gravados para {data_pregao}."
+            )
+        except Exception as exc:
+            # A migração pode ainda não ter sido aplicada; não derruba o job.
+            print(
+                f"Falha ao persistir OHLC dos índices: {type(exc).__name__}"
+            )
+    return resultados or None
+
+
 def executar_auditoria_carteira():
     print("INICIANDO ARQUITETURA MODULAR DE ALTA PERFORMANCE")
     
@@ -97,6 +134,7 @@ def executar_auditoria_carteira():
         print("Execucao concluida com sucesso. (Mercado esta estavel, sem alertas de distorcoes).")
 
     tentar_persistir_eod(planilha, agora_dt)
+    tentar_persistir_indices_eod(agora_dt)
 
 if __name__ == "__main__":
     executar_auditoria_carteira()
