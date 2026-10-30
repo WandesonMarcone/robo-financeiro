@@ -194,34 +194,35 @@ def rodar_docs_acoes(message):
     bot.reply_to(
         message,
         f"Varredura de PDFs de acoes na CVM ({ano_escolhido}) em segundo plano. "
-        "Aguarde o aviso de conclusao!",
+        "A tarefa sera retomada automaticamente se o Render reiniciar.",
     )
 
-    def tarefa_docs_background(ano):
-        try:
-            from pipeline_dados.coletor_docs_acoes import RelatoriosAcoesCVM
-            from pipeline_dados.coletor_docs_acoes import STATUS_GRAVADO as DOCS_GRAVADO
+    try:
+        from services.tarefas_longas import (
+            iniciar_tarefa_docs_acoes,
+            executar_tarefa_docs_acoes,
+        )
 
-            session = SessionDB()
-            try:
-                resultado = RelatoriosAcoesCVM(session).vasculhar_documentos(ano)
-            finally:
-                session.close()
-            bot.send_message(chat_id, resultado.mensagem_telegram())
-            if resultado.status == DOCS_GRAVADO and resultado.gravados > 0:
-                bot.send_message(
-                    chat_id,
-                    "Documentos novos gravados; iniciando classificacao por IA.",
-                )
-                rodar_ia_acoes(message)
-        except Exception as e:
+        tarefa_id = iniciar_tarefa_docs_acoes(ano_escolhido, chat_id)
+        if tarefa_id is None:
             bot.send_message(
                 chat_id,
-                f"Varredura de PDFs de acoes ({ano}): falha de processamento "
-                f"ou persistencia ({e}).",
+                "Ja existe uma varredura de documentos de acoes em andamento. "
+                "Nao iniciei outra para evitar duplicidades.",
             )
+            return
+        threading.Thread(
+            target=executar_tarefa_docs_acoes,
+            args=(tarefa_id,),
+            daemon=True,
+        ).start()
+    except Exception as erro:
+        bot.send_message(
+            chat_id,
+            f"Varredura de PDFs de acoes ({ano_escolhido}): "
+            f"falha ao registrar a tarefa ({type(erro).__name__}).",
+        )
 
-    threading.Thread(target=tarefa_docs_background, args=(ano_escolhido,)).start()
 
 @bot.message_handler(commands=['processar_acoes_ia'])
 def rodar_ia_acoes(message):
