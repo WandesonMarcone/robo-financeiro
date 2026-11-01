@@ -538,6 +538,7 @@ def editar_texto_ou_caption(
     reply_markup=None,
     parse_mode=None,
     message=None,
+    substituir_foto=False,
 ):
     """Atualiza o texto de um callback, inclusive quando a mensagem e foto.
 
@@ -596,6 +597,20 @@ def editar_texto_ou_caption(
             return False
 
     foto = mensagem_eh_foto(message)
+
+    # Menus de navegação não devem manter a logo do ativo anterior. Quando o
+    # chamador pede substituição, remove a mensagem de mídia e envia uma
+    # mensagem textual nova com os mesmos botões.
+    if foto and substituir_foto:
+        try:
+            bot_api.delete_message(chat_id, message_id)
+        except Exception:
+            logger.debug(
+                "TELEGRAM - não foi possível remover a mensagem de mídia",
+                exc_info=True,
+            )
+        return _tentar(_enviar, parse_mode)
+
     cabe_na_caption = len(texto or "") <= LIMITE_CAPTION_TELEGRAM
     if foto and cabe_na_caption and _tentar(_com_caption, parse_mode):
         return True

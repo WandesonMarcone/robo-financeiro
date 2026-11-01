@@ -1,7 +1,9 @@
 import logging
+from datetime import datetime
 
 import io
 import re
+from sqlalchemy import func
 from telebot.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -489,7 +491,37 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None, message=None):
     resumo_limpo = sanitizar_markdown(montar_resumo_ativo(ticker, tipo, indicadores))
     ticker_limpo = sanitizar_markdown(_rotulo_ativo(ticker, tipo))
 
+    # Registra o momento real da consulta do painel. Isso não afirma que a
+    # planilha ou a fonte externa tenha sido atualizada nesse instante.
+    consulta_em = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+
+    ultima_data_documento = None
+    try:
+        session = SessionDB()
+        ultima_data_documento = (
+            session.query(func.max(DocumentosQualitativos.data_publicacao))
+            .join(Ativo)
+            .filter(
+                Ativo.ticker == ticker,
+                DocumentosQualitativos.status_processamento == "SALVO_DRIVE",
+            )
+            .scalar()
+        )
+        session.close()
+    except Exception:
+        logger.debug(
+            "Último documento indisponível para %s", ticker, exc_info=True
+        )
+
+    documento_info = (
+        ultima_data_documento.strftime("%d/%m/%Y")
+        if ultima_data_documento
+        else "nenhum documento salvo"
+    )
+
     texto = f"{icone}: **{ticker_limpo}**\n"
+    texto += f"🕒 **Consulta do painel:** {consulta_em}\n"
+    texto += f"📄 **Último documento salvo:** {documento_info}\n"
     if resumo_limpo:
         texto += f"📝 **Resumo:** _{resumo_limpo}_\n"
     texto += (
