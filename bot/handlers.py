@@ -27,6 +27,7 @@ def _atualizar_mensagem(call, texto, markup=None, parse_mode="Markdown"):
         reply_markup=markup,
         parse_mode=parse_mode,
         message=mensagem,
+        substituir_foto=True,
     )
 
 
