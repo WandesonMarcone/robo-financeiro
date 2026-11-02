@@ -1,6 +1,4 @@
 import logging
-from datetime import datetime
-
 import io
 import re
 from sqlalchemy import func
