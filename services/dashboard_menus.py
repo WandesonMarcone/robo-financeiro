@@ -450,7 +450,7 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None, message=None):
 
     is_fii = (tipo == 'fii')
     icone = "🏢 Fundo" if is_fii else "📈 Ação"
-    voltar_cmd = "voltar_painel"
+    # Ao sair do painel de um ativo, retorne ao módulo de origem.\n    # O painel inicial pode conter mídia/logo; voltar para ele quebrava a\n    # navegação e impedia escolher outra classe/ativo.\n    voltar_cmd = "menu_fiis" if is_fii else "menu_acoes"
 
     # O file_id do Telegram evita novo download; a URL só é resolvida quando
     # ainda não há cache do envio anterior.
