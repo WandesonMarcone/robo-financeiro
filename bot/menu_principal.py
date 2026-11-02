@@ -238,6 +238,7 @@ def editar_mensagem(chat_id, message_id, texto, markup, message=None):
         reply_markup=markup,
         parse_mode="Markdown",
         message=message,
+        substituir_foto=True,
     )
 
 
