@@ -1,6 +1,8 @@
 import logging
 import io
 import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from sqlalchemy import func
 from telebot.types import (
     InlineKeyboardButton,
@@ -450,7 +452,7 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None, message=None):
 
     is_fii = (tipo == 'fii')
     icone = "🏢 Fundo" if is_fii else "📈 Ação"
-    voltar_cmd = "voltar_painel"
+    # Ao sair do painel de um ativo, retorne ao módulo de origem.\n    # O painel inicial pode conter mídia/logo; voltar para ele quebrava a\n    # navegação e impedia escolher outra classe/ativo.\n    voltar_cmd = "menu_fiis" if is_fii else "menu_acoes"
 
     # O file_id do Telegram evita novo download; a URL só é resolvida quando
     # ainda não há cache do envio anterior.
@@ -501,6 +503,15 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None, message=None):
     )
     if coleta_bruta.upper().startswith("OK"):
         coleta_github = coleta_bruta[2:].strip() or "horário não informado"
+        # Para a coleta de hoje, o dia é redundante; para datas anteriores,
+        # preserva data e horário para deixar o atraso evidente.
+        match_coleta = re.match(r"^(\d{2})/(\d{2})(?:/(\d{4}))?\s+(.+)$", coleta_github)
+        if match_coleta:
+            dia, mes, ano, horario = match_coleta.groups()
+            hoje = datetime.now(ZoneInfo("America/Sao_Paulo"))
+            ano_coleta = int(ano) if ano else hoje.year
+            if ano_coleta == hoje.year and int(mes) == hoje.month and int(dia) == hoje.day:
+                coleta_github = horario
     else:
         coleta_github = coleta_bruta or "não registrada"
 
