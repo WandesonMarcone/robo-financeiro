@@ -1,0 +1,20 @@
+name: Testes do benchmark
+on:
+  pull_request:
+    paths:
+      - scripts/benchmark_capacidade.py
+      - tests/test_benchmark_capacidade.py
+      - .github/workflows/test-benchmark.yml
+permissions:
+  contents: read
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Executar testes sem rede e sem credenciais
+        run: python -m unittest discover -s tests -p test_benchmark_capacidade.py -v
