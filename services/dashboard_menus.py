@@ -491,9 +491,20 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None, message=None):
     resumo_limpo = sanitizar_markdown(montar_resumo_ativo(ticker, tipo, indicadores))
     ticker_limpo = sanitizar_markdown(_rotulo_ativo(ticker, tipo))
 
-    # Registra o momento real da consulta do painel. Isso não afirma que a
-    # planilha ou a fonte externa tenha sido atualizada nesse instante.
-    consulta_em = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    # A planilha recebe a marcação "OK dd/mm HH:MM" no fim da coleta
+    # automática. Este é o horário da última coleta do robô, não o horário
+    # em que o usuário abriu o painel.
+    raw = indicadores.get("raw") or []
+    indice_coleta = 17 if is_fii else 32
+    coleta_bruta = (
+        str(raw[indice_coleta]).strip()
+        if len(raw) > indice_coleta
+        else ""
+    )
+    if coleta_bruta.upper().startswith("OK"):
+        coleta_github = coleta_bruta[2:].strip() or "horário não informado"
+    else:
+        coleta_github = coleta_bruta or "não registrada"
 
     ultima_data_documento = None
     try:
@@ -520,7 +531,7 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None, message=None):
     )
 
     texto = f"{icone}: **{ticker_limpo}**\n"
-    texto += f"🕒 **Consulta do painel:** {consulta_em}\n"
+    texto += f"🕘 **Última coleta do robô (GitHub):** {coleta_github}\n"
     texto += f"📄 **Último documento salvo:** {documento_info}\n"
     if resumo_limpo:
         texto += f"📝 **Resumo:** _{resumo_limpo}_\n"
