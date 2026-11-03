@@ -519,6 +519,7 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None, message=None):
         coleta_github = coleta_bruta or "não registrada"
 
     ultima_data_documento = None
+    quantidade_documentos = 0
     try:
         session = SessionDB()
         ultima_data_documento = (
@@ -529,6 +530,15 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None, message=None):
                 DocumentosQualitativos.status_processamento == "SALVO_DRIVE",
             )
             .scalar()
+        )
+        quantidade_documentos = (
+            session.query(DocumentosQualitativos)
+            .join(Ativo)
+            .filter(
+                Ativo.ticker == ticker,
+                DocumentosQualitativos.status_processamento == "SALVO_DRIVE",
+            )
+            .count()
         )
         session.close()
     except Exception:
@@ -545,6 +555,7 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None, message=None):
     texto = f"{icone}: **{ticker_limpo}**\n"
     texto += f"🕘 **Última coleta do robô (GitHub):** {coleta_github}\n"
     texto += f"📄 **Último documento salvo:** {documento_info}\n"
+    texto += f"📚 **Documentos organizados no Drive:** {quantidade_documentos}\n"
     if resumo_limpo:
         texto += f"📝 **Resumo:** _{resumo_limpo}_\n"
     texto += (

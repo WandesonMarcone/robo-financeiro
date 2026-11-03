@@ -98,7 +98,7 @@ def _persistir_lote(aba, atualizacoes, tipo):
     return True
 
 
-def executar(limite_total=16, orcamento_segundos=540, pausa_segundos=2.0, planilha=None, clock=time.monotonic, sleep=time.sleep):
+def executar(limite_total=16, orcamento_segundos=540, pausa_segundos=2.0, planilha=None, clock=time.monotonic, sleep=time.sleep, ticker=None):
     if not 1 <= limite_total <= 16:
         raise ValueError("limite_total_invalido")
     if not 60 <= orcamento_segundos <= 540:
@@ -122,19 +122,30 @@ def executar(limite_total=16, orcamento_segundos=540, pausa_segundos=2.0, planil
     cursor_fiis = _inteiro(estado[2])
     pendentes_acoes = _lista(estado[3])
     pendentes_fiis = _lista(estado[4])
-    limite_acoes, limite_fiis = distribuir_limite(limite_total, len(acoes), len(fiis))
-    lote_acoes, proximo_acoes, pendentes_acoes = selecionar_com_retentativas(
-        acoes, cursor_acoes, limite_acoes, pendentes_acoes
-    )
-    lote_fiis, proximo_fiis, pendentes_fiis = selecionar_com_retentativas(
-        fiis, cursor_fiis, limite_fiis, pendentes_fiis
-    )
+    ticker_isolado = str(ticker or "").strip().upper()
+    if ticker_isolado:
+        if ticker_isolado in acoes:
+            lote_acoes, lote_fiis = [ticker_isolado], []
+        elif ticker_isolado in fiis:
+            lote_acoes, lote_fiis = [], [ticker_isolado]
+        else:
+            raise ValueError(f"ticker_nao_encontrado:{ticker_isolado}")
+        proximo_acoes, proximo_fiis = cursor_acoes, cursor_fiis
+    else:
+        limite_acoes, limite_fiis = distribuir_limite(limite_total, len(acoes), len(fiis))
+        lote_acoes, proximo_acoes, pendentes_acoes = selecionar_com_retentativas(
+            acoes, cursor_acoes, limite_acoes, pendentes_acoes
+        )
+        lote_fiis, proximo_fiis, pendentes_fiis = selecionar_com_retentativas(
+            fiis, cursor_fiis, limite_fiis, pendentes_fiis
+        )
 
     fuso = pytz.timezone("America/Sao_Paulo")
     agora_dt = datetime.datetime.now(fuso)
     agora_sp = agora_dt.strftime("%d/%m %H:%M")
     print(
         f"Atualização cíclica: teto={limite_total}; "
+        f"ticker={ticker_isolado or 'lote'}; "
         f"ações={len(lote_acoes)}; FIIs={len(lote_fiis)}; "
         f"orçamento={orcamento_segundos}s."
     )
@@ -183,6 +194,7 @@ def executar(limite_total=16, orcamento_segundos=540, pausa_segundos=2.0, planil
 
     return {
         "limite_total": limite_total,
+        "ticker": ticker_isolado or None,
         "acoes_solicitadas": len(lote_acoes),
         "fiis_solicitados": len(lote_fiis),
         "acoes_avancaram": sucesso_acoes,
@@ -197,8 +209,9 @@ def main():
     parser.add_argument("--limite-total", type=int, default=16)
     parser.add_argument("--orcamento-segundos", type=int, default=540)
     parser.add_argument("--pausa-segundos", type=float, default=2.0)
+    parser.add_argument("--ticker", default="")
     args = parser.parse_args()
-    resultado = executar(args.limite_total, args.orcamento_segundos, args.pausa_segundos)
+    resultado = executar(args.limite_total, args.orcamento_segundos, args.pausa_segundos, ticker=args.ticker)
     print(resultado)
 
 

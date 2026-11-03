@@ -7,6 +7,10 @@ on:
     - cron: "30 12,14,16,18,20,22,23 * * 1-5"
   workflow_dispatch:
     inputs:
+      ticker:
+        description: Ticker isolado (ex.: PETR4 ou MXRF11); deixe vazio para lote
+        required: false
+        default: ""
       limite_total:
         description: Teto total de ativos no ciclo (1 a 16)
         required: true
@@ -43,11 +47,21 @@ jobs:
       - name: Atualizar no máximo 16 ativos sem notificações
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TICKER_ISOLADO: ${{ inputs.ticker }}
         run: >-
           python atualizador_ciclico.py
+          --ticker "${{ inputs.ticker }}"
           --limite-total "${{ inputs.limite_total || '16' }}"
           --orcamento-segundos 540
           --pausa-segundos 2
+      - name: Avisar conclusão de busca isolada
+        if: success() && inputs.ticker != ''
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+          TICKER_ISOLADO: ${{ inputs.ticker }}
+        run: python scripts/notificar_sucesso_atualizacao.py
       - name: Avisar administrador somente sobre falha do ciclo
         if: failure()
         continue-on-error: true
