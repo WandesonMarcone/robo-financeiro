@@ -1,0 +1,40 @@
+name: Testes de fluxos isolados
+
+on:
+  push:
+    paths:
+      - 'atualizador_ciclico.py'
+      - 'modules/lotes_atualizacao.py'
+      - 'modules/scraper_acoes.py'
+      - 'modules/scraper_fiis.py'
+      - 'tests/test_lotes_atualizacao.py'
+      - 'tests/test_sem_statusinvest.py'
+      - 'scripts/notificar_falha_workflow.py'
+      - '.github/workflows/test-fluxos-isolados.yml'
+      - '.github/workflows/atualizacao-ciclica.yml'
+  pull_request:
+    paths:
+      - 'atualizador_ciclico.py'
+      - 'modules/lotes_atualizacao.py'
+      - 'modules/scraper_acoes.py'
+      - 'modules/scraper_fiis.py'
+      - 'tests/test_lotes_atualizacao.py'
+      - 'tests/test_sem_statusinvest.py'
+      - 'scripts/notificar_falha_workflow.py'
+      - '.github/workflows/test-fluxos-isolados.yml'
+      - '.github/workflows/atualizacao-ciclica.yml'
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+      - name: Validar módulos e fluxos seguros
+        run: |
+          python -m py_compile atualizador_ciclico.py modules/lotes_atualizacao.py modules/scraper_acoes.py modules/scraper_fiis.py scripts/notificar_falha_workflow.py scripts/notificar_sucesso_atualizacao.py
+          python -m unittest tests.test_lotes_atualizacao tests.test_sem_statusinvest -v
