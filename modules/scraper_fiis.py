@@ -3,6 +3,7 @@ import requests
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
+import time
 import pytz
 import config
 import json
@@ -133,7 +134,7 @@ def buscar_dados_profundos_fii(ticker):
 
     return resultado
 
-def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
+def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, pausa_entre_ativos=0, prazo_monotonic=None, clock=time.monotonic, sleep=time.sleep):
     print("🏢 [1/5] Iniciando varredura com motor JSON ativado...")
     aba_fiis = planilha.worksheet("BD_FIIs")
 
@@ -221,7 +222,11 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     else:
         cat_opps = []
 
-    fila_total = cat_populares + cat_opps + novatos_garimpados
+    if tickers_lote is None:
+        fila_total = cat_populares + cat_opps + novatos_garimpados
+    else:
+        solicitados = [str(t or "").strip().upper() for t in tickers_lote]
+        fila_total = list(dict.fromkeys(t for t in solicitados if t in tickers_planilha))
     print(f"DEBUG: Tamanho da fila para varredura: {len(fila_total)}")
     
     if not fila_total: 
@@ -234,7 +239,12 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     itens_individuais = []
     proxima_linha_vazia = len(dados_planilha) + 1 
 
+    tentados = []
     for ticker in fila_total:
+        if prazo_monotonic is not None and clock() >= prazo_monotonic:
+            print("⏱️ Prazo do lote de FIIs atingido; mantendo o restante para o próximo ciclo.")
+            break
+        tentados.append(ticker)
         try:
             yf_info = yf.Ticker(f"{ticker}.SA").info or {}
             preco_yf = converter_numero(yf_info.get('currentPrice'))
@@ -400,6 +410,9 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
             except Exception as log_error:
                 print(f"   ⚠️ Não foi possível gravar o log: {log_error}")
 
+        if pausa_entre_ativos:
+            sleep(pausa_entre_ativos)
+
     msg_blocos = ["🏢 *MOVIMENTAÇÃO DE FIIs* 🏢"]
     if relatorio_fixas_opps: msg_blocos.append("🏆 *ALERTA VIP:*\n" + "\n\n".join(relatorio_fixas_opps))
     if relatorio_fixas: msg_blocos.append("📌 *CARTEIRA POPULAR:*\n" + "\n\n".join(relatorio_fixas))
@@ -407,4 +420,6 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz):
     tickers_digest = tickers_do_digest(fila_total)
     msg_out = "\n\n➖➖➖➖➖➖➖➖➖➖\n\n".join(msg_blocos) if batch_updates else ""
 
-    return batch_updates, montar_digest(msg_out, tickers_digest, "fii", itens_individuais), aba_fiis
+    digest = montar_digest(msg_out, tickers_digest, "fii", itens_individuais)
+    digest["tentados"] = tentados
+    return batch_updates, digest, aba_fiis
