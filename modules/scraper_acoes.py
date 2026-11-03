@@ -3,6 +3,7 @@ import requests
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
+import time
 import config
 from modules.utils import (
     converter_numero,
@@ -63,7 +64,7 @@ def classificar_setor_por_mapa(ticker, yf_info=None):
         return macro, sub
     return SETOR_PADRAO
 
-def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
+def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, pausa_entre_ativos=0, prazo_monotonic=None, clock=time.monotonic, sleep=time.sleep):
     print("📈 [1/5] Iniciando auditoria completa de Ações...")
     aba_base = planilha.worksheet("BD_Acoes")
 
@@ -168,7 +169,11 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     else:
         cat_opps = []
 
-    fila = cat_populares + cat_opps + cat_novatas
+    if tickers_lote is None:
+        fila = cat_populares + cat_opps + cat_novatas
+    else:
+        solicitados = [str(t or "").strip().upper() for t in tickers_lote]
+        fila = list(dict.fromkeys(t for t in solicitados if t in todas_originais))
     if not fila:
         return [], montar_digest("", [], "acao"), aba_base
 
@@ -181,7 +186,13 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     relatorio_fixas_opps = []
     itens_individuais = []
 
+    tentados = []
+    falhas = []
     for ticker in fila:
+        if prazo_monotonic is not None and clock() >= prazo_monotonic:
+            print("⏱️ Prazo do lote de ações atingido; mantendo o restante para o próximo ciclo.")
+            break
+        tentados.append(ticker)
         linha_idx = todas.index(ticker) + 2
         try:
             # 🟢 ALTERAÇÃO 3: Inserção do Sufixo da B3 para o Yahoo Finance (.SA)
@@ -364,6 +375,7 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
             print(f"   ✅ [OK] {ticker} mapeado e processado.")
         except Exception as e:
             print(f"   ❌ [ERRO] Falha {ticker}: {e}")
+            falhas.append(ticker)
             try:
                 aba_logs = planilha.worksheet("BD_Logs")
                 aba_logs.append_row([str(datetime.now(sp_tz)), f"Ações: {ticker}", str(e)])
@@ -371,6 +383,8 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
                 print(f"   ⚠️ Não foi possível gravar o log: {log_error}")
 
             # --------------------------
+        if pausa_entre_ativos:
+            sleep(pausa_entre_ativos)
 
     # --- MONTAGEM MODULAR COM SEPARADOR ---
     def _bloco(titulo, itens, alerta=False, tag=""):
@@ -400,4 +414,7 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz):
     msg_out = "\n\n➖➖➖➖➖➖➖➖➖➖\n\n".join(msg_blocos) if batch_updates else ""
     tickers_digest = tickers_do_digest(fila)
 
-    return batch_updates, montar_digest(msg_out, tickers_digest, "acao", itens_individuais), aba_base
+    digest = montar_digest(msg_out, tickers_digest, "acao", itens_individuais)
+    digest["tentados"] = tentados
+    digest["falhas"] = falhas
+    return batch_updates, digest, aba_base
