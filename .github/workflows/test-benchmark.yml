@@ -2,7 +2,7 @@ name: Testes de fluxos isolados
 on:
   push:
     branches: [main]
-    paths: ['scripts/benchmark_capacidade.py', 'scripts/diagnostico_fontes.py', 'atualizador_ciclico.py', 'modules/lotes_atualizacao.py', 'modules/scraper_acoes.py', 'modules/scraper_fiis.py', 'tests/test_benchmark_capacidade.py', 'tests/test_diagnostico_fontes.py', 'tests/test_lotes_atualizacao.py', '.github/workflows/test-benchmark.yml', '.github/workflows/atualizacao-ciclica.yml']
+    paths: ['scripts/benchmark_capacidade.py', 'scripts/diagnostico_fontes.py', 'atualizador_ciclico.py', 'scripts/notificar_falha_workflow.py', 'modules/lotes_atualizacao.py', 'modules/scraper_acoes.py', 'modules/scraper_fiis.py scripts/notificar_falha_workflow.py', 'tests/test_benchmark_capacidade.py', 'tests/test_diagnostico_fontes.py', 'tests/test_lotes_atualizacao.py', '.github/workflows/test-benchmark.yml', '.github/workflows/atualizacao-ciclica.yml']
   pull_request:
     paths: ['scripts/benchmark_capacidade.py', 'tests/test_benchmark_capacidade.py', '.github/workflows/test-benchmark.yml']
 permissions:
