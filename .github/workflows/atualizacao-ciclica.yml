@@ -1,0 +1,48 @@
+name: Atualização cíclica de ativos
+
+on:
+  schedule:
+    - cron: "30 12,14,16,18,20,22 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      limite_total:
+        description: Teto total de ativos no ciclo (1 a 20)
+        required: true
+        default: "20"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coleta-mercado-planilha
+  cancel-in-progress: false
+
+jobs:
+  atualizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+      - name: Testar seleção de lotes sem rede
+        run: python -m unittest tests.test_lotes_atualizacao -v
+      - name: Criar credencial temporária do Google
+        shell: python
+        env:
+          GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: |
+          import os
+          with open("credenciais.json", "w", encoding="utf-8") as arquivo:
+              arquivo.write(os.environ["GOOGLE_CREDS"])
+      - name: Atualizar no máximo 20 ativos sem notificações
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: >-
+          python atualizador_ciclico.py
+          --limite-total "${{ inputs.limite_total || '20' }}"
+          --orcamento-segundos 720
+          --pausa-segundos 2
