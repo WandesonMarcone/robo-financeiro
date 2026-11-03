@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import json
 import time
+from pathlib import Path
 
 import pytz
 
@@ -197,9 +199,17 @@ def main():
     parser.add_argument("--limite-total", type=int, default=16)
     parser.add_argument("--orcamento-segundos", type=int, default=540)
     parser.add_argument("--pausa-segundos", type=float, default=2.0)
+    parser.add_argument(
+        "--resultado-json",
+        help="Arquivo local com o resumo do ciclo para o histórico operacional.",
+    )
     args = parser.parse_args()
     resultado = executar(args.limite_total, args.orcamento_segundos, args.pausa_segundos)
-    print(resultado)
+    if args.resultado_json:
+        Path(args.resultado_json).write_text(
+            json.dumps(resultado, ensure_ascii=False), encoding="utf-8"
+        )
+    print(json.dumps(resultado, ensure_ascii=False))
 
 
 if __name__ == "__main__":

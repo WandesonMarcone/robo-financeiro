@@ -6,10 +6,15 @@ on:
       - 'scripts/benchmark_capacidade.py'
       - 'scripts/diagnostico_fontes.py'
       - 'scripts/notificar_falha_workflow.py'
+      - 'scripts/registrar_execucao_ciclica.py'
       - 'atualizador_ciclico.py'
       - 'modules/lotes_atualizacao.py'
       - 'modules/scraper_acoes.py'
       - 'modules/scraper_fiis.py'
+      - 'pipeline_dados/modelos_execucoes.py'
+      - 'pipeline_dados/repositorio_execucoes.py'
+      - 'bot/central_controles.py'
+      - 'migrations/versions/0013_execucoes_ciclicas.sql'
       - 'tests/test_benchmark_capacidade.py'
       - 'tests/test_diagnostico_fontes.py'
       - 'tests/test_lotes_atualizacao.py'
@@ -33,4 +38,4 @@ jobs:
           python -m unittest discover -s tests -p test_benchmark_capacidade.py -v
           python -m unittest discover -s tests -p test_diagnostico_fontes.py -v
           python -m unittest discover -s tests -p test_lotes_atualizacao.py -v
-          python -m py_compile atualizador_ciclico.py modules/lotes_atualizacao.py modules/scraper_acoes.py modules/scraper_fiis.py scripts/notificar_falha_workflow.py
+          python -m py_compile atualizador_ciclico.py modules/lotes_atualizacao.py modules/scraper_acoes.py modules/scraper_fiis.py scripts/notificar_falha_workflow.py scripts/registrar_execucao_ciclica.py pipeline_dados/modelos_execucoes.py pipeline_dados/repositorio_execucoes.py bot/central_controles.py

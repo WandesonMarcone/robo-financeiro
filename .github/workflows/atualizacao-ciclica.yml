@@ -41,6 +41,7 @@ jobs:
           with open("credenciais.json", "w", encoding="utf-8") as arquivo:
               arquivo.write(os.environ["GOOGLE_CREDS"])
       - name: Atualizar no máximo 16 ativos sem notificações
+        id: atualizar
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: >-
@@ -48,6 +49,17 @@ jobs:
           --limite-total "${{ inputs.limite_total || '16' }}"
           --orcamento-segundos 540
           --pausa-segundos 2
+          --resultado-json resultado_ciclo.json
+      - name: Registrar resultado na Central de Controles
+        if: always()
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: >-
+          python scripts/registrar_execucao_ciclica.py
+          --status "${{ steps.atualizar.outcome == 'success' && 'sucesso' || 'falha' }}"
+          --limite-total "${{ inputs.limite_total || '16' }}"
+          --resultado resultado_ciclo.json
       - name: Avisar administrador somente sobre falha do ciclo
         if: failure()
         continue-on-error: true

@@ -37,6 +37,8 @@ Regras de projeto respeitadas
 """
 
 import logging
+from datetime import timezone
+from zoneinfo import ZoneInfo
 
 from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -284,6 +286,7 @@ def _texto_hub():
             "🔔 Notificacoes — alertas por pessoa ou por FIIs/acoes favoritados.",
             "⚖️ Central de Revisoes — documentos suspeitos de FIIs.",
             "🤖 Status das IAs — provedores e modelos disponíveis.",
+            "📜 Histórico dos ciclos — últimas atualizações e falhas do GitHub.",
         ]
     )
 
@@ -306,6 +309,11 @@ def _markup_hub():
     markup.add(
         InlineKeyboardButton(
             "🤖 Status das IAs", callback_data=f"{PREFIXO_CALLBACK}ia"
+        )
+    )
+    markup.add(
+        InlineKeyboardButton(
+            "📜 Histórico dos ciclos", callback_data=f"{PREFIXO_CALLBACK}ciclos"
         )
     )
     markup.add(InlineKeyboardButton("🔙 Voltar ao Menu", callback_data="voltar_menu"))
@@ -847,6 +855,71 @@ def _mostrar_ia(call):
     return None
 
 
+def _data_execucao(data):
+    if data is None:
+        return "data não informada"
+    try:
+        if data.tzinfo is None:
+            data = data.replace(tzinfo=timezone.utc)
+        return data.astimezone(ZoneInfo("America/Sao_Paulo")).strftime("%d/%m %H:%M")
+    except (AttributeError, ValueError):
+        return "data não informada"
+
+
+def _texto_ciclos(execucoes):
+    linhas = [
+        "📜 HISTÓRICO DOS CICLOS",
+        "Últimas execuções da atualização cíclica no GitHub.",
+        "Falha de ticker isolado não equivale a falha do ciclo.",
+        "",
+    ]
+    if not execucoes:
+        linhas.append("Nenhuma execução registrada ainda.")
+        return "\n".join(linhas)
+    icones = {"sucesso": "✅", "falha": "⚠️", "cancelado": "⏹️"}
+    for item in execucoes:
+        status = str(item.status or "desconhecido").capitalize()
+        linhas.append(f"{icones.get(item.status, '❔')} {_data_execucao(item.concluido_em)} — {status}")
+        partes = [f"teto {item.limite_total} ativos"]
+        if item.acoes_solicitadas is not None or item.fiis_solicitados is not None:
+            partes.append(
+                f"solicitados: {item.acoes_solicitadas or 0} ações, "
+                f"{item.fiis_solicitados or 0} FIIs"
+            )
+        if item.duracao_segundos is not None:
+            partes.append(f"{float(item.duracao_segundos):.1f}s")
+        linhas.append("• " + " · ".join(partes))
+        if item.status != "sucesso":
+            linhas.append("• Detalhe técnico: log seguro do GitHub")
+        if item.url_execucao:
+            linhas.append(f"• {item.url_execucao}")
+        linhas.append("")
+    return "\n".join(linhas).rstrip()
+
+
+def _markup_ciclos():
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("🔄 Atualizar", callback_data=f"{PREFIXO_CALLBACK}ciclos")
+    )
+    markup.add(
+        InlineKeyboardButton("🔙 Voltar", callback_data=f"{PREFIXO_CALLBACK}home")
+    )
+    return markup
+
+
+def _mostrar_ciclos(call):
+    try:
+        from pipeline_dados.repositorio_execucoes import RepositorioExecucoesCiclicas
+
+        texto = _texto_ciclos(RepositorioExecucoesCiclicas().listar_recentes())
+    except Exception:
+        logger.warning("CENTRAL - falha ao consultar histórico de ciclos", exc_info=True)
+        texto = "⚠️ Não foi possível consultar o histórico dos ciclos agora."
+    _render(call, texto, _markup_ciclos())
+    return None
+
+
 def _mostrar_revisoes(call):
     from bot.callbacks_revisao import enviar_painel_tickers
 
@@ -997,6 +1070,8 @@ def tratar_callback(call):
             toast = _mostrar_revisoes(call)
         elif acao == "ia":
             toast = _mostrar_ia(call)
+        elif acao == "ciclos":
+            toast = _mostrar_ciclos(call)
         elif acao == "area":
             toast = _tratar_area(call, partes)
         elif acao == "ver":
