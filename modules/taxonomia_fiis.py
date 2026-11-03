@@ -99,7 +99,7 @@ def tipo_macro_fii(texto, ticker=""):
 
 
 def segmento_fii_canonico(texto, tipo=None, ticker=""):
-    """Segmento canonico da coluna C (StatusInvest/Fundamentus ou ja canonico)."""
+    """Segmento canonico da coluna C (Fundamentus ou valor ja canonico)."""
     macro = (
         tipo
         if tipo in MACROS_FII or tipo == "N/D"

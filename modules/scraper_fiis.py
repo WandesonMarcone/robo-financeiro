@@ -1,12 +1,10 @@
 import io
-import requests
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
 import time
 import pytz
 import config
-import json
 from modules.utils import (
     precisa_atualizar,
     get_request_with_retry,
@@ -21,121 +19,10 @@ from modules.relatorio_mercado import (
     rotulo_ticker,
     tickers_do_digest,
 )
-from bs4 import BeautifulSoup
 from modules.taxonomia_fiis import classificar_fii
 
-def buscar_dados_profundos_fii(ticker):
-    """StatusInvest: segmento (JSON) e vacância/imóveis/inquilinos (HTML).
-
-    HTTP 403 (Cloudflare) e demais não-200 são indisponibilidade: nenhum
-    indicador é inventado. Ausência fica em ``None``/NaN, não em zero.
-    """
-    resultado = {
-        "imoveis_reais": None,
-        "vacancia_real": float("nan"),
-        "principais_inquilinos": None,
-        "segmento_real": None,
-    }
-
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
-
-    # ==========================================
-    # 1. EXTRAÇÃO DO JSON (A Mágica das Porcentagens)
-    # ==========================================
-    try:
-        url_json = f"https://statusinvest.com.br/fii/portfolio-segment-chart?ticker={ticker.lower()}"
-        headers_json = headers.copy()
-        headers_json['X-Requested-With'] = 'XMLHttpRequest'
-
-        resp_json = requests.get(url_json, headers=headers_json, timeout=10)
-        if resp_json.status_code == 200:
-            dados_json = resp_json.json()
-            if dados_json and isinstance(dados_json, list):
-                # Monta o texto: "CRI (70.5%) / Cotas de FIIs (29.5%)"
-                lista_seg = [f"{d.get('name')} ({d.get('value')}%)" for d in dados_json if 'name' in d and d.get('value') > 0]
-                if lista_seg:
-                    resultado["segmento_real"] = " / ".join(lista_seg)
-        elif resp_json.status_code == 403:
-            print(f"StatusInvest JSON 403 (Cloudflare) para {ticker}: fonte indisponível")
-        else:
-            print(f"StatusInvest JSON HTTP {resp_json.status_code} para {ticker}: fonte indisponível")
-    except Exception as e:
-        print(f"Aviso JSON para {ticker}: {e}")
-
-    # ==========================================
-    # 2. EXTRAÇÃO HTML (Vacância, Imóveis, Inquilinos)
-    # ==========================================
-    try:
-        url_html = f"https://statusinvest.com.br/fii/{ticker.lower()}"
-        resp_html = requests.get(url_html, headers=headers, timeout=10)
-
-        if resp_html.status_code == 200:
-            soup = BeautifulSoup(resp_html.text, 'html.parser')
-
-            # Tenta achar o segmento básico no HTML caso o JSON seja vazio (Fundos muito novos)
-            if not resultado["segmento_real"]:
-                cards_info = soup.find_all('div', class_='info')
-                for card in cards_info:
-                    titulo = card.find('h3', class_='title')
-                    valor = card.find('strong', class_='value')
-                    if titulo and valor and 'segmento' in titulo.text.lower():
-                        if valor.text.strip() != '-':
-                            resultado["segmento_real"] = valor.text.strip()
-            
-            # Busca Vacância e Imóveis
-            cards_info = soup.find_all('div', class_='info')
-            for card in cards_info:
-                titulo_tag = card.find('h3', class_='title')
-                valor_tag = card.find('strong', class_='value')
-                if titulo_tag and valor_tag:
-                    titulo = titulo_tag.text.strip().lower()
-                    valor = valor_tag.text.strip()
-
-                    if 'vacância' in titulo:
-                        valor_limpo = valor.replace('%', '').replace(',', '.').strip()
-                        if valor_limpo and valor_limpo != '-':
-                            resultado["vacancia_real"] = float(valor_limpo) / 100
-                    elif 'imóveis' in titulo or 'ativos' in titulo:
-                        if valor != '-':
-                            try:
-                                resultado["imoveis_reais"] = int(valor)
-                            except ValueError:
-                                pass
-
-            # Busca Inquilinos
-            tabelas = soup.find_all('table')
-            for tabela in tabelas:
-                header = tabela.find('thead')
-                if header:
-                    texto_header = header.text.lower()
-                    if any(palavra in texto_header for palavra in ['inquilino', 'locatário', 'locatario', 'cliente']):
-                        linhas = tabela.find('tbody').find_all('tr')
-                        lista_inquilinos = []
-                        for linha in linhas[:3]:
-                            colunas = linha.find_all('td')
-                            if len(colunas) >= 2:
-                                nome_inquilino = colunas[0].text.strip()
-                                porcentagem = colunas[-1].text.strip() 
-                                lista_inquilinos.append(f"{nome_inquilino} ({porcentagem})")
-
-                        if lista_inquilinos:
-                            resultado["principais_inquilinos"] = ", ".join(lista_inquilinos)
-                        break
-
-        elif resp_html.status_code == 403:
-            print(f"StatusInvest HTML 403 (Cloudflare) para {ticker}: fonte indisponível")
-        else:
-            print(f"StatusInvest HTML HTTP {resp_html.status_code} para {ticker}: fonte indisponível")
-
-    except Exception as e:
-        print(f"Erro HTML para {ticker}: {e}")
-
-    return resultado
-
 def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, pausa_entre_ativos=0, prazo_monotonic=None, clock=time.monotonic, sleep=time.sleep):
-    print("🏢 [1/5] Iniciando varredura com motor JSON ativado...")
+    print("🏢 [1/5] Iniciando varredura com Yahoo Finance e Fundamentus...")
     aba_fiis = planilha.worksheet("BD_FIIs")
 
     # 1. INICIALIZAÇÃO BLINDADA (Evita o UnboundLocalError)
@@ -281,16 +168,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, p
             vacancia_fund = _fund('Vacância Média') # Vacância 0 é legítima
             segmento_fund = f.get('Segmento') if fundamentus_ok else None
 
-            # API JSON / HTML (StatusInvest)
-            dados_profundos = buscar_dados_profundos_fii(ticker)
-            segmento_status = dados_profundos.get("segmento_real")
-            vacancia_status = dados_profundos.get("vacancia_real")
-            imoveis_status = dados_profundos.get("imoveis_reais")
-            inquilinos_status = dados_profundos.get("principais_inquilinos")
-
-            if segmento_status:
-                setor = segmento_status
-            elif isinstance(segmento_fund, str) and segmento_fund.strip() not in ('', '-'):
+            if isinstance(segmento_fund, str) and segmento_fund.strip() not in ('', '-'):
                 setor = segmento_fund.strip()
             else:
                 setor = None
@@ -301,18 +179,10 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, p
             else:
                 tipo, segmento, emoji = None, None, "🏢"
 
-            if eh_valido(vacancia_status):
-                vacancia = vacancia_status
-            else:
-                vacancia = vacancia_fund
-
-            if eh_valido(imoveis_status):
-                qtd_imoveis = imoveis_status
-
-            if (isinstance(inquilinos_status, str) and inquilinos_status.strip()):
-                inquilinos_planilha = inquilinos_status
-            else:
-                inquilinos_planilha = None
+            vacancia = vacancia_fund
+            # Fundamentus não fornece a lista de inquilinos. Não apagamos o
+            # valor anterior da planilha enquanto não houver fonte oficial.
+            inquilinos_planilha = None
 
             # Indicadores derivados: só calculados quando as entradas são válidas,
             # evitando gravar zeros/lixos provenientes de falha de fonte.
