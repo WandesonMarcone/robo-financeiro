@@ -2,7 +2,9 @@ name: Atualização cíclica de ativos
 
 on:
   schedule:
-    - cron: "30 12,14,16,18,20,22 * * 1-5"
+    # Horários em UTC: 09:30 a 20:30 em Brasília. Sete ciclos de 16
+    # ativos cobrem os 111 ativos atuais sem aumentar o teto seguro.
+    - cron: "30 12,14,16,18,20,22,23 * * 1-5"
   workflow_dispatch:
     inputs:
       limite_total:
@@ -46,8 +48,7 @@ jobs:
           --limite-total "${{ inputs.limite_total || '16' }}"
           --orcamento-segundos 540
           --pausa-segundos 2
-
-      - name: Avisar administrador sobre falha total
+      - name: Avisar administrador somente sobre falha do ciclo
         if: failure()
         continue-on-error: true
         env:
