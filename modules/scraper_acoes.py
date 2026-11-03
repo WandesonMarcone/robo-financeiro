@@ -187,6 +187,7 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, 
     itens_individuais = []
 
     tentados = []
+    falhas = []
     for ticker in fila:
         if prazo_monotonic is not None and clock() >= prazo_monotonic:
             print("⏱️ Prazo do lote de ações atingido; mantendo o restante para o próximo ciclo.")
@@ -374,6 +375,7 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, 
             print(f"   ✅ [OK] {ticker} mapeado e processado.")
         except Exception as e:
             print(f"   ❌ [ERRO] Falha {ticker}: {e}")
+            falhas.append(ticker)
             try:
                 aba_logs = planilha.worksheet("BD_Logs")
                 aba_logs.append_row([str(datetime.now(sp_tz)), f"Ações: {ticker}", str(e)])
@@ -414,4 +416,5 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, 
 
     digest = montar_digest(msg_out, tickers_digest, "acao", itens_individuais)
     digest["tentados"] = tentados
+    digest["falhas"] = falhas
     return batch_updates, digest, aba_base
