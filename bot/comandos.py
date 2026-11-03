@@ -3,6 +3,7 @@ import time
 from types import SimpleNamespace
 
 import requests
+import re
 import config
 import fitz
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -14,6 +15,7 @@ from atualizador_documentos import SessionDB
 from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from pipeline_dados.coletor_fiis import ano_padrao_coleta, processar_informes_fiis_cvm
 from modules.utils import conectar_gspread
+from services.github_actions import disparar_atualizacao_isolada
 
 
 def _ano_do_comando(message):
@@ -84,6 +86,22 @@ def status_banco(message):
         bot.reply_to(message, f"❌ Erro ao consultar banco: {e}")
     finally:
         session.close() 
+
+
+@bot.message_handler(commands=['atualizar_ativo'])
+def atualizar_ativo(message):
+    """Enfileira, somente para administrador, a coleta de um ticker."""
+    partes = (message.text or "").split()
+    if len(partes) != 2 or not re.fullmatch(r"[A-Z]{4,6}\d{1,2}", partes[1].upper()):
+        bot.reply_to(message, "⚠️ Uso correto: `/atualizar_ativo PETR4` ou `/atualizar_ativo MXRF11`.", parse_mode="Markdown")
+        return
+    ticker = partes[1].upper()
+    bot.reply_to(message, f"🔎 Enfileirando a busca isolada de *{ticker}*…", parse_mode="Markdown")
+    sucesso, detalhe = disparar_atualizacao_isolada(ticker)
+    if sucesso:
+        bot.send_message(message.chat.id, f"✅ {detalhe}\nO resultado será gravado na planilha/Neon e o workflow enviará a conclusão.")
+    else:
+        bot.send_message(message.chat.id, f"❌ Não foi possível iniciar *{ticker}*: {detalhe}", parse_mode="Markdown")
 
 @bot.message_handler(commands=['relatorios', 'docs'])
 def enviar_ultimos_relatorios(message):
@@ -426,6 +444,7 @@ def callback_executar_comando(call):
         "cmd_processar_acoes_ia": ("/processar_acoes_ia", rodar_ia_acoes),
         "cmd_forcar_cvm": ("/forcar_cvm", rodar_cvm),
         "cmd_forcar_fiis": ("/forcar_fiis", cmd_forcar_fiis),
+        "cmd_atualizar_ativo": ("/atualizar_ativo", atualizar_ativo),
         "cmd_gerar_resumos_ia": ("/gerar_resumos_ia", cmd_gerar_resumos_ia),
         "cmd_alimentar_ia": ("/alimentar_ia", alimentar_ia_passado),
         "cmd_auditar_drive": ("/auditar_drive", cmd_auditar_drive),
