@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       limite_total:
-        description: Teto total de ativos no ciclo (1 a 20)
+        description: Teto total de ativos no ciclo (1 a 16)
         required: true
-        default: "20"
+        default: "16"
 
 permissions:
   contents: read
@@ -38,11 +38,18 @@ jobs:
           import os
           with open("credenciais.json", "w", encoding="utf-8") as arquivo:
               arquivo.write(os.environ["GOOGLE_CREDS"])
-      - name: Atualizar no máximo 20 ativos sem notificações
+      - name: Atualizar no máximo 16 ativos sem notificações
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: >-
           python atualizador_ciclico.py
-          --limite-total "${{ inputs.limite_total || '20' }}"
-          --orcamento-segundos 720
+          --limite-total "${{ inputs.limite_total || '16' }}"
+          --orcamento-segundos 540
           --pausa-segundos 2
+
+      - name: Avisar administrador sobre falha total
+        if: failure()
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: python scripts/notificar_falha_workflow.py
