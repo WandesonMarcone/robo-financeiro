@@ -1,0 +1,48 @@
+name: Diagnóstico isolado Yahoo e Fundamentus
+
+on:
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: Amostra de ações separada por vírgula
+        required: true
+        default: PETR4,VALE3,ITUB4,BBAS3,BBDC4,WEGE3,ABEV3,SUZB3
+      limite:
+        description: Máximo de ativos da amostra (1 a 100)
+        required: true
+        default: "8"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diagnostico-fontes
+  cancel-in-progress: false
+
+jobs:
+  diagnostico:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Testes locais sem rede
+        run: python -m unittest discover -s tests -p test_diagnostico_fontes.py -v
+      - name: Medir Yahoo e Fundamentus sem credenciais
+        env:
+          DIAG_TICKERS: ${{ inputs.tickers }}
+          DIAG_LIMIT: ${{ inputs.limite }}
+        run: >-
+          python scripts/diagnostico_fontes.py
+          --tickers "$DIAG_TICKERS"
+          --limite "$DIAG_LIMIT"
+          --saida diagnostico-fontes-resultados.json
+      - name: Publicar artefato do diagnóstico
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostico-fontes
+          path: diagnostico-fontes-resultados.json
+          retention-days: 7
