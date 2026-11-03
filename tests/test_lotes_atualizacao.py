@@ -1,3 +1,4 @@
+import math
 import unittest
 
 from modules.lotes_atualizacao import atualizar_pendentes, distribuir_limite, proximo_lote, selecionar_com_retentativas
@@ -20,6 +21,13 @@ class LotesAtualizacaoTests(unittest.TestCase):
         acoes, fiis = distribuir_limite(20, 77, 34)
         self.assertEqual((acoes, fiis), (14, 6))
         self.assertEqual(acoes + fiis, 20)
+
+    def test_margem_de_16_cobre_base_em_sete_ciclos(self):
+        acoes, fiis = distribuir_limite(16, 77, 34)
+        self.assertEqual((acoes, fiis), (11, 5))
+        self.assertEqual(acoes + fiis, 16)
+        self.assertEqual(math.ceil(77 / acoes), 7)
+        self.assertEqual(math.ceil(34 / fiis), 7)
 
     def test_lista_vazia_nao_avanca(self):
         self.assertEqual(proximo_lote([], 4, 20), ([], 0))
