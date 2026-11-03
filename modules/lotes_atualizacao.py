@@ -57,3 +57,51 @@ def distribuir_limite(total, quantidade_acoes, quantidade_fiis):
     elif sobra and limite_fiis < fiis:
         limite_fiis += sobra
     return limite_acoes, limite_fiis
+
+
+def selecionar_com_retentativas(tickers, cursor, limite, pendentes, limite_retentativas=2):
+    """Prioriza poucas retentativas sem deixar falhas bloquearem a rotação.
+
+    O cursor só deve ser salvo quando todo o lote retornado for efetivamente
+    tentado. Em corte por prazo, preservar o cursor repete parte do lote de
+    forma segura, sem pular ativos.
+    """
+    ativos = normalizar_tickers(tickers)
+    pendentes_validos = [t for t in normalizar_tickers(pendentes) if t in ativos]
+    if limite < 0 or limite_retentativas < 0:
+        raise ValueError("limite_invalido")
+    if not ativos or limite == 0:
+        return [], 0, pendentes_validos
+
+    prioridade = pendentes_validos[:min(limite_retentativas, limite)]
+    bloqueados = set(pendentes_validos)
+    try:
+        inicio = int(cursor) % len(ativos)
+    except (TypeError, ValueError):
+        inicio = 0
+
+    novos = []
+    passos = 0
+    necessario = min(limite, len(ativos)) - len(prioridade)
+    while passos < len(ativos) and len(novos) < necessario:
+        ticker = ativos[(inicio + passos) % len(ativos)]
+        passos += 1
+        if ticker not in bloqueados:
+            novos.append(ticker)
+
+    lote = prioridade + novos
+    proximo_cursor = (inicio + passos) % len(ativos)
+    return lote, proximo_cursor, pendentes_validos
+
+
+def atualizar_pendentes(pendentes, tentados, falhas):
+    """Remove êxitos e recoloca somente os tickers que falharam no ciclo."""
+    fila = normalizar_tickers(pendentes)
+    tentados_set = set(normalizar_tickers(tentados))
+    falhas_norm = normalizar_tickers(falhas)
+    falhas_set = set(falhas_norm)
+    resultado = [ticker for ticker in fila if ticker not in tentados_set or ticker in falhas_set]
+    for ticker in falhas_norm:
+        if ticker not in resultado:
+            resultado.append(ticker)
+    return resultado
