@@ -240,6 +240,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, p
     proxima_linha_vazia = len(dados_planilha) + 1 
 
     tentados = []
+    falhas = []
     for ticker in fila_total:
         if prazo_monotonic is not None and clock() >= prazo_monotonic:
             print("⏱️ Prazo do lote de FIIs atingido; mantendo o restante para o próximo ciclo.")
@@ -404,6 +405,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, p
             print(f"   ✅ [OK] {ticker} mapeado e processado.")
         except Exception as e:
             print(f"   ❌ [ERRO] Falha {ticker}: {e}")
+            falhas.append(ticker)
             try:
                 aba_logs = planilha.worksheet("BD_Logs")
                 aba_logs.append_row([str(datetime.now(sp_tz)), f"Ações: {ticker}", str(e)])
@@ -422,4 +424,5 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, p
 
     digest = montar_digest(msg_out, tickers_digest, "fii", itens_individuais)
     digest["tentados"] = tentados
+    digest["falhas"] = falhas
     return batch_updates, digest, aba_fiis
