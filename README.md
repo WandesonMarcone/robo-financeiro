@@ -19,7 +19,7 @@ Nao ha `admin.md` neste repositorio. Detalhes de schema ficam em
 
 Capacidades ativas:
 
-- Scraping com fallback (Fundamentus, StatusInvest, Yahoo Finance).
+- Scraping com fallback (Fundamentus e Yahoo Finance).
 - Acervo documental: FNET/B3 e CVM, PDFs no Drive em
   `Documentos / Tipo / Ticker / Ano / Mes`, mais pasta de revisao.
 - IA documental (Groq): duas checagens, catalogo fixo, auto-save so com acordo
@@ -51,7 +51,6 @@ graph TD
         CVM["CVM"]
         FNET["FNET B3"]
         FUND["Fundamentus"]
-        SI["StatusInvest"]
         YF["Yahoo Finance"]
     end
     subgraph Processamento
@@ -71,7 +70,6 @@ graph TD
     ACT --> GAR
     ORC --> COL
     GAR --> FUND
-    GAR --> SI
     GAR --> YF
     COL --> CVM
     COL --> FNET
