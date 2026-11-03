@@ -1,7 +1,7 @@
 """Atualização cíclica, silenciosa e limitada de ativos da planilha.
 
-Este processo não envia Telegram nem cria alertas. Ele atualiza somente um lote
-curto e retoma a posição persistida na aba Controle_Robo depois de gravar dados.
+Não envia Telegram ou cria alertas de mercado. O estado na aba Controle_Robo
+só avança depois que as respectivas células de dados foram gravadas.
 """
 from __future__ import annotations
 
@@ -12,7 +12,12 @@ import time
 import pytz
 
 import config
-from modules.lotes_atualizacao import distribuir_limite, proximo_lote
+from modules.lotes_atualizacao import (
+    atualizar_pendentes,
+    distribuir_limite,
+    normalizar_tickers,
+    selecionar_com_retentativas,
+)
 from modules.scraper_acoes import rodar_garimpo_acoes
 from modules.scraper_fiis import rodar_garimpo_fiis
 from modules.utils import conectar_gspread
@@ -20,6 +25,14 @@ from modules.utils import conectar_gspread
 
 CHAVE_ESTADO = "atualizacao_ciclica_v1"
 ABA_CONTROLE = "Controle_Robo"
+CABECALHO_CONTROLE = [
+    "chave",
+    "cursor_acoes",
+    "cursor_fiis",
+    "pendentes_acoes",
+    "pendentes_fiis",
+    "atualizado_em",
+]
 
 
 def _tickers(linhas):
@@ -30,14 +43,22 @@ def _controle(planilha):
     try:
         aba = planilha.worksheet(ABA_CONTROLE)
     except Exception:
-        aba = planilha.add_worksheet(title=ABA_CONTROLE, rows=10, cols=4)
-        aba.append_row(["chave", "cursor_acoes", "cursor_fiis", "atualizado_em"])
+        aba = planilha.add_worksheet(title=ABA_CONTROLE, rows=10, cols=6)
+        aba.append_row(CABECALHO_CONTROLE)
+
     valores = aba.get_all_values()
+    if not valores:
+        aba.append_row(CABECALHO_CONTROLE)
+        valores = [CABECALHO_CONTROLE]
+    elif len(valores[0]) < len(CABECALHO_CONTROLE):
+        aba.update("A1:F1", [CABECALHO_CONTROLE])
+
     for indice, linha in enumerate(valores[1:], start=2):
         if linha and linha[0] == CHAVE_ESTADO:
-            return aba, indice, linha
-    aba.append_row([CHAVE_ESTADO, "0", "0", ""])
-    return aba, len(valores) + 1, [CHAVE_ESTADO, "0", "0", ""]
+            return aba, indice, linha + [""] * (6 - len(linha))
+
+    aba.append_row([CHAVE_ESTADO, "0", "0", "", "", ""])
+    return aba, len(valores) + 1, [CHAVE_ESTADO, "0", "0", "", "", ""]
 
 
 def _inteiro(valor):
@@ -47,26 +68,40 @@ def _inteiro(valor):
         return 0
 
 
-def _gravar(aba, linha, cursor_acoes, cursor_fiis, agora_sp):
+def _lista(valor):
+    return normalizar_tickers(str(valor or "").split(","))
+
+
+def _texto_lista(valores):
+    return ",".join(normalizar_tickers(valores))
+
+
+def _gravar_estado(aba, linha, cursor_acoes, cursor_fiis, pendentes_acoes, pendentes_fiis, agora_sp):
     aba.update(
-        f"B{linha}:D{linha}",
-        [[str(cursor_acoes), str(cursor_fiis), agora_sp]],
+        f"B{linha}:F{linha}",
+        [[
+            str(cursor_acoes),
+            str(cursor_fiis),
+            _texto_lista(pendentes_acoes),
+            _texto_lista(pendentes_fiis),
+            agora_sp,
+        ]],
     )
 
 
 def _persistir_lote(aba, atualizacoes, tipo):
     if not atualizacoes:
-        print(f"Lote {tipo}: sem dados válidos; cursor preservado para nova tentativa.")
+        print(f"Lote {tipo}: sem dados válidos; estado preservado para nova tentativa.")
         return False
     aba.batch_update(atualizacoes)
     print(f"Lote {tipo}: {len(atualizacoes)} células gravadas.")
     return True
 
 
-def executar(limite_total=20, orcamento_segundos=720, pausa_segundos=2.0, planilha=None, clock=time.monotonic, sleep=time.sleep):
-    if not 1 <= limite_total <= 20:
+def executar(limite_total=16, orcamento_segundos=540, pausa_segundos=2.0, planilha=None, clock=time.monotonic, sleep=time.sleep):
+    if not 1 <= limite_total <= 16:
         raise ValueError("limite_total_invalido")
-    if not 60 <= orcamento_segundos <= 720:
+    if not 60 <= orcamento_segundos <= 540:
         raise ValueError("orcamento_invalido")
     if not 0 <= pausa_segundos <= 10:
         raise ValueError("pausa_invalida")
@@ -83,11 +118,17 @@ def executar(limite_total=20, orcamento_segundos=720, pausa_segundos=2.0, planil
     fiis = _tickers(aba_fiis.get_all_values())
     controle, linha_estado, estado = _controle(planilha)
 
-    cursor_acoes = _inteiro(estado[1] if len(estado) > 1 else 0)
-    cursor_fiis = _inteiro(estado[2] if len(estado) > 2 else 0)
+    cursor_acoes = _inteiro(estado[1])
+    cursor_fiis = _inteiro(estado[2])
+    pendentes_acoes = _lista(estado[3])
+    pendentes_fiis = _lista(estado[4])
     limite_acoes, limite_fiis = distribuir_limite(limite_total, len(acoes), len(fiis))
-    lote_acoes, _ = proximo_lote(acoes, cursor_acoes, limite_acoes)
-    lote_fiis, _ = proximo_lote(fiis, cursor_fiis, limite_fiis)
+    lote_acoes, proximo_acoes, pendentes_acoes = selecionar_com_retentativas(
+        acoes, cursor_acoes, limite_acoes, pendentes_acoes
+    )
+    lote_fiis, proximo_fiis, pendentes_fiis = selecionar_com_retentativas(
+        fiis, cursor_fiis, limite_fiis, pendentes_fiis
+    )
 
     fuso = pytz.timezone("America/Sao_Paulo")
     agora_dt = datetime.datetime.now(fuso)
@@ -108,9 +149,16 @@ def executar(limite_total=20, orcamento_segundos=720, pausa_segundos=2.0, planil
     )
     sucesso_fiis = _persistir_lote(destino_fiis, atualizacoes_fiis, "FIIs")
     if sucesso_fiis:
-        executados_fiis = len(digest_fiis.get("tentados") or [])
-        cursor_fiis = (cursor_fiis + executados_fiis) % len(fiis) if fiis else 0
-        _gravar(controle, linha_estado, cursor_acoes, cursor_fiis, agora_sp)
+        tentados = digest_fiis.get("tentados") or []
+        pendentes_fiis = atualizar_pendentes(
+            pendentes_fiis, tentados, digest_fiis.get("falhas") or []
+        )
+        if len(tentados) == len(lote_fiis):
+            cursor_fiis = proximo_fiis
+        _gravar_estado(
+            controle, linha_estado, cursor_acoes, cursor_fiis,
+            pendentes_acoes, pendentes_fiis, agora_sp,
+        )
 
     atualizacoes_acoes, digest_acoes, destino_acoes = rodar_garimpo_acoes(
         planilha, agora_dt, agora_sp, fuso,
@@ -122,9 +170,16 @@ def executar(limite_total=20, orcamento_segundos=720, pausa_segundos=2.0, planil
     )
     sucesso_acoes = _persistir_lote(destino_acoes, atualizacoes_acoes, "ações")
     if sucesso_acoes:
-        executados_acoes = len(digest_acoes.get("tentados") or [])
-        cursor_acoes = (cursor_acoes + executados_acoes) % len(acoes) if acoes else 0
-        _gravar(controle, linha_estado, cursor_acoes, cursor_fiis, agora_sp)
+        tentados = digest_acoes.get("tentados") or []
+        pendentes_acoes = atualizar_pendentes(
+            pendentes_acoes, tentados, digest_acoes.get("falhas") or []
+        )
+        if len(tentados) == len(lote_acoes):
+            cursor_acoes = proximo_acoes
+        _gravar_estado(
+            controle, linha_estado, cursor_acoes, cursor_fiis,
+            pendentes_acoes, pendentes_fiis, agora_sp,
+        )
 
     return {
         "limite_total": limite_total,
@@ -133,14 +188,14 @@ def executar(limite_total=20, orcamento_segundos=720, pausa_segundos=2.0, planil
         "acoes_avancaram": sucesso_acoes,
         "fiis_avancaram": sucesso_fiis,
         "duracao_segundos": round(clock() - inicio, 3),
-        "orçamento_segundos": orcamento_segundos,
+        "orcamento_segundos": orcamento_segundos,
     }
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--limite-total", type=int, default=20)
-    parser.add_argument("--orcamento-segundos", type=int, default=720)
+    parser.add_argument("--limite-total", type=int, default=16)
+    parser.add_argument("--orcamento-segundos", type=int, default=540)
     parser.add_argument("--pausa-segundos", type=float, default=2.0)
     args = parser.parse_args()
     resultado = executar(args.limite_total, args.orcamento_segundos, args.pausa_segundos)
