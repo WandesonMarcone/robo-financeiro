@@ -187,6 +187,25 @@ class GoogleDriveManager:
             # 2. Cria ou localiza a pasta de REVISÃO dentro de "Documentos"
             revisao_id = self._obter_ou_criar_pasta("⚠️ REVISÃO", parent_id=doc_raiz_id)
 
+            # Idempotência: não cria outro PDF com o mesmo nome na revisão.
+            consulta = (
+                f"name = '{nome_arquivo.replace("'", "\\'")}' and "
+                f"'{revisao_id}' in parents and trashed = false"
+            )
+            existentes = self.service.files().list(
+                q=consulta,
+                fields='files(id, webViewLink, createdTime)',
+                orderBy='createdTime desc',
+                pageSize=10,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+                corpora='allDrives',
+            ).execute().get('files', [])
+            if existentes:
+                existente = existentes[0]
+                logger.info("Revisão duplicada ignorada: %s", nome_arquivo)
+                return existente.get('id'), existente.get('webViewLink')
+
             file_metadata = {'name': nome_arquivo, 'parents': [revisao_id]}
             media = MediaFileUpload(caminho_arquivo, mimetype='application/pdf', resumable=True)
 
@@ -197,7 +216,6 @@ class GoogleDriveManager:
                 supportsAllDrives=True,
             ).execute()
 
-            # Retorna uma tupla com o ID e o link
             return arquivo_upado.get('id'), arquivo_upado.get('webViewLink')
         except Exception as e:
             print(f"❌ Erro ao enviar para REVISÃO: {e}")
