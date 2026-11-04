@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       ticker:
-        description: Ticker isolado (ex.: PETR4 ou MXRF11); deixe vazio para lote
+        description: "Ticker isolado (ex.: PETR4 ou MXRF11); deixe vazio para lote"
         required: false
         default: ""
       limite_total:

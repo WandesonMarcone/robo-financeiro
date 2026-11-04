@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       ticker:
-        description: Ticker do ativo (ex.: PETR4 ou MXRF11)
+        description: "Ticker do ativo (ex.: PETR4 ou MXRF11)"
         required: true
         type: string
 
