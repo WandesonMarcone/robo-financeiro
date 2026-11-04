@@ -51,7 +51,7 @@ jobs:
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID || '8867098987' }}
           TICKER_ISOLADO: ${{ inputs.ticker }}
         run: python scripts/notificar_sucesso_atualizacao.py
       - name: Avisar falha
