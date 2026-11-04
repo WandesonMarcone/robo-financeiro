@@ -1,0 +1,62 @@
+name: Atualização isolada de ativo
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticker:
+        description: Ticker do ativo (ex.: PETR4 ou MXRF11)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coleta-isolada-ativo
+  cancel-in-progress: false
+
+jobs:
+  atualizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+      - name: Validar seleção de lotes
+        run: python -m unittest tests.test_lotes_atualizacao -v
+      - name: Criar credencial temporária do Google
+        shell: python
+        env:
+          GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: |
+          import os
+          with open("credenciais.json", "w", encoding="utf-8") as arquivo:
+              arquivo.write(os.environ["GOOGLE_CREDS"])
+      - name: Atualizar somente o ativo solicitado
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TICKER_ISOLADO: ${{ inputs.ticker }}
+        run: >-
+          python atualizador_ciclico.py
+          --ticker "${{ inputs.ticker }}"
+          --limite-total 1
+          --orcamento-segundos 540
+          --pausa-segundos 2
+      - name: Avisar conclusão
+        if: success()
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+          TICKER_ISOLADO: ${{ inputs.ticker }}
+        run: python scripts/notificar_sucesso_atualizacao.py
+      - name: Avisar falha
+        if: failure()
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: python scripts/notificar_falha_workflow.py
