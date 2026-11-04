@@ -1031,7 +1031,14 @@ def alimentar_textos_pendentes(session=None, drive_manager=None, limite=None):
                 <= TEXTO_MAX_CLASSIFICACAO,
             ),
         )
-        docs = consulta.all()
+        # Guarda apenas IDs: a auditoria/limpeza pode remover uma linha enquanto
+        # a tarefa está em segundo plano. Recarregamos cada documento antes de usar.
+        ids = [doc_id for (doc_id,) in consulta.with_entities(DocumentosQualitativos.id).all()]
+        docs = []
+        for doc_id in ids:
+            doc = session.query(DocumentosQualitativos).filter_by(id=doc_id).first()
+            if doc is not None:
+                docs.append(doc)
         docs.sort(key=_prioridade_rag)
         if limite:
             docs = docs[: int(limite)]
