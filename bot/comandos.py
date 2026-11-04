@@ -16,6 +16,7 @@ from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from pipeline_dados.coletor_fiis import ano_padrao_coleta, processar_informes_fiis_cvm
 from modules.utils import conectar_gspread
 from services.github_actions import disparar_atualizacao_isolada
+from services.planilhas import buscar_dados_planilha_com_cache
 
 
 def _ano_do_comando(message):
@@ -96,6 +97,20 @@ def atualizar_ativo(message):
         bot.reply_to(message, "⚠️ Uso correto: `/atualizar_ativo PETR4` ou `/atualizar_ativo MXRF11`.", parse_mode="Markdown")
         return
     ticker = partes[1].upper()
+    try:
+        nome_aba = "BD_FIIs" if ticker.endswith("11") else "BD_Acoes"
+        matriz = buscar_dados_planilha_com_cache(nome_aba) or []
+        tickers_validos = {
+            str(linha[0]).strip().upper()
+            for linha in matriz[1:]
+            if linha and str(linha[0]).strip()
+        }
+    except Exception:
+        bot.reply_to(message, "❌ Não consegui consultar a planilha para validar o ativo. Tente novamente em alguns instantes.")
+        return
+    if ticker not in tickers_validos:
+        bot.reply_to(message, f"⚠️ O ativo *{ticker}* não está cadastrado na planilha monitorada.", parse_mode="Markdown")
+        return
     bot.reply_to(message, f"🔎 Enfileirando a busca isolada de *{ticker}*…", parse_mode="Markdown")
     sucesso, detalhe = disparar_atualizacao_isolada(ticker)
     if sucesso:
