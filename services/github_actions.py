@@ -19,7 +19,7 @@ def disparar_atualizacao_isolada(ticker, timeout=20):
     if not ticker:
         return False, "Ticker não informado."
 
-    url = f"https://api.github.com/repos/{repositorio}/actions/workflows/atualizacao-ciclica.yml/dispatches"
+    url = f"https://api.github.com/repos/{repositorio}/actions/workflows/atualizacao-isolada.yml/dispatches"
     headers = {
         "Accept": "application/vnd.github+json",
         "Authorization": f"Bearer {token}",
