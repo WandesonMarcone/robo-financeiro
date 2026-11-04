@@ -16,7 +16,6 @@ from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from pipeline_dados.coletor_fiis import ano_padrao_coleta, processar_informes_fiis_cvm
 from modules.utils import conectar_gspread
 from services.github_actions import disparar_atualizacao_isolada
-from services.planilhas import buscar_dados_planilha_com_cache
 
 
 def _ano_do_comando(message):
@@ -97,26 +96,48 @@ def atualizar_ativo(message):
         bot.reply_to(message, "⚠️ Uso correto: `/atualizar_ativo PETR4` ou `/atualizar_ativo MXRF11`.", parse_mode="Markdown")
         return
     ticker = partes[1].upper()
-    try:
-        nome_aba = "BD_FIIs" if ticker.endswith("11") else "BD_Acoes"
-        matriz = buscar_dados_planilha_com_cache(nome_aba) or []
-        tickers_validos = {
-            str(linha[0]).strip().upper()
-            for linha in matriz[1:]
-            if linha and str(linha[0]).strip()
-        }
-    except Exception:
-        bot.reply_to(message, "❌ Não consegui consultar a planilha para validar o ativo. Tente novamente em alguns instantes.")
-        return
-    if ticker not in tickers_validos:
-        bot.reply_to(message, f"⚠️ O ativo *{ticker}* não está cadastrado na planilha monitorada.", parse_mode="Markdown")
-        return
     bot.reply_to(message, f"🔎 Enfileirando a busca isolada de *{ticker}*…", parse_mode="Markdown")
     sucesso, detalhe = disparar_atualizacao_isolada(ticker)
     if sucesso:
         bot.send_message(message.chat.id, f"✅ {detalhe}\nO resultado será gravado na planilha/Neon e o workflow enviará a conclusão.")
     else:
         bot.send_message(message.chat.id, f"❌ Não foi possível iniciar *{ticker}*: {detalhe}", parse_mode="Markdown")
+
+
+@bot.message_handler(commands=['forcar_documentos'])
+def forcar_documentos_ativo(message):
+    """Busca documentos de um único ativo, sem iniciar uma varredura ampla."""
+    partes = (message.text or "").split()
+    if len(partes) not in (2, 3) or not re.fullmatch(r"[A-Z]{4,6}\d{1,2}", partes[1].upper()):
+        bot.reply_to(message, "⚠️ Uso correto: `/forcar_documentos GARE11 [DIAS|ANO]` ou `/forcar_documentos PETR4 [ANO]`.", parse_mode="Markdown")
+        return
+    ticker = partes[1].upper()
+    filtro = partes[2] if len(partes) == 3 else None
+    session = SessionDB()
+    try:
+        ativo = session.query(Ativo).filter(func.upper(Ativo.ticker) == ticker).first()
+        if ativo is None:
+            bot.reply_to(message, f"❌ O ativo *{ticker}* não está cadastrado.", parse_mode="Markdown")
+            return
+        tipo = str(getattr(ativo.tipo, "value", ativo.tipo) or "").upper()
+    finally:
+        session.close()
+    bot.reply_to(message, f"🔎 Iniciando busca documental isolada de *{ticker}* em segundo plano…", parse_mode="Markdown")
+
+    def tarefa():
+        try:
+            if tipo == "FII":
+                from pipeline_dados.coletor_fnet import ColetorFnet
+                dias = int(filtro) if filtro and filtro.isdigit() else 60
+                resultado = ColetorFnet().coletar(dias=dias, ticker=ticker)
+            else:
+                from pipeline_dados.coletor_docs_acoes import RelatoriosAcoesCVM
+                ano = int(filtro) if filtro and filtro.isdigit() and len(filtro) == 4 else ano_padrao_coleta()
+                resultado = RelatoriosAcoesCVM().vasculhar_documentos(ano=ano, ticker=ticker)
+            bot.send_message(message.chat.id, f"✅ Busca documental de *{ticker}* concluída.\n{resultado.mensagem_telegram()}", parse_mode="Markdown")
+        except Exception as exc:
+            bot.send_message(message.chat.id, f"❌ Busca documental de *{ticker}* encerrada com erro: {type(exc).__name__}.")
+    threading.Thread(target=tarefa, daemon=True).start()
 
 @bot.message_handler(commands=['relatorios', 'docs'])
 def enviar_ultimos_relatorios(message):
@@ -569,3 +590,4 @@ def tratar_reset_docs(call):
     except Exception as e:
         bot.answer_callback_query(call.id, "Erro ao apagar.")
         bot.edit_message_text(f"❌ Erro ao apagar: {e}", chat_id, mensagem_id)
+
