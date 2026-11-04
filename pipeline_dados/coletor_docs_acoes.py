@@ -163,10 +163,11 @@ class RelatoriosAcoesCVM:
         self.session = session
         self.http_get = http_get
 
-    def vasculhar_documentos(self, ano=None):
+    def vasculhar_documentos(self, ano=None, ticker=None):
         if ano is None:
             ano = ano_padrao_coleta()
         resultado = ResultadoColetaDocs(ano)
+        ticker_filtro = str(ticker or "").strip().upper() or None
         session_propria = self.session is None
         obter = self.http_get if self.http_get is not None else requests.get
         session = self.session
@@ -226,6 +227,8 @@ class RelatoriosAcoesCVM:
                 if ativo is None:
                     resultado.sem_ativo += 1
                     continue
+                if ticker_filtro and str(ativo.ticker or "").upper() != ticker_filtro:
+                    continue
 
                 try:
                     existe = (
@@ -268,3 +271,4 @@ class RelatoriosAcoesCVM:
         finally:
             if session_propria and session is not None:
                 session.close()
+
