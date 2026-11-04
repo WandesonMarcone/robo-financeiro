@@ -55,6 +55,7 @@ COMANDOS_ADMIN = frozenset(
         "forcar_cvm",
         "forcar_fiis",
         "atualizar_ativo",
+        "forcar_documentos",
         "gerar_resumos_ia",
         "alimentar_ia",
         "mapear_nomes",
@@ -86,6 +87,7 @@ CALLBACKS_ADMIN_EXATOS = frozenset(
         "cmd_forcar_cvm",
         "cmd_forcar_fiis",
         "cmd_atualizar_ativo",
+        "cmd_forcar_documentos",
         "cmd_gerar_resumos_ia",
         "cmd_alimentar_ia",
         "cmd_auditar_drive",
@@ -591,3 +593,4 @@ def verificar_update(update):
     except Exception:
         logger.exception("Falha ao verificar permissao do update")
         return False, None
+
