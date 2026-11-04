@@ -38,4 +38,5 @@ def disparar_atualizacao_isolada(ticker, timeout=20):
         return False, f"Falha de rede ao enfileirar: {exc.__class__.__name__}."
     if resposta.status_code == 204:
         return True, "Busca isolada enfileirada no GitHub Actions."
-    return False, f"GitHub recusou o disparo (HTTP {resposta.status_code})."
+    detalhe = (resposta.text or "").strip().replace("\n", " ")[:240]
+    return False, f"GitHub recusou o disparo (HTTP {resposta.status_code}){': ' + detalhe if detalhe else '.'}"
