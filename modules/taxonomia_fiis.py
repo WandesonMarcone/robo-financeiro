@@ -21,6 +21,19 @@ EXCECOES_TIPO_FII = {
     "GARE11": "Tijolo",
 }
 
+# Referências oficiais verificadas em 04/11/2026. Revisar em caso de mudança
+# de mandato; classificação não representa avaliação de qualidade ou risco.
+CLASSIFICACOES_VERIFICADAS = {
+    "BTLG11": ("Tijolo", "Logística", "https://content.btgpactual.com/research/home/fundos-imobiliarios/ativo/BTLG11"),
+    "XPML11": ("Tijolo", "Shoppings", "https://www.xpasset.com.br/fundos/xp-malls/"),
+    "HGLG11": ("Tijolo", "Logística", "https://realestate.patria.com/tijolo/hglg11/"),
+    "HGRU11": ("Tijolo", "Renda Urbana", "https://realestate.patria.com/tijolo/hgru11/"),
+    "KNRI11": ("Tijolo", "Logística e Lajes Corporativas", "https://www.kinea.com.br/fundos/fundo-imobiliario-kinea-renda-knri11/"),
+    "KNIP11": ("Papel", "CRI", "https://www.kinea.com.br/fundos/fundo-imobiliario-kinea-indices-de-precos-knip11/"),
+    "MCCI11": ("Papel", "CRI", "https://jivemaua.com.br/fundos/mcci11/"),
+    "SNEL11": ("Híbrido", "Energia Solar", "https://www.suno.com.br/asset/fundos/snel11/"),
+}
+
 _SEGMENTOS = (
     ("CRI", "Papel", ("TITULOS", "PAPEL", "RECEBIVEL", "VALORES MOBILIARIOS", "CRI", "LCI", "CRA", "CERTIFICADOS")),
     ("Cotas de FIIs", "FOF", ("FUNDO DE FUNDOS", "FOF", "COTAS DE FUNDOS", "COTAS DE FIIS")),
@@ -88,6 +101,8 @@ def _casar_segmentos(texto):
 def tipo_macro_fii(texto, ticker=""):
     """Macro canonica (Tijolo/Papel/FOF/Hibrido) a partir da planilha ou do texto livre."""
     t = str(ticker or "").strip().upper()
+    if t in CLASSIFICACOES_VERIFICADAS:
+        return CLASSIFICACOES_VERIFICADAS[t][0]
     if t in EXCECOES_TIPO_FII:
         return EXCECOES_TIPO_FII[t]
     chave = _sem_acento_upper(texto)
@@ -100,6 +115,9 @@ def tipo_macro_fii(texto, ticker=""):
 
 def segmento_fii_canonico(texto, tipo=None, ticker=""):
     """Segmento canonico da coluna C (Fundamentus ou valor ja canonico)."""
+    t = str(ticker or "").strip().upper()
+    if t in CLASSIFICACOES_VERIFICADAS:
+        return CLASSIFICACOES_VERIFICADAS[t][1]
     macro = (
         tipo
         if tipo in MACROS_FII or tipo == "N/D"
@@ -121,6 +139,9 @@ def segmento_fii_canonico(texto, tipo=None, ticker=""):
 def classificar_fii(setor, ticker=""):
     """Devolve (macro, segmento, emoji) a partir do texto livre da fonte."""
     t = str(ticker or "").strip().upper()
+    if t in CLASSIFICACOES_VERIFICADAS:
+        tipo, segmento, _fonte = CLASSIFICACOES_VERIFICADAS[t]
+        return tipo, segmento, EMOJI_MACRO_FII[tipo]
     achados = _casar_segmentos(setor)
     macros = list(dict.fromkeys(item[1] for item in achados))
     if t in EXCECOES_TIPO_FII:

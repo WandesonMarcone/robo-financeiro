@@ -54,11 +54,13 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, p
     mapa_atualizacao = {}
     precos_antigos = {}
     indicadores_antigos = {}
+    classificacoes_anteriores = {}
 
     for row in dados_planilha[1:]: 
         if row and row[0].strip():
             t = row[0].strip().upper()
             tickers_planilha.append(t)
+            classificacoes_anteriores[t] = (row[1:3] + ["", ""])[:2]
             try:
                 if len(row) > 3 and str(row[3]).strip():
                     raw_val = str(row[3]).replace('R$', '').replace('.', '').replace(',', '.').strip()
@@ -174,10 +176,10 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, p
                 setor = None
 
             ticker_novo = ticker not in tickers_planilha
-            if setor or ticker_novo:
-                tipo, segmento, emoji = classificar_fii(setor or "", ticker)
-            else:
-                tipo, segmento, emoji = None, None, "🏢"
+            tipo_anterior, segmento_anterior = classificacoes_anteriores.get(ticker, ("", ""))
+            tipo, segmento, emoji = classificar_fii(setor or segmento_anterior or tipo_anterior, ticker)
+            if tipo == "N/D":
+                tipo, segmento = None, None
 
             vacancia = vacancia_fund
             # Fundamentus não fornece a lista de inquilinos. Não apagamos o
@@ -235,7 +237,7 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, p
 
             preco_velho = precos_antigos.get(ticker, 0.0)
             preco_exib = preco if eh_valido(preco) else preco_velho
-            tipo_exib = tipo if tipo else "N/D"
+            tipo_exib = f"{tipo} · {segmento}" if tipo else "Classificação pendente"
             pvp_txt = f"{pvp:.2f}" if eh_valido(pvp) else "N/D"
             dy_txt = formatar_pct(dy)
             icone_variacao = "📈" if preco_exib > preco_velho else ("📉" if preco_exib < preco_velho else "➖")
@@ -288,7 +290,16 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, p
     msg_blocos = ["🏢 *MOVIMENTAÇÃO DE FIIs* 🏢"]
     if relatorio_fixas_opps: msg_blocos.append("🏆 *ALERTA VIP:*\n" + "\n\n".join(relatorio_fixas_opps))
     if relatorio_fixas: msg_blocos.append("📌 *CARTEIRA POPULAR:*\n" + "\n\n".join(relatorio_fixas))
-    if relatorio_opps: msg_blocos.append("🎯 *TOP OPORTUNIDADES:*\n" + "\n\n".join(relatorio_opps))
+    if relatorio_opps:
+        msg_blocos.append(
+            "🔎 *CANDIDATOS PARA ANÁLISE — FILTRO QUANTITATIVO:*\n"
+            "Ordem: liquidez decrescente.\n"
+            f"Critérios: P/VP {filtro_fii.get('pvp_min', 0):.2f}–{filtro_fii.get('pvp_max', 1.05):.2f}; "
+            f"DY mínimo {filtro_fii.get('dy_min', 0.09):.1%}.\n"
+            "Riscos de crédito, dívida e renda recorrente ainda não validados. "
+            "Vacância ausente não significa zero.\n\n" + "\n\n".join(relatorio_opps)
+        )
+    msg_blocos.append(f"Consulta: {agora_sp}. Indicadores: Fundamentus; cotação: Yahoo/ Fundamentus. Datas-base podem diferir.")
     tickers_digest = tickers_do_digest(fila_total)
     msg_out = "\n\n➖➖➖➖➖➖➖➖➖➖\n\n".join(msg_blocos) if batch_updates else ""
 
