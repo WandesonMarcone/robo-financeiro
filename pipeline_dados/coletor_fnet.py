@@ -149,8 +149,9 @@ class ColetorFnet:
         self.session = session
         self.capturar_tudo = capturar_tudo
 
-    def coletar(self, dias=DIAS_PADRAO):
+    def coletar(self, dias=DIAS_PADRAO, ticker=None):
         resultado = ResultadoVarreduraFnet(dias)
+        ticker_filtro = str(ticker or "").strip().upper() or None
         session_propria = self.session is None
         session = self.session
         if session_propria:
@@ -192,6 +193,8 @@ class ColetorFnet:
                 ativo = _encontrar_ativo(nome_fundo, pares)
                 if ativo is None:
                     resultado.sem_ativo += 1
+                    continue
+                if ticker_filtro and str(ativo.ticker or "").upper() != ticker_filtro:
                     continue
 
                 try:
@@ -243,3 +246,4 @@ class ColetorFnet:
         finally:
             if session_propria and session is not None:
                 session.close()
+

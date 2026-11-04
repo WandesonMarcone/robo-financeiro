@@ -283,6 +283,7 @@ def _texto_hub():
             "👥 Usuarios — solicitacoes e cadastros.",
             "🔔 Notificacoes — alertas por pessoa ou por FIIs/acoes favoritados.",
             "⚖️ Central de Revisoes — documentos suspeitos de FIIs.",
+            "📄 Busca documental isolada — um FII ou ação por vez.",
             "🤖 Status das IAs — provedores e modelos disponíveis.",
         ]
     )
@@ -301,6 +302,11 @@ def _markup_hub():
     markup.add(
         InlineKeyboardButton(
             "⚖️ Central de Revisoes", callback_data=f"{PREFIXO_CALLBACK}revisoes"
+        )
+    )
+    markup.add(
+        InlineKeyboardButton(
+            "📄 Buscar documentos de ativo", callback_data=f"{PREFIXO_CALLBACK}docs"
         )
     )
     markup.add(
@@ -995,6 +1001,17 @@ def tratar_callback(call):
                 toast = _mostrar_notificacoes_pessoa(call, usuario_id)
         elif acao == "revisoes":
             toast = _mostrar_revisoes(call)
+        elif acao == "docs":
+            bot.send_message(
+                call.message.chat.id,
+                "📄 Busca documental isolada\n\n"
+                "Envie um comando para buscar somente aquele ativo:\n"
+                "`/forcar_documentos GARE11` para FII (últimos 60 dias)\n"
+                "`/forcar_documentos PETR4 2026` para ação (ano informado).\n\n"
+                "A operação é exclusiva do administrador e envia o resultado final.",
+                parse_mode="Markdown",
+            )
+            toast = "Busca documental isolada pronta."
         elif acao == "ia":
             toast = _mostrar_ia(call)
         elif acao == "area":
@@ -1191,3 +1208,4 @@ def _tratar_do(call, partes):
     # Atualiza a interface voltando à lista da área (a página é reajustada).
     erro = _mostrar_area(call, area, pagina, aviso=aviso)
     return erro or toast
+
