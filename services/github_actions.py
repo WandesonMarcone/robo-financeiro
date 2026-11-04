@@ -29,7 +29,9 @@ def disparar_atualizacao_isolada(ticker, timeout=20):
         resposta = requests.post(
             url,
             headers=headers,
-            json={"ref": "main", "inputs": {"ticker": ticker, "limite_total": "1"}},
+            # O limite_total possui valor padrão no workflow. Enviamos apenas
+            # o ticker para evitar rejeição de inputs opcionais pelo endpoint.
+            json={"ref": "main", "inputs": {"ticker": ticker}},
             timeout=timeout,
         )
     except requests.RequestException as exc:
