@@ -2,9 +2,9 @@ name: Atualização cíclica de ativos
 
 on:
   schedule:
-    # Horários em UTC: ciclos diurnos e madrugada em Brasília. Cada ciclo
+    # Horários em UTC: ciclos diurnos e madrugada/primeiras horas em Brasília. Cada ciclo
     # permite até 30 ativos, pausa de 2s e orçamento interno de 9 minutos.
-    - cron: "30 3,5,7,12,14,16,18,20,22,23 * * 1-5"
+    - cron: "30 3,5,7,9,12,14,16,18,20,22,23 * * 1-5"
   workflow_dispatch:
     inputs:
       ticker:
