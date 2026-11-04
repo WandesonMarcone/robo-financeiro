@@ -10,6 +10,7 @@ mapeado na B3.
 from __future__ import annotations
 
 import logging
+import math
 import re
 import unicodedata
 
@@ -536,6 +537,8 @@ def eh_oportunidade_fii(pvp, dy, liquidez=None, vacancia=None, filtros=None):
         dy = float(dy)
     except (TypeError, ValueError):
         return False
+    if not all(math.isfinite(v) for v in (pvp, dy)) or pvp <= 0 or dy < 0:
+        return False
     if not (f.get("pvp_min", 0) <= pvp <= f.get("pvp_max", 1.05)):
         return False
     if dy < _pct_para_filtro(dy, f.get("dy_min", 0.09)):
@@ -543,7 +546,7 @@ def eh_oportunidade_fii(pvp, dy, liquidez=None, vacancia=None, filtros=None):
     liq_min = f.get("liquidez_min")
     if liq_min is not None:
         try:
-            if float(liquidez) < liq_min:
+            if not math.isfinite(float(liquidez)) or float(liquidez) < liq_min:
                 return False
         except (TypeError, ValueError):
             return False
@@ -553,7 +556,7 @@ def eh_oportunidade_fii(pvp, dy, liquidez=None, vacancia=None, filtros=None):
             vac = float(vacancia)
         except (TypeError, ValueError):
             vac = None
-        if vac is not None and vac > vac_max:
+        if vac is not None and math.isfinite(vac) and (vac < 0 or vac > vac_max):
             return False
     return True
 
