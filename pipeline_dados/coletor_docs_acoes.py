@@ -222,13 +222,16 @@ class RelatoriosAcoesCVM:
                     resultado.ignorados_validacao += 1
                     continue
 
-                resultado.informes_encontrados += 1
                 ativo = mapa_cnpj.get(cnpj_limpo)
                 if ativo is None:
+                    if ticker_filtro:
+                        continue
+                    resultado.informes_encontrados += 1
                     resultado.sem_ativo += 1
                     continue
                 if ticker_filtro and str(ativo.ticker or "").upper() != ticker_filtro:
                     continue
+                resultado.informes_encontrados += 1
 
                 try:
                     existe = (
