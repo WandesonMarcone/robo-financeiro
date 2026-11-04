@@ -295,6 +295,24 @@ def _rodar_lote_ia(chat_id, message_id, somente_sem_texto=False, pagina_inicial=
     )
 
 
+@bot.message_handler(commands=['classificar_ia'])
+def comando_classificar_ia(message):
+    """Atalho textual para classificar a fila que também aparece na Central."""
+    chat_id = message.chat.id
+    sent = bot.send_message(
+        chat_id,
+        "🤖 Classificação da fila de revisão iniciada em segundo plano.",
+    )
+    if not _lote_ia_lock.acquire(blocking=False):
+        bot.send_message(chat_id, "⚖️ Já existe uma classificação em andamento.")
+        return
+    threading.Thread(
+        target=_rodar_lote_ia,
+        args=(chat_id, sent.message_id),
+        daemon=True,
+    ).start()
+
+
 @bot.callback_query_handler(func=lambda call: call.data == "rev_ia_lote")
 def classificar_lote_com_ia(call):
     """Duas checagens da IA em segundo plano (catalogo fixo, sem estourar o webhook)."""
