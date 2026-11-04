@@ -98,8 +98,8 @@ def _persistir_lote(aba, atualizacoes, tipo):
     return True
 
 
-def executar(limite_total=16, orcamento_segundos=540, pausa_segundos=2.0, planilha=None, clock=time.monotonic, sleep=time.sleep, ticker=None):
-    if not 1 <= limite_total <= 16:
+def executar(limite_total=40, orcamento_segundos=540, pausa_segundos=2.0, planilha=None, clock=time.monotonic, sleep=time.sleep, ticker=None):
+    if not 1 <= limite_total <= 40:
         raise ValueError("limite_total_invalido")
     if not 60 <= orcamento_segundos <= 540:
         raise ValueError("orcamento_invalido")
@@ -206,7 +206,7 @@ def executar(limite_total=16, orcamento_segundos=540, pausa_segundos=2.0, planil
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--limite-total", type=int, default=16)
+    parser.add_argument("--limite-total", type=int, default=40)
     parser.add_argument("--orcamento-segundos", type=int, default=540)
     parser.add_argument("--pausa-segundos", type=float, default=2.0)
     parser.add_argument("--ticker", default="")
