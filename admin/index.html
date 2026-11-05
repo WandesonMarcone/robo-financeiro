@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111814">
+  <title>Estratégia Fardada | Central de Controle</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand"><img src="assets/estrategia-fardada.webp" alt="Estratégia Fardada"><div><strong>ESTRATÉGIA</strong><span>FARDADA</span></div></div>
+    <nav aria-label="Navegação principal">
+      <button class="nav active" data-view="visao">▦ <span>Visão operacional</span></button>
+      <button class="nav" data-view="comandos">⌘ <span>Comandos</span></button>
+      <button class="nav" data-view="documentos">▤ <span>Documentos</span></button>
+      <button class="nav" data-view="alertas">◉ <span>Alertas e eventos</span></button>
+      <button class="nav" data-view="fontes">◌ <span>Fontes e IAs</span></button>
+      <button class="nav" data-view="config">⚙ <span>Conexão</span></button>
+    </nav>
+    <div class="sidebar-foot"><span class="dot"></span> Sistema administrativo</div>
+  </aside>
+  <main>
+    <header><button class="mobile-menu" aria-label="Abrir menu">☰</button><div><p class="eyebrow">CENTRAL DE CONTROLE</p><h1 id="page-title">Visão operacional</h1></div><div class="header-right"><span id="connection" class="status neutral">● Sem conexão</span><button class="icon-button" id="refresh" title="Atualizar">↻</button></div></header>
+
+    <section id="visao" class="view active">
+      <div class="hero"><div><p class="eyebrow gold">ROBÔ FINANCEIRO</p><h2>Controle a operação.<br><em>Veja o que importa.</em></h2><p>Monitoramento centralizado de coletas, documentos, alertas e tarefas administrativas.</p></div><div class="hero-mark">EF<span>↑</span></div></div>
+      <div class="metrics" id="metrics">
+        <article><span>●</span><small>Robô</small><strong>Verificando</strong><p>Conecte a API administrativa</p></article>
+        <article><span>◌</span><small>Fila de tarefas</small><strong>—</strong><p>Sem dados carregados</p></article>
+        <article><span>▤</span><small>Documentos pendentes</small><strong>—</strong><p>Neon ainda não consultado</p></article>
+        <article><span>◉</span><small>Última atualização</small><strong>—</strong><p>Sem histórico</p></article>
+      </div>
+      <div class="two-col"><section class="panel"><div class="panel-title"><div><p class="eyebrow">ATIVIDADE</p><h3>Execuções recentes</h3></div><button class="text-button" data-go="comandos">Ver comandos</button></div><div class="timeline" id="timeline"><p class="empty">Conecte a API para acompanhar tarefas e execuções.</p></div></section><section class="panel"><div class="panel-title"><div><p class="eyebrow">SAÚDE DO SISTEMA</p><h3>Serviços essenciais</h3></div></div><div class="health" id="health"><div><span>Render</span><b class="neutral">Aguardando</b></div><div><span>Neon</span><b class="neutral">Aguardando</b></div><div><span>Google Drive</span><b class="neutral">Aguardando</b></div><div><span>GitHub Actions</span><b class="neutral">Aguardando</b></div></div></section></div>
+    </section>
+
+    <section id="comandos" class="view">
+      <div class="section-heading"><div><p class="eyebrow">OPERAÇÃO MANUAL</p><h2>Comandos do robô</h2><p>Os mesmos fluxos administrativos do Telegram, organizados em um só painel.</p></div><button class="primary" id="open-command">+ Nova operação</button></div>
+      <div class="command-grid" id="command-grid"></div>
+    </section>
+
+    <section id="documentos" class="view"><div class="section-heading"><div><p class="eyebrow">BASE DOCUMENTAL</p><h2>Documentos e revisão</h2><p>Consulta, classificação e organização ficam centralizadas aqui.</p></div><button class="primary" data-command="forcar_documentos">Buscar documento de ativo</button></div><section class="panel filter-panel"><input id="document-search" placeholder="Buscar por ticker, tipo ou data"><select><option>Todos os status</option><option>Pendente de revisão</option><option>Salvo no Drive</option></select><button class="secondary">Filtrar</button></section><section class="panel"><div class="panel-title"><h3>Documentos recentes</h3><span class="status neutral">API necessária</span></div><p class="empty">Quando conectada, esta área exibirá os documentos do Neon e links do Google Drive.</p></section></section>
+
+    <section id="alertas" class="view"><div class="section-heading"><div><p class="eyebrow">MONITORAMENTO</p><h2>Alertas e eventos</h2><p>Variações, fatos relevantes e conclusões de processamento.</p></div></div><section class="panel"><p class="empty">Os eventos aparecerão aqui após a conexão com a API do robô.</p></section></section>
+    <section id="fontes" class="view"><div class="section-heading"><div><p class="eyebrow">DIAGNÓSTICO</p><h2>Fontes e inteligências</h2><p>Status real das fontes de dados e provedores de IA.</p></div><button class="primary" data-command="diagnostico_fontes">Diagnosticar fontes</button></div><div class="source-grid"><article class="panel"><h3>Mercado</h3><p>Yahoo Finance · Fundamentus · B3/CVM</p><b class="neutral">Aguardando teste</b></article><article class="panel"><h3>Documentos</h3><p>FNET · CVM · Google Drive</p><b class="neutral">Aguardando teste</b></article><article class="panel"><h3>IA</h3><p>OpenAI · Groq · OpenRouter</p><b class="neutral">Aguardando teste</b></article></div></section>
+    <section id="config" class="view"><div class="section-heading"><div><p class="eyebrow">ACESSO ADMINISTRATIVO</p><h2>Conexão segura</h2><p>O token fica somente neste navegador durante a sessão.</p></div></div><section class="panel connection-panel"><label>Endereço da API do robô<input id="api-url" type="url" placeholder="https://robo-fii-v2.onrender.com"></label><label>Token administrativo<input id="api-token" type="password" placeholder="Cole o token configurado no Render"></label><div><button class="primary" id="save-connection">Conectar painel</button><button class="secondary" id="disconnect">Limpar sessão</button></div><p class="help">Não coloque credenciais do Neon, Drive, Telegram ou GitHub no GitHub Pages. Somente o token administrativo limitado da API.</p></section></section>
+  </main>
+  <dialog id="command-dialog"><form method="dialog" id="command-form"><button class="close" value="cancel" aria-label="Fechar">×</button><p class="eyebrow">EXECUTAR OPERAÇÃO</p><h2 id="dialog-title">Comando</h2><p id="dialog-description"></p><input id="command-action" type="hidden"><label id="ticker-field">Ativo <input id="ticker" placeholder="Ex.: PETR4 ou MXRF11" pattern="[A-Za-z]{4,6}[0-9]{1,2}"></label><label id="period-field">Período <input id="period" placeholder="Ex.: 2026 ou 60"></label><p class="notice">A execução será registrada no robô. Processos longos continuam em segundo plano.</p><button class="primary" id="execute" value="default">Executar comando</button><p id="command-result" role="status"></p></form></dialog>
+  <script src="assets/app.js"></script>
+</body>
+</html>
