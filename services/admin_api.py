@@ -151,20 +151,65 @@ def _ativos_para_painel(limite: int = 120) -> tuple[list[dict], dict]:
         session.close()
 
 
+def _serializar_documento(documento, ticker: str) -> dict:
+    """Campos seguros e úteis para auditoria documental no painel."""
+    return {
+        "id": documento.id,
+        "ticker": ticker,
+        "tipo": documento.tipo_documento or "Não classificado",
+        "data_publicacao": documento.data_publicacao.isoformat() if documento.data_publicacao else None,
+        "status": documento.status_processamento or "SALVO",
+        "atualizado_em": documento.data_atualizacao.isoformat() if documento.data_atualizacao else None,
+        "assunto": documento.assunto or "",
+        "url": documento.url_pdf or "",
+        "tem_resumo": bool(documento.resumo_ia),
+    }
+
+
+def _documentos_para_painel(ticker: str | None = None, status: str | None = None, limite: int = 100) -> list[dict]:
+    """Consulta documental no Neon. Não baixa PDFs nem chama fontes externas."""
+    from atualizador_documentos import SessionDB
+    from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
+    from sqlalchemy import func
+
+    session = SessionDB()
+    try:
+        consulta = session.query(DocumentosQualitativos, Ativo.ticker).join(Ativo, Ativo.id == DocumentosQualitativos.ativo_id)
+        if ticker:
+            consulta = consulta.filter(func.upper(Ativo.ticker) == ticker.upper())
+        if status:
+            consulta = consulta.filter(func.upper(DocumentosQualitativos.status_processamento) == status.upper())
+        linhas = consulta.order_by(
+            DocumentosQualitativos.data_publicacao.desc(),
+            DocumentosQualitativos.id.desc(),
+        ).limit(min(max(limite, 1), 200)).all()
+        return [_serializar_documento(documento, ativo_ticker) for documento, ativo_ticker in linhas]
+    finally:
+        session.close()
+
+
 @admin_api.route("/api/admin/status", methods=["GET"])
 @exige_admin
 def status():
     recentes = list(_TASKS.values())[-8:]
     recentes.reverse()
     pendentes = sum(1 for item in _TASKS.values() if item["status"] == "em_andamento")
+    neon_ok = False
     try:
         _, base = _ativos_para_painel(limite=500)
+        neon_ok = True
     except Exception:
         base = {"assets": "—", "acoes": "—", "fiis": "—", "documentos": "—"}
     return jsonify({
         "robot": "Online",
         "updated_at": datetime.now().strftime("Consulta %d/%m/%Y %H:%M"),
         "metrics": {"queue": pendentes, "pending_documents": base["documentos"], "last_update": "Agora", **base},
+        "services": {
+            "render": "ok",
+            "neon": "ok" if neon_ok else "error",
+            "drive": "unknown",
+            "github": "unknown",
+        },
         "recent": recentes,
     })
 
@@ -178,6 +223,25 @@ def listar_ativos():
     except Exception:
         return jsonify({"message": "Não foi possível consultar o cadastro de ativos agora."}), 503
     return jsonify({"assets": ativos, "totals": totais})
+
+
+@admin_api.route("/api/admin/documents", methods=["GET"])
+@exige_admin
+def listar_documentos():
+    ticker = str(request.args.get("ticker") or "").strip().upper()
+    status = str(request.args.get("status") or "").strip().upper()
+    busca = str(request.args.get("q") or "").strip().lower()
+    if ticker and not _TICKER.fullmatch(ticker):
+        return jsonify({"message": "Ticker inválido."}), 400
+    try:
+        documentos = _documentos_para_painel(ticker=ticker or None, status=status or None)
+    except Exception:
+        return jsonify({"message": "Não foi possível consultar os documentos no Neon agora."}), 503
+    if busca:
+        documentos = [doc for doc in documentos if busca in " ".join([
+            doc["ticker"], doc["tipo"], doc["status"], doc["assunto"], doc["data_publicacao"] or "",
+        ]).lower()]
+    return jsonify({"documents": documentos, "total": len(documentos), "ticker": ticker or None})
 
 
 @admin_api.route("/api/admin/commands", methods=["POST"])
