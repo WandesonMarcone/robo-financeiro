@@ -91,7 +91,7 @@ def _executar_em_background(tarefa_id: str, funcao, *args):
 
 def _coletar_documentos_isolados(ticker: str, periodo: str | None):
     from atualizador_documentos import SessionDB
-    from pipeline_dados.modelos_ativos import Ativo
+    from pipeline_dados.banco_dados import Ativo
     from sqlalchemy import func
 
     session = SessionDB()
@@ -118,18 +118,66 @@ def _diagnostico_fontes():
     return diagnosticar(tickers, limite=min(3, len(tickers)), pausa=2, orcamento=120)
 
 
+def _ativos_para_painel(limite: int = 120) -> tuple[list[dict], dict]:
+    """Leitura curta do cadastro no Neon, sem acionar coletas externas."""
+    from atualizador_documentos import SessionDB
+    from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
+    from sqlalchemy import func
+
+    session = SessionDB()
+    try:
+        linhas = (
+            session.query(
+                Ativo.id, Ativo.ticker, Ativo.tipo,
+                func.count(DocumentosQualitativos.id).label("documentos"),
+            )
+            .outerjoin(DocumentosQualitativos, DocumentosQualitativos.ativo_id == Ativo.id)
+            .group_by(Ativo.id, Ativo.ticker, Ativo.tipo)
+            .order_by(Ativo.ticker.asc()).limit(limite).all()
+        )
+        ativos = [{
+            "ticker": linha.ticker,
+            "tipo": str(getattr(linha.tipo, "value", linha.tipo) or "—"),
+            "documentos": int(linha.documentos or 0),
+        } for linha in linhas]
+        totais = {
+            "assets": len(ativos),
+            "acoes": sum(item["tipo"] == "ACAO" for item in ativos),
+            "fiis": sum(item["tipo"] == "FII" for item in ativos),
+            "documentos": sum(item["documentos"] for item in ativos),
+        }
+        return ativos, totais
+    finally:
+        session.close()
+
+
 @admin_api.route("/api/admin/status", methods=["GET"])
 @exige_admin
 def status():
     recentes = list(_TASKS.values())[-8:]
     recentes.reverse()
     pendentes = sum(1 for item in _TASKS.values() if item["status"] == "em_andamento")
+    try:
+        _, base = _ativos_para_painel(limite=500)
+    except Exception:
+        base = {"assets": "—", "acoes": "—", "fiis": "—", "documentos": "—"}
     return jsonify({
         "robot": "Online",
         "updated_at": datetime.now().strftime("Consulta %d/%m/%Y %H:%M"),
-        "metrics": {"queue": pendentes, "pending_documents": "—", "last_update": "Agora"},
+        "metrics": {"queue": pendentes, "pending_documents": base["documentos"], "last_update": "Agora", **base},
         "recent": recentes,
     })
+
+
+@admin_api.route("/api/admin/assets", methods=["GET"])
+@exige_admin
+def listar_ativos():
+    """Lista o cadastro real limitado, sem acionar coleta externa."""
+    try:
+        ativos, totais = _ativos_para_painel()
+    except Exception:
+        return jsonify({"message": "Não foi possível consultar o cadastro de ativos agora."}), 503
+    return jsonify({"assets": ativos, "totals": totais})
 
 
 @admin_api.route("/api/admin/commands", methods=["POST"])
