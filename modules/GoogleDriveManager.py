@@ -69,6 +69,60 @@ class GoogleDriveManager:
 
         self.service = build('drive', 'v3', credentials=self.creds)
 
+    def medir_armazenamento_robo(self):
+        """Mede arquivos sob a raiz do robô, sem alterar nada no Drive.
+
+        A cota da conta é retornada separadamente da área ocupada pelo robô:
+        a primeira pode conter arquivos pessoais que não pertencem ao sistema.
+        """
+        sobre = self.service.about().get(
+            fields="storageQuota(limit,usage,usageInDrive,usageInDriveTrash)"
+        ).execute().get("storageQuota", {})
+        resultado = {
+            "conta_usada_bytes": int(sobre.get("usage") or 0),
+            "conta_limite_bytes": int(sobre.get("limit") or 0),
+            "conta_lixeira_bytes": int(sobre.get("usageInDriveTrash") or 0),
+            "robo_bytes": 0,
+            "arquivos": 0,
+            "pdfs": 0,
+            "pastas": 0,
+            "raiz_configurada": bool(self.root_folder_id),
+        }
+        if not self.root_folder_id:
+            return resultado
+
+        pendentes = [self.root_folder_id]
+        vistos = set()
+        while pendentes:
+            pasta_id = pendentes.pop()
+            if pasta_id in vistos:
+                continue
+            vistos.add(pasta_id)
+            pagina = None
+            while True:
+                resposta = self.service.files().list(
+                    q=f"'{pasta_id}' in parents and trashed = false",
+                    fields="nextPageToken,files(id,mimeType,size)",
+                    pageToken=pagina,
+                    pageSize=1000,
+                    supportsAllDrives=True,
+                    includeItemsFromAllDrives=True,
+                    corpora="allDrives",
+                ).execute()
+                for arquivo in resposta.get("files", []):
+                    if arquivo.get("mimeType") == _MIME_PASTA:
+                        resultado["pastas"] += 1
+                        pendentes.append(arquivo["id"])
+                        continue
+                    resultado["arquivos"] += 1
+                    resultado["robo_bytes"] += int(arquivo.get("size") or 0)
+                    if arquivo.get("mimeType") == "application/pdf":
+                        resultado["pdfs"] += 1
+                pagina = resposta.get("nextPageToken")
+                if not pagina:
+                    break
+        return resultado
+
     def _obter_ou_criar_pasta(self, nome_pasta, parent_id=None):
         """Busca uma pasta por nome. Se não existir, cria automaticamente."""
         parent_id = parent_id or self.root_folder_id

@@ -19,6 +19,7 @@ from flask import Blueprint, jsonify, request
 admin_api = Blueprint("admin_api", __name__)
 _TICKER = re.compile(r"^[A-Z]{4,6}[0-9]{1,2}$")
 _TASKS: dict[str, dict] = {}
+_STORAGE: dict[str, object] = {"status": "not_measured"}
 
 
 def _origens_permitidas() -> set[str]:
@@ -87,6 +88,45 @@ def _executar_em_background(tarefa_id: str, funcao, *args):
             _TASKS[tarefa_id]["status"] = "falha"
             _TASKS[tarefa_id]["error"] = type(exc).__name__
     threading.Thread(target=executar, daemon=True).start()
+
+
+def _medir_armazenamento():
+    """Medição leve do Neon e do diretório raiz usado pelo robô no Drive."""
+    from sqlalchemy import text
+    from atualizador_documentos import SessionDB
+
+    _STORAGE.update({"status": "measuring", "error": None})
+    try:
+        session = SessionDB()
+        try:
+            banco_bytes = int(session.execute(text("SELECT pg_database_size(current_database())")).scalar() or 0)
+            tabelas_bytes = int(session.execute(text(
+                "SELECT COALESCE(SUM(pg_total_relation_size(relid)), 0) "
+                "FROM pg_catalog.pg_statio_user_tables"
+            )).scalar() or 0)
+        finally:
+            session.close()
+        from modules.GoogleDriveManager import GoogleDriveManager
+        drive = GoogleDriveManager().medir_armazenamento_robo()
+        _STORAGE.update({
+            "status": "ready",
+            "measured_at": datetime.now().strftime("%d/%m/%Y %H:%M"),
+            "neon": {"database_bytes": banco_bytes, "tables_bytes": tabelas_bytes},
+            "drive": drive,
+        })
+    except Exception as exc:
+        _STORAGE.update({"status": "error", "error": type(exc).__name__})
+
+
+@admin_api.route("/api/admin/storage", methods=["GET"])
+@exige_admin
+def armazenamento():
+    """Retorna a última medição e dispara uma nova sem bloquear a interface."""
+    atualizar = str(request.args.get("refresh") or "").lower() in {"1", "true", "sim"}
+    if atualizar or _STORAGE.get("status") == "not_measured":
+        if _STORAGE.get("status") != "measuring":
+            threading.Thread(target=_medir_armazenamento, daemon=True).start()
+    return jsonify(_STORAGE)
 
 
 def _coletar_documentos_isolados(ticker: str, periodo: str | None):
