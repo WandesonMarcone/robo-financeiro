@@ -629,22 +629,23 @@ def rotina_de_atualizacao_em_massa(dias=60, session=None, capturar_tudo=None):
     resultado.processamento = rotina_processar_pendentes()
     return resultado
 
-def rotina_processar_acoes():
-    """Esteira exclusiva da Inteligência Artificial para documentos da CVM"""
+def rotina_processar_acoes(ticker: str | None = None):
+    """Esteira de IA dos documentos CVM pendentes, opcionalmente de um único ativo."""
     resultado = ResultadoProcessamento("PENDENTE_ACAO")
+    ticker = str(ticker or "").strip().upper() or None
     session_fila = SessionDB()
     try:
-        pendentes_ids = [
-            doc.id
-            for doc in session_fila.query(DocumentosQualitativos.id).filter(
-                DocumentosQualitativos.status_processamento == "PENDENTE_ACAO"
-            ).all()
-        ]
+        consulta = session_fila.query(DocumentosQualitativos.id).filter(
+            DocumentosQualitativos.status_processamento == "PENDENTE_ACAO"
+        )
+        if ticker:
+            consulta = consulta.join(Ativo).filter(Ativo.ticker == ticker)
+        pendentes_ids = [doc.id for doc in consulta.all()]
     finally:
         session_fila.close()
 
     resultado.fila = len(pendentes_ids)
-    logger.info("Fila PENDENTE_ACAO: %s documento(s)", resultado.fila)
+    logger.info("Fila PENDENTE_ACAO%s: %s documento(s)", f" de {ticker}" if ticker else "", resultado.fila)
     if not pendentes_ids:
         return resultado
 

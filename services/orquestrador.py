@@ -88,13 +88,14 @@ def coleta_docs_acoes():
         _avisar(f"Erro na varredura de PDFs de acoes: {type(e).__name__}")
 
 
-def processar_ia_acoes():
-    """Cron semanal: classifica fila PENDENTE_ACAO (equivalente a /processar_acoes_ia)."""
-    _avisar("Iniciando classificacao por IA de documentos de acoes.")
+def processar_ia_acoes(ticker: str | None = None):
+    """Cron semanal: classifica a fila PENDENTE_ACAO, inteira ou de um ativo."""
+    alvo = f" de {ticker.upper()}" if ticker else ""
+    _avisar(f"Iniciando classificacao por IA de documentos de acoes{alvo}.")
     try:
         from atualizador_documentos import rotina_processar_acoes
 
-        resultado = rotina_processar_acoes()
+        resultado = rotina_processar_acoes(ticker=ticker)
         _avisar(resultado.mensagem_telegram())
     except Exception as e:
         _avisar(f"Erro no processamento IA de acoes: {type(e).__name__}")

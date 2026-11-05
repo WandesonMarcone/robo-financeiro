@@ -268,6 +268,13 @@ def executar_comando():
         tarefa = _registrar_tarefa(action, f"Busca documental de {ticker}", ticker)
         _executar_em_background(tarefa, _coletar_documentos_isolados, ticker, periodo)
         return jsonify({"message": f"Busca documental de {ticker} iniciada.", "task_id": tarefa}), 202
+    if action == "processar_pendentes_acao":
+        if not ticker:
+            return jsonify({"message": "Informe o ticker da ação para processar somente seus pendentes."}), 400
+        from services import orquestrador
+        tarefa = _registrar_tarefa(action, f"Classificação de pendentes de {ticker}", ticker)
+        _executar_em_background(tarefa, orquestrador.processar_ia_acoes, ticker)
+        return jsonify({"message": f"Classificação dos documentos PENDENTE_ACAO de {ticker} iniciada.", "task_id": tarefa}), 202
 
     from services import orquestrador
     acoes = {

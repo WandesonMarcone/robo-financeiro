@@ -6,6 +6,7 @@ const commands=[
  {id:'forcar_cvm',icon:'◈',title:'Atualizar ITR/CVM',desc:'Atualiza dados estruturados de ações na CVM.',period:true},
  {id:'forcar_fiis',icon:'▧',title:'Informes de FIIs',desc:'Atualiza informes mensais de fundos imobiliários.',period:true},
  {id:'processar_acoes_ia',icon:'✦',title:'Classificar ações com IA',desc:'Classifica e organiza documentos de ações com IA.'},
+ {id:'processar_pendentes_acao',icon:'✓',title:'Processar pendentes de uma ação',desc:'Classifica somente os PDFs PENDENTE_ACAO do ticker informado; não faz nova varredura.',ticker:true},
  {id:'gerar_resumos_ia',icon:'✧',title:'Gerar resumos por IA',desc:'Substitui os resumos atuais dos ativos.'},
  {id:'alimentar_ia',icon:'◌',title:'Alimentar base de IA',desc:'Processa documentos pendentes na base de conhecimento.'},
  {id:'auditar_drive',icon:'▣',title:'Auditar Google Drive',desc:'Confere organização e documentos da base.'},
