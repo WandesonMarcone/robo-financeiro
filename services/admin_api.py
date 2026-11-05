@@ -388,6 +388,36 @@ def executar_comando():
         else:
             return jsonify({"message": f"Este documento está em {status_documento} e não pode ser reenviado pela fila pendente."}), 409
         return jsonify({"message": f"Documento de {alvo} enviado para classificação e organização no Drive.", "task_id": tarefa}), 202
+    if action == "corrigir_tipo_documento":
+        try:
+            documento_id = int(documento_id)
+            if documento_id <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return jsonify({"message": "Documento inválido."}), 400
+        novo_tipo = " ".join(str(dados.get("tipo_documento") or "").split()).strip()
+        if not 3 <= len(novo_tipo) <= 120:
+            return jsonify({"message": "Informe um tipo de documento entre 3 e 120 caracteres."}), 400
+        from atualizador_documentos import SessionDB, confirmar_classificacao_manual
+        from pipeline_dados.banco_dados import DocumentosQualitativos
+        session = SessionDB()
+        try:
+            documento = session.query(DocumentosQualitativos).filter_by(id=documento_id).first()
+            if not documento:
+                return jsonify({"message": "Documento não encontrado."}), 404
+            anterior = documento.tipo_documento
+            link = confirmar_classificacao_manual(documento, novo_tipo)
+            session.commit()
+            if link:
+                mensagem = f"Tipo alterado de '{anterior}' para '{novo_tipo}' e arquivo renomeado no Drive."
+            else:
+                mensagem = f"Tipo alterado de '{anterior}' para '{novo_tipo}' no Neon. O arquivo não foi renomeado porque não há link do Drive disponível."
+            return jsonify({"message": mensagem, "drive_renamed": bool(link)})
+        except Exception as exc:
+            session.rollback()
+            return jsonify({"message": f"Não foi possível corrigir o documento ({type(exc).__name__})."}), 502
+        finally:
+            session.close()
 
     from services import orquestrador
     acoes = {
