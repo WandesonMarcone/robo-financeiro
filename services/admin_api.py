@@ -273,6 +273,73 @@ def _documentos_para_painel(ticker: str | None = None, status: str | None = None
         session.close()
 
 
+def _cobertura_documental() -> dict:
+    """Resumo factual da base documental gravada no Neon."""
+    from atualizador_documentos import SessionDB
+    from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
+    from sqlalchemy import func
+
+    session = SessionDB()
+    try:
+        por_ativo = session.query(
+            Ativo.id, func.count(DocumentosQualitativos.id).label("total")
+        ).outerjoin(
+            DocumentosQualitativos, DocumentosQualitativos.ativo_id == Ativo.id
+        ).group_by(Ativo.id).all()
+        por_status = dict(session.query(
+            DocumentosQualitativos.status_processamento,
+            func.count(DocumentosQualitativos.id),
+        ).group_by(DocumentosQualitativos.status_processamento).all())
+        ultimo = session.query(func.max(DocumentosQualitativos.data_atualizacao)).scalar()
+        ativos_total = len(por_ativo)
+        com_documento = sum(1 for item in por_ativo if int(item.total or 0) > 0)
+        return {
+            "assets_total": ativos_total,
+            "assets_with_documents": com_documento,
+            "assets_without_documents": max(0, ativos_total - com_documento),
+            "documents_total": sum(int(valor or 0) for valor in por_status.values()),
+            "saved_drive": int(por_status.get("SALVO_DRIVE", 0) or 0),
+            "pending": int(por_status.get("PENDENTE", 0) or 0) + int(por_status.get("PENDENTE_ACAO", 0) or 0),
+            "review": int(por_status.get("AGUARDANDO_REVISAO", 0) or 0),
+            "last_document_event": ultimo.isoformat() if ultimo else None,
+        }
+    finally:
+        session.close()
+
+
+def _ultimas_execucoes_github(limite: int = 8) -> tuple[list[dict], str | None]:
+    """Consulta o histórico de workflows sem disparar operação alguma."""
+    import requests
+
+    token = (os.environ.get("GITHUB_ACTIONS_TOKEN") or os.environ.get("GITHUB_TOKEN") or "").strip()
+    repo = (os.environ.get("GITHUB_REPOSITORY") or "WandesonMarcone/robo-financeiro").strip()
+    if not token:
+        return [], "Token do GitHub não configurado no Render."
+    resposta = requests.get(
+        f"https://api.github.com/repos/{repo}/actions/runs?per_page=30",
+        headers={"Accept": "application/vnd.github+json", "Authorization": f"Bearer {token}"},
+        timeout=12,
+    )
+    if resposta.status_code != 200:
+        return [], f"GitHub não respondeu ao histórico (HTTP {resposta.status_code})."
+    permitidos = {"Atualização cíclica de ativos", "Atualização isolada de ativo", "Robô Financeiro"}
+    linhas = []
+    for item in resposta.json().get("workflow_runs", []):
+        if item.get("name") not in permitidos:
+            continue
+        linhas.append({
+            "workflow": item.get("name"), "status": item.get("status"),
+            "conclusion": item.get("conclusion"),
+            "started_at": item.get("run_started_at") or item.get("created_at"),
+            "updated_at": item.get("updated_at"),
+            "title": item.get("display_title") or item.get("head_commit", {}).get("message") or "Execução",
+            "url": item.get("html_url"),
+        })
+        if len(linhas) >= limite:
+            break
+    return linhas, None
+
+
 @admin_api.route("/api/admin/status", methods=["GET"])
 @exige_admin
 def status():
@@ -326,6 +393,17 @@ def listar_documentos():
             doc["ticker"], doc["tipo"], doc["status"], doc["assunto"], doc["data_publicacao"] or "",
         ]).lower()]
     return jsonify({"documents": documentos, "total": len(documentos), "ticker": ticker or None})
+
+
+@admin_api.route("/api/admin/operations", methods=["GET"])
+@exige_admin
+def operacoes():
+    try:
+        cobertura = _cobertura_documental()
+    except Exception:
+        return jsonify({"message": "Não foi possível medir a cobertura documental no Neon."}), 503
+    execucoes, erro_github = _ultimas_execucoes_github()
+    return jsonify({"coverage": cobertura, "workflow_runs": execucoes, "github_error": erro_github})
 
 
 @admin_api.route("/api/admin/commands", methods=["POST"])
