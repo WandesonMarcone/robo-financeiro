@@ -12,7 +12,8 @@ const commands=[
  {id:'diagnostico_fontes',icon:'◎',title:'Diagnosticar fontes',desc:'Testa fornecedores de dados e registra indisponibilidades.',},
  {id:'status',icon:'◉',title:'Atualizar status',desc:'Recarrega o panorama de serviços e tarefas.',}
 ];
-const state={api:sessionStorage.getItem('roboApi')||'',token:sessionStorage.getItem('roboToken')||''};
+const DEFAULT_API='https://robo-fii-v2.onrender.com';
+const state={api:sessionStorage.getItem('roboApi')||DEFAULT_API,token:sessionStorage.getItem('roboToken')||''};
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 function setConnection(type,text){const e=$('#connection');e.className='status '+type;e.textContent='● '+text}
 function view(id){$$('.view').forEach(x=>x.classList.toggle('active',x.id===id));$$('.nav').forEach(x=>x.classList.toggle('active',x.dataset.view===id));$('#page-title').textContent=$(`.nav[data-view="${id}"] span`).textContent}
