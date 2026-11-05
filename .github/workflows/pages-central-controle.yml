@@ -1,9 +1,12 @@
-name: Publicar Central de Controle
+name: Publicar Central de Controle (Pages)
 
 on:
   push:
-    branches: [main]
-    paths: [admin/**, .github/workflows/pages-central-controle.yml]
+    branches:
+      - main
+    paths:
+      - 'admin/**'
+      - '.github/workflows/pages-central-controle.yml'
   workflow_dispatch:
 
 permissions:
