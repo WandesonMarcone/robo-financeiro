@@ -457,16 +457,17 @@ class ResultadoProcessamento:
         )
 
 
-def rotina_processar_pendentes():
+def rotina_processar_pendentes(documento_id: int | None = None):
+    """Processa a fila FII inteira ou apenas um documento PENDENTE escolhido."""
     resultado = ResultadoProcessamento("PENDENTE")
     session_fila = SessionDB()
     try:
-        pendentes_ids = [
-            doc.id
-            for doc in session_fila.query(DocumentosQualitativos.id).filter(
-                DocumentosQualitativos.status_processamento == "PENDENTE"
-            ).all()
-        ]
+        consulta = session_fila.query(DocumentosQualitativos.id).filter(
+            DocumentosQualitativos.status_processamento == "PENDENTE"
+        )
+        if documento_id is not None:
+            consulta = consulta.filter(DocumentosQualitativos.id == documento_id)
+        pendentes_ids = [doc.id for doc in consulta.all()]
     finally:
         session_fila.close()
 
@@ -629,7 +630,7 @@ def rotina_de_atualizacao_em_massa(dias=60, session=None, capturar_tudo=None):
     resultado.processamento = rotina_processar_pendentes()
     return resultado
 
-def rotina_processar_acoes(ticker: str | None = None):
+def rotina_processar_acoes(ticker: str | None = None, documento_id: int | None = None):
     """Esteira de IA dos documentos CVM pendentes, opcionalmente de um único ativo."""
     resultado = ResultadoProcessamento("PENDENTE_ACAO")
     ticker = str(ticker or "").strip().upper() or None
@@ -638,6 +639,8 @@ def rotina_processar_acoes(ticker: str | None = None):
         consulta = session_fila.query(DocumentosQualitativos.id).filter(
             DocumentosQualitativos.status_processamento == "PENDENTE_ACAO"
         )
+        if documento_id is not None:
+            consulta = consulta.filter(DocumentosQualitativos.id == documento_id)
         if ticker:
             consulta = consulta.join(Ativo).filter(Ativo.ticker == ticker)
         pendentes_ids = [doc.id for doc in consulta.all()]

@@ -251,6 +251,7 @@ def executar_comando():
     action = str(dados.get("action") or "").strip()
     ticker = str(dados.get("ticker") or "").strip().upper()
     periodo = str(dados.get("period") or "").strip()
+    documento_id = dados.get("document_id")
     if ticker and not _TICKER.fullmatch(ticker):
         return jsonify({"message": "Ticker inválido."}), 400
 
@@ -275,6 +276,34 @@ def executar_comando():
         tarefa = _registrar_tarefa(action, f"Classificação de pendentes de {ticker}", ticker)
         _executar_em_background(tarefa, orquestrador.processar_ia_acoes, ticker)
         return jsonify({"message": f"Classificação dos documentos PENDENTE_ACAO de {ticker} iniciada.", "task_id": tarefa}), 202
+    if action == "organizar_documento_drive":
+        try:
+            documento_id = int(documento_id)
+            if documento_id <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return jsonify({"message": "Documento inválido."}), 400
+        from atualizador_documentos import rotina_processar_acoes, rotina_processar_pendentes
+        from pipeline_dados.banco_dados import DocumentosQualitativos
+        from atualizador_documentos import SessionDB
+        session = SessionDB()
+        try:
+            documento = session.query(DocumentosQualitativos).filter_by(id=documento_id).first()
+            if not documento:
+                return jsonify({"message": "Documento não encontrado."}), 404
+            status_documento = documento.status_processamento
+            alvo = documento.ativo.ticker
+        finally:
+            session.close()
+        if status_documento == "PENDENTE":
+            tarefa = _registrar_tarefa(action, f"Organização no Drive: {alvo}", alvo)
+            _executar_em_background(tarefa, rotina_processar_pendentes, documento_id)
+        elif status_documento == "PENDENTE_ACAO":
+            tarefa = _registrar_tarefa(action, f"Organização no Drive: {alvo}", alvo)
+            _executar_em_background(tarefa, rotina_processar_acoes, alvo, documento_id)
+        else:
+            return jsonify({"message": f"Este documento está em {status_documento} e não pode ser reenviado pela fila pendente."}), 409
+        return jsonify({"message": f"Documento de {alvo} enviado para classificação e organização no Drive.", "task_id": tarefa}), 202
 
     from services import orquestrador
     acoes = {
