@@ -20,6 +20,9 @@ admin_api = Blueprint("admin_api", __name__)
 _TICKER = re.compile(r"^[A-Z]{4,6}[0-9]{1,2}$")
 _TASKS: dict[str, dict] = {}
 _STORAGE: dict[str, object] = {"status": "not_measured"}
+_EXTERNAL_HEALTH: dict[str, object] = {"drive": "checking", "github": "checking"}
+_EXTERNAL_HEALTH_AT: datetime | None = None
+_EXTERNAL_HEALTH_RUNNING = False
 
 
 def _origens_permitidas() -> set[str]:
@@ -116,6 +119,48 @@ def _medir_armazenamento():
         })
     except Exception as exc:
         _STORAGE.update({"status": "error", "error": type(exc).__name__})
+
+
+def _verificar_servicos_externos():
+    """Testa Drive e GitHub com as credenciais já guardadas no Render."""
+    global _EXTERNAL_HEALTH_AT, _EXTERNAL_HEALTH_RUNNING
+    resultado = {"drive": "error", "github": "error"}
+    try:
+        from modules.GoogleDriveManager import GoogleDriveManager
+        GoogleDriveManager().service.about().get(fields="storageQuota(usage)").execute()
+        resultado["drive"] = "ok"
+    except Exception:
+        resultado["drive"] = "error"
+
+    try:
+        import requests
+        token = (os.environ.get("GITHUB_ACTIONS_TOKEN") or os.environ.get("GITHUB_TOKEN") or "").strip()
+        repo = (os.environ.get("GITHUB_REPOSITORY") or "WandesonMarcone/robo-financeiro").strip()
+        if not token:
+            resultado["github"] = "missing"
+        else:
+            resposta = requests.get(
+                f"https://api.github.com/repos/{repo}/actions/runs?per_page=1",
+                headers={"Accept": "application/vnd.github+json", "Authorization": f"Bearer {token}"},
+                timeout=12,
+            )
+            resultado["github"] = "ok" if resposta.status_code == 200 else "error"
+    except Exception:
+        resultado["github"] = "error"
+    _EXTERNAL_HEALTH.update(resultado)
+    _EXTERNAL_HEALTH_AT = datetime.now()
+    _EXTERNAL_HEALTH_RUNNING = False
+
+
+def _saude_externa_atual() -> dict:
+    """Evita chamadas externas em toda atualização da tela; renova a cada 5 min."""
+    global _EXTERNAL_HEALTH_AT, _EXTERNAL_HEALTH_RUNNING
+    vencida = _EXTERNAL_HEALTH_AT is None or (datetime.now() - _EXTERNAL_HEALTH_AT).total_seconds() > 300
+    if vencida and not _EXTERNAL_HEALTH_RUNNING:
+        _EXTERNAL_HEALTH.update({"drive": "checking", "github": "checking"})
+        _EXTERNAL_HEALTH_RUNNING = True
+        threading.Thread(target=_verificar_servicos_externos, daemon=True).start()
+    return dict(_EXTERNAL_HEALTH)
 
 
 @admin_api.route("/api/admin/storage", methods=["GET"])
@@ -247,8 +292,7 @@ def status():
         "services": {
             "render": "ok",
             "neon": "ok" if neon_ok else "error",
-            "drive": "unknown",
-            "github": "unknown",
+            **_saude_externa_atual(),
         },
         "recent": recentes,
     })
