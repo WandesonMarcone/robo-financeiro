@@ -71,6 +71,11 @@ def exige_admin(funcao):
 
 def _registrar_tarefa(action: str, descricao: str, alvo=None):
     tarefa_id = str(uuid.uuid4())[:8]
+    from services.historico_operacional import iniciar_evento
+    evento_id = iniciar_evento(
+        action, origem="PAINEL_ADMIN", ticker=alvo, mensagem=descricao,
+        detalhes={"task_id": tarefa_id},
+    )
     _TASKS[tarefa_id] = {
         "id": tarefa_id,
         "action": action,
@@ -78,18 +83,24 @@ def _registrar_tarefa(action: str, descricao: str, alvo=None):
         "target": alvo,
         "status": "em_andamento",
         "when": datetime.now().strftime("%d/%m %H:%M"),
+        "event_id": evento_id,
     }
     return tarefa_id
 
 
 def _executar_em_background(tarefa_id: str, funcao, *args):
     def executar():
+        from services.historico_operacional import concluir_evento
         try:
             funcao(*args)
             _TASKS[tarefa_id]["status"] = "ok"
+            concluir_evento(_TASKS[tarefa_id].get("event_id"), sucesso=True,
+                            mensagem=_TASKS[tarefa_id]["label"])
         except Exception as exc:  # detalhes ficam somente no log privado Render
             _TASKS[tarefa_id]["status"] = "falha"
             _TASKS[tarefa_id]["error"] = type(exc).__name__
+            concluir_evento(_TASKS[tarefa_id].get("event_id"), sucesso=False,
+                            erro=type(exc).__name__)
     threading.Thread(target=executar, daemon=True).start()
 
 
@@ -203,27 +214,39 @@ def _diagnostico_fontes():
     return diagnosticar(tickers, limite=min(3, len(tickers)), pausa=2, orcamento=120)
 
 
-def _ativos_para_painel(limite: int = 120) -> tuple[list[dict], dict]:
+def _ativos_para_painel(limite: int = 300, busca: str | None = None,
+                        tipo: str | None = None) -> tuple[list[dict], dict]:
     """Leitura curta do cadastro no Neon, sem acionar coletas externas."""
     from atualizador_documentos import SessionDB
     from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
-    from sqlalchemy import func
+    from sqlalchemy import case, func
 
     session = SessionDB()
     try:
-        linhas = (
+        consulta = (
             session.query(
                 Ativo.id, Ativo.ticker, Ativo.tipo,
                 func.count(DocumentosQualitativos.id).label("documentos"),
+                func.sum(case((DocumentosQualitativos.status_processamento.in_(("PENDENTE", "PENDENTE_ACAO")), 1), else_=0)).label("pendentes"),
+                func.sum(case((DocumentosQualitativos.status_processamento == "AGUARDANDO_REVISAO", 1), else_=0)).label("revisao"),
+                func.sum(case((DocumentosQualitativos.status_processamento == "SALVO_DRIVE", 1), else_=0)).label("salvos_drive"),
+                func.max(DocumentosQualitativos.data_atualizacao).label("ultimo_documento_em"),
             )
             .outerjoin(DocumentosQualitativos, DocumentosQualitativos.ativo_id == Ativo.id)
-            .group_by(Ativo.id, Ativo.ticker, Ativo.tipo)
-            .order_by(Ativo.ticker.asc()).limit(limite).all()
         )
+        if busca:
+            consulta = consulta.filter(func.upper(Ativo.ticker).like(f"%{busca.upper()}%"))
+        if tipo in {"ACAO", "FII"}:
+            consulta = consulta.filter(Ativo.tipo == tipo)
+        linhas = consulta.group_by(Ativo.id, Ativo.ticker, Ativo.tipo).order_by(Ativo.ticker.asc()).limit(min(max(limite, 1), 300)).all()
         ativos = [{
             "ticker": linha.ticker,
             "tipo": str(getattr(linha.tipo, "value", linha.tipo) or "—"),
             "documentos": int(linha.documentos or 0),
+            "pendentes": int(linha.pendentes or 0),
+            "revisao": int(linha.revisao or 0),
+            "salvos_drive": int(linha.salvos_drive or 0),
+            "ultimo_documento_em": linha.ultimo_documento_em.isoformat() if linha.ultimo_documento_em else None,
         } for linha in linhas]
         totais = {
             "assets": len(ativos),
@@ -232,6 +255,33 @@ def _ativos_para_painel(limite: int = 120) -> tuple[list[dict], dict]:
             "documentos": sum(item["documentos"] for item in ativos),
         }
         return ativos, totais
+    finally:
+        session.close()
+
+
+def _historico_para_painel(limite: int = 25) -> dict:
+    """Lê somente a auditoria que já foi persistida no Neon."""
+    from atualizador_documentos import SessionDB
+    from pipeline_dados.banco_dados import EventoOperacional, HistoricoNotificacao
+
+    session = SessionDB()
+    try:
+        eventos = session.query(EventoOperacional).order_by(EventoOperacional.iniciado_em.desc()).limit(limite).all()
+        notificacoes = session.query(HistoricoNotificacao).order_by(HistoricoNotificacao.criado_em.desc()).limit(limite).all()
+        return {
+            "operations": [{
+                "id": e.id, "type": e.tipo, "origin": e.origem, "ticker": e.ticker,
+                "status": e.status, "message": e.mensagem or "", "error": e.erro or "",
+                "started_at": e.iniciado_em.isoformat() if e.iniciado_em else None,
+                "finished_at": e.concluido_em.isoformat() if e.concluido_em else None,
+            } for e in eventos],
+            "notifications": [{
+                "id": n.id, "type": n.tipo, "ticker": n.ticker, "channel": n.canal,
+                "status": n.status, "summary": n.resumo or "", "error": n.erro or "",
+                "created_at": n.criado_em.isoformat() if n.criado_em else None,
+                "sent_at": n.enviado_em.isoformat() if n.enviado_em else None,
+            } for n in notificacoes],
+        }
     finally:
         session.close()
 
@@ -346,6 +396,18 @@ def status():
     recentes = list(_TASKS.values())[-8:]
     recentes.reverse()
     pendentes = sum(1 for item in _TASKS.values() if item["status"] == "em_andamento")
+    try:
+        auditoria = _historico_para_painel(limite=8)
+        if auditoria["operations"]:
+            recentes = [{
+                "id": item["id"], "action": item["type"],
+                "label": item["message"] or item["type"], "target": item["ticker"],
+                "status": {"CONCLUIDA": "ok", "FALHOU": "falha"}.get(item["status"], "em_andamento"),
+                "when": item["finished_at"] or item["started_at"] or "",
+            } for item in auditoria["operations"]]
+            pendentes = sum(1 for item in auditoria["operations"] if item["status"] == "EM_ANDAMENTO")
+    except Exception:
+        pass
     neon_ok = False
     try:
         _, base = _ativos_para_painel(limite=500)
@@ -368,9 +430,11 @@ def status():
 @admin_api.route("/api/admin/assets", methods=["GET"])
 @exige_admin
 def listar_ativos():
-    """Lista o cadastro real limitado, sem acionar coleta externa."""
+    """Lista o cadastro real e sua cobertura documental, sem coletar dados."""
+    busca = str(request.args.get("q") or "").strip()
+    tipo = str(request.args.get("type") or "").strip().upper()
     try:
-        ativos, totais = _ativos_para_painel()
+        ativos, totais = _ativos_para_painel(busca=busca or None, tipo=tipo or None)
     except Exception:
         return jsonify({"message": "Não foi possível consultar o cadastro de ativos agora."}), 503
     return jsonify({"assets": ativos, "totals": totais})
@@ -406,6 +470,16 @@ def operacoes():
     return jsonify({"coverage": cobertura, "workflow_runs": execucoes, "github_error": erro_github})
 
 
+@admin_api.route("/api/admin/history", methods=["GET"])
+@exige_admin
+def historico():
+    """Auditoria persistente de tarefas, varreduras, erros e notificações."""
+    try:
+        return jsonify(_historico_para_painel(limite=40))
+    except Exception:
+        return jsonify({"message": "O histórico ainda não foi inicializado no Neon."}), 503
+
+
 @admin_api.route("/api/admin/commands", methods=["POST"])
 @exige_admin
 def executar_comando():
@@ -423,7 +497,12 @@ def executar_comando():
         if not ticker:
             return jsonify({"message": "Informe o ticker do ativo."}), 400
         from services.github_actions import disparar_atualizacao_isolada
+        from services.historico_operacional import iniciar_evento, concluir_evento
+        evento_id = iniciar_evento(action, origem="PAINEL_ADMIN", ticker=ticker,
+                                   mensagem=f"Atualização isolada de {ticker}")
         ok, mensagem = disparar_atualizacao_isolada(ticker)
+        concluir_evento(evento_id, sucesso=ok, mensagem=mensagem,
+                        erro=None if ok else "GITHUB_ACTIONS_DISPATCH_FAILED")
         return jsonify({"message": mensagem}), 202 if ok else 502
     if action == "forcar_documentos":
         if not ticker:

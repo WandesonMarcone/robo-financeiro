@@ -100,6 +100,44 @@ class TarefaLonga(Base):
     erro: Mapped[Optional[str]] = mapped_column(Text)
 
 
+class EventoOperacional(Base):
+    """Auditoria persistente de varreduras, comandos e falhas operacionais."""
+
+    __tablename__ = 'eventos_operacionais'
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    origem: Mapped[str] = mapped_column(String(30), nullable=False, default="SISTEMA", index=True)
+    tipo: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    ticker: Mapped[Optional[str]] = mapped_column(String(10), index=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="EM_ANDAMENTO", index=True)
+    mensagem: Mapped[Optional[str]] = mapped_column(Text)
+    erro: Mapped[Optional[str]] = mapped_column(Text)
+    detalhes: Mapped[Optional[str]] = mapped_column(Text)
+    iniciado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, index=True)
+    concluido_em: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+
+class HistoricoNotificacao(Base):
+    """Registro administrativo das notificações geradas pelo robô.
+
+    O status representa o resultado do envio à API do Telegram; não afirma que
+    o destinatário leu a mensagem.
+    """
+
+    __tablename__ = 'historico_notificacoes'
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    canal: Mapped[str] = mapped_column(String(30), nullable=False, default="TELEGRAM")
+    tipo: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    ticker: Mapped[Optional[str]] = mapped_column(String(10), index=True)
+    destinatario: Mapped[Optional[str]] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="GERADA", index=True)
+    resumo: Mapped[Optional[str]] = mapped_column(Text)
+    erro: Mapped[Optional[str]] = mapped_column(Text)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, index=True)
+    enviado_em: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+
 class DocumentosQualitativos(Base):
     __tablename__ = 'documentos_qualitativos'
     __table_args__ = (UniqueConstraint('ativo_id', 'url_pdf', name='uix_docs_url'),)

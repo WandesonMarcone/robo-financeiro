@@ -321,10 +321,18 @@ def enviar_alerta_revisao_telegram(
     if media and _enviar_foto_telegram(
         chat_id, ticker, media, mensagem, teclado=teclado, parse_mode="Markdown"
     ):
+        from services.historico_operacional import registrar_notificacao
+        registrar_notificacao("DOCUMENTO_PARA_REVISAO", ticker=ticker, destinatario=chat_id,
+                              resumo=f"{nome_doc}: enviado para revisão", enviada=True)
         return True
-    return _enviar_mensagem_telegram(
+    entregue = _enviar_mensagem_telegram(
         chat_id, mensagem, teclado=teclado, parse_mode="Markdown"
     )
+    from services.historico_operacional import registrar_notificacao
+    registrar_notificacao("DOCUMENTO_PARA_REVISAO", ticker=ticker, destinatario=chat_id,
+                          resumo=f"{nome_doc}: alerta de revisão", enviada=entregue,
+                          erro=None if entregue else "TELEGRAM_SEND_FAILED")
+    return entregue
 
 
 def _destinatarios_do_ativo(ativo_id):
@@ -401,6 +409,10 @@ def notificar_documento_disponivel(
             )
         if not entregue:
             entregue = _enviar_mensagem_telegram(destino, mensagem, teclado=teclado)
+        from services.historico_operacional import registrar_notificacao
+        registrar_notificacao("NOVO_DOCUMENTO", ticker=ticker, destinatario=destino,
+                              resumo=f"{nome_doc or 'Documento'}", enviada=entregue,
+                              erro=None if entregue else "TELEGRAM_SEND_FAILED")
         if entregue:
             enviados += 1
     return enviados
