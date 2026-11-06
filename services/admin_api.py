@@ -228,11 +228,92 @@ def _coletar_documentos_isolados(ticker: str, periodo: str | None):
         session.close()
     if tipo == "FII":
         from pipeline_dados.coletor_fnet import ColetorFnet
-        ColetorFnet().coletar(dias=int(periodo or 60), ticker=ticker)
+        return ColetorFnet().coletar(dias=int(periodo or 60), ticker=ticker)
     else:
         from pipeline_dados.coletor_docs_acoes import RelatoriosAcoesCVM
         ano = int(periodo) if periodo and len(periodo) == 4 else datetime.now().year
-        RelatoriosAcoesCVM().vasculhar_documentos(ano=ano, ticker=ticker)
+        return RelatoriosAcoesCVM().vasculhar_documentos(ano=ano, ticker=ticker)
+
+
+def _indicadores_planilha_para_painel(ticker: str, tipo: str) -> dict:
+    """Lê os indicadores que o workflow isolado realmente atualiza.
+
+    A atualização cíclica escreve primeiro na planilha. Ela não deve ser
+    apresentada como se tivesse persistido cotação e DY nas tabelas contábeis
+    do Neon. O cache de cinco minutos evita uma chamada ao Sheets por clique.
+    """
+    try:
+        from services.planilhas import buscar_ativo_na_planilha
+        item = buscar_ativo_na_planilha(ticker, tipo == "FII")
+    except Exception:
+        item = None
+    if not item:
+        return {"source": "Planilha indisponível ou ativo sem indicadores", "fields": []}
+    if tipo == "FII":
+        campos = [
+            ["Cotação", item.get("preco")], ["P/VP", item.get("pvp")],
+            ["Dividend Yield", item.get("dy")], ["VPA", item.get("vpa")],
+            ["Dividendo mensal", item.get("div_mensal")],
+            ["Tipo", item.get("tipo")], ["Setor", item.get("setor")],
+        ]
+    else:
+        campos = [
+            ["Cotação", item.get("preco")], ["Dividend Yield", item.get("dy")],
+            ["P/L", item.get("pl")], ["P/VP", item.get("pvp")],
+            ["ROE", item.get("roe")], ["Setor", item.get("setor")],
+            ["Subsetor", item.get("subsetor")],
+        ]
+    return {
+        "source": "Planilha de investimentos — atualizada pelo GitHub Actions",
+        "fields": [[nome, valor] for nome, valor in campos if valor not in (None, "", "N/A")],
+    }
+
+
+def _monitorar_atualizacao_isolada(evento_id: int | None, ticker: str, iniciado_ts: float) -> None:
+    """Converte o aceite do dispatch no resultado real do workflow, quando visível."""
+    import time
+    import requests
+    from services.historico_operacional import concluir_evento, registrar_progresso
+
+    token = (os.environ.get("GITHUB_ACTIONS_TOKEN") or os.environ.get("GITHUB_TOKEN") or "").strip()
+    repo = (os.environ.get("GITHUB_REPOSITORY") or "WandesonMarcone/robo-financeiro").strip()
+    if not token:
+        return
+    url = f"https://api.github.com/repos/{repo}/actions/workflows/atualizacao-isolada.yml/runs?event=workflow_dispatch&per_page=5"
+    headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {token}"}
+    encontrado = None
+    for tentativa in range(30):  # até ~10 min; o workflow possui orçamento de 9 min
+        time.sleep(12 if tentativa == 0 else 20)
+        try:
+            resposta = requests.get(url, headers=headers, timeout=12)
+            if resposta.status_code != 200:
+                continue
+            execucoes = resposta.json().get("workflow_runs") or []
+            candidatos = []
+            for execucao in execucoes:
+                try:
+                    criado = datetime.fromisoformat(str(execucao.get("created_at") or "").replace("Z", "+00:00")).timestamp()
+                except (TypeError, ValueError):
+                    criado = 0
+                # Não confunde uma execução isolada antiga com a que acabou
+                # de ser disparada pelo painel.
+                if criado >= iniciado_ts - 15:
+                    candidatos.append(execucao)
+            if candidatos:
+                encontrado = candidatos[0]
+                if tentativa == 0:
+                    registrar_progresso(evento_id, f"Workflow localizado no GitHub Actions: {encontrado.get('html_url') or 'sem link'}")
+                if encontrado.get("status") == "completed":
+                    sucesso = encontrado.get("conclusion") == "success"
+                    registrar_progresso(evento_id, "Workflow concluído com sucesso." if sucesso else f"Workflow terminou em {encontrado.get('conclusion') or 'falha'}.")
+                    concluir_evento(evento_id, sucesso=sucesso,
+                                   mensagem=("Atualização isolada concluída no GitHub Actions. Reabra o ativo para consultar os indicadores atualizados."
+                                             if sucesso else "Atualização isolada terminou com falha no GitHub Actions."),
+                                   erro=None if sucesso else str(encontrado.get("conclusion") or "GITHUB_ACTION_FAILED"))
+                    return
+        except Exception:
+            continue
+    registrar_progresso(evento_id, "O workflow ainda não finalizou dentro da janela de acompanhamento; consulte a execução no GitHub Actions.")
 
 
 def _varrer_fnet_pelo_painel(dias: int):
@@ -417,6 +498,12 @@ def _detalhe_ativo_para_painel(ticker: str) -> dict | None:
                         ["Lucro líquido", linha.lucro_liquido], ["Dívida líquida", linha.divida_liquida],
                     ],
                 }
+        indicadores_mercado = _indicadores_planilha_para_painel(ativo.ticker, tipo)
+        if indicadores_mercado["fields"]:
+            # Mantém os dados oficiais do Neon e acrescenta os indicadores de
+            # mercado da planilha, sem fingir que são a mesma fonte.
+            dados["campos"] = indicadores_mercado["fields"] + dados["campos"]
+        dados["fonte_mercado"] = indicadores_mercado["source"]
         return {
             "ticker": ativo.ticker, "tipo": tipo,
             "documents": [_serializar_documento(doc, ativo.ticker, tipo) for doc in documentos],
@@ -706,13 +793,22 @@ def executar_comando():
         if not ticker:
             return jsonify({"message": "Informe o ticker do ativo."}), 400
         from services.github_actions import disparar_atualizacao_isolada
-        from services.historico_operacional import iniciar_evento, concluir_evento
+        from services.historico_operacional import iniciar_evento, registrar_progresso
         evento_id = iniciar_evento(action, origem="PAINEL_ADMIN", ticker=ticker,
                                    mensagem=f"Atualização isolada de {ticker}")
+        registrar_progresso(evento_id, "Solicitando workflow de atualização isolada ao GitHub Actions.")
         ok, mensagem = disparar_atualizacao_isolada(ticker)
-        concluir_evento(evento_id, sucesso=ok, mensagem=mensagem,
-                        erro=None if ok else "GITHUB_ACTIONS_DISPATCH_FAILED")
-        return jsonify({"message": mensagem}), 202 if ok else 502
+        if not ok:
+            from services.historico_operacional import concluir_evento
+            concluir_evento(evento_id, sucesso=False, mensagem=mensagem,
+                            erro="GITHUB_ACTIONS_DISPATCH_FAILED")
+            return jsonify({"message": mensagem}), 502
+        registrar_progresso(evento_id, "Disparo aceito pelo GitHub. Aguardando o início do workflow para confirmar o resultado real.")
+        threading.Thread(target=_monitorar_atualizacao_isolada, args=(evento_id, ticker, datetime.now().timestamp()), daemon=True).start()
+        return jsonify({
+            "message": "Atualização enviada ao GitHub Actions. O histórico mostrará o andamento e só marcará concluída após o workflow terminar.",
+            "task_id": evento_id,
+        }), 202
     if action == "forcar_documentos":
         if not ticker:
             return jsonify({"message": "Informe o ticker do ativo."}), 400
