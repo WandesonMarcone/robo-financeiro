@@ -286,6 +286,69 @@ def _historico_para_painel(limite: int = 25) -> dict:
         session.close()
 
 
+def _detalhe_ativo_para_painel(ticker: str) -> dict | None:
+    """Ficha administrativa de um ativo, sem requisitar dados de mercado."""
+    from atualizador_documentos import SessionDB
+    from pipeline_dados.banco_dados import (
+        Ativo, DadosFinanceirosAcoes, DadosFinanceirosFiis, DocumentosQualitativos,
+        EventoOperacional,
+    )
+    from sqlalchemy import func
+
+    session = SessionDB()
+    try:
+        ativo = session.query(Ativo).filter(func.upper(Ativo.ticker) == ticker).first()
+        if not ativo:
+            return None
+        tipo = str(getattr(ativo.tipo, "value", ativo.tipo) or "")
+        documentos = session.query(DocumentosQualitativos).filter_by(ativo_id=ativo.id).order_by(
+            DocumentosQualitativos.data_publicacao.desc(), DocumentosQualitativos.id.desc()
+        ).limit(12).all()
+        ultima_operacao = session.query(EventoOperacional).filter(
+            func.upper(EventoOperacional.ticker) == ticker
+        ).order_by(EventoOperacional.iniciado_em.desc()).first()
+        dados = {"data_referencia": None, "data_coleta": None, "campos": []}
+        if tipo == "FII":
+            linha = session.query(DadosFinanceirosFiis).filter_by(ativo_id=ativo.id).order_by(
+                DadosFinanceirosFiis.data_referencia.desc()
+            ).first()
+            if linha:
+                dados = {
+                    "data_referencia": linha.data_referencia.isoformat() if linha.data_referencia else None,
+                    "data_coleta": None,
+                    "campos": [
+                        ["Patrimônio líquido", linha.patrimonio_liquido], ["Cotistas", linha.cotistas],
+                        ["Cotas emitidas", linha.cotas_emitidas], ["Vacância física", linha.vacancia_fisica],
+                    ],
+                }
+        else:
+            linha = session.query(DadosFinanceirosAcoes).filter_by(ativo_id=ativo.id).order_by(
+                DadosFinanceirosAcoes.data_referencia.desc()
+            ).first()
+            if linha:
+                dados = {
+                    "data_referencia": linha.data_referencia.isoformat() if linha.data_referencia else None,
+                    "data_coleta": linha.data_coleta.isoformat() if linha.data_coleta else None,
+                    "campos": [
+                        ["Patrimônio líquido", linha.patrimonio_liquido], ["Receita", linha.receita],
+                        ["Lucro líquido", linha.lucro_liquido], ["Dívida líquida", linha.divida_liquida],
+                    ],
+                }
+        return {
+            "ticker": ativo.ticker, "tipo": tipo,
+            "documents": [_serializar_documento(doc, ativo.ticker) for doc in documentos],
+            "documents_total": session.query(func.count(DocumentosQualitativos.id)).filter_by(ativo_id=ativo.id).scalar() or 0,
+            "financial": dados,
+            "last_scan": {
+                "type": ultima_operacao.tipo, "status": ultima_operacao.status,
+                "at": ultima_operacao.iniciado_em.isoformat() if ultima_operacao and ultima_operacao.iniciado_em else None,
+                "finished_at": ultima_operacao.concluido_em.isoformat() if ultima_operacao and ultima_operacao.concluido_em else None,
+            } if ultima_operacao else None,
+        }
+    finally:
+        session.close()
+
+
 def _serializar_documento(documento, ticker: str) -> dict:
     """Campos seguros e úteis para auditoria documental no painel."""
     return {
@@ -438,6 +501,21 @@ def listar_ativos():
     except Exception:
         return jsonify({"message": "Não foi possível consultar o cadastro de ativos agora."}), 503
     return jsonify({"assets": ativos, "totals": totais})
+
+
+@admin_api.route("/api/admin/assets/<ticker>", methods=["GET"])
+@exige_admin
+def detalhe_ativo(ticker: str):
+    ticker = str(ticker or "").strip().upper()
+    if not _TICKER.fullmatch(ticker):
+        return jsonify({"message": "Ticker inválido."}), 400
+    try:
+        detalhe = _detalhe_ativo_para_painel(ticker)
+    except Exception:
+        return jsonify({"message": "Não foi possível carregar a ficha do ativo agora."}), 503
+    if detalhe is None:
+        return jsonify({"message": "Ativo não encontrado no cadastro-base."}), 404
+    return jsonify(detalhe)
 
 
 @admin_api.route("/api/admin/documents", methods=["GET"])
