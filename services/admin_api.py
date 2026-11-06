@@ -11,6 +11,7 @@ import os
 import re
 import threading
 import uuid
+from urllib.parse import urlencode
 from datetime import datetime
 from functools import wraps
 
@@ -418,7 +419,7 @@ def _detalhe_ativo_para_painel(ticker: str) -> dict | None:
                 }
         return {
             "ticker": ativo.ticker, "tipo": tipo,
-            "documents": [_serializar_documento(doc, ativo.ticker) for doc in documentos],
+            "documents": [_serializar_documento(doc, ativo.ticker, tipo) for doc in documentos],
             "documents_total": session.query(func.count(DocumentosQualitativos.id)).filter_by(ativo_id=ativo.id).scalar() or 0,
             "financial": dados,
             "last_scan": {
@@ -431,8 +432,24 @@ def _detalhe_ativo_para_painel(ticker: str) -> dict | None:
         session.close()
 
 
-def _serializar_documento(documento, ticker: str) -> dict:
+def _origem_documento(documento) -> tuple[str, str]:
+    """Retorna uma origem auditável sem confundir a URL da fonte com o Drive."""
+    url_drive = str(getattr(documento, "url_pdf", None) or "").strip()
+    if "drive.google.com" in url_drive:
+        return "Google Drive", url_drive
+    if url_drive:
+        return "Fonte oficial registrada", url_drive
+    id_b3 = str(getattr(documento, "id_b3", None) or "").strip()
+    if id_b3:
+        # A B3 pode exigir cookies para servir o PDF. O painel identifica este
+        # botão como origem, e não promete que seja um link público do arquivo.
+        return "B3/FNET", "https://fnet.bmfbovespa.com.br/fnet/publico/downloadDocumento?" + urlencode({"id": id_b3})
+    return "Origem não registrada", ""
+
+
+def _serializar_documento(documento, ticker: str, tipo_ativo: str | None = None) -> dict:
     """Campos seguros e úteis para auditoria documental no painel."""
+    origem, origem_url = _origem_documento(documento)
     return {
         "id": documento.id,
         "ticker": ticker,
@@ -442,6 +459,10 @@ def _serializar_documento(documento, ticker: str) -> dict:
         "atualizado_em": documento.data_atualizacao.isoformat() if documento.data_atualizacao else None,
         "assunto": documento.assunto or "",
         "url": documento.url_pdf or "",
+        "origin": origem,
+        "origin_url": origem_url,
+        "id_origem": str(documento.id_b3 or "") if getattr(documento, "id_b3", None) else "",
+        "asset_type": tipo_ativo or getattr(getattr(documento, "ativo", None), "tipo", ""),
         "tem_resumo": bool(documento.resumo_ia),
     }
 
@@ -454,7 +475,7 @@ def _documentos_para_painel(ticker: str | None = None, status: str | None = None
 
     session = SessionDB()
     try:
-        consulta = session.query(DocumentosQualitativos, Ativo.ticker).join(Ativo, Ativo.id == DocumentosQualitativos.ativo_id)
+        consulta = session.query(DocumentosQualitativos, Ativo.ticker, Ativo.tipo).join(Ativo, Ativo.id == DocumentosQualitativos.ativo_id)
         if ticker:
             consulta = consulta.filter(func.upper(Ativo.ticker) == ticker.upper())
         if status:
@@ -463,7 +484,7 @@ def _documentos_para_painel(ticker: str | None = None, status: str | None = None
             DocumentosQualitativos.data_publicacao.desc(),
             DocumentosQualitativos.id.desc(),
         ).limit(min(max(limite, 1), 200)).all()
-        return [_serializar_documento(documento, ativo_ticker) for documento, ativo_ticker in linhas]
+        return [_serializar_documento(documento, ativo_ticker, getattr(ativo_tipo, "value", ativo_tipo)) for documento, ativo_ticker, ativo_tipo in linhas]
     finally:
         session.close()
 
@@ -619,6 +640,19 @@ def listar_documentos():
     return jsonify({"documents": documentos, "total": len(documentos), "ticker": ticker or None})
 
 
+@admin_api.route("/api/admin/document-types", methods=["GET"])
+@exige_admin
+def tipos_documento():
+    """Catálogo idêntico ao usado nos botões de revisão do Telegram."""
+    tipo_ativo = str(request.args.get("asset_type") or "FII").strip().upper()
+    if tipo_ativo not in {"FII", "ACAO"}:
+        return jsonify({"message": "Tipo de ativo inválido."}), 400
+    from config import TIPOS_DOC_ACAO, TIPOS_DOC_FII
+    catalogo = TIPOS_DOC_ACAO if tipo_ativo == "ACAO" else TIPOS_DOC_FII
+    tipos = list(dict.fromkeys(nome for nome in catalogo.values() if nome))
+    return jsonify({"asset_type": tipo_ativo, "types": tipos})
+
+
 @admin_api.route("/api/admin/operations", methods=["GET"])
 @exige_admin
 def operacoes():
@@ -739,7 +773,7 @@ def executar_comando():
             return jsonify({"message": "Documento inválido."}), 400
         novo_tipo = " ".join(str(dados.get("tipo_documento") or "").split()).strip()
         if not 3 <= len(novo_tipo) <= 120:
-            return jsonify({"message": "Informe um tipo de documento entre 3 e 120 caracteres."}), 400
+            return jsonify({"message": "Escolha um tipo de documento válido."}), 400
         from atualizador_documentos import SessionDB, confirmar_classificacao_manual
         from pipeline_dados.banco_dados import DocumentosQualitativos
         session = SessionDB()
@@ -747,17 +781,21 @@ def executar_comando():
             documento = session.query(DocumentosQualitativos).filter_by(id=documento_id).first()
             if not documento:
                 return jsonify({"message": "Documento não encontrado."}), 404
+            from config import TIPOS_DOC_ACAO, TIPOS_DOC_FII
+            tipo_ativo = str(getattr(documento.ativo.tipo, "value", documento.ativo.tipo)).upper()
+            tipos_permitidos = set((TIPOS_DOC_ACAO if tipo_ativo == "ACAO" else TIPOS_DOC_FII).values())
+            if novo_tipo not in tipos_permitidos:
+                return jsonify({"message": "Tipo não pertence ao catálogo oficial deste ativo."}), 400
             anterior = documento.tipo_documento
             link = confirmar_classificacao_manual(documento, novo_tipo)
+            if not link:
+                raise RuntimeError("arquivo_nao_organizado_no_drive")
             session.commit()
-            if link:
-                mensagem = f"Tipo alterado de '{anterior}' para '{novo_tipo}' e arquivo renomeado no Drive."
-            else:
-                mensagem = f"Tipo alterado de '{anterior}' para '{novo_tipo}' no Neon. O arquivo não foi renomeado porque não há link do Drive disponível."
-            return jsonify({"message": mensagem, "drive_renamed": bool(link)})
+            mensagem = f"Tipo alterado de '{anterior}' para '{novo_tipo}' e arquivo organizado no Drive."
+            return jsonify({"message": mensagem, "drive_renamed": True})
         except Exception as exc:
             session.rollback()
-            return jsonify({"message": f"Não foi possível corrigir o documento ({type(exc).__name__})."}), 502
+            return jsonify({"message": "Não foi possível organizar o PDF no Drive; o tipo não foi alterado. Tente 'Salvar no Drive' ou consulte a origem do documento."}), 502
         finally:
             session.close()
 

@@ -5,6 +5,7 @@ import logging
 import re
 import requests
 import unicodedata
+import tempfile
 from datetime import datetime, timedelta
 import config
 from fnet_scraper import FnetDownloader
@@ -1289,14 +1290,45 @@ def _confirmar_identificacao(doc, tipo, resumo, ticker, drive_manager=None):
 
 
 def confirmar_classificacao_manual(doc, tipo, drive_manager=None):
-    """Classificacao humana: move/renomeia no Drive (tipo + data B3) e puxa texto RAG."""
-    doc.tipo_documento = tipo
-    doc.resumo_ia = None
+    """Classificação humana: organiza revisão ou baixa a origem FNET para o Drive.
+
+    Um PENDENTE FNET ainda só tem ``id_b3``. Antes este caso alterava somente
+    o Neon, criando uma falsa impressão de que o PDF estava salvo. Agora a
+    confirmação só é efetivada quando o arquivo entra no Drive.
+    """
     link = _organizar_identificado_no_drive(doc, tipo, drive_manager=drive_manager)
+    if not link and str(getattr(doc, "id_b3", None) or "").strip():
+        pdf = _baixar_pdf_fnet(doc)
+        ticker = _ticker_doc(doc)
+        if _eh_pdf(pdf) and ticker != "?":
+            caminho_temporario = None
+            try:
+                with tempfile.NamedTemporaryFile(prefix=f"manual_{ticker}_", suffix=".pdf", delete=False) as arquivo:
+                    arquivo.write(pdf)
+                    caminho_temporario = arquivo.name
+                drive = drive_manager
+                if drive is None:
+                    from modules.GoogleDriveManager import GoogleDriveManager
+                    drive = GoogleDriveManager()
+                link = drive.upload_pdf_organizado(
+                    caminho_arquivo=caminho_temporario,
+                    nome_arquivo=_nome_arquivo_drive(tipo, doc),
+                    ticker=ticker,
+                    mes_ref=_mes_ref_do_doc(doc),
+                    tipo_ativo=_tipo_ativo_doc(doc),
+                )
+            except Exception:
+                logger.warning("Falha ao salvar manualmente o doc %s no Drive", getattr(doc, "id", None), exc_info=True)
+                link = None
+            finally:
+                if caminho_temporario and os.path.exists(caminho_temporario):
+                    os.remove(caminho_temporario)
     if link:
+        doc.tipo_documento = tipo
+        doc.resumo_ia = None
         doc.url_pdf = link
         doc.status_processamento = "SALVO_DRIVE"
-    _preencher_texto_rag(doc, drive_manager=drive_manager)
+        _preencher_texto_rag(doc, drive_manager=drive_manager)
     return link
 
 
