@@ -99,12 +99,14 @@ def _executar_em_background(tarefa_id: str, funcao, *args):
             _TASKS[tarefa_id]["status"] = "ok"
             mensagem = _resumo_retorno(retorno) or _TASKS[tarefa_id]["label"]
             _TASKS[tarefa_id]["progress"].append({"at": datetime.now().isoformat(), "message": mensagem})
+            registrar_progresso(_TASKS[tarefa_id].get("event_id"), mensagem)
             concluir_evento(_TASKS[tarefa_id].get("event_id"), sucesso=True,
                             mensagem=mensagem)
         except Exception as exc:  # detalhes ficam somente no log privado Render
             _TASKS[tarefa_id]["status"] = "falha"
             _TASKS[tarefa_id]["error"] = type(exc).__name__
             _TASKS[tarefa_id]["progress"].append({"at": datetime.now().isoformat(), "message": f"Falha: {type(exc).__name__}"})
+            registrar_progresso(_TASKS[tarefa_id].get("event_id"), f"Falha: {type(exc).__name__}")
             concluir_evento(_TASKS[tarefa_id].get("event_id"), sucesso=False,
                             erro=type(exc).__name__)
     threading.Thread(target=executar, daemon=True).start()
