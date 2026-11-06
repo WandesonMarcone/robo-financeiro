@@ -84,24 +84,45 @@ def _registrar_tarefa(action: str, descricao: str, alvo=None):
         "status": "em_andamento",
         "when": datetime.now().strftime("%d/%m %H:%M"),
         "event_id": evento_id,
+        "progress": [{"at": datetime.now().isoformat(), "message": "Tarefa recebida pelo painel."}],
     }
     return tarefa_id
 
 
 def _executar_em_background(tarefa_id: str, funcao, *args):
     def executar():
-        from services.historico_operacional import concluir_evento
+        from services.historico_operacional import concluir_evento, registrar_progresso
         try:
-            funcao(*args)
+            _TASKS[tarefa_id]["progress"].append({"at": datetime.now().isoformat(), "message": "Execução iniciada no robô."})
+            registrar_progresso(_TASKS[tarefa_id].get("event_id"), "Execução iniciada no robô.")
+            retorno = funcao(*args)
             _TASKS[tarefa_id]["status"] = "ok"
+            mensagem = _resumo_retorno(retorno) or _TASKS[tarefa_id]["label"]
+            _TASKS[tarefa_id]["progress"].append({"at": datetime.now().isoformat(), "message": mensagem})
             concluir_evento(_TASKS[tarefa_id].get("event_id"), sucesso=True,
-                            mensagem=_TASKS[tarefa_id]["label"])
+                            mensagem=mensagem)
         except Exception as exc:  # detalhes ficam somente no log privado Render
             _TASKS[tarefa_id]["status"] = "falha"
             _TASKS[tarefa_id]["error"] = type(exc).__name__
+            _TASKS[tarefa_id]["progress"].append({"at": datetime.now().isoformat(), "message": f"Falha: {type(exc).__name__}"})
             concluir_evento(_TASKS[tarefa_id].get("event_id"), sucesso=False,
                             erro=type(exc).__name__)
     threading.Thread(target=executar, daemon=True).start()
+
+
+def _resumo_retorno(retorno) -> str:
+    if retorno is None:
+        return "Concluída sem resumo retornado."
+    mensagem = getattr(retorno, "mensagem_telegram", None)
+    if callable(mensagem):
+        try:
+            return str(mensagem())[:1500]
+        except Exception:
+            pass
+    if isinstance(retorno, dict):
+        pares = [f"{chave}: {valor}" for chave, valor in retorno.items() if isinstance(valor, (str, int, float, bool))]
+        return "; ".join(pares)[:1500] or "Concluída."
+    return str(retorno)[:1500]
 
 
 def _medir_armazenamento():
@@ -109,7 +130,8 @@ def _medir_armazenamento():
     from sqlalchemy import text
     from atualizador_documentos import SessionDB
 
-    _STORAGE.update({"status": "measuring", "error": None})
+    _STORAGE.update({"status": "measuring", "phase": "Medindo banco Neon…", "error": None,
+                     "started_at": datetime.now().strftime("%d/%m/%Y %H:%M")})
     try:
         session = SessionDB()
         try:
@@ -120,16 +142,19 @@ def _medir_armazenamento():
             )).scalar() or 0)
         finally:
             session.close()
+        _STORAGE.update({"phase": "Neon medido. Contando arquivos da pasta do robô no Drive…",
+                         "neon": {"database_bytes": banco_bytes, "tables_bytes": tabelas_bytes}})
         from modules.GoogleDriveManager import GoogleDriveManager
         drive = GoogleDriveManager().medir_armazenamento_robo()
         _STORAGE.update({
             "status": "ready",
+            "phase": "Medição concluída.",
             "measured_at": datetime.now().strftime("%d/%m/%Y %H:%M"),
             "neon": {"database_bytes": banco_bytes, "tables_bytes": tabelas_bytes},
             "drive": drive,
         })
     except Exception as exc:
-        _STORAGE.update({"status": "error", "error": type(exc).__name__})
+        _STORAGE.update({"status": "error", "phase": "Falha na medição.", "error": type(exc).__name__})
 
 
 def _verificar_servicos_externos():
@@ -207,6 +232,12 @@ def _coletar_documentos_isolados(ticker: str, periodo: str | None):
         RelatoriosAcoesCVM().vasculhar_documentos(ano=ano, ticker=ticker)
 
 
+def _varrer_fnet_pelo_painel(dias: int):
+    """Executa apenas FNET; não mistura CVM, ações ou a fila residual."""
+    from pipeline_dados.coletor_fnet import ColetorFnet
+    return ColetorFnet().coletar(dias=dias)
+
+
 def _diagnostico_fontes():
     """Executa uma amostra curta; o diagnóstico completo continua no Actions."""
     from scripts.diagnostico_fontes import diagnosticar
@@ -274,6 +305,7 @@ def _historico_para_painel(limite: int = 25) -> dict:
                 "status": e.status, "message": e.mensagem or "", "error": e.erro or "",
                 "started_at": e.iniciado_em.isoformat() if e.iniciado_em else None,
                 "finished_at": e.concluido_em.isoformat() if e.concluido_em else None,
+                "details": _detalhes_evento(e.detalhes),
             } for e in eventos],
             "notifications": [{
                 "id": n.id, "type": n.tipo, "ticker": n.ticker, "channel": n.canal,
@@ -284,6 +316,54 @@ def _historico_para_painel(limite: int = 25) -> dict:
         }
     finally:
         session.close()
+
+
+def _detalhes_evento(valor) -> dict:
+    try:
+        import json
+        resultado = json.loads(valor or "{}")
+        return resultado if isinstance(resultado, dict) else {}
+    except (TypeError, ValueError):
+        return {}
+
+
+def _alertas_para_painel(limite: int = 80) -> list[dict]:
+    from atualizador_documentos import SessionDB
+    from pipeline_dados.banco_dados import Ativo
+    from pipeline_dados.modelos_alertas import AlertaEvento
+
+    session = SessionDB()
+    try:
+        linhas = session.query(AlertaEvento, Ativo.ticker).join(
+            Ativo, Ativo.id == AlertaEvento.ativo_id
+        ).order_by(AlertaEvento.data_evento.desc()).limit(limite).all()
+        return [{
+            "ticker": ticker, "indicator": alerta.indicador, "type": alerta.tipo_alerta,
+            "reason": alerta.motivo, "severity": alerta.severidade,
+            "sent": bool(alerta.telegram_enviado),
+            "at": alerta.data_evento.isoformat() if alerta.data_evento else None,
+            "variation": float(alerta.variacao_percentual) if alerta.variacao_percentual is not None else None,
+        } for alerta, ticker in linhas]
+    finally:
+        session.close()
+
+
+def _fontes_para_painel() -> dict:
+    """Estado conhecido: configurado não é tratado como teste bem-sucedido."""
+    import config
+    def configurada(nome: str) -> str:
+        return "configured" if (os.environ.get(nome) or getattr(config, nome, None)) else "missing"
+    return {
+        "sources": [
+            {"name": "Google Drive", "status": _saude_externa_atual().get("drive", "checking"), "detail": "Credenciais do Drive"},
+            {"name": "GitHub Actions", "status": _saude_externa_atual().get("github", "checking"), "detail": "Token de consulta"},
+            {"name": "FNET / B3", "status": "unknown", "detail": "Use Diagnosticar fontes para teste pontual"},
+            {"name": "CVM", "status": "unknown", "detail": "Use Diagnosticar fontes para teste pontual"},
+            {"name": "OpenAI", "status": configurada("OPENAI_API_KEY"), "detail": "Chave configurada"},
+            {"name": "Groq", "status": configurada("GROQ_API_KEY"), "detail": "Chave configurada"},
+            {"name": "OpenRouter", "status": configurada("OPENROUTER_API_KEY"), "detail": "Chave configurada"},
+        ]
+    }
 
 
 def _detalhe_ativo_para_painel(ticker: str) -> dict | None:
@@ -558,6 +638,21 @@ def historico():
         return jsonify({"message": "O histórico ainda não foi inicializado no Neon."}), 503
 
 
+@admin_api.route("/api/admin/alerts", methods=["GET"])
+@exige_admin
+def alertas():
+    try:
+        return jsonify({"alerts": _alertas_para_painel()})
+    except Exception:
+        return jsonify({"message": "Não foi possível consultar os eventos de alerta no Neon."}), 503
+
+
+@admin_api.route("/api/admin/sources", methods=["GET"])
+@exige_admin
+def fontes():
+    return jsonify(_fontes_para_painel())
+
+
 @admin_api.route("/api/admin/commands", methods=["POST"])
 @exige_admin
 def executar_comando():
@@ -588,6 +683,16 @@ def executar_comando():
         tarefa = _registrar_tarefa(action, f"Busca documental de {ticker}", ticker)
         _executar_em_background(tarefa, _coletar_documentos_isolados, ticker, periodo)
         return jsonify({"message": f"Busca documental de {ticker} iniciada.", "task_id": tarefa}), 202
+    if action == "forcar_varredura":
+        try:
+            dias = int(periodo or 60)
+            if not 1 <= dias <= 365:
+                raise ValueError
+        except (TypeError, ValueError):
+            return jsonify({"message": "Informe um período entre 1 e 365 dias para a varredura FNET."}), 400
+        tarefa = _registrar_tarefa(action, f"Varredura de documentos FNET — últimos {dias} dias")
+        _executar_em_background(tarefa, _varrer_fnet_pelo_painel, dias)
+        return jsonify({"message": f"Varredura FNET dos últimos {dias} dias iniciada.", "task_id": tarefa}), 202
     if action == "processar_pendentes_acao":
         if not ticker:
             return jsonify({"message": "Informe o ticker da ação para processar somente seus pendentes."}), 400
@@ -656,7 +761,6 @@ def executar_comando():
 
     from services import orquestrador
     acoes = {
-        "forcar_varredura": ("Varredura de documentos FNET", orquestrador.varredura_diaria),
         "forcar_docs_acoes": ("Coleta de PDFs de ações", orquestrador.coleta_docs_acoes),
         "forcar_cvm": ("Atualização CVM/ITR", orquestrador.varredura_diaria),
         "forcar_fiis": ("Coleta de informes de FIIs", orquestrador.coleta_informes_fiis),

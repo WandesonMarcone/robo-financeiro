@@ -59,6 +59,32 @@ def concluir_evento(evento_id: int | None, *, sucesso: bool, mensagem: str | Non
         logger.debug("Não foi possível concluir evento de auditoria.", exc_info=True)
 
 
+def registrar_progresso(evento_id: int | None, mensagem: str) -> None:
+    """Acrescenta uma linha curta de progresso, preservando no máximo 30."""
+    if not evento_id:
+        return
+    try:
+        from atualizador_documentos import SessionDB
+        from pipeline_dados.banco_dados import EventoOperacional
+        session = SessionDB()
+        try:
+            evento = session.get(EventoOperacional, evento_id)
+            if evento:
+                try:
+                    detalhes = json.loads(evento.detalhes or "{}")
+                except (TypeError, ValueError):
+                    detalhes = {}
+                linhas = list(detalhes.get("progress") or [])[-29:]
+                linhas.append({"at": datetime.now().isoformat(), "message": str(mensagem)[:500]})
+                detalhes["progress"] = linhas
+                evento.detalhes = json.dumps(detalhes, ensure_ascii=False)
+                session.commit()
+        finally:
+            session.close()
+    except Exception:
+        logger.debug("Não foi possível registrar progresso.", exc_info=True)
+
+
 def registrar_notificacao(tipo: str, *, ticker: str | None = None,
                           destinatario: str | int | None = None,
                           resumo: str | None = None, enviada: bool = False,
