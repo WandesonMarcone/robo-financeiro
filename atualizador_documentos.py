@@ -470,9 +470,10 @@ class ResultadoProcessamento:
         )
 
 
-def rotina_processar_pendentes(documento_id: int | None = None):
-    """Processa a fila FII inteira ou apenas um documento PENDENTE escolhido."""
+def rotina_processar_pendentes(documento_id: int | None = None, ticker: str | None = None):
+    """Processa pendentes FII, opcionalmente de um único documento ou ativo."""
     resultado = ResultadoProcessamento("PENDENTE")
+    ticker = str(ticker or "").strip().upper() or None
     session_fila = SessionDB()
     try:
         consulta = session_fila.query(DocumentosQualitativos.id).filter(
@@ -480,12 +481,14 @@ def rotina_processar_pendentes(documento_id: int | None = None):
         )
         if documento_id is not None:
             consulta = consulta.filter(DocumentosQualitativos.id == documento_id)
+        if ticker:
+            consulta = consulta.join(Ativo).filter(Ativo.ticker == ticker)
         pendentes_ids = [doc.id for doc in consulta.all()]
     finally:
         session_fila.close()
 
     resultado.fila = len(pendentes_ids)
-    logger.info("Fila PENDENTE: %s documento(s)", resultado.fila)
+    logger.info("Fila PENDENTE%s: %s documento(s)", f" de {ticker}" if ticker else "", resultado.fila)
     if not pendentes_ids:
         return resultado
 

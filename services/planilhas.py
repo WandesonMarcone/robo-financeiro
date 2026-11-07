@@ -62,12 +62,12 @@ def buscar_ativo_na_planilha(ticker, is_fii):
                 return {
                     "tipo": safe_get(row, 1), "setor": safe_get(row, 2), "preco": safe_get(row, 3),
                     "pvp": safe_get(row, 5), "dy": safe_get(row, 6), "vpa": safe_get(row, 14),
-                    "div_mensal": safe_get(row, 16), "raw": row
+                    "div_mensal": safe_get(row, 16), "atualizado_em": safe_get(row, 17), "raw": row
                 }
             idx_sub = int(getattr(config, "COLUNA_SUBSETOR_ACAO", 34))
             return {
                 "setor": safe_get(row, 1), "preco": safe_get(row, 2), "dy": safe_get(row, 3),
                 "pl": safe_get(row, 5), "pvp": safe_get(row, 6), "roe": safe_get(row, 19),
-                "subsetor": safe_get(row, idx_sub), "raw": row
+                "subsetor": safe_get(row, idx_sub), "atualizado_em": safe_get(row, 32), "raw": row
             }
     return None

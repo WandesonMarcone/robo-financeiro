@@ -265,6 +265,7 @@ def _indicadores_planilha_para_painel(ticker: str, tipo: str) -> dict:
         ]
     return {
         "source": "Planilha de investimentos — atualizada pelo GitHub Actions",
+        "updated_at": item.get("atualizado_em") or None,
         "fields": [[nome, valor] for nome, valor in campos if valor not in (None, "", "N/A")],
     }
 
@@ -504,10 +505,15 @@ def _detalhe_ativo_para_painel(ticker: str) -> dict | None:
             # mercado da planilha, sem fingir que são a mesma fonte.
             dados["campos"] = indicadores_mercado["fields"] + dados["campos"]
         dados["fonte_mercado"] = indicadores_mercado["source"]
+        dados["mercado_atualizado_em"] = indicadores_mercado.get("updated_at")
         return {
             "ticker": ativo.ticker, "tipo": tipo,
             "documents": [_serializar_documento(doc, ativo.ticker, tipo) for doc in documentos],
             "documents_total": session.query(func.count(DocumentosQualitativos.id)).filter_by(ativo_id=ativo.id).scalar() or 0,
+            "pending_documents": session.query(func.count(DocumentosQualitativos.id)).filter(
+                DocumentosQualitativos.ativo_id == ativo.id,
+                DocumentosQualitativos.status_processamento == ("PENDENTE" if tipo == "FII" else "PENDENTE_ACAO"),
+            ).scalar() or 0,
             "financial": dados,
             "last_scan": {
                 "type": ultima_operacao.tipo, "status": ultima_operacao.status,
@@ -832,6 +838,13 @@ def executar_comando():
         tarefa = _registrar_tarefa(action, f"Classificação de pendentes de {ticker}", ticker)
         _executar_em_background(tarefa, orquestrador.processar_ia_acoes, ticker)
         return jsonify({"message": f"Classificação dos documentos PENDENTE_ACAO de {ticker} iniciada.", "task_id": tarefa}), 202
+    if action == "processar_pendentes_fii":
+        if not ticker:
+            return jsonify({"message": "Informe o ticker do FII para processar somente seus pendentes."}), 400
+        from atualizador_documentos import rotina_processar_pendentes
+        tarefa = _registrar_tarefa(action, f"Classificação de pendentes FII de {ticker}", ticker)
+        _executar_em_background(tarefa, rotina_processar_pendentes, None, ticker)
+        return jsonify({"message": f"Classificação dos documentos PENDENTE de {ticker} iniciada.", "task_id": tarefa}), 202
     if action == "organizar_documento_drive":
         try:
             documento_id = int(documento_id)
