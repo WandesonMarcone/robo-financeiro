@@ -140,6 +140,16 @@ def executar(limite_total=30, orcamento_segundos=540, pausa_segundos=2.0, planil
             fiis, cursor_fiis, limite_fiis, pendentes_fiis
         )
 
+    # O ciclo roda no GitHub Actions; este registro persistente é o elo que
+    # faltava para a Central provar o lote noturno, mesmo sem Telegram.
+    try:
+        from services.historico_operacional import iniciar_evento, concluir_evento, registrar_resultado
+        evento_id = iniciar_evento("ATUALIZACAO_CICLICA", origem="GITHUB_ACTIONS", ticker=ticker_isolado or None,
+                                  mensagem="Ciclo automático de atualização iniciado.",
+                                  detalhes={"acoes_selecionadas": lote_acoes, "fiis_selecionados": lote_fiis,
+                                            "limite": limite_total, "orcamento_segundos": orcamento_segundos})
+    except Exception:
+        evento_id = None
     fuso = pytz.timezone("America/Sao_Paulo")
     agora_dt = datetime.datetime.now(fuso)
     agora_sp = agora_dt.strftime("%d/%m %H:%M")
@@ -192,7 +202,7 @@ def executar(limite_total=30, orcamento_segundos=540, pausa_segundos=2.0, planil
             pendentes_acoes, pendentes_fiis, agora_sp,
         )
 
-    return {
+    saida = {
         "limite_total": limite_total,
         "ticker": ticker_isolado or None,
         "acoes_solicitadas": len(lote_acoes),
@@ -202,6 +212,15 @@ def executar(limite_total=30, orcamento_segundos=540, pausa_segundos=2.0, planil
         "duracao_segundos": round(clock() - inicio, 3),
         "orcamento_segundos": orcamento_segundos,
     }
+    saida["acoes"] = {"tentados": digest_acoes.get("tentados") or [], "falhas": digest_acoes.get("falhas") or [], "gravacoes": len(atualizacoes_acoes)}
+    saida["fiis"] = {"tentados": digest_fiis.get("tentados") or [], "falhas": digest_fiis.get("falhas") or [], "gravacoes": len(atualizacoes_fiis)}
+    try:
+        registrar_resultado(evento_id, saida)
+        concluir_evento(evento_id, sucesso=bool(sucesso_acoes or sucesso_fiis),
+                        mensagem=f"Ciclo concluído: {len(saida['acoes']['tentados'])} ações e {len(saida['fiis']['tentados'])} FIIs tentados.")
+    except Exception:
+        pass
+    return saida
 
 
 def main():

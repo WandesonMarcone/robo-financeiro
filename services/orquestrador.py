@@ -38,24 +38,34 @@ def varredura_diaria():
         parse_mode="Markdown",
     )
 
+    from services.historico_operacional import iniciar_evento, concluir_evento, registrar_resultado
     # 1. Rotina B3/FNET + fila PENDENTE residual
+    evento_fnet = iniciar_evento("VARREDURA_FNET", origem="RENDER_CRON", mensagem="Varredura FNET automática iniciada.")
     try:
         resultado_fnet = rotina_de_atualizacao_em_massa()
+        detalhes = resultado_fnet.detalhes_painel() if callable(getattr(resultado_fnet, "detalhes_painel", None)) else {}
+        registrar_resultado(evento_fnet, detalhes)
+        concluir_evento(evento_fnet, sucesso=getattr(resultado_fnet, "status", "erro") != "erro", mensagem=resultado_fnet.mensagem_telegram())
         _avisar(resultado_fnet.mensagem_telegram())
         processamento = getattr(resultado_fnet, "processamento", None)
         if processamento is not None:
             _avisar(processamento.mensagem_telegram())
     except Exception as e:
+        concluir_evento(evento_fnet, sucesso=False, erro=type(e).__name__, mensagem="Falha na varredura FNET automática.")
         _avisar(f"❌ Erro na varredura B3: {type(e).__name__}")
 
     # 2. Rotina CVM (Ações)
+    evento_acoes = iniciar_evento("VARREDURA_DOCUMENTOS_ACOES", origem="RENDER_CRON", mensagem="Varredura documental CVM/IPE de ações iniciada.")
     session = None
     try:
         session = SessionDB()
         coletor = AcoesCVMReader(session)
         resultado_cvm = coletor.atualizar_acoes()
+        registrar_resultado(evento_acoes, {"mensagem": resultado_cvm.mensagem_telegram()})
+        concluir_evento(evento_acoes, sucesso=True, mensagem=resultado_cvm.mensagem_telegram())
         _avisar(resultado_cvm.mensagem_telegram())
     except Exception as e:
+        concluir_evento(evento_acoes, sucesso=False, erro=type(e).__name__, mensagem="Falha na varredura CVM de ações.")
         _avisar(f"❌ Erro na varredura CVM: {type(e).__name__}")
     finally:
         if session is not None:
@@ -78,13 +88,18 @@ def coleta_informes_fiis():
 
 def coleta_docs_acoes():
     """Cron semanal: PDFs de acoes na CVM (equivalente a /forcar_docs_acoes)."""
+    from services.historico_operacional import iniciar_evento, concluir_evento, registrar_resultado
+    evento_id = iniciar_evento("VARREDURA_DOCUMENTOS_ACOES", origem="RENDER_CRON", mensagem="Varredura IPE/CVM de ações iniciada.")
     _avisar("Iniciando varredura semanal de PDFs de acoes (CVM).")
     try:
         from pipeline_dados.coletor_docs_acoes import RelatoriosAcoesCVM
 
         resultado = RelatoriosAcoesCVM().vasculhar_documentos()
+        registrar_resultado(evento_id, resultado.detalhes_painel())
+        concluir_evento(evento_id, sucesso=resultado.status != "erro", mensagem=resultado.mensagem_telegram())
         _avisar(resultado.mensagem_telegram())
     except Exception as e:
+        concluir_evento(evento_id, sucesso=False, erro=type(e).__name__, mensagem="Falha na varredura IPE/CVM de ações.")
         _avisar(f"Erro na varredura de PDFs de acoes: {type(e).__name__}")
 
 

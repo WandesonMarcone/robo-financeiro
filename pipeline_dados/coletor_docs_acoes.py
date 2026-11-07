@@ -56,6 +56,23 @@ class ResultadoColetaDocs:
         self.ignorados_validacao = 0
         self.falhas_persistencia = 0
         self.erro = None
+        self.documentos_novos = []
+        self.por_ativo = {}
+
+    def registrar_documento_novo(self, ticker, tipo, data, origem):
+        bloco = self.por_ativo.setdefault(str(ticker), {"ticker": str(ticker), "novos": 0, "documentos": []})
+        bloco["novos"] += 1
+        item = {"ticker": str(ticker), "tipo": str(tipo), "data": data.isoformat() if data else None, "origem": str(origem)}
+        if len(bloco["documentos"]) < 30:
+            bloco["documentos"].append(item)
+        if len(self.documentos_novos) < 120:
+            self.documentos_novos.append(item)
+
+    def detalhes_painel(self):
+        return {"ano": self.ano, "status": self.status, "documentos_arquivo": self.informes_encontrados,
+                "novos": self.gravados, "ja_existentes": self.ja_existentes, "sem_ativo": self.sem_ativo,
+                "falhas_persistencia": self.falhas_persistencia, "ativos": list(self.por_ativo.values()),
+                "documentos": self.documentos_novos}
 
     def mensagem_telegram(self):
         ano = self.ano
@@ -254,6 +271,7 @@ class RelatoriosAcoesCVM:
                     )
                     session.commit()
                     resultado.gravados += 1
+                    resultado.registrar_documento_novo(ativo.ticker, categoria, data_pub, link_pdf)
                 except Exception:
                     session.rollback()
                     resultado.falhas_persistencia += 1
