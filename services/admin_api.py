@@ -458,7 +458,7 @@ def _detalhe_ativo_para_painel(ticker: str) -> dict | None:
         Ativo, DadosFinanceirosAcoes, DadosFinanceirosFiis, DocumentosQualitativos,
         EventoOperacional,
     )
-    from sqlalchemy import func
+    from sqlalchemy import func, text
 
     session = SessionDB()
     try:
@@ -506,6 +506,24 @@ def _detalhe_ativo_para_painel(ticker: str) -> dict | None:
             dados["campos"] = indicadores_mercado["fields"] + dados["campos"]
         dados["fonte_mercado"] = indicadores_mercado["source"]
         dados["mercado_atualizado_em"] = indicadores_mercado.get("updated_at")
+        # A sobreposição é uma decisão humana separada da coleta. Se a migração
+        # ainda não tiver sido aplicada, a ficha continua disponível normalmente.
+        classificacao_manual = None
+        try:
+            linha_manual = session.execute(text(
+                "SELECT classe, segmento, estrategia, bloqueado, atualizado_em "
+                "FROM sobreposicoes_manuais_ativos WHERE ativo_id = :ativo_id"
+            ), {"ativo_id": ativo.id}).mappings().first()
+            if linha_manual:
+                classificacao_manual = {
+                    "classe": linha_manual["classe"],
+                    "segmento": linha_manual["segmento"],
+                    "estrategia": linha_manual["estrategia"],
+                    "bloqueado": bool(linha_manual["bloqueado"]),
+                    "updated_at": linha_manual["atualizado_em"].isoformat() if linha_manual["atualizado_em"] else None,
+                }
+        except Exception:
+            session.rollback()
         return {
             "ticker": ativo.ticker, "tipo": tipo,
             "documents": [_serializar_documento(doc, ativo.ticker, tipo) for doc in documentos],
@@ -515,6 +533,7 @@ def _detalhe_ativo_para_painel(ticker: str) -> dict | None:
                 DocumentosQualitativos.status_processamento == ("PENDENTE" if tipo == "FII" else "PENDENTE_ACAO"),
             ).scalar() or 0,
             "financial": dados,
+            "manual_classification": classificacao_manual,
             "last_scan": {
                 "type": ultima_operacao.tipo, "status": ultima_operacao.status,
                 "at": ultima_operacao.iniciado_em.isoformat() if ultima_operacao and ultima_operacao.iniciado_em else None,
@@ -795,6 +814,40 @@ def executar_comando():
 
     if action == "status":
         return jsonify({"message": "Status atualizado."})
+    if action == "salvar_classificacao_manual":
+        if not ticker:
+            return jsonify({"message": "Informe o ticker do ativo."}), 400
+        valores = {
+            nome: " ".join(str(dados.get(nome) or "").split()).strip() or None
+            for nome in ("classe", "segmento", "estrategia")
+        }
+        if not any(valores.values()):
+            return jsonify({"message": "Informe ao menos uma classificação manual."}), 400
+        if any(valor and len(valor) > 160 for valor in valores.values()):
+            return jsonify({"message": "Cada campo de classificação aceita até 160 caracteres."}), 400
+        from sqlalchemy import text
+        from atualizador_documentos import SessionDB
+        from pipeline_dados.banco_dados import Ativo
+        session = SessionDB()
+        try:
+            ativo = session.query(Ativo).filter(func.upper(Ativo.ticker) == ticker).first()
+            if not ativo:
+                return jsonify({"message": "Ativo não encontrado no cadastro-base."}), 404
+            session.execute(text(
+                "INSERT INTO sobreposicoes_manuais_ativos "
+                "(ativo_id, classe, segmento, estrategia, bloqueado, origem, atualizado_em) "
+                "VALUES (:ativo_id, :classe, :segmento, :estrategia, TRUE, 'PAINEL_ADMIN', NOW()) "
+                "ON CONFLICT (ativo_id) DO UPDATE SET classe = EXCLUDED.classe, "
+                "segmento = EXCLUDED.segmento, estrategia = EXCLUDED.estrategia, "
+                "bloqueado = TRUE, origem = 'PAINEL_ADMIN', atualizado_em = NOW()"
+            ), {"ativo_id": ativo.id, **valores})
+            session.commit()
+            return jsonify({"message": f"Classificação manual de {ticker} salva e bloqueada contra sobrescrita automática."})
+        except Exception:
+            session.rollback()
+            return jsonify({"message": "A estrutura de classificação manual ainda não está disponível no Neon."}), 503
+        finally:
+            session.close()
     if action == "atualizar_ativo":
         if not ticker:
             return jsonify({"message": "Informe o ticker do ativo."}), 400
