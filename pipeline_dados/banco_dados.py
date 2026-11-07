@@ -136,6 +136,8 @@ class HistoricoNotificacao(Base):
     erro: Mapped[Optional[str]] = mapped_column(Text)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now, index=True)
     enviado_em: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    audiencia: Mapped[str] = mapped_column(String(20), nullable=False, default="USUARIO")
+    usuario_id: Mapped[Optional[int]] = mapped_column(Integer)
 
 
 class DocumentosQualitativos(Base):

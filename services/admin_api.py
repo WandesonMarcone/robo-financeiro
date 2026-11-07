@@ -398,10 +398,43 @@ def _historico_para_painel(limite: int = 25) -> dict:
             "notifications": [{
                 "id": n.id, "type": n.tipo, "ticker": n.ticker, "channel": n.canal,
                 "status": n.status, "summary": n.resumo or "", "error": n.erro or "",
+                "audience": getattr(n, "audiencia", "USUARIO") or "USUARIO",
+                "user_id": getattr(n, "usuario_id", None),
                 "created_at": n.criado_em.isoformat() if n.criado_em else None,
                 "sent_at": n.enviado_em.isoformat() if n.enviado_em else None,
             } for n in notificacoes],
         }
+    finally:
+        session.close()
+
+
+def _usuarios_para_painel(limite: int = 100) -> list[dict]:
+    """Visão administrativa: usuários, favoritos, alertas e última entrega."""
+    from sqlalchemy import text
+    from atualizador_documentos import SessionDB
+    session = SessionDB()
+    try:
+        linhas = session.execute(text("""
+            SELECT u.id, u.nome, u.email, u.papel, u.status_cadastro, u.ativo,
+                   COALESCE(p.alertas_ativos, TRUE) AS alertas_ativos,
+                   p.variacao_minima_percentual,
+                   COUNT(DISTINCT aa.ativo_id) AS favoritos,
+                   MAX(h.enviado_em) AS ultima_notificacao
+            FROM usuarios u
+            LEFT JOIN preferencias_alertas_usuarios p ON p.usuario_id = u.id
+            LEFT JOIN ativos_acompanhados aa ON aa.usuario_id = u.id
+            LEFT JOIN historico_notificacoes h ON h.usuario_id = u.id
+            GROUP BY u.id, u.nome, u.email, u.papel, u.status_cadastro, u.ativo,
+                     p.alertas_ativos, p.variacao_minima_percentual
+            ORDER BY u.id ASC LIMIT :limite
+        """), {"limite": min(max(int(limite), 1), 200)}).mappings().all()
+        return [{"id": x["id"], "name": x["nome"] or "Sem nome", "email": x["email"] or "",
+                 "role": x["papel"] or "USUARIO", "status": x["status_cadastro"] or "—",
+                 "active": bool(x["ativo"]), "alerts_active": bool(x["alertas_ativos"]),
+                 "threshold": float(x["variacao_minima_percentual"]) if x["variacao_minima_percentual"] is not None else None,
+                 "favorites": int(x["favoritos"] or 0),
+                 "last_notification": x["ultima_notificacao"].isoformat() if x["ultima_notificacao"] else None}
+                for x in linhas]
     finally:
         session.close()
 
@@ -509,6 +542,17 @@ def _detalhe_ativo_para_painel(ticker: str) -> dict | None:
             dados["campos"] = indicadores_mercado["fields"] + dados["campos"]
         dados["fonte_mercado"] = indicadores_mercado["source"]
         dados["mercado_atualizado_em"] = indicadores_mercado.get("updated_at")
+        try:
+            manuais = session.execute(text(
+                "SELECT chave, valor_texto, fonte, data_referencia, bloqueado, atualizado_em "
+                "FROM indicadores_manuais_ativos WHERE ativo_id = :ativo_id ORDER BY chave"
+            ), {"ativo_id": ativo.id}).mappings().all()
+            dados["indicadores_manuais"] = [{"key": x["chave"], "value": x["valor_texto"], "source": x["fonte"],
+                "reference_date": x["data_referencia"].isoformat() if x["data_referencia"] else None,
+                "locked": bool(x["bloqueado"]), "updated_at": x["atualizado_em"].isoformat() if x["atualizado_em"] else None} for x in manuais]
+        except Exception:
+            session.rollback()
+            dados["indicadores_manuais"] = []
         # A sobreposição é uma decisão humana separada da coleta. Se a migração
         # ainda não tiver sido aplicada, a ficha continua disponível normalmente.
         classificacao_manual = None
@@ -721,6 +765,15 @@ def listar_ativos():
     return jsonify({"assets": ativos, "totals": totais})
 
 
+@admin_api.route("/api/admin/users", methods=["GET"])
+@exige_admin
+def listar_usuarios():
+    try:
+        return jsonify({"users": _usuarios_para_painel()})
+    except Exception:
+        return jsonify({"message": "Não foi possível consultar usuários, favoritos e preferências agora."}), 503
+
+
 @admin_api.route("/api/admin/assets/<ticker>", methods=["GET"])
 @exige_admin
 def detalhe_ativo(ticker: str):
@@ -849,6 +902,34 @@ def executar_comando():
         except Exception:
             session.rollback()
             return jsonify({"message": "A estrutura de classificação manual ainda não está disponível no Neon."}), 503
+        finally:
+            session.close()
+    if action == "salvar_indicador_manual":
+        chave = re.sub(r"[^a-z0-9_]", "", str(dados.get("chave") or "").lower().replace(" ", "_"))
+        valor = " ".join(str(dados.get("valor") or "").split()).strip()
+        fonte = " ".join(str(dados.get("fonte") or "").split()).strip()
+        referencia = str(dados.get("data_referencia") or "").strip() or None
+        if not ticker or not chave or not valor or not fonte:
+            return jsonify({"message": "Ticker, indicador, valor e fonte são obrigatórios."}), 400
+        from sqlalchemy import text, func
+        from atualizador_documentos import SessionDB
+        from pipeline_dados.banco_dados import Ativo
+        session = SessionDB()
+        try:
+            ativo = session.query(Ativo).filter(func.upper(Ativo.ticker) == ticker).first()
+            if not ativo:
+                return jsonify({"message": "Ativo não encontrado no cadastro-base."}), 404
+            session.execute(text("""
+                INSERT INTO indicadores_manuais_ativos (ativo_id, chave, valor_texto, fonte, data_referencia, bloqueado, atualizado_em)
+                VALUES (:ativo_id, :chave, :valor, :fonte, CAST(:referencia AS DATE), TRUE, NOW())
+                ON CONFLICT (ativo_id, chave) DO UPDATE SET valor_texto=EXCLUDED.valor_texto, fonte=EXCLUDED.fonte,
+                data_referencia=EXCLUDED.data_referencia, bloqueado=TRUE, atualizado_em=NOW()
+            """), {"ativo_id": ativo.id, "chave": chave, "valor": valor, "fonte": fonte, "referencia": referencia})
+            session.commit()
+            return jsonify({"message": f"Indicador manual '{chave}' salvo e bloqueado."})
+        except Exception:
+            session.rollback()
+            return jsonify({"message": "Não foi possível salvar o indicador manual."}), 502
         finally:
             session.close()
     if action == "atualizar_ativo":

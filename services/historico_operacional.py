@@ -112,7 +112,8 @@ def registrar_resultado(evento_id: int | None, resultado: dict) -> None:
 def registrar_notificacao(tipo: str, *, ticker: str | None = None,
                           destinatario: str | int | None = None,
                           resumo: str | None = None, enviada: bool = False,
-                          erro: str | None = None) -> None:
+                          erro: str | None = None, audiencia: str = "USUARIO",
+                          usuario_id: int | None = None) -> None:
     try:
         from atualizador_documentos import SessionDB
         from pipeline_dados.banco_dados import HistoricoNotificacao
@@ -122,6 +123,7 @@ def registrar_notificacao(tipo: str, *, ticker: str | None = None,
                 tipo=tipo, ticker=ticker, destinatario=str(destinatario) if destinatario else None,
                 status="ENVIADA" if enviada else "FALHOU",
                 resumo=(resumo or "")[:1500] or None, erro=(erro or "")[:1000] or None,
+                audiencia=(audiencia or "USUARIO").upper()[:20], usuario_id=usuario_id,
                 enviado_em=datetime.now() if enviada else None,
             ))
             session.commit()
