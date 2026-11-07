@@ -18,7 +18,9 @@ from functools import wraps
 from flask import Blueprint, jsonify, request
 
 admin_api = Blueprint("admin_api", __name__)
-_TICKER = re.compile(r"^[A-Z]{4,6}[0-9]{1,2}$")
+# ETFs e BDRs podem ter dígitos no prefixo (ex.: A1MD34). A validação aceita
+# somente símbolos curtos de bolsa, sem abrir espaço para URLs ou comandos.
+_TICKER = re.compile(r"^[A-Z0-9]{4,10}$")
 _TASKS: dict[str, dict] = {}
 _STORAGE: dict[str, object] = {"status": "not_measured"}
 _EXTERNAL_HEALTH: dict[str, object] = {"drive": "checking", "github": "checking"}
