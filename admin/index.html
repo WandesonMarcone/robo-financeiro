@@ -4,6 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#111814">
+  <meta name="application-name" content="Estratégia Fardada">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="assets/estrategia-fardada.webp">
   <title>Estratégia Fardada | Central de Controle</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -62,5 +65,6 @@
   <dialog id="command-dialog"><form method="dialog" id="command-form"><button type="button" class="close" value="cancel" aria-label="Fechar">×</button><p class="eyebrow">EXECUTAR OPERAÇÃO</p><h2 id="dialog-title">Comando</h2><p id="dialog-description"></p><input id="command-action" type="hidden"><label id="ticker-field">Ativo <input id="ticker" placeholder="Ex.: PETR4 ou MXRF11" pattern="[A-Za-z]{4,6}[0-9]{1,2}"></label><label id="period-field">Período <input id="period" placeholder="Ex.: 2026 ou 60"></label><p class="notice">A execução será registrada no robô. Processos longos continuam em segundo plano.</p><button class="primary" id="execute" value="default">Executar comando</button><p id="command-result" role="status"></p></form></dialog>
   <dialog id="classify-dialog"><form method="dialog" id="classify-form"><button type="button" class="close" value="cancel" aria-label="Fechar">×</button><p class="eyebrow">REVISÃO DOCUMENTAL</p><h2>Classificar e salvar no Drive</h2><p id="classify-document-info" class="help"></p><input id="classify-document-id" type="hidden"><label>Tipo oficial do documento<select id="classify-type" required><option value="">Carregando catálogo…</option></select></label><p class="notice">Ao confirmar, o robô baixa a origem FNET quando necessário, salva no Drive, renomeia e só então atualiza o status para SALVO_DRIVE.</p><button class="primary" id="classify-save" value="default">Classificar e salvar</button><p id="classify-result" role="status"></p></form></dialog>
   <script src="assets/app.js"></script>
+  <script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');</script>
 </body>
 </html>

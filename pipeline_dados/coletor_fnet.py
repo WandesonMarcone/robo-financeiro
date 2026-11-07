@@ -45,6 +45,28 @@ class ResultadoVarreduraFnet:
         self.ignorados_validacao = 0
         self.falhas_persistencia = 0
         self.erro = None
+        # Auditoria curta para o painel. Só entram documentos novos e o limite
+        # impede que uma busca ampla transforme o histórico num depósito de dados.
+        self.documentos_novos = []
+        self.por_ativo = {}
+
+    def registrar_documento_novo(self, ticker, tipo, data, id_origem):
+        resumo = self.por_ativo.setdefault(str(ticker), {"ticker": str(ticker), "novos": 0, "documentos": []})
+        resumo["novos"] += 1
+        item = {"ticker": str(ticker), "tipo": str(tipo), "data": data.isoformat() if data else None, "id_origem": str(id_origem)}
+        if len(resumo["documentos"]) < 30:
+            resumo["documentos"].append(item)
+        if len(self.documentos_novos) < 120:
+            self.documentos_novos.append(item)
+
+    def detalhes_painel(self):
+        return {
+            "dias": self.dias, "status": self.status,
+            "informes_b3": self.informes_encontrados, "novos": self.gravados,
+            "ja_existentes": self.ja_existentes, "sem_ativo": self.sem_ativo,
+            "falhas_persistencia": self.falhas_persistencia,
+            "ativos": list(self.por_ativo.values()), "documentos": self.documentos_novos,
+        }
 
     def mensagem_telegram(self):
         janela = f"ultimos {self.dias} dia(s)"
@@ -226,6 +248,7 @@ class ColetorFnet:
                     )
                     session.commit()
                     resultado.gravados += 1
+                    resultado.registrar_documento_novo(ativo.ticker, tipo_doc, data_referencia, id_doc)
                 except Exception:
                     session.rollback()
                     resultado.falhas_persistencia += 1

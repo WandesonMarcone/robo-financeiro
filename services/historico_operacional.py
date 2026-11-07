@@ -85,6 +85,30 @@ def registrar_progresso(evento_id: int | None, mensagem: str) -> None:
         logger.debug("Não foi possível registrar progresso.", exc_info=True)
 
 
+def registrar_resultado(evento_id: int | None, resultado: dict) -> None:
+    """Anexa resultado estruturado, limitado, de uma operação administrativa."""
+    if not evento_id:
+        return
+    try:
+        from atualizador_documentos import SessionDB
+        from pipeline_dados.banco_dados import EventoOperacional
+        session = SessionDB()
+        try:
+            evento = session.get(EventoOperacional, evento_id)
+            if evento:
+                try:
+                    detalhes = json.loads(evento.detalhes or "{}")
+                except (TypeError, ValueError):
+                    detalhes = {}
+                detalhes["resultado"] = resultado
+                evento.detalhes = json.dumps(detalhes, ensure_ascii=False)
+                session.commit()
+        finally:
+            session.close()
+    except Exception:
+        logger.debug("Não foi possível registrar resultado estruturado.", exc_info=True)
+
+
 def registrar_notificacao(tipo: str, *, ticker: str | None = None,
                           destinatario: str | int | None = None,
                           resumo: str | None = None, enviada: bool = False,

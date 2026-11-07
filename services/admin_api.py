@@ -92,11 +92,14 @@ def _registrar_tarefa(action: str, descricao: str, alvo=None):
 
 def _executar_em_background(tarefa_id: str, funcao, *args):
     def executar():
-        from services.historico_operacional import concluir_evento, registrar_progresso
+        from services.historico_operacional import concluir_evento, registrar_progresso, registrar_resultado
         try:
             _TASKS[tarefa_id]["progress"].append({"at": datetime.now().isoformat(), "message": "Execução iniciada no robô."})
             registrar_progresso(_TASKS[tarefa_id].get("event_id"), "Execução iniciada no robô.")
             retorno = funcao(*args)
+            detalhes = getattr(retorno, "detalhes_painel", None)
+            if callable(detalhes):
+                registrar_resultado(_TASKS[tarefa_id].get("event_id"), detalhes())
             _TASKS[tarefa_id]["status"] = "ok"
             mensagem = _resumo_retorno(retorno) or _TASKS[tarefa_id]["label"]
             _TASKS[tarefa_id]["progress"].append({"at": datetime.now().isoformat(), "message": mensagem})

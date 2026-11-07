@@ -1,0 +1,14 @@
+{
+  "name": "Estratégia Fardada — Central de Controle",
+  "short_name": "Estratégia Fardada",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#111814",
+  "theme_color": "#111814",
+  "description": "Central administrativa do Robô Financeiro.",
+  "icons": [
+    {"src": "assets/estrategia-fardada.webp", "sizes": "192x192", "type": "image/webp", "purpose": "any maskable"},
+    {"src": "assets/estrategia-fardada.webp", "sizes": "512x512", "type": "image/webp", "purpose": "any maskable"}
+  ]
+}
