@@ -63,6 +63,7 @@ COMANDOS_ADMIN = frozenset(
         "resetar_docs",
         "revisao",
         "controles",
+        "atualizar_macro",
     }
 )
 

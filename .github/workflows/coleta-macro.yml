@@ -1,0 +1,24 @@
+name: Coleta macro oficial
+on:
+  schedule:
+    # 19h15 em Brasília (UTC-3): após o fechamento da série diária do BCB.
+    - cron: '15 22 * * 1-5'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: coleta-macro-oficial
+  cancel-in-progress: false
+jobs:
+  coletar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install -r requirements.txt
+      - name: Coletar Selic e PTAX oficiais
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python scripts/coletar_series_macro.py

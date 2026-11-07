@@ -16,6 +16,7 @@ from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
 from pipeline_dados.coletor_fiis import ano_padrao_coleta, processar_informes_fiis_cvm
 from modules.utils import conectar_gspread
 from services.github_actions import disparar_atualizacao_isolada
+from services.coletor_macro_bcb import coletar_bcb
 
 
 def _ano_do_comando(message):
@@ -23,6 +24,20 @@ def _ano_do_comando(message):
     if len(texto) > 1 and texto[1].isdigit():
         return int(texto[1])
     return ano_padrao_coleta()
+
+@bot.message_handler(commands=['atualizar_macro'])
+def atualizar_macro(message):
+    """Atualiza somente séries macro oficiais; não envia alerta de mercado."""
+    bot.reply_to(message, "📈 Iniciando atualização oficial de Selic e dólar PTAX…")
+    def executar():
+        try:
+            resultado = coletar_bcb()
+            ok = len(resultado.get('series') or {})
+            falhas = len(resultado.get('falhas') or [])
+            bot.send_message(message.chat.id, f"✅ Atualização macro concluída. Séries atualizadas: {ok}. Falhas: {falhas}.")
+        except Exception as exc:
+            bot.send_message(message.chat.id, f"❌ Atualização macro falhou: {type(exc).__name__}.")
+    threading.Thread(target=executar, daemon=True).start()
 
 # ==========================================
 # 🔒 UTILITÁRIOS DE SEGURANÇA
