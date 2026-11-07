@@ -273,6 +273,7 @@ COMANDOS_AJUDA_USUARIO = (
     ("/relatorios", "Últimos documentos dos seus ativos.", "cmd_relatorios"),
     ("/docs", "Atalho para os últimos documentos.", "cmd_docs"),
     ("/help", "Mostra esta ajuda.", "cmd_help"),
+    ("/mercado", "Consulta Selic, CDI, IPCA, PTAX e Tesouro disponíveis.", None),
     ("/cancelar", "Cancela um cadastro em andamento, sem enviar pedido.", "cmd_cancelar"),
 )
 
@@ -280,6 +281,8 @@ COMANDOS_AJUDA_USUARIO = (
 # ``admin``; continuam sendo validados pelo controle central de permissões.
 COMANDOS_AJUDA_ADMIN = (
     ("/status", "Saúde do banco de dados.", "cmd_status"),
+    ("/atualizar_macro", "Atualiza Selic, CDI, IPCA e PTAX oficiais.", None),
+    ("/atualizar_mercado", "Atualiza as séries macro e o Tesouro Direto.", None),
     ("/adicionar TICKER", "Adiciona um ativo ao monitoramento.", None),
     ("/forcar_varredura [DIAS]", "Varredura FNET de FIIs (padrao: 60 dias).", "cmd_forcar_varredura"),
     ("/atualizar_ativo TICKER", "Busca isolada de um ativo pelo GitHub Actions.", "cmd_atualizar_ativo"),

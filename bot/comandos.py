@@ -28,7 +28,7 @@ def _ano_do_comando(message):
 @bot.message_handler(commands=['atualizar_macro'])
 def atualizar_macro(message):
     """Atualiza somente séries macro oficiais; não envia alerta de mercado."""
-    bot.reply_to(message, "📈 Iniciando atualização oficial de Selic e dólar PTAX…")
+    bot.reply_to(message, "📈 Iniciando atualização oficial de Selic, CDI, IPCA e dólar PTAX…")
     def executar():
         try:
             resultado = coletar_bcb()
@@ -38,6 +38,32 @@ def atualizar_macro(message):
         except Exception as exc:
             bot.send_message(message.chat.id, f"❌ Atualização macro falhou: {type(exc).__name__}.")
     threading.Thread(target=executar, daemon=True).start()
+
+
+@bot.message_handler(commands=['atualizar_mercado'])
+def atualizar_mercado(message):
+    """Administrador: atualiza macro e última tabela oficial do Tesouro."""
+    bot.reply_to(message, "📊 Iniciando atualização de mercado e Tesouro Direto…")
+    def executar():
+        try:
+            from services.coletor_tesouro_direto import coletar_tesouro_direto
+            macro = coletar_bcb()
+            tesouro = coletar_tesouro_direto()
+            bot.send_message(message.chat.id, "✅ Mercado atualizado. "
+                f"Séries: {len(macro.get('series') or {})}; falhas: {len(macro.get('falhas') or [])}; "
+                f"títulos Tesouro: {tesouro.get('gravadas', 0)}.")
+        except Exception as exc:
+            bot.send_message(message.chat.id, f"❌ Atualização de mercado falhou: {type(exc).__name__}.")
+    threading.Thread(target=executar, daemon=True).start()
+
+
+@bot.message_handler(commands=['mercado'])
+def mercado(message):
+    from services.painel_mercado import mensagem_mercado
+    try:
+        bot.send_message(message.chat.id, mensagem_mercado(), parse_mode="Markdown")
+    except Exception as exc:
+        bot.reply_to(message, f"❌ Consulta de mercado indisponível: {type(exc).__name__}.")
 
 # ==========================================
 # 🔒 UTILITÁRIOS DE SEGURANÇA

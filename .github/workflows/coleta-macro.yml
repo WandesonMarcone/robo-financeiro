@@ -18,7 +18,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
       - run: pip install -r requirements.txt
-      - name: Coletar Selic e PTAX oficiais
+      - name: Coletar Selic, CDI, IPCA e PTAX oficiais
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: python scripts/coletar_series_macro.py

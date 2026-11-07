@@ -851,6 +851,17 @@ def alertas():
         return jsonify({"message": "Não foi possível consultar os eventos de alerta no Neon."}), 503
 
 
+@admin_api.route("/api/admin/market", methods=["GET"])
+@exige_admin
+def mercado():
+    """Séries oficiais e histórico curto para a Central, sem acionar coleta."""
+    try:
+        from services.painel_mercado import resumo_mercado
+        return jsonify(resumo_mercado())
+    except Exception:
+        return jsonify({"message": "Não foi possível consultar as séries de mercado no Neon."}), 503
+
+
 @admin_api.route("/api/admin/sources", methods=["GET"])
 @exige_admin
 def fontes():
