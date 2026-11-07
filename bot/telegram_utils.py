@@ -274,6 +274,7 @@ COMANDOS_AJUDA_USUARIO = (
     ("/docs", "Atalho para os últimos documentos.", "cmd_docs"),
     ("/help", "Mostra esta ajuda.", "cmd_help"),
     ("/mercado", "Consulta Selic, CDI, IPCA, PTAX e Tesouro disponíveis.", None),
+    ("/etfs_bdrs", "Consulta ETFs e BDRs acompanhados.", None),
     ("/cancelar", "Cancela um cadastro em andamento, sem enviar pedido.", "cmd_cancelar"),
 )
 
@@ -283,6 +284,10 @@ COMANDOS_AJUDA_ADMIN = (
     ("/status", "Saúde do banco de dados.", "cmd_status"),
     ("/atualizar_macro", "Atualiza Selic, CDI, IPCA e PTAX oficiais.", None),
     ("/atualizar_mercado", "Atualiza as séries macro e o Tesouro Direto.", None),
+    ("/adicionar_instrumento TICKER ETF|BDR [EXTERNO]", "Cadastra ETF/BDR para acompanhamento.", None),
+    ("/atualizar_instrumento_internacional TICKER", "Atualiza somente um ETF ou BDR cadastrado.", None),
+    ("/atualizar_etfs_bdrs", "Atualiza até 30 ETFs/BDRs cadastrados.", None),
+    ("/etfs_bdrs", "Consulta ETFs e BDRs acompanhados.", None),
     ("/adicionar TICKER", "Adiciona um ativo ao monitoramento.", None),
     ("/forcar_varredura [DIAS]", "Varredura FNET de FIIs (padrao: 60 dias).", "cmd_forcar_varredura"),
     ("/atualizar_ativo TICKER", "Busca isolada de um ativo pelo GitHub Actions.", "cmd_atualizar_ativo"),

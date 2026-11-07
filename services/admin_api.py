@@ -862,6 +862,58 @@ def mercado():
         return jsonify({"message": "Não foi possível consultar as séries de mercado no Neon."}), 503
 
 
+@admin_api.route("/api/admin/instruments", methods=["GET"])
+@exige_admin
+def instrumentos_internacionais():
+    """ETFs e BDRs têm cadastro e métricas próprios, sem se passar por ações."""
+    from atualizador_documentos import SessionDB
+    sessao = SessionDB()
+    try:
+        tipo = str(request.args.get("type") or "").upper().strip()
+        if tipo and tipo not in {"ETF", "BDR"}:
+            return jsonify({"message": "Tipo inválido."}), 400
+        linhas = sessao.execute(text("""
+          WITH ultima AS (
+            SELECT DISTINCT ON (instrumento_id) instrumento_id, referencia_em, fechamento,
+              variacao_percentual, volume, fonte, qualidade_fonte
+            FROM observacoes_instrumentos_internacionais
+            ORDER BY instrumento_id, referencia_em DESC
+          )
+          SELECT i.ticker,i.tipo,i.nome,i.simbolo_exterior,i.indice_referencia,i.gestora,i.moeda_origem,
+            i.atualizado_em,u.referencia_em,u.fechamento,u.variacao_percentual,u.volume,u.fonte,u.qualidade_fonte
+          FROM instrumentos_internacionais i LEFT JOIN ultima u ON u.instrumento_id=i.id
+          WHERE i.ativo=TRUE AND (:tipo='' OR i.tipo=:tipo)
+          ORDER BY i.tipo,i.ticker
+        """), {"tipo": tipo}).mappings().all()
+        return jsonify({"instruments": [{**dict(l), "referencia_em": l["referencia_em"].isoformat() if l["referencia_em"] else None,
+                          "atualizado_em": l["atualizado_em"].isoformat() if l["atualizado_em"] else None} for l in linhas]})
+    except Exception:
+        return jsonify({"message": "A estrutura de ETFs e BDRs ainda não está disponível no Neon."}), 503
+    finally:
+        sessao.close()
+
+
+@admin_api.route("/api/admin/instruments/<ticker>", methods=["GET"])
+@exige_admin
+def detalhe_instrumento_internacional(ticker):
+    from atualizador_documentos import SessionDB
+    sessao = SessionDB()
+    try:
+        item = sessao.execute(text("SELECT * FROM instrumentos_internacionais WHERE ticker=:ticker"), {"ticker": ticker.upper()}).mappings().first()
+        if not item:
+            return jsonify({"message": "Instrumento não encontrado."}), 404
+        metricas = sessao.execute(text("""
+          SELECT chave, valor_numerico, valor_texto, unidade, fonte, qualidade_fonte, referencia_em, bloqueado
+          FROM metricas_instrumentos_internacionais WHERE instrumento_id=:id ORDER BY chave
+        """), {"id": item["id"]}).mappings().all()
+        return jsonify({"instrument": {**dict(item), "criado_em": item["criado_em"].isoformat(), "atualizado_em": item["atualizado_em"].isoformat()},
+                        "metrics": [{**dict(m), "referencia_em": m["referencia_em"].isoformat() if m["referencia_em"] else None} for m in metricas]})
+    except Exception:
+        return jsonify({"message": "Não foi possível consultar a ficha do instrumento."}), 503
+    finally:
+        sessao.close()
+
+
 @admin_api.route("/api/admin/sources", methods=["GET"])
 @exige_admin
 def fontes():
@@ -876,11 +928,34 @@ def executar_comando():
     ticker = str(dados.get("ticker") or "").strip().upper()
     periodo = str(dados.get("period") or "").strip()
     documento_id = dados.get("document_id")
+    tipo_instrumento = str(dados.get("instrument_type") or "").strip().upper()
+    simbolo_exterior = str(dados.get("external_symbol") or "").strip().upper() or None
     if ticker and not _TICKER.fullmatch(ticker):
         return jsonify({"message": "Ticker inválido."}), 400
 
     if action == "status":
         return jsonify({"message": "Status atualizado."})
+    if action == "registrar_instrumento":
+        if not ticker or tipo_instrumento not in {"ETF", "BDR"}:
+            return jsonify({"message": "Informe ticker e escolha ETF ou BDR."}), 400
+        try:
+            from services.coletor_etfs_bdrs import registrar_instrumento
+            item = registrar_instrumento(ticker, tipo_instrumento, simbolo_exterior)
+            return jsonify({"message": f"{item['ticker']} cadastrado como {item['tipo']}. Use Atualizar para buscar o primeiro histórico."})
+        except Exception:
+            return jsonify({"message": "Não foi possível cadastrar: confirme que a migração 0016 foi aplicada no Neon."}), 503
+    if action == "atualizar_instrumento":
+        if not ticker:
+            return jsonify({"message": "Informe o ticker do ETF ou BDR."}), 400
+        from services.coletor_etfs_bdrs import coletar_instrumento
+        tarefa = _registrar_tarefa(action, f"Atualização de ETF/BDR: {ticker}", ticker)
+        _executar_em_background(tarefa, coletar_instrumento, ticker, tipo_instrumento or None, simbolo_exterior)
+        return jsonify({"message": f"Atualização de {ticker} iniciada; origem e qualidade aparecerão na ficha.", "task_id": tarefa}), 202
+    if action == "atualizar_instrumentos":
+        from services.coletor_etfs_bdrs import coletar_instrumentos_ativos
+        tarefa = _registrar_tarefa(action, "Atualização dos ETFs e BDRs cadastrados")
+        _executar_em_background(tarefa, coletar_instrumentos_ativos, 30)
+        return jsonify({"message": "Atualização de até 30 ETFs/BDRs cadastrados iniciada.", "task_id": tarefa}), 202
     if action == "salvar_classificacao_manual":
         if not ticker:
             return jsonify({"message": "Informe o ticker do ativo."}), 400

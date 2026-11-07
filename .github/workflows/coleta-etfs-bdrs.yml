@@ -1,0 +1,25 @@
+name: Coleta ETFs e BDRs
+on:
+  schedule:
+    # 19h45 em Brasília: fechamento diário, com lista limitada a 30 instrumentos.
+    - cron: '45 22 * * 1-5'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: coleta-etfs-bdrs
+  cancel-in-progress: false
+jobs:
+  coletar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install -r requirements.txt
+      - name: Coletar instrumentos cadastrados
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SEC_EDGAR_USER_AGENT: ${{ secrets.SEC_EDGAR_USER_AGENT }}
+        run: python scripts/coletar_etfs_bdrs.py

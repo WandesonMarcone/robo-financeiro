@@ -65,6 +65,85 @@ def mercado(message):
     except Exception as exc:
         bot.reply_to(message, f"❌ Consulta de mercado indisponível: {type(exc).__name__}.")
 
+
+@bot.message_handler(commands=['adicionar_instrumento'])
+def adicionar_instrumento(message):
+    """Admin cadastra ETF/BDR; não força equivalência com ação ou FII."""
+    partes = (message.text or "").split()
+    if len(partes) not in (3, 4) or not re.fullmatch(r"[A-Z0-9]{4,12}", partes[1].upper()) or partes[2].upper() not in {"ETF", "BDR"}:
+        bot.reply_to(message, "⚠️ Uso: `/adicionar_instrumento IVVB11 ETF [IVV]` ou `/adicionar_instrumento AAPL34 BDR [AAPL]`.", parse_mode="Markdown")
+        return
+    ticker, tipo = partes[1].upper(), partes[2].upper()
+    externo = partes[3].upper() if len(partes) == 4 else None
+    try:
+        from services.coletor_etfs_bdrs import registrar_instrumento
+        registrar_instrumento(ticker, tipo, externo)
+        bot.reply_to(message, f"✅ {ticker} cadastrado como *{tipo}*. Use `/atualizar_instrumento_internacional {ticker}` para buscar a primeira referência.", parse_mode="Markdown")
+    except Exception as exc:
+        bot.reply_to(message, f"❌ Cadastro de {ticker} indisponível: {type(exc).__name__}.")
+
+
+@bot.message_handler(commands=['atualizar_instrumento_internacional'])
+def atualizar_instrumento_internacional(message):
+    partes = (message.text or "").split()
+    if len(partes) != 2 or not re.fullmatch(r"[A-Z0-9]{4,12}", partes[1].upper()):
+        bot.reply_to(message, "⚠️ Uso: `/atualizar_instrumento_internacional IVVB11`.", parse_mode="Markdown")
+        return
+    ticker = partes[1].upper()
+    bot.reply_to(message, f"📈 Atualizando ETF/BDR *{ticker}*…", parse_mode="Markdown")
+    def tarefa():
+        try:
+            from services.coletor_etfs_bdrs import coletar_instrumento
+            resultado = coletar_instrumento(ticker)
+            bot.send_message(message.chat.id, f"✅ *{ticker}* atualizado. Referência: {resultado.get('referencia')}; métricas: {resultado.get('metricas', 0)}; dados oficiais SEC: {resultado.get('oficiais_sec', 0)}.", parse_mode="Markdown")
+        except Exception as exc:
+            bot.send_message(message.chat.id, f"❌ Atualização de *{ticker}* falhou: {type(exc).__name__}. Confirme se ele foi cadastrado e se a fonte respondeu.", parse_mode="Markdown")
+    threading.Thread(target=tarefa, daemon=True).start()
+
+
+@bot.message_handler(commands=['atualizar_etfs_bdrs'])
+def atualizar_etfs_bdrs(message):
+    bot.reply_to(message, "📊 Iniciando atualização dos ETFs e BDRs cadastrados (máximo de 30)…")
+    def tarefa():
+        try:
+            from services.coletor_etfs_bdrs import coletar_instrumentos_ativos
+            resultado = coletar_instrumentos_ativos(30)
+            bot.send_message(message.chat.id, f"✅ Atualização concluída. Processados: {resultado.get('processados', 0)}; falhas: {len(resultado.get('falhas') or [])}.")
+        except Exception as exc:
+            bot.send_message(message.chat.id, f"❌ Atualização ETFs/BDRs falhou: {type(exc).__name__}.")
+    threading.Thread(target=tarefa, daemon=True).start()
+
+
+@bot.message_handler(commands=['etfs_bdrs'])
+def etfs_bdrs(message):
+    """Consulta curta, adequada para usuários; detalhes permanecem na Central."""
+    from atualizador_documentos import SessionDB
+    try:
+        from sqlalchemy import text
+        sessao = SessionDB()
+        try:
+            linhas = sessao.execute(text("""
+              SELECT i.ticker,i.tipo,i.nome,o.fechamento,o.variacao_percentual,o.referencia_em
+              FROM instrumentos_internacionais i LEFT JOIN LATERAL (
+                SELECT fechamento,variacao_percentual,referencia_em FROM observacoes_instrumentos_internacionais
+                WHERE instrumento_id=i.id ORDER BY referencia_em DESC LIMIT 1
+              ) o ON TRUE WHERE i.ativo=TRUE ORDER BY i.tipo,i.ticker LIMIT 20
+            """)).mappings().all()
+        finally:
+            sessao.close()
+        if not linhas:
+            bot.reply_to(message, "📭 Ainda não há ETFs ou BDRs cadastrados para consulta.")
+            return
+        texto = ["🌐 *ETFs e BDRs acompanhados*"]
+        for item in linhas:
+            preco = f"R$ {float(item['fechamento']):.2f}" if item["fechamento"] is not None else "sem cotação"
+            variacao = f" · {float(item['variacao_percentual']):+.2f}%" if item["variacao_percentual"] is not None else ""
+            texto.append(f"• *{item['ticker']}* ({item['tipo']}): {preco}{variacao}")
+        texto.append("\nDados de fechamento e fontes detalhadas: Central administrativa.")
+        bot.send_message(message.chat.id, "\n".join(texto), parse_mode="Markdown")
+    except Exception as exc:
+        bot.reply_to(message, f"❌ Consulta indisponível: {type(exc).__name__}.")
+
 # ==========================================
 # 🔒 UTILITÁRIOS DE SEGURANÇA
 # ==========================================
