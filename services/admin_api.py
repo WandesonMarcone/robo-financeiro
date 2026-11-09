@@ -11,6 +11,7 @@ import os
 import re
 import threading
 import uuid
+import logging
 from urllib.parse import urlencode
 from datetime import datetime
 from functools import wraps
@@ -18,6 +19,7 @@ from functools import wraps
 from flask import Blueprint, jsonify, request
 
 admin_api = Blueprint("admin_api", __name__)
+logger = logging.getLogger(__name__)
 # ETFs e BDRs podem ter dígitos no prefixo (ex.: A1MD34). A validação aceita
 # somente símbolos curtos de bolsa, sem abrir espaço para URLs ou comandos.
 _TICKER = re.compile(r"^[A-Z0-9]{4,10}$")
@@ -153,10 +155,11 @@ def _medir_armazenamento():
         _STORAGE.update({"phase": "Neon medido. Contando arquivos da pasta do robô no Drive…",
                          "neon": {"database_bytes": banco_bytes, "tables_bytes": tabelas_bytes}})
         from modules.GoogleDriveManager import GoogleDriveManager
-        drive = GoogleDriveManager().medir_armazenamento_robo()
+        drive = GoogleDriveManager().medir_armazenamento_robo(tempo_maximo_segundos=90)
         _STORAGE.update({
-            "status": "ready",
-            "phase": "Medição concluída.",
+            "status": "ready" if drive.get("medicao_concluida", True) else "partial",
+            "phase": ("Medição concluída." if drive.get("medicao_concluida", True)
+                      else "Medição parcial: o Drive tem muitas subpastas. Os valores exibidos são parciais; toque em Medir agora para uma nova tentativa."),
             "measured_at": datetime.now().strftime("%d/%m/%Y %H:%M"),
             "neon": {"database_bytes": banco_bytes, "tables_bytes": tabelas_bytes},
             "drive": drive,
@@ -890,6 +893,7 @@ def instrumentos_internacionais():
         return jsonify({"instruments": [{**dict(l), "referencia_em": l["referencia_em"].isoformat() if l["referencia_em"] else None,
                           "atualizado_em": l["atualizado_em"].isoformat() if l["atualizado_em"] else None} for l in linhas]})
     except Exception:
+        logger.exception("Falha ao listar ETFs/BDRs no painel")
         return jsonify({"message": "A estrutura de ETFs e BDRs ainda não está disponível no Neon."}), 503
     finally:
         sessao.close()
@@ -951,6 +955,7 @@ def executar_comando():
     documento_id = dados.get("document_id")
     tipo_instrumento = str(dados.get("instrument_type") or "").strip().upper()
     simbolo_exterior = str(dados.get("external_symbol") or "").strip().upper() or None
+    tipo_ativo = str(dados.get("asset_type") or tipo_instrumento or "").strip().upper()
     if ticker and not _TICKER.fullmatch(ticker):
         return jsonify({"message": "Ticker inválido."}), 400
 
@@ -965,6 +970,32 @@ def executar_comando():
             return jsonify({"message": f"{item['ticker']} cadastrado como {item['tipo']}. Use Atualizar para buscar o primeiro histórico."})
         except Exception:
             return jsonify({"message": "Não foi possível cadastrar: confirme que a migração 0016 foi aplicada no Neon."}), 503
+    if action == "adicionar_ativo_acompanhado":
+        if not ticker or tipo_ativo not in {"ACAO", "FII", "ETF", "BDR"}:
+            return jsonify({"message": "Informe ticker e escolha Ação, FII, ETF ou BDR."}), 400
+        if tipo_ativo in {"ETF", "BDR"}:
+            try:
+                from services.coletor_etfs_bdrs import registrar_instrumento
+                item = registrar_instrumento(ticker, tipo_ativo, simbolo_exterior)
+                return jsonify({"message": f"{item['ticker']} incluído como {item['tipo']}. Atualize a categoria para buscar a primeira referência."})
+            except Exception:
+                logger.exception("Falha ao cadastrar instrumento internacional")
+                return jsonify({"message": "Não foi possível cadastrar o ETF/BDR."}), 503
+        try:
+            import config
+            from modules.utils import conectar_gspread
+            aba_nome = "BD_FIIs" if tipo_ativo == "FII" else "BD_Acoes"
+            planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
+            aba = planilha.worksheet(aba_nome)
+            linhas = aba.get_all_values()
+            existentes = {str(linha[0]).strip().upper() for linha in linhas[1:] if linha}
+            if ticker in existentes:
+                return jsonify({"message": f"{ticker} já está acompanhado em {aba_nome}."})
+            aba.update(f"A{len(linhas) + 1}", [[ticker]])
+            return jsonify({"message": f"{ticker} incluído em {aba_nome}. O próximo ciclo de atualização preencherá os dados e ele aparecerá na Central."})
+        except Exception:
+            logger.exception("Falha ao incluir ativo na planilha")
+            return jsonify({"message": "Não foi possível incluir o ativo na planilha agora."}), 503
     if action == "cadastrar_base_inicial_instrumentos":
         try:
             from services.coletor_etfs_bdrs import cadastrar_base_inicial

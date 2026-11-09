@@ -69,7 +69,7 @@ class GoogleDriveManager:
 
         self.service = build('drive', 'v3', credentials=self.creds)
 
-    def medir_armazenamento_robo(self):
+    def medir_armazenamento_robo(self, tempo_maximo_segundos=90):
         """Mede arquivos sob a raiz do robô, sem alterar nada no Drive.
 
         A cota da conta é retornada separadamente da área ocupada pelo robô:
@@ -91,15 +91,28 @@ class GoogleDriveManager:
         if not self.root_folder_id:
             return resultado
 
+        # A árvore pode ter milhares de meses/documentos. A tela não pode ficar
+        # em "medindo" para sempre: devolvemos uma medição explicitamente
+        # parcial ao atingir o orçamento e uma nova tentativa pode continuá-la.
+        import time
+        inicio = time.monotonic()
         pendentes = [self.root_folder_id]
         vistos = set()
         while pendentes:
+            if time.monotonic() - inicio >= max(5, int(tempo_maximo_segundos)):
+                resultado["medicao_concluida"] = False
+                resultado["pastas_pendentes"] = len(pendentes)
+                return resultado
             pasta_id = pendentes.pop()
             if pasta_id in vistos:
                 continue
             vistos.add(pasta_id)
             pagina = None
             while True:
+                if time.monotonic() - inicio >= max(5, int(tempo_maximo_segundos)):
+                    resultado["medicao_concluida"] = False
+                    resultado["pastas_pendentes"] = len(pendentes) + 1
+                    return resultado
                 resposta = self.service.files().list(
                     q=f"'{pasta_id}' in parents and trashed = false",
                     fields="nextPageToken,files(id,mimeType,size)",
@@ -121,6 +134,7 @@ class GoogleDriveManager:
                 pagina = resposta.get("nextPageToken")
                 if not pagina:
                     break
+        resultado["medicao_concluida"] = True
         return resultado
 
     def _obter_ou_criar_pasta(self, nome_pasta, parent_id=None):
