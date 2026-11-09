@@ -225,6 +225,38 @@ def coletar_instrumentos_ativos(limite=30, session_factory=None):
     return resultado
 
 
+def listar_instrumentos_telegram(limite=20, session_factory=None):
+    """Resumo curto para o menu Telegram, sem disparar nova coleta."""
+    from atualizador_documentos import SessionDB
+    sessao = session_factory() if session_factory else SessionDB()
+    try:
+        linhas = sessao.execute(text("""
+            SELECT i.ticker, i.tipo, i.nome, o.fechamento, o.variacao_percentual, o.referencia_em
+            FROM instrumentos_internacionais i
+            LEFT JOIN LATERAL (
+                SELECT fechamento, variacao_percentual, referencia_em
+                FROM observacoes_instrumentos_internacionais
+                WHERE instrumento_id=i.id
+                ORDER BY referencia_em DESC LIMIT 1
+            ) o ON TRUE
+            WHERE i.ativo=TRUE
+            ORDER BY i.tipo, i.ticker
+            LIMIT :limite
+        """), {"limite": max(1, min(int(limite), 30))}).mappings().all()
+    finally:
+        sessao.close()
+    if not linhas:
+        return "📭 Ainda não há ETFs ou BDRs cadastrados para consulta."
+    texto = ["🌐 *ETFs e BDRs acompanhados*"]
+    for item in linhas:
+        preco = f"R$ {float(item['fechamento']):.2f}" if item["fechamento"] is not None else "sem cotação"
+        variacao = f" · {float(item['variacao_percentual']):+.2f}%" if item["variacao_percentual"] is not None else ""
+        referencia = str(item["referencia_em"] or "")[:10]
+        texto.append(f"• *{item['ticker']}* ({item['tipo']}): {preco}{variacao}{f' · {referencia}' if referencia else ''}")
+    texto.append("\nDados de fechamento e indicadores; não há varredura documental para estes ativos.")
+    return "\n".join(texto)
+
+
 def avaliar_oportunidade_instrumento(item):
     """Aplica uma triagem conservadora; nunca equivale a recomendação de compra."""
     tipo = str(item.get("tipo") or "").upper()

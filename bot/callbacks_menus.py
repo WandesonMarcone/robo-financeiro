@@ -197,6 +197,102 @@ def callback_consultar_indicadores(call):
     menu_principal.editar_callback(call, menu_principal.TEXTO_CONSULTAR_INDICADORES, markup)
 
 
+def _admin_mercado_autorizado(call):
+    """Revalida o papel: botões administrativos nunca bastam como permissão."""
+    _telegram_id, papel, _dto, erro = menu_principal.usuario_autorizado(call)
+    if erro:
+        menu_principal.responder_callback(call, erro)
+        return False
+    if papel != permissoes.PAPEL_ADMIN:
+        menu_principal.responder_callback(call, TEXTO_ACESSO_NEGADO)
+        return False
+    return True
+
+
+def _menu_mercado_internacional():
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton("📊 Ibovespa, IFIX e macro", callback_data="adm_mercado_resumo"),
+        InlineKeyboardButton("🌐 ETFs e BDRs acompanhados", callback_data="adm_instrumentos_lista"),
+    )
+    markup.row(
+        InlineKeyboardButton("🔎 Oportunidades ETFs", callback_data="adm_oportunidades_etf"),
+        InlineKeyboardButton("🔎 Oportunidades BDRs", callback_data="adm_oportunidades_bdr"),
+    )
+    markup.add(InlineKeyboardButton("🔙 Voltar ao painel", callback_data="voltar_painel"))
+    return markup
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "adm_mercado_internacional")
+def callback_adm_mercado_internacional(call):
+    if not _admin_mercado_autorizado(call):
+        return
+    texto = (
+        "🌐 *Mercado, ETFs e BDRs*\n\n"
+        "Consulte o fechamento de Ibovespa e IFIX, os dados macro e os ativos internacionais "
+        "acompanhados. ETFs e BDRs usam cotação e indicadores; não entram na varredura documental."
+    )
+    menu_principal.responder_callback(call)
+    menu_principal.editar_callback(call, texto, _menu_mercado_internacional())
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "adm_mercado_resumo")
+def callback_adm_mercado_resumo(call):
+    if not _admin_mercado_autorizado(call):
+        return
+    try:
+        from services.painel_mercado import mensagem_mercado
+        texto = mensagem_mercado()
+    except Exception as exc:
+        logger.warning("MENU - falha no resumo de mercado", exc_info=True)
+        texto = f"❌ Consulta de mercado indisponível: {type(exc).__name__}."
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🔙 Mercado, ETFs e BDRs", callback_data="adm_mercado_internacional"))
+    menu_principal.responder_callback(call)
+    menu_principal.editar_callback(call, texto, markup)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "adm_instrumentos_lista")
+def callback_adm_instrumentos_lista(call):
+    if not _admin_mercado_autorizado(call):
+        return
+    try:
+        from services.coletor_etfs_bdrs import listar_instrumentos_telegram
+        texto = listar_instrumentos_telegram()
+    except Exception as exc:
+        logger.warning("MENU - falha na lista ETF/BDR", exc_info=True)
+        texto = f"❌ Consulta de ETFs e BDRs indisponível: {type(exc).__name__}."
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🔙 Mercado, ETFs e BDRs", callback_data="adm_mercado_internacional"))
+    menu_principal.responder_callback(call)
+    menu_principal.editar_callback(call, texto, markup)
+
+
+@bot.callback_query_handler(func=lambda call: call.data in {"adm_oportunidades_etf", "adm_oportunidades_bdr"})
+def callback_adm_oportunidades_internacionais(call):
+    if not _admin_mercado_autorizado(call):
+        return
+    tipo = "ETF" if call.data.endswith("etf") else "BDR"
+    try:
+        from services.coletor_etfs_bdrs import listar_oportunidades_instrumentos
+        itens = listar_oportunidades_instrumentos(tipo=tipo)
+        linhas = [f"🔎 *Possíveis oportunidades — {tipo}s*", "_Triagem automática; não é recomendação de compra ou venda._"]
+        if itens:
+            for item in itens:
+                preco = f"R$ {float(item['fechamento']):.2f}" if item.get("fechamento") is not None else "preço indisponível"
+                linhas.append(f"\n• *{item['ticker']}* — {preco}\n  " + " · ".join(item.get("motivos") or []))
+        else:
+            linhas.append("\nNenhum candidato com dados, liquidez e histórico suficientes no momento.")
+        texto = "\n".join(linhas)
+    except Exception as exc:
+        logger.warning("MENU - falha em oportunidades ETF/BDR", exc_info=True)
+        texto = f"❌ Triagem de {tipo}s indisponível: {type(exc).__name__}."
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🔙 Mercado, ETFs e BDRs", callback_data="adm_mercado_internacional"))
+    menu_principal.responder_callback(call)
+    menu_principal.editar_callback(call, texto, markup)
+
+
 @bot.callback_query_handler(func=lambda call: call.data == "minha_conta")
 def callback_minha_conta(call):
     """Exibe os dados cadastrais do próprio usuário (recurso já existente)."""

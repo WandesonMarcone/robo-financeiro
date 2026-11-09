@@ -177,6 +177,11 @@ def _montar_painel_admin(nome_limpo, itens_fii, itens_acao):
         )
     )
     markup.row(
+        InlineKeyboardButton(
+            "🌐 Mercado, ETFs e BDRs", callback_data="adm_mercado_internacional"
+        )
+    )
+    markup.row(
         InlineKeyboardButton("📊 Minha carteira", callback_data="minha_carteira")
     )
     markup.row(
