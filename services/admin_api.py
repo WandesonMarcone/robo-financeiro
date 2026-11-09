@@ -872,6 +872,7 @@ def mercado():
 def instrumentos_internacionais():
     """ETFs e BDRs têm cadastro e métricas próprios, sem se passar por ações."""
     from atualizador_documentos import SessionDB
+    from sqlalchemy import text
     sessao = SessionDB()
     try:
         tipo = str(request.args.get("type") or "").upper().strip()
@@ -894,7 +895,7 @@ def instrumentos_internacionais():
                           "atualizado_em": l["atualizado_em"].isoformat() if l["atualizado_em"] else None} for l in linhas]})
     except Exception:
         logger.exception("Falha ao listar ETFs/BDRs no painel")
-        return jsonify({"message": "A estrutura de ETFs e BDRs ainda não está disponível no Neon."}), 503
+        return jsonify({"message": "Não foi possível carregar ETFs/BDRs neste momento. O Neon possui a base; consulte o log técnico da API."}), 503
     finally:
         sessao.close()
 
@@ -903,6 +904,7 @@ def instrumentos_internacionais():
 @exige_admin
 def detalhe_instrumento_internacional(ticker):
     from atualizador_documentos import SessionDB
+    from sqlalchemy import text
     sessao = SessionDB()
     try:
         item = sessao.execute(text("SELECT * FROM instrumentos_internacionais WHERE ticker=:ticker"), {"ticker": ticker.upper()}).mappings().first()
