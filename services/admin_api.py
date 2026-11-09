@@ -343,7 +343,7 @@ def _ativos_para_painel(limite: int = 300, busca: str | None = None,
     """Leitura curta do cadastro no Neon, sem acionar coletas externas."""
     from atualizador_documentos import SessionDB
     from pipeline_dados.banco_dados import Ativo, DocumentosQualitativos
-    from sqlalchemy import case, func
+    from sqlalchemy import case, func, text
 
     session = SessionDB()
     try:
@@ -372,10 +372,37 @@ def _ativos_para_painel(limite: int = 300, busca: str | None = None,
             "salvos_drive": int(linha.salvos_drive or 0),
             "ultimo_documento_em": linha.ultimo_documento_em.isoformat() if linha.ultimo_documento_em else None,
         } for linha in linhas]
+        # ETFs e BDRs têm cadastro próprio e não possuem fluxo documental.
+        # Ainda assim, são ativos acompanhados e precisam entrar em "Todos"
+        # e no contador da Central, sem fingir que são ações ou FIIs.
+        if tipo in (None, "", "ETF", "BDR"):
+            internacionais = session.execute(text("""
+                WITH ultima AS (
+                    SELECT DISTINCT ON (instrumento_id) instrumento_id, referencia_em
+                    FROM observacoes_instrumentos_internacionais
+                    ORDER BY instrumento_id, referencia_em DESC
+                )
+                SELECT i.ticker, i.tipo, u.referencia_em
+                FROM instrumentos_internacionais i
+                LEFT JOIN ultima u ON u.instrumento_id=i.id
+                WHERE i.ativo=TRUE AND (:tipo='' OR i.tipo=:tipo)
+                ORDER BY i.ticker ASC
+                LIMIT :limite
+            """), {"tipo": tipo or "", "limite": min(max(limite, 1), 300)}).mappings().all()
+            ativos.extend({
+                "ticker": linha["ticker"], "tipo": linha["tipo"],
+                "documentos": 0, "pendentes": 0, "revisao": 0, "salvos_drive": 0,
+                "ultimo_documento_em": None,
+                "ultima_cotacao_em": linha["referencia_em"].isoformat() if linha["referencia_em"] else None,
+                "instrumento_internacional": True,
+            } for linha in internacionais)
+        ativos.sort(key=lambda item: item["ticker"])
         totais = {
             "assets": len(ativos),
             "acoes": sum(item["tipo"] == "ACAO" for item in ativos),
             "fiis": sum(item["tipo"] == "FII" for item in ativos),
+            "etfs": sum(item["tipo"] == "ETF" for item in ativos),
+            "bdrs": sum(item["tipo"] == "BDR" for item in ativos),
             "documentos": sum(item["documentos"] for item in ativos),
         }
         return ativos, totais
