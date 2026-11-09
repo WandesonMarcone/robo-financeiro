@@ -275,6 +275,8 @@ COMANDOS_AJUDA_USUARIO = (
     ("/help", "Mostra esta ajuda.", "cmd_help"),
     ("/mercado", "Consulta Selic, CDI, IPCA, PTAX e Tesouro disponíveis.", None),
     ("/etfs_bdrs", "Consulta ETFs e BDRs acompanhados.", None),
+    ("/oportunidades_etfs", "Triagem de ETFs com dados e liquidez suficientes.", None),
+    ("/oportunidades_bdrs", "Triagem de BDRs com dados e liquidez suficientes.", None),
     ("/cancelar", "Cancela um cadastro em andamento, sem enviar pedido.", "cmd_cancelar"),
 )
 

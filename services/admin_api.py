@@ -916,6 +916,25 @@ def detalhe_instrumento_internacional(ticker):
         sessao.close()
 
 
+@admin_api.route("/api/admin/opportunities/instruments", methods=["GET"])
+@exige_admin
+def oportunidades_instrumentos_internacionais():
+    """Triagem explicável; candidatos não são recomendação de investimento."""
+    tipo = str(request.args.get("type") or "").upper().strip()
+    if tipo not in {"ETF", "BDR"}:
+        return jsonify({"message": "Escolha ETF ou BDR."}), 400
+    try:
+        from services.coletor_etfs_bdrs import listar_oportunidades_instrumentos
+        itens = listar_oportunidades_instrumentos(tipo=tipo)
+        return jsonify({
+            "type": tipo,
+            "opportunities": itens,
+            "criteria": "Dados recentes, liquidez mínima, distância da máxima e limite de volatilidade. Triagem, não recomendação.",
+        })
+    except Exception:
+        return jsonify({"message": "Não foi possível calcular as oportunidades agora."}), 503
+
+
 @admin_api.route("/api/admin/sources", methods=["GET"])
 @exige_admin
 def fontes():
@@ -946,6 +965,13 @@ def executar_comando():
             return jsonify({"message": f"{item['ticker']} cadastrado como {item['tipo']}. Use Atualizar para buscar o primeiro histórico."})
         except Exception:
             return jsonify({"message": "Não foi possível cadastrar: confirme que a migração 0016 foi aplicada no Neon."}), 503
+    if action == "cadastrar_base_inicial_instrumentos":
+        try:
+            from services.coletor_etfs_bdrs import cadastrar_base_inicial
+            resultado = cadastrar_base_inicial()
+            return jsonify({"message": f"Base inicial cadastrada: {resultado['quantidade']} instrumentos. Atualize-os para buscar a primeira referência."})
+        except Exception:
+            return jsonify({"message": "Não foi possível cadastrar a base inicial de ETFs/BDRs."}), 503
     if action == "atualizar_instrumento":
         if not ticker:
             return jsonify({"message": "Informe o ticker do ETF ou BDR."}), 400

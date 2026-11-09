@@ -13,6 +13,19 @@ import os
 from sqlalchemy import text
 
 
+# Lista inicial deliberadamente pequena. Ela dá cobertura aos principais tipos
+# de exposição sem transformar o robô em um rastreador indiscriminado de toda a
+# B3. Metadados já preenchidos manualmente não são sobrescritos pelo cadastro.
+BASE_INICIAL_INSTRUMENTOS = (
+    {"ticker": "BOVA11", "tipo": "ETF", "nome": "iShares Ibovespa Fundo de Índice", "externo": "IBOV", "indice": "Ibovespa", "gestora": "BlackRock"},
+    {"ticker": "IVVB11", "tipo": "ETF", "nome": "iShares S&P 500 Fundo de Investimento", "externo": "IVV", "indice": "S&P 500", "gestora": "BlackRock"},
+    {"ticker": "SMAL11", "tipo": "ETF", "nome": "iShares BM&FBovespa Small Cap Fundo de Índice", "externo": "EWZS", "indice": "Índice Small Cap (SMLL)", "gestora": "BlackRock"},
+    {"ticker": "XFIX11", "tipo": "ETF", "nome": "Trend ETF IFIX Fundo de Índice", "externo": "IFIX", "indice": "IFIX", "gestora": "XP Asset"},
+    {"ticker": "GOLD11", "tipo": "ETF", "nome": "Trend ETF LBMA Ouro", "externo": "GOLD", "indice": "LBMA Gold Price", "gestora": "XP Asset"},
+    {"ticker": "HMRN31", "tipo": "BDR", "nome": "Homerun Resources Inc.", "externo": "HMR", "indice": None, "gestora": None},
+)
+
+
 def _numero(valor):
     try:
         valor = float(valor)
@@ -41,6 +54,40 @@ def registrar_instrumento(ticker, tipo, simbolo_exterior=None, session_factory=N
         """), {"ticker": ticker, "tipo": tipo, "yahoo": f"{ticker}.SA", "externo": simbolo_exterior or None}).mappings().one()
         sessao.commit()
         return dict(row)
+    except Exception:
+        sessao.rollback()
+        raise
+    finally:
+        sessao.close()
+
+
+def cadastrar_base_inicial(session_factory=None):
+    """Registra a seleção inicial de ETFs e o BDR solicitado.
+
+    Não dispara coleta: o chamador decide quando executar a primeira busca,
+    mantendo a operação previsível e auditável.
+    """
+    from atualizador_documentos import SessionDB
+    sessao = session_factory() if session_factory else SessionDB()
+    try:
+        cadastrados = []
+        for item in BASE_INICIAL_INSTRUMENTOS:
+            sessao.execute(text("""
+                INSERT INTO instrumentos_internacionais
+                  (ticker,tipo,nome,simbolo_yahoo_br,simbolo_exterior,indice_referencia,gestora,fonte_cadastro,ativo)
+                VALUES (:ticker,:tipo,:nome,:yahoo,:externo,:indice,:gestora,'BASE_INICIAL_SISTEMA',TRUE)
+                ON CONFLICT (ticker) DO UPDATE SET
+                  tipo=EXCLUDED.tipo, ativo=TRUE,
+                  nome=COALESCE(instrumentos_internacionais.nome, EXCLUDED.nome),
+                  simbolo_yahoo_br=COALESCE(instrumentos_internacionais.simbolo_yahoo_br, EXCLUDED.simbolo_yahoo_br),
+                  simbolo_exterior=COALESCE(instrumentos_internacionais.simbolo_exterior, EXCLUDED.simbolo_exterior),
+                  indice_referencia=COALESCE(instrumentos_internacionais.indice_referencia, EXCLUDED.indice_referencia),
+                  gestora=COALESCE(instrumentos_internacionais.gestora, EXCLUDED.gestora),
+                  atualizado_em=NOW()
+            """), {**item, "yahoo": f"{item['ticker']}.SA"})
+            cadastrados.append(item["ticker"])
+        sessao.commit()
+        return {"cadastrados": cadastrados, "quantidade": len(cadastrados)}
     except Exception:
         sessao.rollback()
         raise
@@ -136,6 +183,10 @@ def coletar_instrumento(ticker, tipo=None, simbolo_exterior=None, session_factor
             queda = (fechamentos / fechamentos.cummax() - 1).min() * 100
             _upsert_metrica(sessao, instrumento["id"], "max_drawdown_1a", queda, "%", "CALCULO_PROPRIO")
             _upsert_metrica(sessao, instrumento["id"], "volume_medio_30d", historico["Volume"].tail(30).mean(), "ações/dia", "YAHOO_FINANCE")
+            _upsert_metrica(sessao, instrumento["id"], "liquidez_media_30d_brl", (historico["Close"] * historico["Volume"]).tail(30).mean(), "BRL/dia", "YAHOO_FINANCE")
+            _upsert_metrica(sessao, instrumento["id"], "distancia_maxima_1a", ((fechamentos.iloc[-1] / fechamentos.max()) - 1) * 100, "%", "CALCULO_PROPRIO")
+            if len(fechamentos) >= 20:
+                _upsert_metrica(sessao, instrumento["id"], "retorno_periodo_coletado", ((fechamentos.iloc[-1] / fechamentos.iloc[0]) - 1) * 100, "%", "CALCULO_PROPRIO")
         info = papel.get_info() or {}
         campos = {"patrimonio_ou_market_cap": (info.get("totalAssets") or info.get("marketCap"), "BRL"),
                   "dividend_yield": (info.get("dividendYield"), "%"), "p_l": (info.get("trailingPE"), "x"),
@@ -172,3 +223,64 @@ def coletar_instrumentos_ativos(limite=30, session_factory=None):
         except Exception as exc:
             resultado["falhas"].append({"ticker": ticker, "erro": type(exc).__name__})
     return resultado
+
+
+def avaliar_oportunidade_instrumento(item):
+    """Aplica uma triagem conservadora; nunca equivale a recomendação de compra."""
+    tipo = str(item.get("tipo") or "").upper()
+    liquidez = _numero(item.get("liquidez_media_30d_brl"))
+    distancia = _numero(item.get("distancia_maxima_1a"))
+    volatilidade = _numero(item.get("volatilidade_30d"))
+    if tipo not in {"ETF", "BDR"} or liquidez is None or distancia is None:
+        return None
+    piso_liquidez = 100_000 if tipo == "ETF" else 30_000
+    queda_minima = -7 if tipo == "ETF" else -12
+    teto_volatilidade = 60 if tipo == "ETF" else 75
+    if liquidez < piso_liquidez or distancia > queda_minima:
+        return None
+    if volatilidade is not None and volatilidade > teto_volatilidade:
+        return None
+    # Mais desconto até a máxima e mais liquidez aumentam a prioridade, mas
+    # não substituem análise do índice/empresa e dos riscos específicos.
+    pontuacao = min(abs(distancia) / 4, 6) + min(liquidez / 500_000, 3)
+    return {"score": round(pontuacao, 2), "motivos": [
+        f"{abs(distancia):.1f}% abaixo da máxima do período coletado",
+        f"liquidez média de R$ {liquidez:,.0f}/dia",
+    ]}
+
+
+def listar_oportunidades_instrumentos(tipo=None, limite=8, session_factory=None):
+    """Lista candidatos com dados suficientes e origem explícita."""
+    from atualizador_documentos import SessionDB
+    sessao = session_factory() if session_factory else SessionDB()
+    try:
+        linhas = sessao.execute(text("""
+          WITH ultima AS (
+            SELECT DISTINCT ON (instrumento_id) instrumento_id, referencia_em, fechamento, variacao_percentual
+            FROM observacoes_instrumentos_internacionais
+            ORDER BY instrumento_id, referencia_em DESC
+          ), metricas AS (
+            SELECT instrumento_id,
+              MAX(valor_numerico) FILTER (WHERE chave='liquidez_media_30d_brl') AS liquidez_media_30d_brl,
+              MAX(valor_numerico) FILTER (WHERE chave='distancia_maxima_1a') AS distancia_maxima_1a,
+              MAX(valor_numerico) FILTER (WHERE chave='volatilidade_30d') AS volatilidade_30d
+            FROM metricas_instrumentos_internacionais GROUP BY instrumento_id
+          )
+          SELECT i.ticker,i.tipo,i.nome,i.indice_referencia,u.referencia_em,u.fechamento,u.variacao_percentual,
+                 m.liquidez_media_30d_brl,m.distancia_maxima_1a,m.volatilidade_30d
+          FROM instrumentos_internacionais i
+          JOIN ultima u ON u.instrumento_id=i.id
+          LEFT JOIN metricas m ON m.instrumento_id=i.id
+          WHERE i.ativo=TRUE AND (:tipo='' OR i.tipo=:tipo)
+            AND u.referencia_em >= NOW() - INTERVAL '10 days'
+        """), {"tipo": str(tipo or "").upper()}).mappings().all()
+        candidatos = []
+        for linha in linhas:
+            item = dict(linha)
+            avaliacao = avaliar_oportunidade_instrumento(item)
+            if avaliacao:
+                candidatos.append({**item, **avaliacao})
+        candidatos.sort(key=lambda x: x["score"], reverse=True)
+        return candidatos[:max(1, min(int(limite), 20))]
+    finally:
+        sessao.close()

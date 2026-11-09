@@ -75,7 +75,7 @@ COMANDOS_ADMIN = frozenset(
 # ``cancelar`` é do formulário de autocadastro e, para um usuário ainda não
 # aprovado, só é liberado enquanto houver formulário ativo (ver ``verificar_update``).
 COMANDOS_USUARIO = frozenset(
-    {"menu", "start", "relatorios", "docs", "help", "cancelar", "mercado", "etfs_bdrs"}
+    {"menu", "start", "relatorios", "docs", "help", "cancelar", "mercado", "etfs_bdrs", "oportunidades_etfs", "oportunidades_bdrs"}
 )
 
 # Callbacks exclusivos do administrador (revisão, diagnóstico e reset).

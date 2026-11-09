@@ -144,6 +144,32 @@ def etfs_bdrs(message):
     except Exception as exc:
         bot.reply_to(message, f"❌ Consulta indisponível: {type(exc).__name__}.")
 
+
+def _enviar_oportunidades_instrumentos(message, tipo):
+    try:
+        from services.coletor_etfs_bdrs import listar_oportunidades_instrumentos
+        itens = listar_oportunidades_instrumentos(tipo=tipo)
+        if not itens:
+            bot.reply_to(message, f"📭 Ainda não há candidatos {tipo} com histórico, liquidez e critérios suficientes. Isso não significa que não existam bons ativos; significa que o robô ainda não tem evidência suficiente.")
+            return
+        linhas = [f"🔎 *Possíveis oportunidades — {tipo}s*", "_Triagem automática; não é recomendação de compra ou venda._"]
+        for item in itens:
+            preco = f"R$ {float(item['fechamento']):.2f}" if item.get("fechamento") is not None else "preço indisponível"
+            linhas.append(f"\n• *{item['ticker']}* — {preco}\n  " + " · ".join(item.get("motivos") or []))
+        bot.send_message(message.chat.id, "\n".join(linhas), parse_mode="Markdown")
+    except Exception as exc:
+        bot.reply_to(message, f"❌ Triagem de {tipo}s indisponível: {type(exc).__name__}.")
+
+
+@bot.message_handler(commands=['oportunidades_etfs'])
+def oportunidades_etfs(message):
+    _enviar_oportunidades_instrumentos(message, "ETF")
+
+
+@bot.message_handler(commands=['oportunidades_bdrs'])
+def oportunidades_bdrs(message):
+    _enviar_oportunidades_instrumentos(message, "BDR")
+
 # ==========================================
 # 🔒 UTILITÁRIOS DE SEGURANÇA
 # ==========================================
