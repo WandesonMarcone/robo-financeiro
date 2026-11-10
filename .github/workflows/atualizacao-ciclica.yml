@@ -2,9 +2,13 @@ name: Atualização cíclica de ativos
 
 on:
   schedule:
-    # Horários em UTC: ciclos diurnos e madrugada/primeiras horas em Brasília. Cada ciclo
-    # permite até 30 ativos, pausa de 2s e orçamento interno de 9 minutos.
-    - cron: "30 3,5,7,9,12,14,16,18,20,22,23 * * 1-5"
+    # Janela noturna redundante, em UTC. No Brasil são 00h10 a 08h10,
+    # de segunda a sexta. Cada passagem limita-se a 30 ativos, mas há nove
+    # chances de concluir a rotação completa caso um agendamento do GitHub
+    # atrase ou seja descartado. Com a base atual (79 ações e 34 FIIs), quatro
+    # execuções saudáveis já cobrem tudo; as demais são margem de segurança.
+    # O minuto 10 evita o pico habitual de agendamentos em :00 e :30.
+    - cron: "10 3-11 * * 1-5"
   workflow_dispatch:
     inputs:
       ticker:

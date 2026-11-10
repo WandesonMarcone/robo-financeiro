@@ -223,9 +223,13 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, p
             if eh_valido(vpa): valores['O'] = vpa
             if eh_valido(lucro_12m): valores['P'] = lucro_12m
             if eh_valido(media_div_mensal): valores['Q'] = media_div_mensal
-            # Só carimba a atualização quando o Fundamentus respondeu de fato.
-            # Assim uma falha parcial não marca dados antigos como recentes.
-            if fundamentus_ok: valores['R'] = f"OK {agora_sp}"
+            # A coluna R significa *última coleta de mercado*, não "última
+            # resposta do Fundamentus". Antes, uma coleta válida pelo Yahoo
+            # atualizava preço mas deixava a data antiga quando o Fundamentus
+            # oscilava, fazendo o painel acusar falsamente um FII desatualizado.
+            # Não carimbamos ausência: é exigido ao menos preço válido de uma
+            # das duas fontes para declarar sucesso da coleta.
+            if eh_valido(preco): valores['R'] = f"OK {agora_sp}"
 
             for coluna, valor in valores.items():
                 batch_updates.append({'range': f'{coluna}{linha_idx}', 'values': [[valor]]})
