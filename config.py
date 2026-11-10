@@ -75,6 +75,8 @@ COLUNA_SUBSETOR_ACAO = 34
 FAVORITOS_LIMITES = {
     "fii": 5,
     "acao": 5,
+    "etf": 5,
+    "bdr": 5,
 }
 
 

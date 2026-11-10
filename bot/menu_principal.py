@@ -121,27 +121,28 @@ def _resolver_nome(dto, from_user):
 
 
 def _resolver_favoritos(usuario_id, papel, dto):
-    """Retorna ``(favoritos_fii, favoritos_acao)`` do usuário (ou vazio).
+    """Retorna favoritos por classe, sem misturar ETFs/BDRs com ações/FIIs.
 
     Só consulta quando existe conta persistente (``usuario_id``) e o acesso é
     permitido: admin autorizado pela config ou conta aprovada e ativa. Qualquer
     falha resulta em listas vazias (falha segura), sem quebrar o menu.
     """
     if usuario_id is None:
-        return [], []
+        return [], [], [], []
     permitido = papel == permissoes.PAPEL_ADMIN or (
         dto is not None and dto.esta_aprovado() and dto.ativo
     )
     if not permitido:
-        return [], []
+        return [], [], [], []
     try:
         repositorio = RepositorioFavoritos()
-        return repositorio.listar(usuario_id, "fii"), repositorio.listar(
-            usuario_id, "acao"
-        )
+        from pipeline_dados.repositorio_favoritos_internacionais import RepositorioFavoritosInternacionais
+        internacional = RepositorioFavoritosInternacionais()
+        return (repositorio.listar(usuario_id, "fii"), repositorio.listar(usuario_id, "acao"),
+                internacional.listar(usuario_id, "ETF"), internacional.listar(usuario_id, "BDR"))
     except Exception:
         logger.warning("MENU - falha ao carregar favoritos", exc_info=True)
-        return [], []
+        return [], [], [], []
 
 
 def usuario_autorizado(message_or_call):
@@ -182,11 +183,13 @@ def montar_painel(telegram_id, from_user=None):
     dto = _resolver_cadastro(telegram_id)
     nome = _resolver_nome(dto, from_user)
     usuario_id = dto.id if dto is not None else None
-    favoritos_fii, favoritos_acao = _resolver_favoritos(usuario_id, papel, dto)
+    favoritos_fii, favoritos_acao, favoritos_etf, favoritos_bdr = _resolver_favoritos(usuario_id, papel, dto)
     return montar_painel_inicial(
         nome,
         favoritos_fii=favoritos_fii,
         favoritos_acao=favoritos_acao,
+        favoritos_etf=favoritos_etf,
+        favoritos_bdr=favoritos_bdr,
         incluir_admin=incluir_admin,
     )
 
@@ -294,9 +297,11 @@ def markup_voltar(voltar="voltar_painel"):
 # ---------------------------------------------------------------------------
 
 
-def texto_carteira(favoritos_fii, favoritos_acao):
+def texto_carteira(favoritos_fii, favoritos_acao, favoritos_etf=None, favoritos_bdr=None):
     """Monta a tela da carteira com botões para cada ativo favoritado."""
-    if not favoritos_fii and not favoritos_acao:
+    favoritos_etf = favoritos_etf or []
+    favoritos_bdr = favoritos_bdr or []
+    if not favoritos_fii and not favoritos_acao and not favoritos_etf and not favoritos_bdr:
         return TEXTO_ATIVOS_VAZIOS, markup_voltar()
 
     markup = InlineKeyboardMarkup()
@@ -309,6 +314,10 @@ def texto_carteira(favoritos_fii, favoritos_acao):
         linhas += ["📈 *Ações*"]
         linhas += [f"• {escapar_markdown(f.ticker)}" for f in favoritos_acao]
         linhas.append("")
+    if favoritos_etf:
+        linhas += ["🌐 *ETFs*", *[f"• {escapar_markdown(f.ticker)}" for f in favoritos_etf], ""]
+    if favoritos_bdr:
+        linhas += ["🌍 *BDRs*", *[f"• {escapar_markdown(f.ticker)}" for f in favoritos_bdr], ""]
     linhas.append("Toque em um ativo para abrir o painel de indicadores:")
 
     for favorito in list(favoritos_fii) + list(favoritos_acao):
@@ -318,6 +327,8 @@ def texto_carteira(favoritos_fii, favoritos_acao):
                 callback_data=f"painel_{favorito.ticker}_{favorito.tipo}",
             )
         )
+    for favorito in list(favoritos_etf) + list(favoritos_bdr):
+        markup.row(InlineKeyboardButton(f"📊 {favorito.ticker}", callback_data=f"painel_int_{favorito.ticker}"))
     markup.row(InlineKeyboardButton("🔙 Voltar ao painel", callback_data="voltar_painel"))
     return "\n".join(linhas), markup
 

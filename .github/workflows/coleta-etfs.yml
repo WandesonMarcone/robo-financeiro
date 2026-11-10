@@ -1,0 +1,26 @@
+name: Atualização diária de ETFs
+on:
+  schedule:
+    # 19h15 em Brasília (UTC-3), após o fechamento regular.
+    - cron: '15 22 * * 1-5'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: coleta-etfs
+  cancel-in-progress: false
+jobs:
+  coletar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install -r requirements.txt
+      - name: Coletar ETFs e notificar favoritos
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+        run: python scripts/coletar_etfs_bdrs.py --tipo ETF --limite 30

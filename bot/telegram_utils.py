@@ -70,7 +70,8 @@ def nome_de_exibicao_do_telegram(from_user):
     return None
 
 
-def montar_painel_inicial(nome, favoritos_fii=None, favoritos_acao=None, incluir_admin=False):
+def montar_painel_inicial(nome, favoritos_fii=None, favoritos_acao=None,
+                          favoritos_etf=None, favoritos_bdr=None, incluir_admin=False):
     """Monta o texto e o teclado do painel inicial.
 
     Retorna ``(texto, markup)``. Função pura (sem banco/serviços) para poder ser
@@ -83,6 +84,8 @@ def montar_painel_inicial(nome, favoritos_fii=None, favoritos_acao=None, incluir
     nome_limpo = nome_de_exibicao(nome)
     itens_fii = _normalizar_favoritos(favoritos_fii)
     itens_acao = _normalizar_favoritos(favoritos_acao)
+    itens_etf = _normalizar_favoritos(favoritos_etf)
+    itens_bdr = _normalizar_favoritos(favoritos_bdr)
 
     if incluir_admin:
         return _montar_painel_admin(nome_limpo, itens_fii, itens_acao)
@@ -107,8 +110,18 @@ def montar_painel_inicial(nome, favoritos_fii=None, favoritos_acao=None, incluir
         ", ".join(escapar_markdown(t) for t in itens_acao)
         if itens_acao
         else TEXTO_CATEGORIA_VAZIA,
+        "",
+        "🌐 *ETFs*",
+        ", ".join(escapar_markdown(t) for t in itens_etf)
+        if itens_etf
+        else TEXTO_CATEGORIA_VAZIA,
+        "",
+        "🌍 *BDRs*",
+        ", ".join(escapar_markdown(t) for t in itens_bdr)
+        if itens_bdr
+        else TEXTO_CATEGORIA_VAZIA,
     ]
-    if not itens_fii and not itens_acao:
+    if not itens_fii and not itens_acao and not itens_etf and not itens_bdr:
         linhas += ["", TEXTO_SEM_FAVORITOS]
     linhas += ["", "━━━━━━━━━━━━━━", "📌 *MENU PRINCIPAL*"]
     texto = "\n".join(linhas)
@@ -116,6 +129,8 @@ def montar_painel_inicial(nome, favoritos_fii=None, favoritos_acao=None, incluir
     markup = InlineKeyboardMarkup()
     _adicionar_favoritos(markup, itens_fii, "fii")
     _adicionar_favoritos(markup, itens_acao, "acao")
+    for ticker in itens_etf + itens_bdr:
+        markup.row(InlineKeyboardButton(f"📊 {ticker}", callback_data=f"painel_int_{ticker}"))
 
     markup.row(
         InlineKeyboardButton("📊 Minha carteira", callback_data="minha_carteira")

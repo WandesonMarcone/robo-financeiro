@@ -1,9 +1,12 @@
-name: Coleta ETFs e BDRs
+name: Coleta ETFs e BDRs (manual)
 on:
-  schedule:
-    # 19h45 em Brasília: fechamento diário, com lista limitada a 30 instrumentos.
-    - cron: '45 22 * * 1-5'
   workflow_dispatch:
+    inputs:
+      tipo:
+        description: 'Classe a atualizar (deixe em branco para todas, sem notificação diária)'
+        required: false
+        type: choice
+        options: ['', 'ETF', 'BDR']
 permissions:
   contents: read
 concurrency:
@@ -18,8 +21,8 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
       - run: pip install -r requirements.txt
-      - name: Coletar instrumentos cadastrados
+      - name: Coletar instrumentos cadastrados manualmente
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           SEC_EDGAR_USER_AGENT: ${{ secrets.SEC_EDGAR_USER_AGENT }}
-        run: python scripts/coletar_etfs_bdrs.py
+        run: python scripts/coletar_etfs_bdrs.py --tipo "${{ inputs.tipo }}" --sem-notificacoes

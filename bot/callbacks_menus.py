@@ -125,6 +125,10 @@ def callback_minha_carteira(call):
         repositorio = menu_principal.RepositorioFavoritos()
         favoritos_fii = repositorio.listar(dto.id, "fii")
         favoritos_acao = repositorio.listar(dto.id, "acao")
+        from pipeline_dados.repositorio_favoritos_internacionais import RepositorioFavoritosInternacionais
+        internacionais = RepositorioFavoritosInternacionais()
+        favoritos_etf = internacionais.listar(dto.id, "ETF")
+        favoritos_bdr = internacionais.listar(dto.id, "BDR")
     except Exception:
         logger.warning("MENU - falha ao carregar carteira", exc_info=True)
         menu_principal.responder_callback(call, menu_principal.TEXTO_ERRO_BANCO)
@@ -133,7 +137,7 @@ def callback_minha_carteira(call):
         )
         return
     menu_principal.responder_callback(call)
-    texto, markup = menu_principal.texto_carteira(favoritos_fii, favoritos_acao)
+    texto, markup = menu_principal.texto_carteira(favoritos_fii, favoritos_acao, favoritos_etf, favoritos_bdr)
     menu_principal.editar_callback(call, texto, markup)
 
 
@@ -169,6 +173,10 @@ def callback_gerenciar_favoritos(call):
     markup.add(
         InlineKeyboardButton("🏢 FIIs", callback_data="favoritos_fiis"),
         InlineKeyboardButton("📈 Ações", callback_data="favoritos_acoes"),
+    )
+    markup.add(
+        InlineKeyboardButton("🌐 ETFs", callback_data="favoritos_etfs"),
+        InlineKeyboardButton("🌍 BDRs", callback_data="favoritos_bdrs"),
     )
     markup.row(InlineKeyboardButton("🔙 Voltar ao painel", callback_data="voltar_painel"))
     menu_principal.responder_callback(call)
@@ -240,9 +248,20 @@ def callback_menu_instrumentos(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("painel_int_"))
 def callback_painel_instrumento(call):
-    if not _admin_mercado_autorizado(call):
-        return
     ticker = call.data.removeprefix("painel_int_").upper()
+    _telegram_id, papel, dto, erro = menu_principal.usuario_autorizado(call)
+    if erro:
+        menu_principal.responder_callback(call, erro)
+        return
+    if papel != permissoes.PAPEL_ADMIN:
+        try:
+            from pipeline_dados.repositorio_favoritos_internacionais import RepositorioFavoritosInternacionais
+            permitido = dto is not None and any(x.ticker == ticker for x in RepositorioFavoritosInternacionais().listar(dto.id))
+        except Exception:
+            permitido = False
+        if not permitido:
+            menu_principal.responder_callback(call, TEXTO_ACESSO_NEGADO)
+            return
     try:
         from services.coletor_etfs_bdrs import detalhe_instrumento_menu
         item, metricas = detalhe_instrumento_menu(ticker)

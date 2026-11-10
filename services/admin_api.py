@@ -450,11 +450,12 @@ def _usuarios_para_painel(limite: int = 100) -> list[dict]:
             SELECT u.id, u.nome, u.email, u.papel, u.status_cadastro, u.ativo,
                    COALESCE(p.alertas_ativos, TRUE) AS alertas_ativos,
                    p.variacao_minima_percentual,
-                   COUNT(DISTINCT aa.ativo_id) AS favoritos,
+                   COUNT(DISTINCT aa.ativo_id) + COUNT(DISTINCT fii.instrumento_id) AS favoritos,
                    MAX(h.enviado_em) AS ultima_notificacao
             FROM usuarios u
             LEFT JOIN preferencias_alertas_usuarios p ON p.usuario_id = u.id
             LEFT JOIN ativos_acompanhados aa ON aa.usuario_id = u.id
+            LEFT JOIN favoritos_instrumentos_internacionais fii ON fii.usuario_id = u.id
             LEFT JOIN historico_notificacoes h ON h.usuario_id = u.id
             GROUP BY u.id, u.nome, u.email, u.papel, u.status_cadastro, u.ativo,
                      p.alertas_ativos, p.variacao_minima_percentual
@@ -941,8 +942,14 @@ def detalhe_instrumento_internacional(ticker):
           SELECT chave, valor_numerico, valor_texto, unidade, fonte, qualidade_fonte, referencia_em, bloqueado
           FROM metricas_instrumentos_internacionais WHERE instrumento_id=:id ORDER BY chave
         """), {"id": item["id"]}).mappings().all()
+        historico = sessao.execute(text("""
+          SELECT referencia_em,fechamento,variacao_percentual,volume,fonte,qualidade_fonte
+          FROM observacoes_instrumentos_internacionais
+          WHERE instrumento_id=:id ORDER BY referencia_em DESC LIMIT 90
+        """), {"id": item["id"]}).mappings().all()
         return jsonify({"instrument": {**dict(item), "criado_em": item["criado_em"].isoformat(), "atualizado_em": item["atualizado_em"].isoformat()},
-                        "metrics": [{**dict(m), "referencia_em": m["referencia_em"].isoformat() if m["referencia_em"] else None} for m in metricas]})
+                        "metrics": [{**dict(m), "referencia_em": m["referencia_em"].isoformat() if m["referencia_em"] else None} for m in metricas],
+                        "history": [{**dict(h), "referencia_em": h["referencia_em"].isoformat() if h["referencia_em"] else None} for h in historico]})
     except Exception:
         return jsonify({"message": "Não foi possível consultar a ficha do instrumento."}), 503
     finally:

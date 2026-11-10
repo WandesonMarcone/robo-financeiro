@@ -137,6 +137,8 @@ CALLBACKS_USUARIO_EXATOS = frozenset(
         "menu_ajuda",
         "favoritos_fiis",
         "favoritos_acoes",
+        "favoritos_etfs",
+        "favoritos_bdrs",
         "ajuda_roadmap",
         "ajuda_comandos",
         "cmd_start",
@@ -158,6 +160,7 @@ CALLBACKS_USUARIO_PREFIXOS = (
     "ia_",
     "ajuda_cvm_",
     "painel_",
+    "painel_int_",
     "dados_",
     "ano_",
     "mes_",
@@ -483,6 +486,7 @@ def operacao_do_update(update):
 # handler), portanto vale mesmo para callback_data forjado/antigo.
 CALLBACKS_COM_TICKER = {
     "painel_": 1,
+    "painel_int_": 2,
     "dados_": 1,
     "ano_": 1,
     "mes_": 1,
@@ -521,11 +525,18 @@ def tickers_permitidos(usuario_id):
         dto = RepositorioUsuarios().obter_por_telegram_id(chave)
         if dto is None or not dto.esta_aprovado() or not dto.ativo:
             return frozenset()
-        return frozenset(
+        nacionais = {
             str(f.ticker).strip().upper()
             for f in RepositorioFavoritos().listar(dto.id)
             if getattr(f, "ticker", None)
-        )
+        }
+        from pipeline_dados.repositorio_favoritos_internacionais import RepositorioFavoritosInternacionais
+        internacionais = {
+            str(f.ticker).strip().upper()
+            for f in RepositorioFavoritosInternacionais().listar(dto.id)
+            if getattr(f, "ticker", None)
+        }
+        return frozenset(nacionais | internacionais)
     except Exception:
         logger.warning("Falha ao resolver ativos permitidos", exc_info=True)
         return frozenset()

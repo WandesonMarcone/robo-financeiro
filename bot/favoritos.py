@@ -30,6 +30,10 @@ from pipeline_dados.repositorio_favoritos import (
     RepositorioFavoritos,
 )
 from pipeline_dados.repositorio_usuarios import RepositorioUsuarios
+from pipeline_dados.repositorio_favoritos_internacionais import (
+    InstrumentoNaoCadastradoError,
+    RepositorioFavoritosInternacionais,
+)
 
 logger = logging.getLogger("robo.favoritos")
 
@@ -37,6 +41,8 @@ logger = logging.getLogger("robo.favoritos")
 TIPO_POR_CALLBACK = {
     "favoritos_fiis": "fii",
     "favoritos_acoes": "acao",
+    "favoritos_etfs": "etf",
+    "favoritos_bdrs": "bdr",
 }
 
 PREFIXO_LISTAR_ADICIONAR = "favadd_"
@@ -45,8 +51,8 @@ PREFIXO_REMOVER = "favrem_"
 
 TAMANHO_PAGINA = 12
 
-VOLTAR_MENU = {"fii": "menu_fiis", "acao": "menu_acoes"}
-ROTULO_TIPO = {"fii": "FIIs", "acao": "Ações"}
+VOLTAR_MENU = {"fii": "menu_fiis", "acao": "menu_acoes", "etf": "menu_etfs", "bdr": "menu_bdrs"}
+ROTULO_TIPO = {"fii": "FIIs", "acao": "Ações", "etf": "ETFs", "bdr": "BDRs"}
 
 TEXTO_ERRO_BANCO = "⚠️ Não foi possível acessar seus favoritos agora. Tente novamente."
 TEXTO_SEM_CONTA = (
@@ -141,6 +147,14 @@ def _destino_voltar(tipo, admin):
     return VOLTAR_MENU[tipo] if admin else "gerenciar_favoritos"
 
 
+def _repositorio_para(tipo):
+    return RepositorioFavoritosInternacionais() if tipo in {"etf", "bdr"} else RepositorioFavoritos()
+
+
+def _callback_painel(favorito):
+    return f"painel_int_{favorito.ticker}" if favorito.tipo.lower() in {"etf", "bdr"} else f"painel_{favorito.ticker}_{favorito.tipo}"
+
+
 def _limite_do_tipo(tipo):
     """Limite máximo de favoritos do tipo (``None`` = sem teto).
 
@@ -191,7 +205,7 @@ def _markup_favoritos(favoritos, tipo, admin=False):
         markup.row(
             InlineKeyboardButton(
                 f"📊 {favorito.ticker}",
-                callback_data=f"painel_{favorito.ticker}_{tipo}",
+                callback_data=_callback_painel(favorito),
             ),
             acao,
         )
@@ -230,7 +244,7 @@ def _texto_favoritos(favoritos, tipo, admin=False):
 def _mostrar_favoritos(call, tipo, usuario_id, aviso=None):
     admin = _e_admin(call)
     try:
-        favoritos = RepositorioFavoritos().listar(usuario_id, tipo)
+        favoritos = _repositorio_para(tipo).listar(usuario_id, tipo)
     except Exception:
         logger.warning("FAVORITOS - falha ao listar", exc_info=True)
         _responder_callback(call, TEXTO_ERRO_BANCO)
@@ -255,7 +269,7 @@ def _mostrar_favoritos(call, tipo, usuario_id, aviso=None):
 
 def _mostrar_disponiveis(call, tipo, usuario_id, pagina):
     try:
-        disponiveis = RepositorioFavoritos().listar_disponiveis(usuario_id, tipo)
+        disponiveis = _repositorio_para(tipo).listar_disponiveis(usuario_id, tipo)
     except Exception:
         logger.warning("FAVORITOS - falha ao listar disponiveis", exc_info=True)
         _responder_callback(call, TEXTO_ERRO_BANCO)
@@ -264,7 +278,7 @@ def _mostrar_disponiveis(call, tipo, usuario_id, pagina):
             TEXTO_ERRO_BANCO,
             InlineKeyboardMarkup().add(
                 InlineKeyboardButton(
-                    "🔙 Voltar", callback_data=f"favoritos_{'fiis' if tipo == 'fii' else 'acoes'}"
+                    "🔙 Voltar", callback_data={"fii":"favoritos_fiis","acao":"favoritos_acoes","etf":"favoritos_etfs","bdr":"favoritos_bdrs"}[tipo]
                 )
             ),
         )
@@ -313,7 +327,7 @@ def _mostrar_disponiveis(call, tipo, usuario_id, pagina):
     if navegacao:
         markup.row(*navegacao)
 
-    voltar_callback = "favoritos_" + ("fiis" if tipo == "fii" else "acoes")
+    voltar_callback = {"fii":"favoritos_fiis","acao":"favoritos_acoes","etf":"favoritos_etfs","bdr":"favoritos_bdrs"}[tipo]
     markup.row(InlineKeyboardButton("🔙 Voltar", callback_data=voltar_callback))
     _render(call, texto, markup)
 
@@ -372,15 +386,15 @@ def adicionar_favorito(call):
     limite = _limite_do_tipo(tipo)
     if limite is not None and not _e_admin(call):
         try:
-            repositorio = RepositorioFavoritos()
-            resolvido = repositorio.resolver_ativo(ticker)
+            repositorio = _repositorio_para(tipo)
+            resolvido = (repositorio.resolver_instrumento(ticker, tipo) if tipo in {"etf", "bdr"} else repositorio.resolver_ativo(ticker))
             atuais = repositorio.listar(usuario_id, tipo)
         except Exception:
             logger.warning("FAVORITOS - falha ao validar limite", exc_info=True)
             _responder_callback(call, TEXTO_ERRO_BANCO)
             return
         ja_favorito = resolvido is not None and any(
-            f.ticker == resolvido[1] for f in atuais
+            f.ticker == (resolvido["ticker"] if tipo in {"etf", "bdr"} else resolvido[1]) for f in atuais
         )
         if not ja_favorito and len(atuais) >= limite:
             _responder_callback(
@@ -392,8 +406,8 @@ def adicionar_favorito(call):
             return
 
     try:
-        _dto, criado = RepositorioFavoritos().adicionar(usuario_id, ticker)
-    except AtivoNaoCadastradoError:
+        _dto, criado = _repositorio_para(tipo).adicionar(usuario_id, ticker, tipo) if tipo in {"etf", "bdr"} else RepositorioFavoritos().adicionar(usuario_id, ticker)
+    except (AtivoNaoCadastradoError, InstrumentoNaoCadastradoError):
         _responder_callback(call, f"❌ {ticker} não está cadastrado no sistema.")
         _mostrar_disponiveis(call, tipo, usuario_id, 0)
         return
@@ -434,7 +448,7 @@ def remover_favorito(call):
         return
 
     try:
-        removido = RepositorioFavoritos().remover(usuario_id, ticker)
+        removido = _repositorio_para(tipo).remover(usuario_id, ticker, tipo) if tipo in {"etf", "bdr"} else RepositorioFavoritos().remover(usuario_id, ticker)
     except Exception:
         logger.warning("FAVORITOS - falha ao remover", exc_info=True)
         _responder_callback(call, TEXTO_ERRO_BANCO)

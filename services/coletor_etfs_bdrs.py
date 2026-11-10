@@ -201,7 +201,13 @@ def coletar_instrumento(ticker, tipo=None, simbolo_exterior=None, session_factor
         sessao.execute(text("UPDATE instrumentos_internacionais SET nome=COALESCE(:nome,nome), moeda_origem=COALESCE(:moeda,moeda_origem), atualizado_em=NOW() WHERE id=:id"), {"id": instrumento["id"], "nome": nome, "moeda": info.get("currency")})
         oficiais = _coletar_sec(sessao, instrumento) if instrumento["tipo"] == "BDR" else 0
         sessao.commit()
-        return {"ticker": ticker, "tipo": instrumento["tipo"], "referencia": data_ref.date().isoformat(), "preco": fechamento, "metricas": len([v for v, _ in campos.values() if v is not None]), "oficiais_sec": oficiais}
+        return {
+            "ticker": ticker, "tipo": instrumento["tipo"],
+            "referencia": data_ref.date().isoformat(), "preco": fechamento,
+            "variacao": variacao,
+            "metricas": len([v for v, _ in campos.values() if v is not None]),
+            "oficiais_sec": oficiais,
+        }
     except Exception:
         sessao.rollback()
         raise
@@ -209,14 +215,26 @@ def coletar_instrumento(ticker, tipo=None, simbolo_exterior=None, session_factor
         sessao.close()
 
 
-def coletar_instrumentos_ativos(limite=30, session_factory=None):
+def coletar_instrumentos_ativos(limite=30, tipo=None, session_factory=None):
+    """Atualiza uma classe por vez quando ``tipo`` for ETF ou BDR.
+
+    O limite continua intencionalmente baixo para proteger a fonte e o job;
+    classes diferentes não disputam a mesma fila ou relatório de término.
+    """
+    tipo = str(tipo or "").strip().upper()
+    if tipo and tipo not in {"ETF", "BDR"}:
+        raise ValueError("tipo deve ser ETF ou BDR")
     from atualizador_documentos import SessionDB
     sessao = session_factory() if session_factory else SessionDB()
     try:
-        tickers = [r[0] for r in sessao.execute(text("SELECT ticker FROM instrumentos_internacionais WHERE ativo=TRUE ORDER BY atualizado_em NULLS FIRST, ticker LIMIT :limite"), {"limite": max(1, min(int(limite), 60))}).all()]
+        tickers = [r[0] for r in sessao.execute(text("""
+            SELECT ticker FROM instrumentos_internacionais
+            WHERE ativo=TRUE AND (:tipo='' OR tipo=:tipo)
+            ORDER BY atualizado_em NULLS FIRST, ticker LIMIT :limite
+        """), {"limite": max(1, min(int(limite), 60)), "tipo": tipo}).all()]
     finally:
         sessao.close()
-    resultado = {"processados": 0, "falhas": [], "ativos": []}
+    resultado = {"tipo": tipo or "TODOS", "processados": 0, "falhas": [], "ativos": []}
     for ticker in tickers:
         try:
             resultado["ativos"].append(coletar_instrumento(ticker, session_factory=session_factory)); resultado["processados"] += 1
