@@ -257,6 +257,55 @@ def listar_instrumentos_telegram(limite=20, session_factory=None):
     return "\n".join(texto)
 
 
+def listar_instrumentos_menu(tipo, session_factory=None):
+    """Dados curtos para os botões de ETF/BDR do Telegram."""
+    tipo = str(tipo or "").upper()
+    if tipo not in {"ETF", "BDR"}:
+        raise ValueError("tipo inválido")
+    from atualizador_documentos import SessionDB
+    sessao = session_factory() if session_factory else SessionDB()
+    try:
+        return [dict(item) for item in sessao.execute(text("""
+            SELECT i.ticker, i.tipo, i.nome, o.fechamento
+            FROM instrumentos_internacionais i
+            LEFT JOIN LATERAL (
+                SELECT fechamento FROM observacoes_instrumentos_internacionais
+                WHERE instrumento_id=i.id ORDER BY referencia_em DESC LIMIT 1
+            ) o ON TRUE
+            WHERE i.ativo=TRUE AND i.tipo=:tipo
+            ORDER BY i.ticker
+        """), {"tipo": tipo}).mappings().all()]
+    finally:
+        sessao.close()
+
+
+def detalhe_instrumento_menu(ticker, session_factory=None):
+    """Ficha auditável para o Telegram, sem consultar fontes externas."""
+    from atualizador_documentos import SessionDB
+    sessao = session_factory() if session_factory else SessionDB()
+    try:
+        item = sessao.execute(text("""
+            SELECT i.id,i.ticker,i.tipo,i.nome,o.fechamento,o.variacao_percentual,
+                   o.referencia_em,o.fonte,o.qualidade_fonte
+            FROM instrumentos_internacionais i
+            LEFT JOIN LATERAL (
+                SELECT fechamento,variacao_percentual,referencia_em,fonte,qualidade_fonte
+                FROM observacoes_instrumentos_internacionais
+                WHERE instrumento_id=i.id ORDER BY referencia_em DESC LIMIT 1
+            ) o ON TRUE WHERE i.ticker=:ticker AND i.ativo=TRUE
+        """), {"ticker": str(ticker or "").upper()}).mappings().first()
+        if not item:
+            return None, []
+        metricas = sessao.execute(text("""
+            SELECT chave,valor_numerico,valor_texto,unidade,fonte,qualidade_fonte
+            FROM metricas_instrumentos_internacionais
+            WHERE instrumento_id=:id ORDER BY chave LIMIT 12
+        """), {"id": item["id"]}).mappings().all()
+        return dict(item), [dict(metrica) for metrica in metricas]
+    finally:
+        sessao.close()
+
+
 def avaliar_oportunidade_instrumento(item):
     """Aplica uma triagem conservadora; nunca equivale a recomendação de compra."""
     tipo = str(item.get("tipo") or "").upper()

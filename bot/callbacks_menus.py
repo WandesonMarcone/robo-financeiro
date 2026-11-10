@@ -191,10 +191,108 @@ def callback_consultar_indicadores(call):
     markup.add(
         InlineKeyboardButton("🏢 FIIs (Imobiliários)", callback_data="menu_fiis"),
         InlineKeyboardButton("📈 Ações (Empresas)", callback_data="menu_acoes"),
+        InlineKeyboardButton("🌐 ETFs", callback_data="menu_etfs"),
+        InlineKeyboardButton("🌍 BDRs", callback_data="menu_bdrs"),
+        InlineKeyboardButton("📊 Ibovespa, IFIX e macro", callback_data="adm_mercado_resumo"),
     )
     markup.add(InlineKeyboardButton("🔙 Voltar ao painel", callback_data="voltar_painel"))
     menu_principal.responder_callback(call)
     menu_principal.editar_callback(call, menu_principal.TEXTO_CONSULTAR_INDICADORES, markup)
+
+
+def _listar_instrumentos(tipo):
+    from services.coletor_etfs_bdrs import listar_instrumentos_menu
+    return listar_instrumentos_menu(tipo)
+
+
+def _menu_instrumentos(tipo):
+    icone = "🌐" if tipo == "ETF" else "🌍"
+    plural = "ETFs" if tipo == "ETF" else "BDRs"
+    itens = _listar_instrumentos(tipo)
+    markup = InlineKeyboardMarkup(row_width=2)
+    for item in itens:
+        preco = item.get("fechamento")
+        rotulo = f"{icone} {item['ticker']}" + (f" · R$ {float(preco):.2f}" if preco is not None else "")
+        markup.add(InlineKeyboardButton(rotulo, callback_data=f"painel_int_{item['ticker']}"))
+    markup.add(InlineKeyboardButton("🔥 Oportunidades", callback_data=f"oportunidades_int_{tipo.lower()}"))
+    markup.add(InlineKeyboardButton("🔙 Indicadores", callback_data="consultar_indicadores"))
+    texto = f"{icone} *{plural} acompanhados*\n\n"
+    texto += "Toque em um ativo para ver cotação, indicadores e fonte. "
+    texto += "Não há varredura documental para esta classe."
+    if not itens:
+        texto += "\n\n📭 Nenhum ativo cadastrado nesta categoria."
+    return texto, markup
+
+
+@bot.callback_query_handler(func=lambda call: call.data in {"menu_etfs", "menu_bdrs"})
+def callback_menu_instrumentos(call):
+    if not _admin_mercado_autorizado(call):
+        return
+    tipo = "ETF" if call.data == "menu_etfs" else "BDR"
+    try:
+        texto, markup = _menu_instrumentos(tipo)
+    except Exception as exc:
+        logger.warning("MENU - falha ao listar %ss", tipo, exc_info=True)
+        texto, markup = f"❌ Não foi possível carregar {tipo}s: {type(exc).__name__}.", menu_principal.markup_voltar("consultar_indicadores")
+    menu_principal.responder_callback(call)
+    menu_principal.editar_callback(call, texto, markup)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("painel_int_"))
+def callback_painel_instrumento(call):
+    if not _admin_mercado_autorizado(call):
+        return
+    ticker = call.data.removeprefix("painel_int_").upper()
+    try:
+        from services.coletor_etfs_bdrs import detalhe_instrumento_menu
+        item, metricas = detalhe_instrumento_menu(ticker)
+        if not item:
+            raise ValueError("ativo não encontrado")
+        linhas = [f"*{item['ticker']}* · {item['tipo']}", item.get("nome") or "Nome não informado"]
+        if item.get("fechamento") is not None:
+            linhas.append(f"\nFechamento: *R$ {float(item['fechamento']):.2f}*")
+        if item.get("variacao_percentual") is not None:
+            linhas.append(f"Variação: *{float(item['variacao_percentual']):+.2f}%*")
+        if item.get("referencia_em"):
+            linhas.append(f"Referência: {str(item['referencia_em'])[:10]}")
+        linhas.append(f"Fonte: {item.get('fonte') or 'não informada'} · {item.get('qualidade_fonte') or 'qualidade não informada'}")
+        if metricas:
+            linhas.append("\n*Indicadores*:")
+            for metrica in metricas[:8]:
+                valor = metrica.get("valor_numerico") if metrica.get("valor_numerico") is not None else metrica.get("valor_texto")
+                linhas.append(f"• {str(metrica['chave']).replace('_', ' ')}: {valor}")
+        texto = "\n".join(linhas)
+        voltar = "menu_etfs" if item["tipo"] == "ETF" else "menu_bdrs"
+        markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🔙 Voltar", callback_data=voltar))
+    except Exception as exc:
+        logger.warning("MENU - falha no painel ETF/BDR", exc_info=True)
+        texto, markup = f"❌ Não foi possível abrir {ticker}: {type(exc).__name__}.", menu_principal.markup_voltar("consultar_indicadores")
+    menu_principal.responder_callback(call)
+    menu_principal.editar_callback(call, texto, markup)
+
+
+@bot.callback_query_handler(func=lambda call: call.data in {"oportunidades_int_etf", "oportunidades_int_bdr"})
+def callback_oportunidades_instrumentos(call):
+    if not _admin_mercado_autorizado(call):
+        return
+    tipo = "ETF" if call.data.endswith("etf") else "BDR"
+    try:
+        from services.coletor_etfs_bdrs import listar_oportunidades_instrumentos
+        itens = listar_oportunidades_instrumentos(tipo=tipo)
+        linhas = [f"🔥 *Top oportunidades — {tipo}s*", "_Triagem automática; não é recomendação de compra ou venda._"]
+        if itens:
+            for item in itens:
+                preco = f"R$ {float(item['fechamento']):.2f}" if item.get("fechamento") is not None else "preço indisponível"
+                linhas.append(f"\n• *{item['ticker']}* — {preco}\n  " + " · ".join(item.get("motivos") or []))
+        else:
+            linhas.append("\n📭 Nenhum candidato passou por liquidez, desconto e histórico suficientes.")
+        texto = "\n".join(linhas)
+        markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🔙 Voltar", callback_data="menu_etfs" if tipo == "ETF" else "menu_bdrs"))
+    except Exception as exc:
+        logger.warning("MENU - falha em oportunidades %s", tipo, exc_info=True)
+        texto, markup = f"❌ Não foi possível analisar oportunidades: {type(exc).__name__}.", menu_principal.markup_voltar("consultar_indicadores")
+    menu_principal.responder_callback(call)
+    menu_principal.editar_callback(call, texto, markup)
 
 
 def _admin_mercado_autorizado(call):
