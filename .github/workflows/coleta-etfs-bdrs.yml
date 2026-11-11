@@ -24,5 +24,6 @@ jobs:
       - name: Coletar instrumentos cadastrados manualmente
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDENTIALS }}
           SEC_EDGAR_USER_AGENT: ${{ secrets.SEC_EDGAR_USER_AGENT }}
         run: python scripts/coletar_etfs_bdrs.py --tipo "${{ inputs.tipo }}" --sem-notificacoes

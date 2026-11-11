@@ -2,13 +2,10 @@ name: Atualização cíclica de ativos
 
 on:
   schedule:
-    # Janela noturna redundante, em UTC. No Brasil são 00h10 a 08h10,
-    # de segunda a sexta. Cada passagem limita-se a 30 ativos, mas há nove
-    # chances de concluir a rotação completa caso um agendamento do GitHub
-    # atrase ou seja descartado. Com a base atual (79 ações e 34 FIIs), quatro
-    # execuções saudáveis já cobrem tudo; as demais são margem de segurança.
-    # O minuto 10 evita o pico habitual de agendamentos em :00 e :30.
-    - cron: "10 3-11 * * 1-5"
+    # Uma única execução noturna executa quatro lotes sequenciais de até 30.
+    # Isso evita depender de vários crons, pois o GitHub pode atrasar ou omitir
+    # agendamentos. Na base atual, quatro lotes cobrem ações e FIIs com sobra.
+    - cron: "10 3 * * 1-5"
   workflow_dispatch:
     inputs:
       ticker:
@@ -48,16 +45,20 @@ jobs:
           import os
           with open("credenciais.json", "w", encoding="utf-8") as arquivo:
               arquivo.write(os.environ["GOOGLE_CREDS"])
-      - name: Atualizar até 30 ativos sem notificações
+      - name: Atualizar cobertura completa sem notificações
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           TICKER_ISOLADO: ${{ inputs.ticker }}
-        run: >-
-          python atualizador_ciclico.py
-          --ticker "${{ inputs.ticker }}"
-          --limite-total "${{ inputs.limite_total || '30' }}"
-          --orcamento-segundos 540
-          --pausa-segundos 2
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.ticker }}" ]; then
+            python atualizador_ciclico.py --ticker "${{ inputs.ticker }}" --limite-total "${{ inputs.limite_total || '30' }}" --orcamento-segundos 180 --pausa-segundos 2
+          else
+            for ciclo in 1 2 3 4; do
+              echo "Iniciando lote ${ciclo}/4"
+              python atualizador_ciclico.py --limite-total 30 --orcamento-segundos 180 --pausa-segundos 2
+            done
+          fi
       - name: Avisar conclusão de busca isolada
         if: success() && inputs.ticker != ''
         continue-on-error: true

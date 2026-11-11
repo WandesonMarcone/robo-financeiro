@@ -215,6 +215,93 @@ def coletar_instrumento(ticker, tipo=None, simbolo_exterior=None, session_factor
         sessao.close()
 
 
+COLUNAS_PLANILHA_INSTRUMENTOS = (
+    "TICKER", "NOME", "PREÇO", "VAR. DIA", "ÍNDICE / REFERÊNCIA",
+    "LIQUIDEZ MÉDIA 30D", "VOLUME MÉDIO 30D", "DISTÂNCIA MÁXIMA 12M",
+    "VOLATILIDADE 30D", "RETORNO COLETADO", "DY", "P/L", "P/VP",
+    "FONTE", "DATA REFERÊNCIA", "ATUALIZADO EM",
+)
+
+
+def sincronizar_instrumentos_planilha(tipo, session_factory=None):
+    """Espelha a última coleta de uma classe em BD_ETFs ou BD_BDRs.
+
+    A planilha é uma visão operacional, como BD_Acoes/BD_FIIs; o Neon segue
+    sendo a fonte auditável. A rotina atualiza por ticker, nunca apaga linhas
+    manuais existentes e só declara sucesso quando há fechamento válido.
+    """
+    tipo = str(tipo or "").upper()
+    if tipo not in {"ETF", "BDR"}:
+        raise ValueError("tipo deve ser ETF ou BDR")
+    from atualizador_documentos import SessionDB
+    from modules.utils import conectar_gspread
+    import config
+
+    sessao = session_factory() if session_factory else SessionDB()
+    try:
+        linhas = sessao.execute(text("""
+          WITH ultima AS (
+            SELECT DISTINCT ON (instrumento_id) instrumento_id, referencia_em,
+                   fechamento, variacao_percentual, fonte
+            FROM observacoes_instrumentos_internacionais
+            ORDER BY instrumento_id, referencia_em DESC
+          ), metricas AS (
+            SELECT instrumento_id,
+              MAX(valor_numerico) FILTER (WHERE chave='liquidez_media_30d_brl') AS liquidez,
+              MAX(valor_numerico) FILTER (WHERE chave='volume_medio_30d') AS volume,
+              MAX(valor_numerico) FILTER (WHERE chave='distancia_maxima_1a') AS distancia,
+              MAX(valor_numerico) FILTER (WHERE chave='volatilidade_30d') AS volatilidade,
+              MAX(valor_numerico) FILTER (WHERE chave='retorno_periodo_coletado') AS retorno,
+              MAX(valor_numerico) FILTER (WHERE chave='dividend_yield') AS dy,
+              MAX(valor_numerico) FILTER (WHERE chave='p_l') AS pl,
+              MAX(valor_numerico) FILTER (WHERE chave='p_vp') AS pvp
+            FROM metricas_instrumentos_internacionais GROUP BY instrumento_id
+          )
+          SELECT i.ticker,i.nome,i.indice_referencia,u.fechamento,u.variacao_percentual,
+                 u.referencia_em,u.fonte,m.liquidez,m.volume,m.distancia,m.volatilidade,
+                 m.retorno,m.dy,m.pl,m.pvp
+          FROM instrumentos_internacionais i
+          LEFT JOIN ultima u ON u.instrumento_id=i.id
+          LEFT JOIN metricas m ON m.instrumento_id=i.id
+          WHERE i.ativo=TRUE AND i.tipo=:tipo ORDER BY i.ticker
+        """), {"tipo": tipo}).mappings().all()
+    finally:
+        sessao.close()
+
+    aba_nome = "BD_ETFs" if tipo == "ETF" else "BD_BDRs"
+    planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
+    aba = planilha.worksheet(aba_nome)
+    existentes = aba.get_all_values()
+    if not existentes or existentes[0][:len(COLUNAS_PLANILHA_INSTRUMENTOS)] != list(COLUNAS_PLANILHA_INSTRUMENTOS):
+        raise RuntimeError(f"cabecalho_invalido:{aba_nome}")
+    por_ticker = {str(linha[0]).strip().upper(): indice + 1 for indice, linha in enumerate(existentes[1:]) if linha and linha[0].strip()}
+    agora = datetime.now().astimezone().strftime("%d/%m/%Y %H:%M")
+    atualizacoes = []
+    proxima_linha = len(existentes) + 1
+    def valor_planilha(valor):
+        numero = _numero(valor)
+        return numero if numero is not None else (valor or "—")
+    for item in linhas:
+        ticker = item["ticker"]
+        referencia = item["referencia_em"]
+        linha = [
+            ticker, item["nome"] or "—", valor_planilha(item["fechamento"]), valor_planilha(item["variacao_percentual"]),
+            item["indice_referencia"] or "—", valor_planilha(item["liquidez"]), valor_planilha(item["volume"]),
+            valor_planilha(item["distancia"]), valor_planilha(item["volatilidade"]), valor_planilha(item["retorno"]), valor_planilha(item["dy"]),
+            valor_planilha(item["pl"]), valor_planilha(item["pvp"]), (item["fonte"] or "YAHOO_FINANCE"),
+            referencia.date().isoformat() if referencia else "—", agora if item["fechamento"] is not None else "SEM COTAÇÃO",
+        ]
+        numero_linha = por_ticker.get(ticker)
+        if numero_linha:
+            atualizacoes.append({"range": f"A{numero_linha}:P{numero_linha}", "values": [linha]})
+        else:
+            atualizacoes.append({"range": f"A{proxima_linha}:P{proxima_linha}", "values": [linha]})
+            proxima_linha += 1
+    if atualizacoes:
+        aba.batch_update(atualizacoes, value_input_option="USER_ENTERED")
+    return {"aba": aba_nome, "linhas": len(linhas), "gravadas": len(atualizacoes)}
+
+
 def coletar_instrumentos_ativos(limite=30, tipo=None, session_factory=None):
     """Atualiza uma classe por vez quando ``tipo`` for ETF ou BDR.
 
@@ -240,6 +327,15 @@ def coletar_instrumentos_ativos(limite=30, tipo=None, session_factory=None):
             resultado["ativos"].append(coletar_instrumento(ticker, session_factory=session_factory)); resultado["processados"] += 1
         except Exception as exc:
             resultado["falhas"].append({"ticker": ticker, "erro": type(exc).__name__})
+    # A sincronização é feita após a coleta para que cada aba represente uma
+    # fotografia coerente da classe, inclusive quando um ativo falhou.
+    tipos_planilha = [tipo] if tipo else ["ETF", "BDR"]
+    resultado["planilha"] = {}
+    for classe in tipos_planilha:
+        try:
+            resultado["planilha"][classe] = sincronizar_instrumentos_planilha(classe, session_factory=session_factory)
+        except Exception as exc:
+            resultado["planilha"][classe] = {"erro": type(exc).__name__}
     return resultado
 
 

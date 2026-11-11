@@ -21,6 +21,7 @@ jobs:
       - name: Coletar ETFs e notificar favoritos
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDENTIALS }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
         run: python scripts/coletar_etfs_bdrs.py --tipo ETF --limite 30
