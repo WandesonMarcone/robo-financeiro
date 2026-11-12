@@ -59,6 +59,9 @@ jobs:
               python atualizador_ciclico.py --limite-total 30 --orcamento-segundos 180 --pausa-segundos 2
             done
           fi
+      - name: Auditar cobertura real da atualização noturna
+        if: success() && inputs.ticker == ''
+        run: python scripts/auditar_cobertura_noturna.py --max-atraso-dias 1
       - name: Avisar conclusão de busca isolada
         if: success() && inputs.ticker != ''
         continue-on-error: true
