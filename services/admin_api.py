@@ -1240,6 +1240,9 @@ def executar_comando():
         acoes[action] = ("Geração de resumos por IA", gerar_resumos_ativos)
     if action == "diagnostico_fontes":
         acoes[action] = ("Diagnóstico das fontes", _diagnostico_fontes)
+    if action == "corrigir_taxonomia_fiis":
+        from services.taxonomia_fiis_automatica import corrigir_taxonomia_fiis
+        acoes[action] = ("Correção automática da taxonomia de FIIs", corrigir_taxonomia_fiis)
     if action not in acoes:
         return jsonify({"message": "Comando não disponível na Central."}), 400
     descricao, funcao = acoes[action]

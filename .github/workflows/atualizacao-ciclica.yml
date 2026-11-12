@@ -62,6 +62,9 @@ jobs:
       - name: Auditar cobertura real da atualização noturna
         if: success() && inputs.ticker == ''
         run: python scripts/auditar_cobertura_noturna.py --max-atraso-dias 1
+      - name: Corrigir setores pendentes de FIIs com fonte estruturada
+        if: success() && inputs.ticker == ''
+        run: python scripts/corrigir_taxonomia_fiis.py
       - name: Avisar conclusão de busca isolada
         if: success() && inputs.ticker != ''
         continue-on-error: true

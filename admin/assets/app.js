@@ -5,6 +5,7 @@ const commands=[
  {id:'forcar_docs_acoes',icon:'◫',title:'Documentos de ações',desc:'Varre PDFs da CVM pelo ano selecionado.',period:true},
  {id:'forcar_cvm',icon:'◈',title:'Atualizar ITR/CVM',desc:'Atualiza dados estruturados de ações na CVM.',period:true},
  {id:'forcar_fiis',icon:'▧',title:'Informes de FIIs',desc:'Atualiza informes mensais de fundos imobiliários.',period:true},
+ {id:'corrigir_taxonomia_fiis',icon:'◈',title:'Corrigir setores dos FIIs',desc:'Recupera tipo e segmento dos FIIs N/A com fonte estruturada; não inventa classificações.'},
  {id:'processar_acoes_ia',icon:'✦',title:'Classificar ações com IA',desc:'Classifica e organiza documentos de ações com IA.'},
  {id:'processar_pendentes_acao',icon:'✓',title:'Processar pendentes de uma ação',desc:'Classifica somente os PDFs PENDENTE_ACAO do ticker informado; não faz nova varredura.',ticker:true},
  {id:'processar_pendentes_fii',icon:'✓',title:'Processar pendentes de um FII',desc:'Classifica somente os documentos PENDENTE do FII informado; não faz nova varredura.',ticker:true},

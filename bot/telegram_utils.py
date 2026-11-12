@@ -313,6 +313,7 @@ COMANDOS_AJUDA_ADMIN = (
     ("/processar_acoes_ia", "Processa PDFs de ações com a IA.", "cmd_processar_acoes_ia"),
     ("/forcar_cvm [ANO]", "Coleta ITR de acoes da CVM (padrao: ano civil corrente).", "cmd_forcar_cvm"),
     ("/forcar_fiis [ANO]", "Coleta informes mensais de FIIs (padrao: ano civil corrente).", "cmd_forcar_fiis"),
+    ("/corrigir_setores_fiis", "Corrige setores N/A de FIIs com evidência estruturada.", "cmd_corrigir_setores_fiis"),
     ("/gerar_resumos_ia", "Gera/substitui os resumos atuais de todos os ativos.", "cmd_gerar_resumos_ia"),
     ("/alimentar_ia", "Extrai texto de PDFs antigos (inicio, fim e DY).", "cmd_alimentar_ia"),
     ("/auditar_drive", "Remove duplicatas e PDFs mortos (Drive + banco).", "cmd_auditar_drive"),

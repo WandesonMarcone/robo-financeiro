@@ -75,11 +75,11 @@ def normalizar_classificacao(dados: Mapping[str, Any]) -> dict[str, Any]:
 
 def prompt_classificacao_fii(ticker: str, texto_documento: str) -> str:
     return f"""Extraia somente fatos explícitos do documento oficial do FII {ticker}.
-Não use DY para inferir High Grade ou High Yield.
+Regra obrigatória: não use DY para inferir High Grade ou High Yield.
 Só informe CDI/IPCA se o documento indicar o indexador.
 Só informe High Grade se houver evidência de grau de investimento.
 Se não houver evidência, use null, lista vazia ou não confirmado.
-Não classifique automaticamente como Tijolo quando faltar informação.
+Regra obrigatória: não classifique automaticamente como Tijolo quando faltar informação.
 Campos JSON: tipo_ativo, classe, segmento, subtipo, indexadores,
 estrategias, confianca, fonte, evidencia.
 Segmento de Papel: Recebíveis Imobiliários. Subtipos: CRI ou LCI/LH.

@@ -387,6 +387,39 @@ def acionar_varredura_manual(message):
 
     threading.Thread(target=tarefa_pesada_background, args=(dias,)).start()
 
+
+@bot.message_handler(commands=['corrigir_setores_fiis'])
+def corrigir_setores_fiis(message):
+    """Recupera apenas os FIIs sem tipo/segmento comprovado."""
+    bot.reply_to(
+        message,
+        "Iniciando correção automática dos setores N/A dos FIIs. "
+        "A rotina usa fonte estruturada e não atribui setor por palpite; aguarde o resultado.",
+    )
+
+    def tarefa():
+        try:
+            from services.taxonomia_fiis_automatica import corrigir_taxonomia_fiis
+            resultado = corrigir_taxonomia_fiis()
+            corrigidos = resultado.get("corrigidos") or []
+            amostra = ", ".join(
+                f"{item['ticker']} ({item['tipo']} · {item['segmento']})"
+                for item in corrigidos[:8]
+            )
+            texto = (
+                f"✅ Taxonomia de FIIs concluída. Corrigidos: {resultado.get('quantidade_corrigida', 0)}. "
+                f"Sem evidência suficiente: {resultado.get('quantidade_sem_evidencia', 0)}."
+            )
+            if amostra:
+                texto += f"\n\nExemplos: {amostra}"
+            if resultado.get("sem_evidencia"):
+                texto += "\nOs restantes permaneceram sem classificação confirmada; não foram tratados como Tijolo automaticamente."
+            bot.send_message(message.chat.id, texto)
+        except Exception as exc:
+            bot.send_message(message.chat.id, f"❌ Correção de setores dos FIIs falhou: {type(exc).__name__}.")
+
+    threading.Thread(target=tarefa, daemon=True).start()
+
 @bot.message_handler(commands=['forcar_docs_acoes'])
 def rodar_docs_acoes(message):
     chat_id = message.chat.id
@@ -626,6 +659,7 @@ def callback_executar_comando(call):
         "cmd_processar_acoes_ia": ("/processar_acoes_ia", rodar_ia_acoes),
         "cmd_forcar_cvm": ("/forcar_cvm", rodar_cvm),
         "cmd_forcar_fiis": ("/forcar_fiis", cmd_forcar_fiis),
+        "cmd_corrigir_setores_fiis": ("/corrigir_setores_fiis", corrigir_setores_fiis),
         "cmd_atualizar_ativo": ("/atualizar_ativo", atualizar_ativo),
         "cmd_gerar_resumos_ia": ("/gerar_resumos_ia", cmd_gerar_resumos_ia),
         "cmd_alimentar_ia": ("/alimentar_ia", alimentar_ia_passado),
