@@ -393,8 +393,8 @@ def corrigir_setores_fiis(message):
     """Recupera apenas os FIIs sem tipo/segmento comprovado."""
     bot.reply_to(
         message,
-        "Iniciando correção automática dos setores N/A dos FIIs. "
-        "A rotina usa fonte estruturada e não atribui setor por palpite; aguarde o resultado.",
+        "Iniciando correção dos setores N/A dos FIIs. "
+        "A rotina prioriza relatório gerencial/documento oficial já salvo; não atribui setor por palpite.",
     )
 
     def tarefa():
@@ -407,7 +407,7 @@ def corrigir_setores_fiis(message):
                 for item in corrigidos[:8]
             )
             texto = (
-                f"✅ Taxonomia de FIIs concluída. Corrigidos: {resultado.get('quantidade_corrigida', 0)}. "
+                f"✅ Taxonomia documental de FIIs concluída. Corrigidos: {resultado.get('quantidade_corrigida', 0)}. "
                 f"Sem evidência suficiente: {resultado.get('quantidade_sem_evidencia', 0)}."
             )
             if amostra:
