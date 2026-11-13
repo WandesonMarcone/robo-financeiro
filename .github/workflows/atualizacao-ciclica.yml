@@ -47,7 +47,7 @@ jobs:
       - name: Planejar cobertura da base inteira
         if: inputs.ticker == ''
         id: planejar
-        run: python scripts/planejar_ciclo_noturno.py --limite-total 30 --github-output "$GITHUB_OUTPUT"
+        run: python -m scripts.planejar_ciclo_noturno --limite-total 30 --github-output "$GITHUB_OUTPUT"
       - name: Atualizar cobertura completa sem notificações
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -66,10 +66,10 @@ jobs:
           fi
       - name: Auditar cobertura real da atualização noturna
         if: success() && inputs.ticker == ''
-        run: python scripts/auditar_cobertura_noturna.py --max-atraso-dias 1
+        run: python -m scripts.auditar_cobertura_noturna --max-atraso-dias 1
       - name: Corrigir setores pendentes de FIIs por documentos oficiais
         if: success() && inputs.ticker == ''
-        run: python scripts/corrigir_taxonomia_fiis.py
+        run: python -m scripts.corrigir_taxonomia_fiis
       - name: Avisar conclusão de busca isolada
         if: success() && inputs.ticker != ''
         continue-on-error: true
@@ -77,10 +77,10 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
           TICKER_ISOLADO: ${{ inputs.ticker }}
-        run: python scripts/notificar_sucesso_atualizacao.py
+        run: python -m scripts.notificar_sucesso_atualizacao
       - name: Avisar administrador somente sobre falha do ciclo
         if: failure()
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        run: python scripts/notificar_falha_workflow.py
+        run: python -m scripts.notificar_falha_workflow
