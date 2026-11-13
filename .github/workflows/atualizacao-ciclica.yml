@@ -2,9 +2,8 @@ name: Atualização cíclica de ativos
 
 on:
   schedule:
-    # Uma única execução noturna executa quatro lotes sequenciais de até 30.
-    # Isso evita depender de vários crons, pois o GitHub pode atrasar ou omitir
-    # agendamentos. Na base atual, quatro lotes cobrem ações e FIIs com sobra.
+    # Uma única execução calcula os lotes necessários para a base inteira.
+    # Isso evita ativos esquecidos quando o cadastro crescer.
     - cron: "10 3 * * 1-5"
   workflow_dispatch:
     inputs:
@@ -27,7 +26,7 @@ concurrency:
 jobs:
   atualizar:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -45,6 +44,10 @@ jobs:
           import os
           with open("credenciais.json", "w", encoding="utf-8") as arquivo:
               arquivo.write(os.environ["GOOGLE_CREDS"])
+      - name: Planejar cobertura da base inteira
+        if: inputs.ticker == ''
+        id: planejar
+        run: python -m scripts.planejar_ciclo_noturno --limite-total 30 --github-output "$GITHUB_OUTPUT"
       - name: Atualizar cobertura completa sem notificações
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -54,17 +57,19 @@ jobs:
           if [ -n "${{ inputs.ticker }}" ]; then
             python atualizador_ciclico.py --ticker "${{ inputs.ticker }}" --limite-total "${{ inputs.limite_total || '30' }}" --orcamento-segundos 180 --pausa-segundos 2
           else
-            for ciclo in 1 2 3 4; do
-              echo "Iniciando lote ${ciclo}/4"
+            ciclos="${{ steps.planejar.outputs.ciclos }}"
+            echo "Base: ${{ steps.planejar.outputs.acoes }} ações e ${{ steps.planejar.outputs.fiis }} FIIs; ${ciclos} lote(s)."
+            for ciclo in $(seq 1 "$ciclos"); do
+              echo "Iniciando lote ${ciclo}/${ciclos}"
               python atualizador_ciclico.py --limite-total 30 --orcamento-segundos 180 --pausa-segundos 2
             done
           fi
       - name: Auditar cobertura real da atualização noturna
         if: success() && inputs.ticker == ''
-        run: python scripts/auditar_cobertura_noturna.py --max-atraso-dias 1
+        run: python -m scripts.auditar_cobertura_noturna --max-atraso-dias 1
       - name: Corrigir setores pendentes de FIIs por documentos oficiais
         if: success() && inputs.ticker == ''
-        run: python scripts/corrigir_taxonomia_fiis.py
+        run: python -m scripts.corrigir_taxonomia_fiis
       - name: Avisar conclusão de busca isolada
         if: success() && inputs.ticker != ''
         continue-on-error: true
@@ -72,10 +77,10 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
           TICKER_ISOLADO: ${{ inputs.ticker }}
-        run: python scripts/notificar_sucesso_atualizacao.py
+        run: python -m scripts.notificar_sucesso_atualizacao
       - name: Avisar administrador somente sobre falha do ciclo
         if: failure()
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        run: python scripts/notificar_falha_workflow.py
+        run: python -m scripts.notificar_falha_workflow
