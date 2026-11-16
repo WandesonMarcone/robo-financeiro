@@ -1,0 +1,37 @@
+name: Contingência diária FNET
+
+on:
+  schedule:
+    # 08:30 em Brasília (UTC-3), após a janela das 08:00 do Render.
+    - cron: '30 11 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: descoberta-fnet-diaria
+  cancel-in-progress: false
+
+jobs:
+  descobrir:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+      - name: Descobrir documentos FNET e gravar auditoria
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python -m scripts.varredura_fnet_diaria
+      - name: Avisar administrador em caso de falha
+        if: failure() && !cancelled()
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+        run: python -m scripts.notificar_falha_workflow

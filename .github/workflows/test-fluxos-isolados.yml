@@ -28,6 +28,9 @@ on:
       - '.github/workflows/coleta-bdrs.yml'
       - 'pipeline_dados/coletor_fnet.py'
       - 'tests/test_fnet_isolado.py'
+      - 'tests/test_contingencia_fnet.py'
+      - 'scripts/varredura_fnet_diaria.py'
+      - '.github/workflows/varredura-fnet-diaria.yml'
       - '.github/workflows/main.yml'
       - '.github/workflows/test-fluxos-isolados.yml'
       - '.github/workflows/atualizacao-ciclica.yml'
@@ -58,6 +61,9 @@ on:
       - '.github/workflows/coleta-bdrs.yml'
       - 'pipeline_dados/coletor_fnet.py'
       - 'tests/test_fnet_isolado.py'
+      - 'tests/test_contingencia_fnet.py'
+      - 'scripts/varredura_fnet_diaria.py'
+      - '.github/workflows/varredura-fnet-diaria.yml'
       - '.github/workflows/main.yml'
       - '.github/workflows/test-fluxos-isolados.yml'
       - '.github/workflows/atualizacao-ciclica.yml'
@@ -74,5 +80,5 @@ jobs:
         run: pip install -r requirements.txt
       - name: Validar módulos e fluxos seguros
         run: |
-          python -m py_compile app.py atualizador_ciclico.py modules/lotes_atualizacao.py modules/scraper_acoes.py modules/scraper_fiis.py modules/utils.py services/admin_api.py modules/GoogleDriveManager.py services/orquestrador.py services/coletor_tesouro_direto.py pipeline_dados/coletor_fnet.py scripts/notificar_falha_workflow.py scripts/notificar_sucesso_atualizacao.py
-          python -m unittest tests.test_lotes_atualizacao tests.test_sem_statusinvest tests.test_fnet_isolado tests.test_medicao_drive tests.test_contingencia_eod tests.test_retorno_crons tests.test_tesouro_csv -v
+          python -m py_compile app.py atualizador_ciclico.py modules/lotes_atualizacao.py modules/scraper_acoes.py modules/scraper_fiis.py modules/utils.py services/admin_api.py modules/GoogleDriveManager.py services/orquestrador.py services/coletor_tesouro_direto.py pipeline_dados/coletor_fnet.py scripts/notificar_falha_workflow.py scripts/notificar_sucesso_atualizacao.py scripts/varredura_fnet_diaria.py
+          python -m unittest tests.test_lotes_atualizacao tests.test_sem_statusinvest tests.test_fnet_isolado tests.test_contingencia_fnet tests.test_medicao_drive tests.test_contingencia_eod tests.test_retorno_crons tests.test_tesouro_csv -v
