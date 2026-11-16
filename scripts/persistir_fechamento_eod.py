@@ -57,8 +57,8 @@ def executar(agora=None, buscar_indices=None, abrir_planilha=None,
     planilha = abrir_planilha()
     (validar_planilha or validar_frescor_planilha)(planilha, agora.date())
     resumo = salvar_snapshots(planilha, agora)
-    if not resumo or not (resumo.get("acoes_gravadas") or resumo.get("fiis_gravados")):
-        raise RuntimeError("Nenhum snapshot EOD gravado; confira Sheets e Neon")
+    if not resumo or not resumo.get("acoes_gravadas") or not resumo.get("fiis_gravados"):
+        raise RuntimeError("Fechamento incompleto de ações ou FIIs; confira Sheets e Neon")
     for indice in ("IFIX", "Ibovespa"):
         salvar_indices([por_indice[indice]], agora.date())
     print(f"EOD {agora.date()}: ações={resumo.get('acoes_gravadas', 0)}, "
