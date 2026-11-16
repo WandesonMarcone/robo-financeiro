@@ -13,6 +13,7 @@ on:
       - 'modules/utils.py'
       - 'services/admin_api.py'
       - 'pipeline_dados/coletor_fnet.py'
+      - 'tests/test_fnet_isolado.py'
       - '.github/workflows/main.yml'
       - '.github/workflows/test-fluxos-isolados.yml'
       - '.github/workflows/atualizacao-ciclica.yml'
@@ -28,6 +29,7 @@ on:
       - 'modules/utils.py'
       - 'services/admin_api.py'
       - 'pipeline_dados/coletor_fnet.py'
+      - 'tests/test_fnet_isolado.py'
       - '.github/workflows/main.yml'
       - '.github/workflows/test-fluxos-isolados.yml'
       - '.github/workflows/atualizacao-ciclica.yml'
@@ -45,4 +47,4 @@ jobs:
       - name: Validar módulos e fluxos seguros
         run: |
           python -m py_compile atualizador_ciclico.py modules/lotes_atualizacao.py modules/scraper_acoes.py modules/scraper_fiis.py modules/utils.py services/admin_api.py pipeline_dados/coletor_fnet.py scripts/notificar_falha_workflow.py scripts/notificar_sucesso_atualizacao.py
-          python -m unittest tests.test_lotes_atualizacao tests.test_sem_statusinvest -v
+          python -m unittest tests.test_lotes_atualizacao tests.test_sem_statusinvest tests.test_fnet_isolado -v
