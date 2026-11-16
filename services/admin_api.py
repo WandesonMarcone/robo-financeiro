@@ -105,8 +105,10 @@ def _executar_em_background(tarefa_id: str, funcao, *args):
             if callable(detalhes):
                 registrar_resultado(_TASKS[tarefa_id].get("event_id"), detalhes())
             mensagem = _resumo_retorno(retorno) or _TASKS[tarefa_id]["label"]
-            status_retorno = str(getattr(retorno, "status", "") or "").lower()
-            erro_retorno = getattr(retorno, "erro", None)
+            status_retorno = str((retorno.get("status") if isinstance(retorno, dict)
+                                  else getattr(retorno, "status", "")) or "").lower()
+            erro_retorno = (retorno.get("erro") if isinstance(retorno, dict)
+                            else getattr(retorno, "erro", None))
             falhou = status_retorno in {"erro", "falha", "failed"} or bool(erro_retorno)
             _TASKS[tarefa_id]["status"] = "falha" if falhou else "ok"
             if falhou:
