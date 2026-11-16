@@ -211,13 +211,17 @@ class ColetorFnet:
                     continue
                 vistos.add(id_doc)
 
-                resultado.informes_encontrados += 1
                 ativo = _encontrar_ativo(nome_fundo, pares)
                 if ativo is None:
-                    resultado.sem_ativo += 1
+                    if not ticker_filtro:
+                        resultado.sem_ativo += 1
+                        resultado.informes_encontrados += 1
                     continue
                 if ticker_filtro and str(ativo.ticker or "").upper() != ticker_filtro:
                     continue
+                # Em busca isolada, os totais exibidos referem-se somente ao
+                # ativo solicitado, não a toda a resposta da B3.
+                resultado.informes_encontrados += 1
 
                 try:
                     existe = (
