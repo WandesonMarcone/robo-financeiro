@@ -18,6 +18,7 @@ from modules.lotes_atualizacao import (
     normalizar_tickers,
     selecionar_com_retentativas,
 )
+from modules.resiliencia_planilha import executar_gravacao_com_retentativa
 from modules.scraper_acoes import rodar_garimpo_acoes
 from modules.scraper_fiis import rodar_garimpo_fiis
 from modules.utils import conectar_gspread
@@ -76,24 +77,29 @@ def _texto_lista(valores):
     return ",".join(normalizar_tickers(valores))
 
 
-def _gravar_estado(aba, linha, cursor_acoes, cursor_fiis, pendentes_acoes, pendentes_fiis, agora_sp):
-    aba.update(
-        f"B{linha}:F{linha}",
-        [[
-            str(cursor_acoes),
-            str(cursor_fiis),
-            _texto_lista(pendentes_acoes),
-            _texto_lista(pendentes_fiis),
-            agora_sp,
-        ]],
+def _gravar_estado(aba, linha, cursor_acoes, cursor_fiis, pendentes_acoes, pendentes_fiis, agora_sp, sleep=time.sleep):
+    valores = [[
+        str(cursor_acoes),
+        str(cursor_fiis),
+        _texto_lista(pendentes_acoes),
+        _texto_lista(pendentes_fiis),
+        agora_sp,
+    ]]
+    return executar_gravacao_com_retentativa(
+        lambda: aba.update(f"B{linha}:F{linha}", valores),
+        "Estado do ciclo", sleep=sleep,
     )
 
 
-def _persistir_lote(aba, atualizacoes, tipo):
+def _persistir_lote(aba, atualizacoes, tipo, sleep=time.sleep):
     if not atualizacoes:
         print(f"Lote {tipo}: sem dados válidos; estado preservado para nova tentativa.")
         return False
-    aba.batch_update(atualizacoes)
+    if not executar_gravacao_com_retentativa(
+        lambda: aba.batch_update(atualizacoes), f"Lote {tipo}", sleep=sleep
+    ):
+        print(f"Lote {tipo}: gravação não confirmada; fila preservada para a próxima execução.")
+        return False
     print(f"Lote {tipo}: {len(atualizacoes)} células gravadas.")
     return True
 
@@ -168,7 +174,7 @@ def executar(limite_total=30, orcamento_segundos=540, pausa_segundos=2.0, planil
         clock=clock,
         sleep=sleep,
     )
-    sucesso_fiis = _persistir_lote(destino_fiis, atualizacoes_fiis, "FIIs")
+    sucesso_fiis = _persistir_lote(destino_fiis, atualizacoes_fiis, "FIIs", sleep=sleep)
     if sucesso_fiis:
         tentados = digest_fiis.get("tentados") or []
         pendentes_fiis = atualizar_pendentes(
@@ -178,7 +184,7 @@ def executar(limite_total=30, orcamento_segundos=540, pausa_segundos=2.0, planil
             cursor_fiis = proximo_fiis
         _gravar_estado(
             controle, linha_estado, cursor_acoes, cursor_fiis,
-            pendentes_acoes, pendentes_fiis, agora_sp,
+            pendentes_acoes, pendentes_fiis, agora_sp, sleep=sleep,
         )
 
     atualizacoes_acoes, digest_acoes, destino_acoes = rodar_garimpo_acoes(
@@ -189,7 +195,7 @@ def executar(limite_total=30, orcamento_segundos=540, pausa_segundos=2.0, planil
         clock=clock,
         sleep=sleep,
     )
-    sucesso_acoes = _persistir_lote(destino_acoes, atualizacoes_acoes, "ações")
+    sucesso_acoes = _persistir_lote(destino_acoes, atualizacoes_acoes, "ações", sleep=sleep)
     if sucesso_acoes:
         tentados = digest_acoes.get("tentados") or []
         pendentes_acoes = atualizar_pendentes(
@@ -199,7 +205,7 @@ def executar(limite_total=30, orcamento_segundos=540, pausa_segundos=2.0, planil
             cursor_acoes = proximo_acoes
         _gravar_estado(
             controle, linha_estado, cursor_acoes, cursor_fiis,
-            pendentes_acoes, pendentes_fiis, agora_sp,
+            pendentes_acoes, pendentes_fiis, agora_sp, sleep=sleep,
         )
 
     saida = {
