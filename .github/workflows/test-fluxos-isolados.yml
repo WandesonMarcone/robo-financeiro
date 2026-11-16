@@ -10,6 +10,12 @@ on:
       - 'tests/test_lotes_atualizacao.py'
       - 'tests/test_sem_statusinvest.py'
       - 'scripts/notificar_falha_workflow.py'
+      - 'modules/utils.py'
+      - 'services/admin_api.py'
+      - 'services/orquestrador.py'
+      - 'pipeline_dados/coletor_fnet.py'
+      - 'tests/test_fnet_isolado.py'
+      - '.github/workflows/main.yml'
       - '.github/workflows/test-fluxos-isolados.yml'
       - '.github/workflows/atualizacao-ciclica.yml'
   pull_request:
@@ -21,6 +27,12 @@ on:
       - 'tests/test_lotes_atualizacao.py'
       - 'tests/test_sem_statusinvest.py'
       - 'scripts/notificar_falha_workflow.py'
+      - 'modules/utils.py'
+      - 'services/admin_api.py'
+      - 'services/orquestrador.py'
+      - 'pipeline_dados/coletor_fnet.py'
+      - 'tests/test_fnet_isolado.py'
+      - '.github/workflows/main.yml'
       - '.github/workflows/test-fluxos-isolados.yml'
       - '.github/workflows/atualizacao-ciclica.yml'
 
@@ -36,5 +48,5 @@ jobs:
         run: pip install -r requirements.txt
       - name: Validar módulos e fluxos seguros
         run: |
-          python -m py_compile atualizador_ciclico.py modules/lotes_atualizacao.py modules/scraper_acoes.py modules/scraper_fiis.py scripts/notificar_falha_workflow.py scripts/notificar_sucesso_atualizacao.py
-          python -m unittest tests.test_lotes_atualizacao tests.test_sem_statusinvest -v
+          python -m py_compile atualizador_ciclico.py modules/lotes_atualizacao.py modules/scraper_acoes.py modules/scraper_fiis.py modules/utils.py services/admin_api.py services/orquestrador.py pipeline_dados/coletor_fnet.py scripts/notificar_falha_workflow.py scripts/notificar_sucesso_atualizacao.py
+          python -m unittest tests.test_lotes_atualizacao tests.test_sem_statusinvest tests.test_fnet_isolado -v

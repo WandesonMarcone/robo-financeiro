@@ -21,14 +21,23 @@ def _chat_operacional():
 
 
 def _avisar(texto, **kwargs):
+    """Envia o aviso operacional e registra a tentativa administrativa."""
     destino = _chat_operacional()
     if destino is None:
         logger.warning("Administrador nao configurado; aviso nao enviado.")
-        return
+        return False
+    from services.historico_operacional import registrar_notificacao
     try:
         bot.send_message(destino, texto, **kwargs)
-    except Exception:
+    except Exception as erro:
+        registrar_notificacao("AVISO_OPERACIONAL", destinatario=destino,
+                              resumo=texto, enviada=False, erro=type(erro).__name__,
+                              audiencia="ADMINISTRADOR")
         logger.warning("Falha ao enviar aviso operacional", exc_info=True)
+        return False
+    registrar_notificacao("AVISO_OPERACIONAL", destinatario=destino,
+                          resumo=texto, enviada=True, audiencia="ADMINISTRADOR")
+    return True
 
 
 def varredura_diaria():

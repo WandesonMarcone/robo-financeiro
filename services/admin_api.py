@@ -104,12 +104,19 @@ def _executar_em_background(tarefa_id: str, funcao, *args):
             detalhes = getattr(retorno, "detalhes_painel", None)
             if callable(detalhes):
                 registrar_resultado(_TASKS[tarefa_id].get("event_id"), detalhes())
-            _TASKS[tarefa_id]["status"] = "ok"
             mensagem = _resumo_retorno(retorno) or _TASKS[tarefa_id]["label"]
+            status_retorno = str((retorno.get("status") if isinstance(retorno, dict)
+                                  else getattr(retorno, "status", "")) or "").lower()
+            erro_retorno = (retorno.get("erro") if isinstance(retorno, dict)
+                            else getattr(retorno, "erro", None))
+            falhou = status_retorno in {"erro", "falha", "failed"} or bool(erro_retorno)
+            _TASKS[tarefa_id]["status"] = "falha" if falhou else "ok"
+            if falhou:
+                _TASKS[tarefa_id]["error"] = str(erro_retorno or status_retorno)[:1000]
             _TASKS[tarefa_id]["progress"].append({"at": datetime.now().isoformat(), "message": mensagem})
             registrar_progresso(_TASKS[tarefa_id].get("event_id"), mensagem)
-            concluir_evento(_TASKS[tarefa_id].get("event_id"), sucesso=True,
-                            mensagem=mensagem)
+            concluir_evento(_TASKS[tarefa_id].get("event_id"), sucesso=not falhou,
+                            mensagem=mensagem, erro=str(erro_retorno or status_retorno) if falhou else None)
         except Exception as exc:  # detalhes ficam somente no log privado Render
             _TASKS[tarefa_id]["status"] = "falha"
             _TASKS[tarefa_id]["error"] = type(exc).__name__
