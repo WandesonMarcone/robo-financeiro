@@ -3,7 +3,7 @@ import unittest
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from scripts.persistir_fechamento_eod import executar
+from scripts.persistir_fechamento_eod import executar, validar_frescor_planilha
 
 
 AGORA = datetime(2026, 11, 16, 20, 0, tzinfo=ZoneInfo("America/Sao_Paulo"))
@@ -33,6 +33,7 @@ class TesteFechamentoContingencia(unittest.TestCase):
             buscar_indices=lambda: [vela("Ibovespa", AGORA.date()),
                                     vela("IFIX", AGORA.date())],
             abrir_planilha=lambda: "planilha",
+            validar_planilha=lambda *_: None,
             salvar_snapshots=lambda planilha, data: {
                 "acoes_gravadas": 70, "fiis_gravados": 33
             },
@@ -44,6 +45,24 @@ class TesteFechamentoContingencia(unittest.TestCase):
         self.assertEqual(datas, [
             ("IFIX", AGORA.date()), ("Ibovespa", AGORA.date())
         ])
+
+    def test_planilha_antiga_nao_pode_ser_datada_como_pregao_novo(self):
+        class Aba:
+            def __init__(self, carimbos, coluna):
+                self.linhas = [["Ticker"]] + [
+                    ["PETR4"] + [""] * (coluna - 1) + [valor] for valor in carimbos
+                ]
+
+            def get_all_values(self):
+                return self.linhas
+
+        class Planilha:
+            def worksheet(self, nome):
+                coluna = 32 if nome == "BD_Acoes" else 17
+                return Aba(["OK 16/11 00:10", "OK 16/11 11:30"], coluna)
+
+        with self.assertRaisesRegex(RuntimeError, "atualização intradiária"):
+            validar_frescor_planilha(Planilha(), AGORA.date())
 
     def test_indice_ausente_interrompe_sem_snapshot(self):
         with self.assertRaisesRegex(RuntimeError, "incompleto"):
