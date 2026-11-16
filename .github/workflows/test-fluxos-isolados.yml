@@ -12,6 +12,8 @@ on:
       - 'scripts/notificar_falha_workflow.py'
       - 'modules/utils.py'
       - 'services/admin_api.py'
+      - 'modules/GoogleDriveManager.py'
+      - 'tests/test_medicao_drive.py'
       - 'services/orquestrador.py'
       - 'pipeline_dados/coletor_fnet.py'
       - 'tests/test_fnet_isolado.py'
@@ -29,6 +31,8 @@ on:
       - 'scripts/notificar_falha_workflow.py'
       - 'modules/utils.py'
       - 'services/admin_api.py'
+      - 'modules/GoogleDriveManager.py'
+      - 'tests/test_medicao_drive.py'
       - 'services/orquestrador.py'
       - 'pipeline_dados/coletor_fnet.py'
       - 'tests/test_fnet_isolado.py'
@@ -48,5 +52,5 @@ jobs:
         run: pip install -r requirements.txt
       - name: Validar módulos e fluxos seguros
         run: |
-          python -m py_compile atualizador_ciclico.py modules/lotes_atualizacao.py modules/scraper_acoes.py modules/scraper_fiis.py modules/utils.py services/admin_api.py services/orquestrador.py pipeline_dados/coletor_fnet.py scripts/notificar_falha_workflow.py scripts/notificar_sucesso_atualizacao.py
-          python -m unittest tests.test_lotes_atualizacao tests.test_sem_statusinvest tests.test_fnet_isolado -v
+          python -m py_compile atualizador_ciclico.py modules/lotes_atualizacao.py modules/scraper_acoes.py modules/scraper_fiis.py modules/utils.py services/admin_api.py modules/GoogleDriveManager.py services/orquestrador.py pipeline_dados/coletor_fnet.py scripts/notificar_falha_workflow.py scripts/notificar_sucesso_atualizacao.py
+          python -m unittest tests.test_lotes_atualizacao tests.test_sem_statusinvest tests.test_fnet_isolado tests.test_medicao_drive -v
