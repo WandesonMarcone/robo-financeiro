@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 import io
+import unicodedata
 from datetime import datetime
 
 import requests
@@ -21,7 +22,8 @@ URL_TESOURO = (
 
 
 def _normalizar(chave: str) -> str:
-    return "".join(ch for ch in str(chave or "").lower() if ch.isalnum())
+    sem_acentos = unicodedata.normalize("NFKD", str(chave or "").lower())
+    return "".join(ch for ch in sem_acentos if ch.isalnum() and not unicodedata.combining(ch))
 
 
 def _numero(valor):
@@ -61,19 +63,26 @@ def coletar_tesouro_direto(session_factory=None):
     leitor = csv.DictReader(io.StringIO(conteudo), delimiter=";")
     linhas = list(leitor)
     if not linhas:
-        return {"fonte": "Tesouro Transparente", "gravadas": 0, "referencia": None}
+        raise ValueError("TESOURO_CSV_VAZIO")
 
     parsed = []
     for linha in linhas:
         referencia = _data(_campo(linha, "Data Base", "DataBase"))
         titulo = _campo(linha, "Tipo Titulo", "TipoTitulo", "Titulo")
         vencimento = _data(_campo(linha, "Data Vencimento", "DataVencimento"))
-        if referencia and titulo:
+        if referencia and titulo and vencimento:
             parsed.append((referencia, str(titulo).strip(), vencimento, linha))
     if not parsed:
         raise ValueError("TESOURO_CSV_SEM_COLUNAS_ESPERADAS")
     ultima = max(item[0] for item in parsed)
     lote = [item for item in parsed if item[0].date() == ultima.date()]
+
+    if not any(
+        _campo(item[3], "Taxa Compra Manha", "Taxa Venda Manha",
+               "PU Compra Manha", "PU Venda Manha")
+        for item in lote
+    ):
+        raise ValueError("TESOURO_CSV_SEM_PRECOS_OU_TAXAS")
 
     sessao = session_factory() if session_factory else SessionDB()
     try:
