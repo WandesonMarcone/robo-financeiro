@@ -47,12 +47,11 @@ def _enviar_movimentacao(pacote, tipo):
     texto = _texto_digest(pacote)
     if not texto:
         return False
-    disparar_alertas(
+    return disparar_alertas(
         texto,
         tickers=_tickers_digest(pacote),
         tipo=_tipo_digest(pacote, tipo),
     )
-    return True
 
 
 def _enviar_favoritos(pacote, tipo):
