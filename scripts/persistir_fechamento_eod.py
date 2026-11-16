@@ -22,7 +22,7 @@ def validar_frescor_planilha(planilha, dia):
         recentes = 0
         for linha in ativos:
             carimbo = str(linha[coluna]).strip() if len(linha) > coluna else ""
-            match = re.fullmatch(r"OK\\s+(\\d{2})/(\\d{2})\\s+(\\d{2}):(\\d{2})", carimbo)
+            match = re.fullmatch(r"OK\s+(\d{2})/(\d{2})\s+(\d{2}):(\d{2})", carimbo)
             if match and (int(match[1]), int(match[2])) == (dia.day, dia.month) and int(match[3]) >= 10:
                 recentes += 1
         if recentes / len(ativos) < 0.6:
