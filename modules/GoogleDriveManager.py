@@ -69,71 +69,69 @@ class GoogleDriveManager:
 
         self.service = build('drive', 'v3', credentials=self.creds)
 
-    def medir_armazenamento_robo(self, tempo_maximo_segundos=90):
-        """Mede arquivos sob a raiz do robô, sem alterar nada no Drive.
+    def medir_armazenamento_robo(self, tempo_maximo_segundos=90, estado=None):
+        """Conta a árvore em lotes; a próxima chamada retoma a última página.
 
-        A cota da conta é retornada separadamente da área ocupada pelo robô:
-        a primeira pode conter arquivos pessoais que não pertencem ao sistema.
+        A cota da conta é independente da soma de arquivos do robô. O estado
+        fica apenas na memória do servidor e é reiniciado se a raiz mudar.
         """
+        import time
+
         sobre = self.service.about().get(
             fields="storageQuota(limit,usage,usageInDrive,usageInDriveTrash)"
         ).execute().get("storageQuota", {})
+        estado = estado if estado is not None else {}
+        if estado.get("raiz") != self.root_folder_id:
+            estado.clear()
+            estado.update({
+                "raiz": self.root_folder_id,
+                "pendentes": [(self.root_folder_id, None)] if self.root_folder_id else [],
+                "robo_bytes": 0, "arquivos": 0, "pdfs": 0, "pastas": 0,
+            })
         resultado = {
             "conta_usada_bytes": int(sobre.get("usage") or 0),
             "conta_limite_bytes": int(sobre.get("limit") or 0),
             "conta_lixeira_bytes": int(sobre.get("usageInDriveTrash") or 0),
-            "robo_bytes": 0,
-            "arquivos": 0,
-            "pdfs": 0,
-            "pastas": 0,
             "raiz_configurada": bool(self.root_folder_id),
         }
         if not self.root_folder_id:
+            resultado.update({"robo_bytes": 0, "arquivos": 0, "pdfs": 0,
+                              "pastas": 0, "medicao_concluida": True})
             return resultado
 
-        # A árvore pode ter milhares de meses/documentos. A tela não pode ficar
-        # em "medindo" para sempre: devolvemos uma medição explicitamente
-        # parcial ao atingir o orçamento e uma nova tentativa pode continuá-la.
-        import time
         inicio = time.monotonic()
-        pendentes = [self.root_folder_id]
-        vistos = set()
+        pendentes = estado["pendentes"]
         while pendentes:
             if time.monotonic() - inicio >= max(5, int(tempo_maximo_segundos)):
-                resultado["medicao_concluida"] = False
-                resultado["pastas_pendentes"] = len(pendentes)
+                resultado.update({campo: estado[campo] for campo in
+                                  ("robo_bytes", "arquivos", "pdfs", "pastas")})
+                resultado.update({"medicao_concluida": False,
+                                  "pastas_pendentes": len(pendentes)})
                 return resultado
-            pasta_id = pendentes.pop()
-            if pasta_id in vistos:
-                continue
-            vistos.add(pasta_id)
-            pagina = None
-            while True:
-                if time.monotonic() - inicio >= max(5, int(tempo_maximo_segundos)):
-                    resultado["medicao_concluida"] = False
-                    resultado["pastas_pendentes"] = len(pendentes) + 1
-                    return resultado
-                resposta = self.service.files().list(
-                    q=f"'{pasta_id}' in parents and trashed = false",
-                    fields="nextPageToken,files(id,mimeType,size)",
-                    pageToken=pagina,
-                    pageSize=1000,
-                    supportsAllDrives=True,
-                    includeItemsFromAllDrives=True,
-                    corpora="allDrives",
-                ).execute()
-                for arquivo in resposta.get("files", []):
-                    if arquivo.get("mimeType") == _MIME_PASTA:
-                        resultado["pastas"] += 1
-                        pendentes.append(arquivo["id"])
-                        continue
-                    resultado["arquivos"] += 1
-                    resultado["robo_bytes"] += int(arquivo.get("size") or 0)
+            pasta_id, pagina = pendentes[-1]
+            resposta = self.service.files().list(
+                q=f"'{pasta_id}' in parents and trashed = false",
+                fields="nextPageToken,files(id,mimeType,size)",
+                pageToken=pagina, pageSize=1000,
+                supportsAllDrives=True, includeItemsFromAllDrives=True,
+                corpora="allDrives",
+            ).execute()
+            proxima = resposta.get("nextPageToken")
+            if proxima:
+                pendentes[-1] = (pasta_id, proxima)
+            else:
+                pendentes.pop()
+            for arquivo in resposta.get("files", []):
+                if arquivo.get("mimeType") == _MIME_PASTA:
+                    estado["pastas"] += 1
+                    pendentes.append((arquivo["id"], None))
+                else:
+                    estado["arquivos"] += 1
+                    estado["robo_bytes"] += int(arquivo.get("size") or 0)
                     if arquivo.get("mimeType") == "application/pdf":
-                        resultado["pdfs"] += 1
-                pagina = resposta.get("nextPageToken")
-                if not pagina:
-                    break
+                        estado["pdfs"] += 1
+        resultado.update({campo: estado[campo] for campo in
+                          ("robo_bytes", "arquivos", "pdfs", "pastas")})
         resultado["medicao_concluida"] = True
         return resultado
 
