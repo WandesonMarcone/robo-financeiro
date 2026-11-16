@@ -117,12 +117,19 @@ def montar_markup_painel(tickers, tipo):
 
 
 def disparar_alertas(msg, tickers=None, tipo=None, chat_id=None):
-    """Push de MOVIMENTACAO (Sheets+Telegram). Nao grava alertas_eventos."""
-    if not msg or str(msg).strip() == "":
-        return
+    """Envia uma mensagem de mercado e registra a entrega real ao Telegram."""
+    if not msg or not str(msg).strip():
+        return False
     destino = chat_id if chat_id is not None else config.TELEGRAM_CHAT_ID
     if destino is None:
-        return
+        return False
+    from services.historico_operacional import registrar_notificacao
+
+    lista = [str(t).strip().upper() for t in (tickers or []) if str(t).strip()]
+    ticker = lista[0] if len(lista) == 1 else None
+    audiencia = ("ADMINISTRADOR" if str(destino) == str(config.TELEGRAM_ADMIN_ID)
+                 else "USUARIO")
+    categoria = str(tipo or "MERCADO").strip().upper()
     try:
         bot = telebot.TeleBot(config.TELEGRAM_BOT_TOKEN)
         kwargs = {"parse_mode": "Markdown"}
@@ -130,9 +137,17 @@ def disparar_alertas(msg, tickers=None, tipo=None, chat_id=None):
         if markup is not None:
             kwargs["reply_markup"] = markup
         bot.send_message(destino, msg, **kwargs)
-        print("📲 [Telegram] Notificação de ALERTA entregue com sucesso!")
-    except Exception as e:
-        print(f"⚠️ [Telegram] Erro de conexão ao enviar alerta: {e}")
+    except Exception as erro:
+        registrar_notificacao("MOVIMENTACAO_" + categoria, ticker=ticker,
+                              destinatario=destino, resumo=str(msg), enviada=False,
+                              erro=type(erro).__name__, audiencia=audiencia)
+        print(f"⚠️ [Telegram] Erro de conexão ao enviar alerta: {type(erro).__name__}")
+        return False
+    registrar_notificacao("MOVIMENTACAO_" + categoria, ticker=ticker,
+                          destinatario=destino, resumo=str(msg), enviada=True,
+                          audiencia=audiencia)
+    print("📲 [Telegram] Notificação de ALERTA entregue com sucesso!")
+    return True
 
 
 def _destino_telegram(usuario):
@@ -178,8 +193,12 @@ def notificar_seguidores_ticker(itens, tipo, repo=None, enviar=None):
             destino = _destino_telegram(usuario)
             if destino is None:
                 continue
-            disparar(texto, tickers=[ticker], tipo=tipo, chat_id=destino)
-            enviados += 1
+            try:
+                entregue = disparar(texto, tickers=[ticker], tipo=tipo, chat_id=destino)
+            except Exception:
+                continue
+            if entregue is not False:
+                enviados += 1
     return enviados
 
 def conectar_gspread():
