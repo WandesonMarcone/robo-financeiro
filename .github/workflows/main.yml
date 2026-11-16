@@ -54,4 +54,4 @@ jobs:
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        run: python scripts/notificar_falha_workflow.py
+        run: python -m scripts.notificar_falha_workflow
