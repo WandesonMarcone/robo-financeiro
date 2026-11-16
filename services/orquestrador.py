@@ -91,8 +91,10 @@ def coleta_informes_fiis():
 
         resultado = processar_informes_fiis_cvm()
         _avisar(resultado.mensagem_telegram())
+        return resultado
     except Exception as e:
         _avisar(f"Erro na coleta mensal de FIIs: {type(e).__name__}")
+        raise
 
 
 def coleta_docs_acoes():
@@ -107,9 +109,11 @@ def coleta_docs_acoes():
         registrar_resultado(evento_id, resultado.detalhes_painel())
         concluir_evento(evento_id, sucesso=resultado.status != "erro", mensagem=resultado.mensagem_telegram())
         _avisar(resultado.mensagem_telegram())
+        return resultado
     except Exception as e:
         concluir_evento(evento_id, sucesso=False, erro=type(e).__name__, mensagem="Falha na varredura IPE/CVM de ações.")
         _avisar(f"Erro na varredura de PDFs de acoes: {type(e).__name__}")
+        raise
 
 
 def processar_ia_acoes(ticker: str | None = None):
@@ -121,8 +125,10 @@ def processar_ia_acoes(ticker: str | None = None):
 
         resultado = rotina_processar_acoes(ticker=ticker)
         _avisar(resultado.mensagem_telegram())
+        return resultado
     except Exception as e:
         _avisar(f"Erro no processamento IA de acoes: {type(e).__name__}")
+        raise
 
 
 def alimentar_ia():
@@ -136,8 +142,10 @@ def alimentar_ia():
 
         resumo = alimentar_textos_pendentes()
         _avisar(mensagem_alimentacao_ia(resumo))
+        return resumo
     except Exception as e:
         _avisar(f"Erro na alimentacao de IA: {type(e).__name__}")
+        raise
 
 
 def auditar_drive():
@@ -151,8 +159,10 @@ def auditar_drive():
 
         resumo = auditar_documentos_drive()
         _avisar(mensagem_auditoria_drive(resumo))
+        return resumo
     except Exception as e:
         _avisar(f"Erro na auditoria do Drive: {type(e).__name__}")
+        raise
 
 
 def snapshot_eod():
