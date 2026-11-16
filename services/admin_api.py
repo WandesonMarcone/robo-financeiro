@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 _TICKER = re.compile(r"^[A-Z0-9]{4,10}$")
 _TASKS: dict[str, dict] = {}
 _STORAGE: dict[str, object] = {"status": "not_measured"}
+_DRIVE_SCAN: dict[str, object] = {}
 _EXTERNAL_HEALTH: dict[str, object] = {"drive": "checking", "github": "checking"}
 _EXTERNAL_HEALTH_AT: datetime | None = None
 _EXTERNAL_HEALTH_RUNNING = False
@@ -162,11 +163,13 @@ def _medir_armazenamento():
         _STORAGE.update({"phase": "Neon medido. Contando arquivos da pasta do robô no Drive…",
                          "neon": {"database_bytes": banco_bytes, "tables_bytes": tabelas_bytes}})
         from modules.GoogleDriveManager import GoogleDriveManager
-        drive = GoogleDriveManager().medir_armazenamento_robo(tempo_maximo_segundos=90)
+        drive = GoogleDriveManager().medir_armazenamento_robo(
+            tempo_maximo_segundos=90, estado=_DRIVE_SCAN
+        )
         _STORAGE.update({
             "status": "ready" if drive.get("medicao_concluida", True) else "partial",
             "phase": ("Medição concluída." if drive.get("medicao_concluida", True)
-                      else "Medição parcial: o Drive tem muitas subpastas. Os valores exibidos são parciais; toque em Medir agora para uma nova tentativa."),
+                      else "Medição parcial: toque em Medir agora para continuar das pastas restantes. Os valores exibidos são parciais."),
             "measured_at": datetime.now().strftime("%d/%m/%Y %H:%M"),
             "neon": {"database_bytes": banco_bytes, "tables_bytes": tabelas_bytes},
             "drive": drive,
