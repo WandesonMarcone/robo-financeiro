@@ -3,6 +3,8 @@ on:
   schedule:
     # 19h30 em Brasília, após o fechamento regular de 18h do Tesouro Direto.
     - cron: '30 22 * * 1-5'
+    # Segunda chance às 22h30 em Brasília, idempotente por título e data-base.
+    - cron: '30 1 * * 2-6'
   workflow_dispatch:
 permissions:
   contents: read
