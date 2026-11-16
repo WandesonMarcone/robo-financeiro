@@ -3,6 +3,8 @@ on:
   schedule:
     # 19h15 em Brasília (UTC-3): após o fechamento da série diária do BCB.
     - cron: '15 22 * * 1-5'
+    # Retentativa idempotente às 23h de Brasília quando a divulgação atrasar.
+    - cron: '0 2 * * 2-6'
   workflow_dispatch:
 permissions:
   contents: read

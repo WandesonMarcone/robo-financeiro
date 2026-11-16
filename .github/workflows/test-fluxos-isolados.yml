@@ -23,6 +23,8 @@ on:
       - 'services/coletor_tesouro_direto.py'
       - 'tests/test_tesouro_csv.py'
       - 'tests/test_auditoria_tesouro.py'
+      - 'tests/test_auditoria_macro.py'
+      - 'scripts/coletar_series_macro.py'
       - 'scripts/coletar_tesouro_direto.py'
       - '.github/workflows/coleta-tesouro.yml'
       - '.github/workflows/coleta-macro.yml'
@@ -58,6 +60,8 @@ on:
       - 'services/coletor_tesouro_direto.py'
       - 'tests/test_tesouro_csv.py'
       - 'tests/test_auditoria_tesouro.py'
+      - 'tests/test_auditoria_macro.py'
+      - 'scripts/coletar_series_macro.py'
       - 'scripts/coletar_tesouro_direto.py'
       - '.github/workflows/coleta-tesouro.yml'
       - '.github/workflows/coleta-macro.yml'
@@ -84,5 +88,5 @@ jobs:
         run: pip install -r requirements.txt
       - name: Validar módulos e fluxos seguros
         run: |
-          python -m py_compile app.py atualizador_ciclico.py modules/lotes_atualizacao.py modules/scraper_acoes.py modules/scraper_fiis.py modules/utils.py services/admin_api.py modules/GoogleDriveManager.py services/orquestrador.py services/coletor_tesouro_direto.py pipeline_dados/coletor_fnet.py scripts/notificar_falha_workflow.py scripts/notificar_sucesso_atualizacao.py scripts/varredura_fnet_diaria.py scripts/coletar_tesouro_direto.py
-          python -m unittest tests.test_lotes_atualizacao tests.test_sem_statusinvest tests.test_fnet_isolado tests.test_contingencia_fnet tests.test_medicao_drive tests.test_contingencia_eod tests.test_retorno_crons tests.test_tesouro_csv tests.test_auditoria_tesouro -v
+          python -m py_compile app.py atualizador_ciclico.py modules/lotes_atualizacao.py modules/scraper_acoes.py modules/scraper_fiis.py modules/utils.py services/admin_api.py modules/GoogleDriveManager.py services/orquestrador.py services/coletor_tesouro_direto.py pipeline_dados/coletor_fnet.py scripts/notificar_falha_workflow.py scripts/notificar_sucesso_atualizacao.py scripts/varredura_fnet_diaria.py scripts/coletar_tesouro_direto.py scripts/coletar_series_macro.py
+          python -m unittest tests.test_lotes_atualizacao tests.test_sem_statusinvest tests.test_fnet_isolado tests.test_contingencia_fnet tests.test_medicao_drive tests.test_contingencia_eod tests.test_retorno_crons tests.test_tesouro_csv tests.test_auditoria_tesouro tests.test_auditoria_macro -v
