@@ -1,0 +1,46 @@
+name: Fechamento EOD de contingência
+
+on:
+  schedule:
+    # 20h em São Paulo. Repete apenas a persistência, sem varrer mercado.
+    - cron: "0 23 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fechamento-eod
+  cancel-in-progress: false
+
+jobs:
+  fechar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+      - name: Credencial temporária da planilha
+        shell: python
+        env:
+          GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: |
+          import os
+          with open("credenciais.json", "w", encoding="utf-8") as arquivo:
+              arquivo.write(os.environ["GOOGLE_CREDS"])
+      - name: Persistir fechamento confirmado
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          EOD_SNAPSHOTS: "true"
+        run: python -m scripts.persistir_fechamento_eod
+      - name: Avisar administrador se falhar
+        if: failure() && !cancelled()
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+        run: python -m scripts.notificar_falha_workflow
