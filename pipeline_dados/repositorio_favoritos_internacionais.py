@@ -56,7 +56,7 @@ class RepositorioFavoritosInternacionais:
         try:
             row = sessao.execute(text("""
                 SELECT id,ticker,tipo FROM instrumentos_internacionais
-                WHERE ticker=:ticker AND ativo=TRUE AND (:tipo IS NULL OR tipo=:tipo)
+                WHERE ticker=:ticker AND ativo=TRUE AND (CAST(:tipo AS text) IS NULL OR tipo=:tipo)
             """), {"ticker": ticker, "tipo": tipo}).mappings().first()
             return dict(row) if row else None
         finally:
@@ -73,7 +73,7 @@ class RepositorioFavoritosInternacionais:
                 FROM favoritos_instrumentos_internacionais f
                 JOIN instrumentos_internacionais i ON i.id=f.instrumento_id
                 WHERE f.usuario_id=:usuario_id AND i.ativo=TRUE
-                  AND (:tipo IS NULL OR i.tipo=:tipo)
+                  AND (CAST(:tipo AS text) IS NULL OR i.tipo=:tipo)
                 ORDER BY i.ticker
             """), {"usuario_id": int(usuario_id), "tipo": tipo}).mappings().all()
             return [FavoritoInternacionalDTO(**dict(row)) for row in rows]
