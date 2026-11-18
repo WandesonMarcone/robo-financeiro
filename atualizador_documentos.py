@@ -435,6 +435,7 @@ class ResultadoProcessamento:
     def __init__(self, status_fila="PENDENTE"):
         self.status_fila = status_fila
         self.fila = 0
+        self.lote = 0
         self.processados = 0
         self.salvo_drive = 0
         self.revisao = 0
@@ -447,11 +448,12 @@ class ResultadoProcessamento:
         if self.erro:
             pendentes = max(0, self.fila - self.processados)
             return (
-                f"Processamento da fila ({etiqueta}) interrompido.\\n"
-                f"Motivo: {self.erro}\\n"
-                f"Na fila: {self.fila}\\n"
-                f"Processados: {self.processados}\\n"
-                f"Pendentes preservados: {pendentes}\\n"
+                f"Processamento da fila ({etiqueta}) interrompido.\n"
+                f"Motivo: {self.erro}\n"
+                f"Na fila: {self.fila}\n"
+                f"Selecionados neste lote: {self.lote}\n"
+                f"Processados: {self.processados}\n"
+                f"Pendentes preservados: {pendentes}\n"
                 f"Erros: {self.erros}"
             )
         if self.fila == 0:
@@ -462,6 +464,7 @@ class ResultadoProcessamento:
         return (
             f"Processamento da fila ({etiqueta}).\n"
             f"Na fila: {self.fila}\n"
+            f"Selecionados neste lote: {self.lote}\n"
             f"Processados: {self.processados}\n"
             f"Salvos no Drive: {self.salvo_drive}\n"
             f"Enviados para revisao: {self.revisao}\n"
@@ -470,7 +473,19 @@ class ResultadoProcessamento:
         )
 
 
-def rotina_processar_pendentes(documento_id: int | None = None, ticker: str | None = None):
+def _selecionar_lote_documental(consulta, limite):
+    """Seleciona uma página estável; itens concluídos saem da próxima consulta."""
+    tamanho = max(1, min(int(limite), 20))
+    total = consulta.count()
+    ids = [doc.id for doc in consulta.order_by(
+        DocumentosQualitativos.data_atualizacao.asc(),
+        DocumentosQualitativos.id.asc(),
+    ).limit(tamanho).all()]
+    return total, ids
+
+
+def rotina_processar_pendentes(documento_id: int | None = None, ticker: str | None = None,
+                              limite: int = 20):
     """Processa pendentes FII, opcionalmente de um único documento ou ativo."""
     resultado = ResultadoProcessamento("PENDENTE")
     ticker = str(ticker or "").strip().upper() or None
@@ -483,12 +498,12 @@ def rotina_processar_pendentes(documento_id: int | None = None, ticker: str | No
             consulta = consulta.filter(DocumentosQualitativos.id == documento_id)
         if ticker:
             consulta = consulta.join(Ativo).filter(Ativo.ticker == ticker)
-        pendentes_ids = [doc.id for doc in consulta.all()]
+        resultado.fila, pendentes_ids = _selecionar_lote_documental(consulta, limite)
     finally:
         session_fila.close()
 
-    resultado.fila = len(pendentes_ids)
-    logger.info("Fila PENDENTE%s: %s documento(s)", f" de {ticker}" if ticker else "", resultado.fila)
+    resultado.lote = len(pendentes_ids)
+    logger.info("Fila PENDENTE%s: %s documento(s), lote=%s", f" de {ticker}" if ticker else "", resultado.fila, resultado.lote)
     if not pendentes_ids:
         return resultado
 
@@ -626,6 +641,15 @@ def rotina_processar_pendentes(documento_id: int | None = None, ticker: str | No
             print(f"❌ Erro crítico ao processar o documento {doc_id}: {e}")
             session.rollback()
             resultado.erros += 1
+            try:
+                # Mantém o item pendente, mas permite que o próximo lote avance.
+                pendente = session.query(DocumentosQualitativos).filter_by(id=doc_id).first()
+                if pendente and pendente.status_processamento == "PENDENTE":
+                    pendente.data_atualizacao = datetime.now()
+                    pendente.log_erro = type(e).__name__
+                    session.commit()
+            except Exception:
+                session.rollback()
         finally:
             # 4. 🔴 FECHA A SESSÃO DO ARQUIVO PARA NÃO DAR TIMEOUT
             session.close()
@@ -646,7 +670,8 @@ def rotina_de_atualizacao_em_massa(dias=60, session=None, capturar_tudo=None):
     resultado.processamento = rotina_processar_pendentes()
     return resultado
 
-def rotina_processar_acoes(ticker: str | None = None, documento_id: int | None = None):
+def rotina_processar_acoes(ticker: str | None = None, documento_id: int | None = None,
+                          limite: int = 20):
     """Esteira de IA dos documentos CVM pendentes, opcionalmente de um único ativo."""
     resultado = ResultadoProcessamento("PENDENTE_ACAO")
     ticker = str(ticker or "").strip().upper() or None
@@ -659,12 +684,12 @@ def rotina_processar_acoes(ticker: str | None = None, documento_id: int | None =
             consulta = consulta.filter(DocumentosQualitativos.id == documento_id)
         if ticker:
             consulta = consulta.join(Ativo).filter(Ativo.ticker == ticker)
-        pendentes_ids = [doc.id for doc in consulta.all()]
+        resultado.fila, pendentes_ids = _selecionar_lote_documental(consulta, limite)
     finally:
         session_fila.close()
 
-    resultado.fila = len(pendentes_ids)
-    logger.info("Fila PENDENTE_ACAO%s: %s documento(s)", f" de {ticker}" if ticker else "", resultado.fila)
+    resultado.lote = len(pendentes_ids)
+    logger.info("Fila PENDENTE_ACAO%s: %s documento(s), lote=%s", f" de {ticker}" if ticker else "", resultado.fila, resultado.lote)
     if not pendentes_ids:
         return resultado
 
@@ -814,6 +839,14 @@ def rotina_processar_acoes(ticker: str | None = None, documento_id: int | None =
             print(f"❌ Erro crítico na ação {doc_id}: {e}")
             session.rollback()
             resultado.erros += 1
+            try:
+                pendente = session.query(DocumentosQualitativos).filter_by(id=doc_id).first()
+                if pendente and pendente.status_processamento == "PENDENTE_ACAO":
+                    pendente.data_atualizacao = datetime.now()
+                    pendente.log_erro = type(e).__name__
+                    session.commit()
+            except Exception:
+                session.rollback()
         finally:
             # 4. 🔴 FECHA SESSÃO
             session.close()
