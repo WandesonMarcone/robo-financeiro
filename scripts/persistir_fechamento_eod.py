@@ -34,7 +34,8 @@ def validar_frescor_planilha(planilha, dia):
 
 
 def executar(agora=None, buscar_indices=None, abrir_planilha=None,
-             salvar_snapshots=None, salvar_indices=None, validar_planilha=None,\n             auditar_cobertura=None):
+             salvar_snapshots=None, salvar_indices=None, validar_planilha=None,
+             auditar_cobertura=None):
     """Grava o fechamento somente se IFIX e Ibovespa têm vela de hoje."""
     agora = agora or datetime.now(ZoneInfo("America/Sao_Paulo"))
     buscar_indices = buscar_indices or buscar_indices_b3_ohlc
