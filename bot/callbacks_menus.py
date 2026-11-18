@@ -267,19 +267,72 @@ def callback_painel_instrumento(call):
         item, metricas = detalhe_instrumento_menu(ticker)
         if not item:
             raise ValueError("ativo não encontrado")
-        linhas = [f"*{item['ticker']}* · {item['tipo']}", item.get("nome") or "Nome não informado"]
+        def _formatar_metrica(metrica):
+            valor = metrica.get("valor_numerico")
+            if valor is None:
+                valor = metrica.get("valor_texto")
+                return str(valor or "não informado")
+            unidade = str(metrica.get("unidade") or "").lower()
+            numero = float(valor)
+            if "%" in unidade:
+                return f"{numero:.2f}%"
+            if unidade in {"brl/dia", "brl"}:
+                return f"R$ {numero:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            if unidade == "x":
+                return f"{numero:.2f}x"
+            if "ações/dia" in unidade:
+                return f"{numero:,.0f}".replace(",", ".") + " ações/dia"
+            return f"{numero:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+        rotulos = {
+            "liquidez_media_30d_brl": "Liquidez média (30d)",
+            "volume_medio_30d": "Volume médio (30d)",
+            "distancia_maxima_1a": "Distância da máxima (1a)",
+            "volatilidade_30d": "Volatilidade (30d)",
+            "retorno_periodo_coletado": "Retorno no período",
+            "dividend_yield": "Dividend Yield",
+            "p_l": "P/L",
+            "p_vp": "P/VP",
+            "roe": "ROE",
+            "margem_lucro": "Margem líquida",
+            "patrimonio_ou_market_cap": "Patrimônio / valor de mercado",
+            "receita": "Receita",
+            "lucro_liquido": "Lucro líquido",
+        }
+        icone = "🌐" if item["tipo"] == "ETF" else "🌍"
+        linhas = [
+            f"{icone} *{item['ticker']}* · {item['tipo']}",
+            item.get("nome") or "Nome não informado",
+            "",
+            "*COTAÇÃO E DESEMPENHO*",
+        ]
         if item.get("fechamento") is not None:
-            linhas.append(f"\nFechamento: *R$ {float(item['fechamento']):.2f}*")
+            linhas.append(f"Fechamento: *R$ {float(item['fechamento']):.2f}*")
+        else:
+            linhas.append("Fechamento: não informado")
         if item.get("variacao_percentual") is not None:
-            linhas.append(f"Variação: *{float(item['variacao_percentual']):+.2f}%*")
+            linhas.append(f"Variação do pregão: *{float(item['variacao_percentual']):+.2f}%*")
         if item.get("referencia_em"):
             linhas.append(f"Referência: {str(item['referencia_em'])[:10]}")
-        linhas.append(f"Fonte: {item.get('fonte') or 'não informada'} · {item.get('qualidade_fonte') or 'qualidade não informada'}")
+        if item.get("indice_referencia"):
+            linhas.append(f"Índice / referência: {item['indice_referencia']}")
+        if item.get("gestora"):
+            linhas.append(f"Gestora: {item['gestora']}")
+        if item.get("simbolo_exterior"):
+            linhas.append(f"Símbolo exterior: {item['simbolo_exterior']}")
         if metricas:
-            linhas.append("\n*Indicadores*:")
-            for metrica in metricas[:8]:
-                valor = metrica.get("valor_numerico") if metrica.get("valor_numerico") is not None else metrica.get("valor_texto")
-                linhas.append(f"• {str(metrica['chave']).replace('_', ' ')}: {valor}")
+            linhas.append("\n*INDICADORES DO ATIVO*")
+            for metrica in metricas:
+                rotulo = rotulos.get(metrica["chave"], str(metrica["chave"]).replace("_", " ").title())
+                linhas.append(f"• {rotulo}: {_formatar_metrica(metrica)}")
+        linhas.append("\n*QUALIDADE DO DADO*")
+        linhas.append(
+            f"Fonte: {item.get('fonte') or 'não informada'} · "
+            f"{item.get('qualidade_fonte') or 'qualidade não informada'}"
+        )
+        linhas.append(
+            "ETFs e BDRs exibem somente métricas aplicáveis e com fonte registrada."
+        )
         texto = "\n".join(linhas)
         voltar = "menu_etfs" if item["tipo"] == "ETF" else "menu_bdrs"
         markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🔙 Voltar", callback_data=voltar))
