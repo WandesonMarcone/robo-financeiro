@@ -340,7 +340,7 @@ MAPA_CNPJ_B3 = {
     # 🥩 Carnes, Proteínas e Agronegócio
     # ==========================================
     '02.916.265/0001-60': 'JBSS3',   # JBS
-    '43.339.004/0001-42': 'BEEF3',   # Minerva Foods
+    '67.620.377/0001-14': 'BEEF3',   # Minerva Foods (CNPJ da emissora na CVM)
     '01.017.595/0001-38': 'MRFG3',   # Marfrig
     '89.113.800/0001-28': 'SLCE3',   # SLC Agrícola (NOVA)
     '33.453.598/0001-23': 'RAIZ4',   # Raízen (Açúcar, Álcool e Combustíveis) (NOVA)
