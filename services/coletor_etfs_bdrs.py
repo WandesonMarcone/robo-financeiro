@@ -399,7 +399,8 @@ def detalhe_instrumento_menu(ticker, session_factory=None):
     sessao = session_factory() if session_factory else SessionDB()
     try:
         item = sessao.execute(text("""
-            SELECT i.id,i.ticker,i.tipo,i.nome,o.fechamento,o.variacao_percentual,
+            SELECT i.id,i.ticker,i.tipo,i.nome,i.indice_referencia,i.gestora,
+                   i.simbolo_exterior,i.moeda_origem,o.fechamento,o.variacao_percentual,
                    o.referencia_em,o.fonte,o.qualidade_fonte
             FROM instrumentos_internacionais i
             LEFT JOIN LATERAL (
@@ -413,7 +414,21 @@ def detalhe_instrumento_menu(ticker, session_factory=None):
         metricas = sessao.execute(text("""
             SELECT chave,valor_numerico,valor_texto,unidade,fonte,qualidade_fonte
             FROM metricas_instrumentos_internacionais
-            WHERE instrumento_id=:id ORDER BY chave LIMIT 12
+            WHERE instrumento_id=:id
+            ORDER BY CASE chave
+              WHEN 'liquidez_media_30d_brl' THEN 1
+              WHEN 'volume_medio_30d' THEN 2
+              WHEN 'distancia_maxima_1a' THEN 3
+              WHEN 'volatilidade_30d' THEN 4
+              WHEN 'retorno_periodo_coletado' THEN 5
+              WHEN 'dividend_yield' THEN 6
+              WHEN 'p_l' THEN 7
+              WHEN 'p_vp' THEN 8
+              WHEN 'roe' THEN 9
+              WHEN 'margem_lucro' THEN 10
+              WHEN 'patrimonio_ou_market_cap' THEN 11
+              ELSE 99 END, chave
+            LIMIT 16
         """), {"id": item["id"]}).mappings().all()
         return dict(item), [dict(metrica) for metrica in metricas]
     finally:
