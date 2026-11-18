@@ -89,8 +89,8 @@ def _mapa_tickers(sessao, tickers):
 
 def _upsert_lote(sessao, modelo, payloads, indicadores, data_referencia):
     gravados = 0
-    omitidos_sem_ativo = 0
-    omitidos_sem_dados = 0
+    omitidos_sem_ativo = []
+    omitidos_sem_dados = []
     tickers = [p.get("ticker") for p in payloads]
     ids = _mapa_tickers(sessao, tickers)
 
@@ -98,11 +98,11 @@ def _upsert_lote(sessao, modelo, payloads, indicadores, data_referencia):
         ticker = str(payload.get("ticker") or "").strip().upper()
         ativo_id = ids.get(ticker)
         if ativo_id is None:
-            omitidos_sem_ativo += 1
+            omitidos_sem_ativo.append(ticker)
             logger.info("EOD: ticker %s sem cadastro em ativos; omitido", ticker)
             continue
         if not _tem_indicador(payload, indicadores):
-            omitidos_sem_dados += 1
+            omitidos_sem_dados.append(ticker)
             continue
 
         existente = sessao.execute(
@@ -151,6 +151,8 @@ def persistir_snapshots(payloads_acoes, payloads_fiis, data_referencia, session_
         "fiis_gravados": 0,
         "omitidos_sem_ativo": 0,
         "omitidos_sem_dados": 0,
+        "tickers_sem_ativo": {"acoes": [], "fiis": []},
+        "tickers_sem_dados": {"acoes": [], "fiis": []},
         "data_referencia": data_referencia,
     }
     sessao = fabrica()
@@ -164,8 +166,10 @@ def persistir_snapshots(payloads_acoes, payloads_fiis, data_referencia, session_
         sessao.commit()
         resumo["acoes_gravadas"] = a_g
         resumo["fiis_gravados"] = f_g
-        resumo["omitidos_sem_ativo"] = a_sa + f_sa
-        resumo["omitidos_sem_dados"] = a_sd + f_sd
+        resumo["omitidos_sem_ativo"] = len(a_sa) + len(f_sa)
+        resumo["omitidos_sem_dados"] = len(a_sd) + len(f_sd)
+        resumo["tickers_sem_ativo"] = {"acoes": a_sa, "fiis": f_sa}
+        resumo["tickers_sem_dados"] = {"acoes": a_sd, "fiis": f_sd}
         return resumo
     except Exception:
         sessao.rollback()

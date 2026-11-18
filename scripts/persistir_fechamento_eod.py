@@ -61,6 +61,12 @@ def executar(agora=None, buscar_indices=None, abrir_planilha=None,
         raise RuntimeError("Fechamento incompleto de ações ou FIIs; confira Sheets e Neon")
     for indice in ("IFIX", "Ibovespa"):
         salvar_indices([por_indice[indice]], agora.date())
+    if resumo.get("omitidos_sem_ativo") or resumo.get("omitidos_sem_dados"):
+        raise RuntimeError(
+            "Fechamento parcial: "
+            f"sem cadastro={resumo.get('tickers_sem_ativo', {})}; "
+            f"sem indicadores={resumo.get('tickers_sem_dados', {})}"
+        )
     print(f"EOD {agora.date()}: ações={resumo.get('acoes_gravadas', 0)}, "
           f"FIIs={resumo.get('fiis_gravados', 0)}, índices=2.")
     return {"status": "gravado", "resumo": resumo, "indices": 2}
