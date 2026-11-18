@@ -176,3 +176,54 @@ def persistir_snapshots(payloads_acoes, payloads_fiis, data_referencia, session_
         raise
     finally:
         sessao.close()
+
+
+def _normalizar_tipo(tipo):
+    return str(getattr(tipo, "value", tipo) or "").upper()
+
+
+def auditar_cobertura_snapshots(data_referencia, session_factory=None):
+    """Compara o catálogo ativo com os snapshots do mesmo pregão.
+
+    Não altera dados. A saída torna visível qualquer ticker cadastrado que não
+    recebeu snapshot no dia, evitando tratar contagens agregadas como cobertura.
+    """
+    fabrica = session_factory or obter_session_factory()
+    sessao = fabrica()
+    try:
+        ativos = sessao.execute(select(Ativo.ticker, Ativo.tipo)).all()
+        esperados = {"acoes": set(), "fiis": set()}
+        for ticker, tipo in ativos:
+            chave = "acoes" if _normalizar_tipo(tipo) == "ACAO" else "fiis"
+            esperados[chave].add(str(ticker).strip().upper())
+
+        acoes_gravadas = {
+            str(ticker).strip().upper()
+            for (ticker,) in sessao.execute(
+                select(Ativo.ticker)
+                .join(SnapshotAcao, SnapshotAcao.ativo_id == Ativo.id)
+                .where(SnapshotAcao.data_referencia == data_referencia)
+            ).all()
+        }
+        fiis_gravados = {
+            str(ticker).strip().upper()
+            for (ticker,) in sessao.execute(
+                select(Ativo.ticker)
+                .join(SnapshotFii, SnapshotFii.ativo_id == Ativo.id)
+                .where(SnapshotFii.data_referencia == data_referencia)
+            ).all()
+        }
+        gravados = {"acoes": acoes_gravadas, "fiis": fiis_gravados}
+        faltantes = {
+            classe: sorted(esperados[classe] - gravados[classe])
+            for classe in esperados
+        }
+        return {
+            "data_referencia": data_referencia,
+            "esperados": {classe: len(itens) for classe, itens in esperados.items()},
+            "gravados": {classe: len(gravados[classe] & esperados[classe]) for classe in esperados},
+            "faltantes": faltantes,
+            "completa": not faltantes["acoes"] and not faltantes["fiis"],
+        }
+    finally:
+        sessao.close()
