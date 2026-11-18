@@ -9,6 +9,7 @@ import config
 from modules.eod_snapshots import tentar_persistir_eod
 from modules.utils import buscar_indices_b3_ohlc, conectar_gspread
 from pipeline_dados.repositorio_indices import persistir_indices_diarios
+from pipeline_dados.repositorio_snapshots import auditar_cobertura_snapshots
 
 
 def validar_frescor_planilha(planilha, dia):
@@ -33,12 +34,13 @@ def validar_frescor_planilha(planilha, dia):
 
 
 def executar(agora=None, buscar_indices=None, abrir_planilha=None,
-             salvar_snapshots=None, salvar_indices=None, validar_planilha=None):
+             salvar_snapshots=None, salvar_indices=None, validar_planilha=None,\n             auditar_cobertura=None):
     """Grava o fechamento somente se IFIX e Ibovespa têm vela de hoje."""
     agora = agora or datetime.now(ZoneInfo("America/Sao_Paulo"))
     buscar_indices = buscar_indices or buscar_indices_b3_ohlc
     salvar_snapshots = salvar_snapshots or tentar_persistir_eod
     salvar_indices = salvar_indices or persistir_indices_diarios
+    auditar_cobertura = auditar_cobertura or auditar_cobertura_snapshots
     registros = buscar_indices()
     por_indice = {
         item.get("indice"): item for item in registros or []
@@ -67,9 +69,24 @@ def executar(agora=None, buscar_indices=None, abrir_planilha=None,
             f"sem cadastro={resumo.get('tickers_sem_ativo', {})}; "
             f"sem indicadores={resumo.get('tickers_sem_dados', {})}"
         )
+
+    # Só considerar o EOD completo quando cada ativo ativo do catálogo tiver
+    # snapshot na mesma data. Isso detecta catálogo e Sheets divergentes.
+    cobertura = auditar_cobertura(agora.date())
+    if not cobertura.get("completa"):
+        faltantes = cobertura.get("faltantes", {})
+        raise RuntimeError(
+            "Cobertura EOD divergente: "
+            f"ações={cobertura.get('gravados', {}).get('acoes', 0)}/"
+            f"{cobertura.get('esperados', {}).get('acoes', 0)} "
+            f"faltando={faltantes.get('acoes', [])}; "
+            f"FIIs={cobertura.get('gravados', {}).get('fiis', 0)}/"
+            f"{cobertura.get('esperados', {}).get('fiis', 0)} "
+            f"faltando={faltantes.get('fiis', [])}"
+        )
     print(f"EOD {agora.date()}: ações={resumo.get('acoes_gravadas', 0)}, "
           f"FIIs={resumo.get('fiis_gravados', 0)}, índices=2.")
-    return {"status": "gravado", "resumo": resumo, "indices": 2}
+    return {"status": "gravado", "resumo": resumo, "indices": 2, "cobertura": cobertura}
 
 
 if __name__ == "__main__":
