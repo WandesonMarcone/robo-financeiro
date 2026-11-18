@@ -1,0 +1,52 @@
+name: Rodada documental imediata
+
+on:
+  push:
+    paths:
+      - ".github/workflows/rodada-documental-imediata.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: processamento-documental-diario
+  cancel-in-progress: false
+
+jobs:
+  processar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+      - name: Criar credenciais Google
+        shell: python
+        env:
+          GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: |
+          import os
+          with open("credenciais.json", "w", encoding="utf-8") as arquivo:
+              arquivo.write(os.environ["GOOGLE_CREDS"])
+      - name: Processar lote documental agora
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          LOGO_DEV_TOKEN: ${{ secrets.LOGO_DEV_TOKEN }}
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
+          DRIVE_ROOT_FOLDER_ID: ${{ secrets.DRIVE_ROOT_FOLDER_ID }}
+        run: python -m scripts.processar_documentos_pendentes
+      - name: Avisar administrador se falhar
+        if: failure() && !cancelled()
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+        run: python -m scripts.notificar_falha_workflow
