@@ -46,6 +46,24 @@ class TesteFechamentoContingencia(unittest.TestCase):
             ("IFIX", AGORA.date()), ("Ibovespa", AGORA.date())
         ])
 
+    def test_cadastro_incompleto_falha_mas_preserva_indices(self):
+        indices = []
+        with self.assertRaisesRegex(RuntimeError, "KNCR11"):
+            executar(
+                AGORA,
+                buscar_indices=lambda: [vela("Ibovespa", AGORA.date()),
+                                        vela("IFIX", AGORA.date())],
+                abrir_planilha=lambda: "planilha",
+                validar_planilha=lambda *_: None,
+                salvar_snapshots=lambda *_: {
+                    "acoes_gravadas": 70, "fiis_gravados": 33,
+                    "omitidos_sem_ativo": 1, "omitidos_sem_dados": 0,
+                    "tickers_sem_ativo": {"acoes": [], "fiis": ["KNCR11"]},
+                },
+                salvar_indices=lambda registros, *_: indices.append(registros[0]["indice"]),
+            )
+        self.assertEqual(indices, ["IFIX", "Ibovespa"])
+
     def test_planilha_antiga_nao_pode_ser_datada_como_pregao_novo(self):
         class Aba:
             def __init__(self, carimbos, coluna):
