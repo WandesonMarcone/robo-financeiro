@@ -40,6 +40,7 @@ class TesteFechamentoContingencia(unittest.TestCase):
             salvar_indices=lambda registros, data: datas.append(
                 (registros[0]["indice"], data)
             ),
+            auditar_cobertura=lambda *_: {"completa": True},
         )
         self.assertEqual(resultado["status"], "gravado")
         self.assertEqual(datas, [
@@ -61,6 +62,27 @@ class TesteFechamentoContingencia(unittest.TestCase):
                     "tickers_sem_ativo": {"acoes": [], "fiis": ["KNCR11"]},
                 },
                 salvar_indices=lambda registros, *_: indices.append(registros[0]["indice"]),
+                auditar_cobertura=lambda *_: {"completa": True},
+            )
+        self.assertEqual(indices, ["IFIX", "Ibovespa"])
+
+    def test_catalogo_divergente_falha_apos_persistir_indices(self):
+        indices = []
+        with self.assertRaisesRegex(RuntimeError, "Cobertura EOD divergente"):
+            executar(
+                AGORA,
+                buscar_indices=lambda: [vela("Ibovespa", AGORA.date()),
+                                        vela("IFIX", AGORA.date())],
+                abrir_planilha=lambda: "planilha",
+                validar_planilha=lambda *_: None,
+                salvar_snapshots=lambda *_: {"acoes_gravadas": 60, "fiis_gravados": 64},
+                salvar_indices=lambda registros, *_: indices.append(registros[0]["indice"]),
+                auditar_cobertura=lambda *_: {
+                    "completa": False,
+                    "esperados": {"acoes": 60, "fiis": 64},
+                    "gravados": {"acoes": 59, "fiis": 63},
+                    "faltantes": {"acoes": ["PETR4"], "fiis": ["KNCR11"]},
+                },
             )
         self.assertEqual(indices, ["IFIX", "Ibovespa"])
 
