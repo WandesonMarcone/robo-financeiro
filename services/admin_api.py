@@ -740,7 +740,17 @@ def _ultimas_execucoes_github(limite: int = 8) -> tuple[list[dict], str | None]:
     )
     if resposta.status_code != 200:
         return [], f"GitHub não respondeu ao histórico (HTTP {resposta.status_code})."
-    permitidos = {"Atualização cíclica de ativos", "Atualização isolada de ativo", "Robô Financeiro"}
+    permitidos = {
+        "Atualização cíclica de ativos",
+        "Atualização isolada de ativo",
+        "Robô Financeiro",
+        "Fechamento EOD de contingência",
+        "Processamento documental diário",
+        "Varredura FNET diária",
+        "Coleta Tesouro Direto",
+        "Coleta de séries macro",
+        "Atualização de ETFs e BDRs",
+    }
     linhas = []
     for item in resposta.json().get("workflow_runs", []):
         if item.get("name") not in permitidos:
