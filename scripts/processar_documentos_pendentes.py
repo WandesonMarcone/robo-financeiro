@@ -1,7 +1,8 @@
-"""Executa lotes seguros e auditáveis da fila documental."""
+"""Executa lotes seguros, auditáveis e classificáveis da fila documental."""
 
 from atualizador_documentos import rotina_processar_acoes, rotina_processar_pendentes
 from services.historico_operacional import concluir_evento, iniciar_evento, registrar_resultado
+from services.taxonomia_fiis_automatica import corrigir_taxonomia_fiis
 
 LIMITE_POR_CLASSE = 20
 
@@ -29,20 +30,26 @@ def main():
         fii = rotina_processar_pendentes(limite=LIMITE_POR_CLASSE)
         acoes = rotina_processar_acoes(limite=LIMITE_POR_CLASSE)
         detalhes = {"fii": _detalhes(fii), "acoes": _detalhes(acoes)}
-        registrar_resultado(evento, detalhes)
         erro = detalhes["fii"]["erro"] or detalhes["acoes"]["erro"]
+        if erro:
+            raise RuntimeError(str(erro))
+
+        # Só usa PDFs que acabaram de ser confirmados no Drive; nunca infere
+        # setor de FII a partir de preço, ticker ou fonte não documental.
+        taxonomia = corrigir_taxonomia_fiis()
+        detalhes["taxonomia"] = taxonomia
+        registrar_resultado(evento, detalhes)
         mensagem = (
             "Processamento documental concluído: "
             f"FIIs={detalhes['fii']['processados']}, "
             f"ações={detalhes['acoes']['processados']}, "
             f"Drive={detalhes['fii']['salvo_drive'] + detalhes['acoes']['salvo_drive']}, "
             f"revisão={detalhes['fii']['revisao'] + detalhes['acoes']['revisao']}, "
+            f"setores corrigidos={taxonomia.get('quantidade_corrigida', 0)}, "
             f"erros={detalhes['fii']['erros'] + detalhes['acoes']['erros']}."
         )
-        concluir_evento(evento, sucesso=not bool(erro), mensagem=mensagem, erro=erro)
+        concluir_evento(evento, sucesso=True, mensagem=mensagem)
         print(mensagem)
-        if erro:
-            raise RuntimeError(str(erro))
     except Exception as exc:
         concluir_evento(
             evento,
