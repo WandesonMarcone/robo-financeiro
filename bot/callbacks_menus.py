@@ -944,6 +944,17 @@ def callback_geral(call):
 
                 datas = sorted(list(set([b.data_referencia.strftime("%Y-%m-%d") for b in balancos if b.data_referencia])), reverse=True)
 
+                if not datas:
+                    markup.add(InlineKeyboardButton("🔙 Voltar aos Anos", callback_data=f"dados_{ticker}_{tipo_ativo}"))
+                    _atualizar_mensagem(
+                        call,
+                        f"📭 Não há ITR/DFP com período válido para {ticker} em {ano_escolhido}. "
+                        "A coleta encontrou o ano, mas não uma data trimestral utilizável.",
+                        markup,
+                        parse_mode=None,
+                    )
+                    return
+
                 for dt in datas:
                     ano, mes_num, dia = dt.split('-')
                     if mes_num == '03': tri = '1º Trimestre (ITR)'
@@ -1073,7 +1084,8 @@ def callback_geral(call):
                 if ativo:
                     tem_docs = session.query(DocumentosQualitativos).filter(
                         DocumentosQualitativos.ativo_id == ativo.id,
-                        DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")
+                        DocumentosQualitativos.url_pdf.isnot(None),
+                        DocumentosQualitativos.status_processamento != "ERRO_DOWNLOAD"
                     ).first()
 
                     if tem_docs:
@@ -1084,7 +1096,7 @@ def callback_geral(call):
                         txt = f"🗄️ **Arquivo Central: {ticker}**\n\nComo você deseja procurar os documentos?"
                     else:
                         termo = "o fundo" if tipo_ativo == "fii" else "a empresa"
-                        txt = f"📭 **Ainda não há documentos processados para {termo} {ticker}.**"
+                        txt = f"📭 **Ainda não há documentos oficiais com link disponível para {termo} {ticker}.**"
                 else:
                     txt = f"❌ Ativo **{ticker}** não encontrado no banco de dados."
 
@@ -1125,7 +1137,8 @@ def callback_geral(call):
 
                 docs = session.query(DocumentosQualitativos).filter(
                     DocumentosQualitativos.ativo_id == ativo.id,
-                    DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")
+                    DocumentosQualitativos.url_pdf.isnot(None),
+                        DocumentosQualitativos.status_processamento != "ERRO_DOWNLOAD"
                 ).all()
 
                 markup = InlineKeyboardMarkup(row_width=1)
@@ -1200,7 +1213,8 @@ def callback_geral(call):
 
                 todos_docs = session.query(DocumentosQualitativos).filter(
                     DocumentosQualitativos.ativo_id == ativo.id,
-                    DocumentosQualitativos.status_processamento.ilike("%SALVO_DRIVE%")
+                    DocumentosQualitativos.url_pdf.isnot(None),
+                        DocumentosQualitativos.status_processamento != "ERRO_DOWNLOAD"
                 ).all()
 
                 docs_finais = []
