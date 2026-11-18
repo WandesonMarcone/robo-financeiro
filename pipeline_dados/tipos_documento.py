@@ -113,6 +113,14 @@ ALIAS_ACAO = {
     "aviso ao mercado": "Comunicado ao Mercado",
     "release de resultados": "Apresentação de Resultados",
     "apresentacao de resultados": "Apresentação de Resultados",
+    "resultado trimestral": "Apresentação de Resultados",
+    "resultados trimestrais": "Apresentação de Resultados",
+    "itr": "Demonstracoes Financeiras",
+    "informacoes trimestrais": "Demonstracoes Financeiras",
+    "informacoes financeiras trimestrais": "Demonstracoes Financeiras",
+    "demonstracoes financeiras trimestrais": "Demonstracoes Financeiras",
+    "demonstracoes financeiras padronizadas": "Demonstracoes Financeiras",
+    "dfp": "Demonstracoes Financeiras",
 }
 
 
