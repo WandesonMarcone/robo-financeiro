@@ -218,6 +218,58 @@ def _enviar_mensagem_telegram(chat_id, mensagem, teclado=None, parse_mode=None):
         return False
 
 
+def enviar_relatorio_processamento_documental(detalhes):
+    """Envia ao administrador o resultado identificável de um lote documental.
+
+    O histórico completo e estruturado fica no Neon para a Central; a mensagem
+    do Telegram resume todos os itens do lote (máximo de 40).
+    """
+    chat_id = _chat_administrador()
+    if not chat_id:
+        logger.warning("Administrador não configurado; resumo documental não enviado.")
+        return False
+
+    fii = detalhes.get("fii") or {}
+    acoes = detalhes.get("acoes") or {}
+    linhas = [
+        "📑 Processamento documental concluído",
+        "",
+        f"FIIs: {fii.get('processados', 0)} processados · {fii.get('salvo_drive', 0)} salvos · {fii.get('revisao', 0)} revisão · {fii.get('erros', 0)} erros",
+        f"Ações: {acoes.get('processados', 0)} processadas · {acoes.get('salvo_drive', 0)} salvos · {acoes.get('revisao', 0)} revisão · {acoes.get('erros', 0)} erros",
+    ]
+    itens = list(fii.get("itens") or []) + list(acoes.get("itens") or [])
+    if itens:
+        linhas.extend(["", "Detalhes do lote:"])
+        rotulos = {
+            "SALVO_DRIVE": "salvo no Drive",
+            "AGUARDANDO_REVISAO": "aguarda revisão",
+            "ERRO_DOWNLOAD": "erro de download",
+            "ERRO_DRIVE": "erro no Drive",
+        }
+        for item in itens[:40]:
+            classe = "FII" if item.get("classe") == "FII" else "Ação"
+            linhas.append(
+                f"• {classe} {item.get('ticker', '—')} — "
+                f"{item.get('tipo', 'Documento')} — "
+                f"{rotulos.get(item.get('status'), item.get('status', 'processado'))}"
+            )
+    else:
+        linhas.extend(["", "Nenhum item foi processado neste lote."])
+
+    mensagem = "\n".join(linhas)
+    entregue = _enviar_mensagem_telegram(chat_id, mensagem)
+    from services.historico_operacional import registrar_notificacao
+    registrar_notificacao(
+        "RESUMO_PROCESSAMENTO_DOCUMENTAL",
+        destinatario=chat_id,
+        resumo=mensagem,
+        enviada=entregue,
+        erro=None if entregue else "TELEGRAM_SEND_FAILED",
+        audiencia="ADMINISTRATIVA",
+    )
+    return entregue
+
+
 def _enviar_foto_telegram(chat_id, ticker, foto, legenda, teclado=None, parse_mode=None):
     """Envia uma foto com legenda a UM chat e memoriza o ``file_id`` retornado."""
     if chat_id is None or not foto:
@@ -442,6 +494,18 @@ class ResultadoProcessamento:
         self.erros = 0
         self.notificados = 0
         self.erro = None
+        # Mantém a auditoria do lote curta e suficiente para Telegram/Central.
+        self.itens = []
+
+    def registrar_item(self, *, ticker, tipo, status):
+        if len(self.itens) >= 40:
+            return
+        self.itens.append({
+            "ticker": str(ticker or "—"),
+            "tipo": str(tipo or "Documento"),
+            "classe": "FII" if self.status_fila == "PENDENTE" else "ACAO",
+            "status": str(status or "PROCESSADO"),
+        })
 
     def mensagem_telegram(self):
         etiqueta = self.status_fila
@@ -535,6 +599,10 @@ def rotina_processar_pendentes(documento_id: int | None = None, ticker: str | No
                 session.commit()
                 resultado.erros += 1
                 resultado.processados += 1
+                resultado.registrar_item(
+                    ticker=ticker, tipo=doc_db.tipo_documento,
+                    status=doc_db.status_processamento,
+                )
                 continue
 
             temp_filename = f"/tmp/{ticker}_{id_doc}.pdf"
@@ -631,6 +699,10 @@ def rotina_processar_pendentes(documento_id: int | None = None, ticker: str | No
             # 3. 💾 SALVA O PROGRESSO DESTE ARQUIVO E DELETA O TEMPORÁRIO
             session.commit()
             resultado.processados += 1
+            resultado.registrar_item(
+                ticker=ticker, tipo=doc_db.tipo_documento,
+                status=doc_db.status_processamento,
+            )
             if notificacao:
                 resultado.notificados += notificar_documento_disponivel(**notificacao)
             if os.path.exists(temp_filename): os.remove(temp_filename)
@@ -731,6 +803,10 @@ def rotina_processar_acoes(ticker: str | None = None, documento_id: int | None =
                 session.commit()
                 resultado.erros += 1
                 resultado.processados += 1
+                resultado.registrar_item(
+                    ticker=ticker, tipo=doc_db.tipo_documento,
+                    status=doc_db.status_processamento,
+                )
                 continue
 
             temp_filename = f"/tmp/{ticker}_cvm_temp.pdf"
@@ -830,6 +906,10 @@ def rotina_processar_acoes(ticker: str | None = None, documento_id: int | None =
             # 3. 💾 SALVA O PROGRESSO
             session.commit()
             resultado.processados += 1
+            resultado.registrar_item(
+                ticker=ticker, tipo=doc_db.tipo_documento,
+                status=doc_db.status_processamento,
+            )
             if notificacao:
                 resultado.notificados += notificar_documento_disponivel(**notificacao)
             if os.path.exists(temp_filename): os.remove(temp_filename)
