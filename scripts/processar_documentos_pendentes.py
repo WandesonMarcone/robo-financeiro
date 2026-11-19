@@ -16,6 +16,7 @@ def _detalhes(resultado):
         "revisao": int(getattr(resultado, "revisao", 0) or 0),
         "erros": int(getattr(resultado, "erros", 0) or 0),
         "notificados": int(getattr(resultado, "notificados", 0) or 0),
+        "itens": list(getattr(resultado, "itens", []) or []),
         "erro": getattr(resultado, "erro", None),
     }
 
@@ -38,6 +39,8 @@ def main():
         # setor de FII a partir de preço, ticker ou fonte não documental.
         taxonomia = corrigir_taxonomia_fiis()
         detalhes["taxonomia"] = taxonomia
+        from atualizador_documentos import enviar_relatorio_processamento_documental
+        detalhes["telegram_resumo_enviado"] = enviar_relatorio_processamento_documental(detalhes)
         registrar_resultado(evento, detalhes)
         mensagem = (
             "Processamento documental concluído: "
@@ -46,7 +49,8 @@ def main():
             f"Drive={detalhes['fii']['salvo_drive'] + detalhes['acoes']['salvo_drive']}, "
             f"revisão={detalhes['fii']['revisao'] + detalhes['acoes']['revisao']}, "
             f"setores corrigidos={taxonomia.get('quantidade_corrigida', 0)}, "
-            f"erros={detalhes['fii']['erros'] + detalhes['acoes']['erros']}."
+            f"erros={detalhes['fii']['erros'] + detalhes['acoes']['erros']}. "
+            f"Telegram={'enviado' if detalhes['telegram_resumo_enviado'] else 'não enviado'}."
         )
         concluir_evento(evento, sucesso=True, mensagem=mensagem)
         print(mensagem)
