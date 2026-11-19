@@ -1,22 +1,33 @@
-name: Contingência diária FNET
+name: Documentos — descoberta e processamento
 
 on:
   schedule:
-    # 08:30 em Brasília (UTC-3), após a janela das 08:00 do Render.
+    # 08h30 de Brasília: descobre publicações novas.
     - cron: '30 11 * * 1-5'
+    # 20h30 de Brasília: trata os documentos pendentes.
+    - cron: '30 23 * * 1-5'
   workflow_dispatch:
+    inputs:
+      modo:
+        description: Etapa manual
+        required: true
+        type: choice
+        default: processar
+        options:
+          - descobrir
+          - processar
 
 permissions:
   contents: read
 
 concurrency:
-  group: descoberta-fnet-diaria
+  group: documentos-diarios
   cancel-in-progress: false
 
 jobs:
-  descobrir:
+  documentos:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,11 +35,37 @@ jobs:
           python-version: '3.12'
       - name: Instalar dependências
         run: pip install -r requirements.txt
-      - name: Descobrir documentos FNET e gravar auditoria
+
+      - name: Descobrir documentos FNET
+        if: github.event.schedule == '30 11 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'descobrir')
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: python -m scripts.varredura_fnet_diaria
-      - name: Avisar administrador em caso de falha
+
+      - name: Criar credenciais Google
+        if: github.event.schedule == '30 23 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'processar')
+        shell: python
+        env:
+          GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: |
+          import os
+          with open('credenciais.json', 'w', encoding='utf-8') as arquivo:
+              arquivo.write(os.environ['GOOGLE_CREDS'])
+      - name: Processar documentos pendentes
+        if: github.event.schedule == '30 23 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'processar')
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          LOGO_DEV_TOKEN: ${{ secrets.LOGO_DEV_TOKEN }}
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
+          DRIVE_ROOT_FOLDER_ID: ${{ secrets.DRIVE_ROOT_FOLDER_ID }}
+        run: python -m scripts.processar_documentos_pendentes
+
+      - name: Avisar administrador somente sobre falha
         if: failure() && !cancelled()
         continue-on-error: true
         env:
