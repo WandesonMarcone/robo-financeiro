@@ -10,6 +10,7 @@ from modules.utils import (
 )
 from modules.scraper_acoes import rodar_garimpo_acoes
 from modules.scraper_fiis import rodar_garimpo_fiis
+from services.oportunidades_unificadas import montar_digest_oportunidades_instrumentos
 from modules.eod_snapshots import (
     eod_apos_fechamento,
     eod_habilitado,
@@ -109,6 +110,9 @@ def executar_auditoria_carteira():
     
     print("\nAcionando Motor de Acoes Estruturais...")
     batch_updates_acoes, digest_acoes, aba_acoes = rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz)
+
+    print("\nAcionando Triagem de ETFs e BDRs atualizados...")
+    digest_instrumentos = montar_digest_oportunidades_instrumentos()
     
     print("\n[5/5] Consolidando gravacao de dados e envio de notificacoes...")
     if batch_updates_fiis:
@@ -121,15 +125,17 @@ def executar_auditoria_carteira():
         
     enviou_fii = _enviar_movimentacao(digest_fiis, "fii")
     enviou_acao = _enviar_movimentacao(digest_acoes, "acao")
+    enviou_instrumentos = _enviar_movimentacao(digest_instrumentos, "instrumento")
     _enviar_favoritos(digest_fiis, "fii")
     _enviar_favoritos(digest_acoes, "acao")
+    _enviar_favoritos(digest_instrumentos, "instrumento")
     try:
         texto_indices = mensagem_indices_b3()
         disparar_alertas(texto_indices)
         print(texto_indices.replace("\n", " | "))
     except Exception as e:
         print(f"Falha ao obter IFIX/Ibovespa: {type(e).__name__}")
-    if not enviou_fii and not enviou_acao:
+    if not enviou_fii and not enviou_acao and not enviou_instrumentos:
         print("Execucao concluida com sucesso. (Mercado esta estavel, sem alertas de distorcoes).")
 
     tentar_persistir_eod(planilha, agora_dt)

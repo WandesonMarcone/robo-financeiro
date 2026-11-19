@@ -90,10 +90,10 @@ def formatar_pct(valor):
 
 
 def montar_markup_painel(tickers, tipo):
-    """Botoes para o painel ja existente: painel_{TICKER}_fii|acao."""
+    """Botoes para o painel do ativo ou para o painel próprio de ETF/BDR."""
     if not tickers or not tipo:
         return None
-    tipo_norm = "fii" if str(tipo).strip().lower() == "fii" else "acao"
+    tipo_norm = str(tipo).strip().lower()
     unicos = []
     vistos = set()
     for bruto in tickers:
@@ -109,7 +109,11 @@ def montar_markup_painel(tickers, tipo):
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
         *[
-            InlineKeyboardButton(t, callback_data=f"painel_{t}_{tipo_norm}")
+            InlineKeyboardButton(
+                t,
+                callback_data=(f"painel_int_{t}" if tipo_norm in {"etf", "bdr", "instrumento"}
+                               else f"painel_{t}_{'fii' if tipo_norm == 'fii' else 'acao'}"),
+            )
             for t in unicos
         ]
     )
