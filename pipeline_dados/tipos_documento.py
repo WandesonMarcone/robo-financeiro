@@ -197,6 +197,24 @@ def normalizar_tipo_documento(tipo, tipo_ativo="FII"):
     return _mapa_oficial(catalogo_fii()).get(chave)
 
 
+
+def tipo_por_assunto_acao(assunto):
+    """Classifica somente títulos inequivocos de apresentação de resultados."""
+    chave = _chave(assunto)
+    if not chave:
+        return None
+    if any(texto in chave for texto in (
+        "apresentacao do resultado",
+        "apresentacao dos resultados",
+        "apresentacao de resultados",
+        "release de resultados",
+        "resultado trimestral",
+        "resultados trimestrais",
+    )):
+        return "Apresentação de Resultados"
+    return None
+
+
 def tipo_exibivel(tipo, tipo_ativo="FII"):
     return normalizar_tipo_documento(tipo, tipo_ativo) is not None
 

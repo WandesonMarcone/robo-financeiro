@@ -492,6 +492,7 @@ class ResultadoProcessamento:
         self.salvo_drive = 0
         self.revisao = 0
         self.erros = 0
+        self.sem_fonte = 0
         self.notificados = 0
         self.erro = None
         # Mantém a auditoria do lote curta e suficiente para Telegram/Central.
@@ -533,6 +534,7 @@ class ResultadoProcessamento:
             f"Salvos no Drive: {self.salvo_drive}\n"
             f"Enviados para revisao: {self.revisao}\n"
             f"Erros: {self.erros}\n"
+            f"Aguardando link oficial: {self.sem_fonte}\n"
             f"Seguidores notificados: {self.notificados}"
         )
 
@@ -546,6 +548,41 @@ def _selecionar_lote_documental(consulta, limite):
         DocumentosQualitativos.id.asc(),
     ).limit(tamanho).all()]
     return total, ids
+
+
+
+def reclassificar_apresentacoes_resultados_acoes(session=None):
+    """Corrige títulos inequivocos de resultados sem alterar comunicados genéricos."""
+    from pipeline_dados.tipos_documento import tipo_por_assunto_acao
+
+    propria = session is None
+    session = session or SessionDB()
+    atualizados = 0
+    try:
+        documentos = (
+            session.query(DocumentosQualitativos)
+            .join(Ativo)
+            .filter(Ativo.tipo == "ACAO")
+            .filter(DocumentosQualitativos.tipo_documento.in_((
+                "Comunicado ao Mercado", "Comunicado Ao Mercado"
+            )))
+            .all()
+        )
+        for documento in documentos:
+            tipo = tipo_por_assunto_acao(documento.assunto)
+            if tipo:
+                documento.tipo_documento = tipo
+                atualizados += 1
+        if atualizados:
+            session.commit()
+        return atualizados
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        if propria:
+            session.close()
+
 
 
 def rotina_processar_pendentes(documento_id: int | None = None, ticker: str | None = None,
@@ -562,7 +599,15 @@ def rotina_processar_pendentes(documento_id: int | None = None, ticker: str | No
             consulta = consulta.filter(DocumentosQualitativos.id == documento_id)
         if ticker:
             consulta = consulta.join(Ativo).filter(Ativo.ticker == ticker)
-        resultado.fila, pendentes_ids = _selecionar_lote_documental(consulta, limite)
+        total_pendente = consulta.count()
+        consulta_pronta = consulta.filter(
+            DocumentosQualitativos.id_b3.isnot(None),
+            DocumentosQualitativos.id_b3 != "",
+        )
+        resultado.fila, pendentes_ids = _selecionar_lote_documental(
+            consulta_pronta, limite
+        )
+        resultado.sem_fonte = max(0, total_pendente - resultado.fila)
     finally:
         session_fila.close()
 
