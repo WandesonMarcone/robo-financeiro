@@ -900,7 +900,7 @@ def _notificacoes_documentais_para_painel(limite: int = 12) -> list[dict]:
     from atualizador_documentos import SessionDB
     from pipeline_dados.banco_dados import EventoOperacional
 
-    tipos = ("VARREDURA_FNET", "VARREDURA_DOCUMENTOS_ACOES", "forcar_documentos")
+    tipos = (\n        "VARREDURA_FNET", "VARREDURA_DOCUMENTOS_ACOES",\n        "forcar_documentos", "forcar_fiis", "forcar_docs_acoes",\n    )
     session = SessionDB()
     try:
         eventos = (
