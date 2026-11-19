@@ -40,6 +40,14 @@ def _avisar(texto, **kwargs):
     return True
 
 
+def _avisar_relatorio_documental(resultado, *, titulo=None):
+    """Envia a conclusão e, quando houver novos documentos, a lista detalhada."""
+    from services.relatorio_documental import mensagens_telegram_documentais
+
+    for mensagem in mensagens_telegram_documentais(resultado, titulo=titulo):
+        _avisar(mensagem)
+
+
 def varredura_diaria():
     """Rotina automatizada de coleta de dados."""
     _avisar(
@@ -55,7 +63,7 @@ def varredura_diaria():
         detalhes = resultado_fnet.detalhes_painel() if callable(getattr(resultado_fnet, "detalhes_painel", None)) else {}
         registrar_resultado(evento_fnet, detalhes)
         concluir_evento(evento_fnet, sucesso=getattr(resultado_fnet, "status", "erro") != "erro", mensagem=resultado_fnet.mensagem_telegram())
-        _avisar(resultado_fnet.mensagem_telegram())
+        _avisar_relatorio_documental(resultado_fnet, titulo="📄 Documentos de FIIs processados nesta varredura")
         processamento = getattr(resultado_fnet, "processamento", None)
         if processamento is not None:
             _avisar(processamento.mensagem_telegram())
@@ -90,7 +98,7 @@ def coleta_informes_fiis():
         from pipeline_dados.coletor_fiis import processar_informes_fiis_cvm
 
         resultado = processar_informes_fiis_cvm()
-        _avisar(resultado.mensagem_telegram())
+        _avisar_relatorio_documental(resultado, titulo="📄 Informes de FIIs processados nesta coleta")
         return resultado
     except Exception as e:
         _avisar(f"Erro na coleta mensal de FIIs: {type(e).__name__}")
@@ -108,7 +116,7 @@ def coleta_docs_acoes():
         resultado = RelatoriosAcoesCVM().vasculhar_documentos()
         registrar_resultado(evento_id, resultado.detalhes_painel())
         concluir_evento(evento_id, sucesso=resultado.status != "erro", mensagem=resultado.mensagem_telegram())
-        _avisar(resultado.mensagem_telegram())
+        _avisar_relatorio_documental(resultado, titulo="📄 Documentos de ações processados nesta varredura")
         return resultado
     except Exception as e:
         concluir_evento(evento_id, sucesso=False, erro=type(e).__name__, mensagem="Falha na varredura IPE/CVM de ações.")
