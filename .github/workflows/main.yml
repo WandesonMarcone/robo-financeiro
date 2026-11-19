@@ -1,57 +1,97 @@
-name: Robô Financeiro
-
-concurrency:
-  group: coleta-mercado-planilha
-  cancel-in-progress: false
+name: Mercado unificado
 
 on:
   schedule:
+    # 10h, 12h, 14h, 16h e 18h de Brasília: oportunidades de todas as classes.
     - cron: '0 13,15,17,19,21 * * 1-5'
-  workflow_dispatch: 
+    # 19h15 de Brasília: atualização noturna única após o pregão.
+    - cron: '15 22 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: Operação manual
+        required: true
+        type: choice
+        default: oportunidades
+        options:
+          - oportunidades
+          - atualizacao_noturna
+      limite_total:
+        description: Teto por lote de ações e FIIs (1 a 30)
+        required: false
+        default: '30'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mercado-unificado
+  cancel-in-progress: false
 
 jobs:
-  build:
+  mercado:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDENTIALS }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      LOGO_DEV_TOKEN: ${{ secrets.LOGO_DEV_TOKEN }}
+      SEC_EDGAR_USER_AGENT: ${{ secrets.SEC_EDGAR_USER_AGENT }}
+      EOD_SNAPSHOTS: 'true'
     steps:
-      - name: Checkout do código
-        uses: actions/checkout@v4
-
-      - name: Configurar Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       - name: Instalar dependências
         run: pip install -r requirements.txt
-
-      - name: Criar arquivo de credenciais
+      - name: Criar credencial temporária do Google
         shell: python
-        env:
-          # O nome da variável aqui (GOOGLE_CREDS) tem de ser igual ao que está no seu script
-          GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDENTIALS }}
         run: |
           import os
-          with open('credenciais.json', 'w') as f:
-              f.write(os.environ['GOOGLE_CREDS'])
+          with open('credenciais.json', 'w', encoding='utf-8') as arquivo:
+              arquivo.write(os.environ['GOOGLE_CREDS'])
 
-      - name: Rodar o Robô
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          LOGO_DEV_TOKEN: ${{ secrets.LOGO_DEV_TOKEN }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          EOD_SNAPSHOTS: "true"
-          # Variáveis novas do Google Drive
-          CLIENT_ID: ${{ secrets.CLIENT_ID }}
-          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
-          REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
-          DRIVE_ROOT_FOLDER_ID: ${{ secrets.DRIVE_ROOT_FOLDER_ID }}
+      - name: Atualizar ETFs e BDRs para a busca de oportunidades
+        if: github.event.schedule == '0 13,15,17,19,21 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'oportunidades')
+        run: python -m scripts.coletar_etfs_bdrs --limite 60 --sem-notificacoes
+      - name: Buscar oportunidades de FIIs, ações, ETFs e BDRs
+        if: github.event.schedule == '0 13,15,17,19,21 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'oportunidades')
         run: python app.py
 
-      - name: Avisar administrador somente sobre falha do workflow
+      - name: Planejar cobertura integral de ações e FIIs
+        if: github.event.schedule == '15 22 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'atualizacao_noturna')
+        id: planejar
+        run: python -m scripts.planejar_ciclo_noturno --limite-total "${{ inputs.limite_total || '30' }}" --github-output "$GITHUB_OUTPUT"
+      - name: Atualizar ações e FIIs em lotes controlados
+        if: github.event.schedule == '15 22 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'atualizacao_noturna')
+        shell: bash
+        run: |
+          ciclos="${{ steps.planejar.outputs.ciclos }}"
+          echo "Base: ${{ steps.planejar.outputs.acoes }} ações e ${{ steps.planejar.outputs.fiis }} FIIs; ${ciclos} lote(s)."
+          for ciclo in $(seq 1 "${ciclos}"); do
+            echo "Iniciando lote ${ciclo}/${ciclos}"
+            python atualizador_ciclico.py --limite-total "${{ inputs.limite_total || '30' }}" --orcamento-segundos 180 --pausa-segundos 2
+          done
+      - name: Atualizar ETFs e BDRs na mesma rodada noturna
+        if: github.event.schedule == '15 22 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'atualizacao_noturna')
+        run: python -m scripts.coletar_etfs_bdrs --limite 60 --sem-notificacoes
+      - name: Atualizar indicadores macro e Tesouro Direto
+        if: github.event.schedule == '15 22 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'atualizacao_noturna')
+        run: |
+          python -m scripts.coletar_series_macro
+          python -m scripts.coletar_tesouro_direto
+      - name: Persistir fechamento e auditar cobertura
+        if: github.event.schedule == '15 22 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'atualizacao_noturna')
+        run: |
+          python -m scripts.persistir_fechamento_eod
+          python -m scripts.auditar_cobertura_noturna --max-atraso-dias 1
+          python -m scripts.corrigir_taxonomia_fiis
+
+      - name: Avisar administrador somente sobre falha
         if: failure() && !cancelled()
         continue-on-error: true
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: python -m scripts.notificar_falha_workflow
