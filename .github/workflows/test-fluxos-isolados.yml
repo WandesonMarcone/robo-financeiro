@@ -76,6 +76,11 @@ on:
       - '.github/workflows/test-fluxos-isolados.yml'
       - '.github/workflows/atualizacao-ciclica.yml'
 
+concurrency:
+  # Em rajadas de commits, mantém somente a validação mais recente da mesma referência.
+  group: testes-fluxos-isolados-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   testes:
     runs-on: ubuntu-latest
