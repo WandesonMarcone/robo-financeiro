@@ -117,6 +117,7 @@ def executar_tarefa_docs_acoes(tarefa_id):
                     "ja_existentes": resultado.ja_existentes,
                     "sem_ativo": resultado.sem_ativo,
                     "falhas_persistencia": resultado.falhas_persistencia,
+                    "detalhes": resultado.detalhes_painel(),
                 },
                 ensure_ascii=False,
             ),
@@ -125,7 +126,11 @@ def executar_tarefa_docs_acoes(tarefa_id):
 
         from bot.loader import bot
 
-        bot.send_message(chat_id, texto)
+        from services.relatorio_documental import mensagens_telegram_documentais
+        for mensagem in mensagens_telegram_documentais(
+            resultado, titulo="📄 Documentos de ações processados nesta varredura"
+        ):
+            bot.send_message(chat_id, mensagem)
         logger.info(
             "Tarefa DOCS_ACOES concluida id=%s gravados=%s existentes=%s",
             tarefa_id,
