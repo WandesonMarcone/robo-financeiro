@@ -895,6 +895,59 @@ def historico():
         return jsonify({"message": "O histórico ainda não foi inicializado no Neon."}), 503
 
 
+def _notificacoes_documentais_para_painel(limite: int = 12) -> list[dict]:
+    """Resumos persistentes das últimas coletas, com acesso aos documentos."""
+    from atualizador_documentos import SessionDB
+    from pipeline_dados.banco_dados import EventoOperacional
+
+    tipos = (
+        "VARREDURA_FNET", "VARREDURA_DOCUMENTOS_ACOES",
+        "forcar_documentos", "forcar_fiis", "forcar_docs_acoes",
+    )
+    session = SessionDB()
+    try:
+        eventos = (
+            session.query(EventoOperacional)
+            .filter(EventoOperacional.tipo.in_(tipos))
+            .order_by(EventoOperacional.iniciado_em.desc())
+            .limit(min(max(limite, 1), 30))
+            .all()
+        )
+        saida = []
+        for evento in eventos:
+            detalhes = _detalhes_evento(evento.detalhes)
+            resultado = detalhes.get("resultado") if isinstance(detalhes.get("resultado"), dict) else detalhes
+            documentos = list(resultado.get("documentos") or [])
+            # A coleta ainda aparece mesmo sem novidade: isso permite saber que
+            # a execução terminou sem documentos novos, em vez de parecer falha.
+            saida.append({
+                "id": evento.id,
+                "type": evento.tipo,
+                "status": evento.status,
+                "message": evento.mensagem,
+                "started_at": evento.iniciado_em.isoformat() if evento.iniciado_em else None,
+                "finished_at": evento.concluido_em.isoformat() if evento.concluido_em else None,
+                "new_documents": int(resultado.get("novos") or len(documentos) or 0),
+                "documents": documentos[:120],
+            })
+        return saida
+    finally:
+        session.close()
+
+
+@admin_api.route("/api/admin/document-notifications", methods=["GET"])
+@exige_admin
+def notificacoes_documentais():
+    try:
+        itens = _notificacoes_documentais_para_painel()
+        return jsonify({
+            "notifications": itens,
+            "new_documents_total": sum(item["new_documents"] for item in itens),
+        })
+    except Exception:
+        return jsonify({"message": "Não foi possível consultar as notificações documentais no Neon."}), 503
+
+
 @admin_api.route("/api/admin/alerts", methods=["GET"])
 @exige_admin
 def alertas():
