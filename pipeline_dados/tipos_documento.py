@@ -197,6 +197,28 @@ def normalizar_tipo_documento(tipo, tipo_ativo="FII"):
     return _mapa_oficial(catalogo_fii()).get(chave)
 
 
+
+def tipo_por_assunto_acao(assunto):
+    """Classifica títulos inequívocos de resultados de companhias abertas.
+
+    A regra é propositalmente conservadora: só trata apresentações/release de
+    resultado. Comunicados genéricos permanecem como comunicados.
+    """
+    chave = _chave(assunto)
+    if not chave:
+        return None
+    if (
+        "apresentacao do resultado" in chave
+        or "apresentacao dos resultados" in chave
+        or "apresentacao de resultados" in chave
+        or "release de resultados" in chave
+        or "resultado trimestral" in chave
+        or "resultados trimestrais" in chave
+    ):
+        return "Apresentação de Resultados"
+    return None
+
+
 def tipo_exibivel(tipo, tipo_ativo="FII"):
     return normalizar_tipo_documento(tipo, tipo_ativo) is not None
 
