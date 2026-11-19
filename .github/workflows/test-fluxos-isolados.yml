@@ -11,6 +11,10 @@ on:
       - 'tests/test_sem_statusinvest.py'
       - 'scripts/notificar_falha_workflow.py'
       - 'modules/utils.py'
+      - 'services/oportunidades_unificadas.py'
+      - 'services/coletor_etfs_bdrs.py'
+      - 'tests/test_oportunidades_unificadas.py'
+      - 'tests/test_etfs_bdrs.py'
       - 'services/admin_api.py'
       - 'modules/GoogleDriveManager.py'
       - 'tests/test_medicao_drive.py'
@@ -52,6 +56,10 @@ on:
       - 'tests/test_sem_statusinvest.py'
       - 'scripts/notificar_falha_workflow.py'
       - 'modules/utils.py'
+      - 'services/oportunidades_unificadas.py'
+      - 'services/coletor_etfs_bdrs.py'
+      - 'tests/test_oportunidades_unificadas.py'
+      - 'tests/test_etfs_bdrs.py'
       - 'services/admin_api.py'
       - 'modules/GoogleDriveManager.py'
       - 'tests/test_medicao_drive.py'
@@ -101,5 +109,5 @@ jobs:
         run: pip install -r requirements.txt
       - name: Validar módulos e fluxos seguros
         run: |
-          python -m py_compile app.py atualizador_ciclico.py atualizador_documentos.py scripts/processar_documentos_pendentes.py modules/lotes_atualizacao.py modules/scraper_acoes.py modules/scraper_fiis.py modules/utils.py services/admin_api.py bot/callbacks_menus.py services/coletor_etfs_bdrs.py pipeline_dados/tipos_documento.py modules/GoogleDriveManager.py services/orquestrador.py services/coletor_tesouro_direto.py pipeline_dados/coletor_fnet.py scripts/notificar_falha_workflow.py scripts/notificar_sucesso_atualizacao.py scripts/varredura_fnet_diaria.py scripts/coletar_tesouro_direto.py scripts/coletar_series_macro.py
-          python -m unittest tests.test_lotes_atualizacao tests.test_sem_statusinvest tests.test_fnet_isolado tests.test_contingencia_fnet tests.test_medicao_drive tests.test_contingencia_eod tests.test_retorno_crons tests.test_tesouro_csv tests.test_auditoria_tesouro tests.test_auditoria_macro tests.test_tipos_documento -v
+          python -m py_compile app.py atualizador_ciclico.py atualizador_documentos.py scripts/processar_documentos_pendentes.py modules/lotes_atualizacao.py modules/scraper_acoes.py modules/scraper_fiis.py modules/utils.py services/admin_api.py bot/callbacks_menus.py services/coletor_etfs_bdrs.py services/oportunidades_unificadas.py pipeline_dados/tipos_documento.py modules/GoogleDriveManager.py services/orquestrador.py services/coletor_tesouro_direto.py pipeline_dados/coletor_fnet.py scripts/notificar_falha_workflow.py scripts/notificar_sucesso_atualizacao.py scripts/varredura_fnet_diaria.py scripts/coletar_tesouro_direto.py scripts/coletar_series_macro.py
+          python -m unittest tests.test_lotes_atualizacao tests.test_sem_statusinvest tests.test_fnet_isolado tests.test_contingencia_fnet tests.test_medicao_drive tests.test_contingencia_eod tests.test_retorno_crons tests.test_tesouro_csv tests.test_auditoria_tesouro tests.test_auditoria_macro tests.test_tipos_documento tests.test_etfs_bdrs tests.test_oportunidades_unificadas -v
