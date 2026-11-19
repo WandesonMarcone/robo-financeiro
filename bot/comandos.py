@@ -19,6 +19,13 @@ from services.github_actions import disparar_atualizacao_isolada
 from services.coletor_macro_bcb import coletar_bcb
 
 
+def _enviar_relatorio_documental(chat_id, resultado, *, titulo):
+    from services.relatorio_documental import mensagens_telegram_documentais
+
+    for texto in mensagens_telegram_documentais(resultado, titulo=titulo):
+        bot.send_message(chat_id, texto)
+
+
 def _ano_do_comando(message):
     texto = (message.text or "").split()
     if len(texto) > 1 and texto[1].isdigit():
@@ -280,7 +287,8 @@ def forcar_documentos_ativo(message):
                 from pipeline_dados.coletor_docs_acoes import RelatoriosAcoesCVM
                 ano = int(filtro) if filtro and filtro.isdigit() and len(filtro) == 4 else ano_padrao_coleta()
                 resultado = RelatoriosAcoesCVM().vasculhar_documentos(ano=ano, ticker=ticker)
-            bot.send_message(message.chat.id, f"✅ Busca documental de *{ticker}* concluída.\n{resultado.mensagem_telegram()}", parse_mode="Markdown")
+            bot.send_message(message.chat.id, f"✅ Busca documental de *{ticker}* concluída.", parse_mode="Markdown")
+            _enviar_relatorio_documental(message.chat.id, resultado, titulo="📄 Documentos processados nesta busca")
         except Exception as exc:
             bot.send_message(message.chat.id, f"❌ Busca documental de *{ticker}* encerrada com erro: {type(exc).__name__}.")
     threading.Thread(target=tarefa, daemon=True).start()
@@ -364,7 +372,7 @@ def acionar_varredura_manual(message):
                 resultado = ColetorFnet(session).coletar(dias=janela)
             finally:
                 session.close()
-            bot.send_message(chat_id, resultado.mensagem_telegram())
+            _enviar_relatorio_documental(chat_id, resultado, titulo="📄 Documentos de FIIs processados nesta varredura")
             bot.send_message(
                 chat_id,
                 "Processando fila PENDENTE (Drive/IA), inclusive residual.",
@@ -515,7 +523,7 @@ def cmd_forcar_fiis(message):
     def background_coleta(ano):
         try:
             resultado = processar_informes_fiis_cvm(ano=ano)
-            bot.send_message(chat_id, resultado.mensagem_telegram())
+            _enviar_relatorio_documental(chat_id, resultado, titulo="📄 Informes de FIIs processados nesta coleta")
         except Exception as e:
             bot.send_message(
                 chat_id,
