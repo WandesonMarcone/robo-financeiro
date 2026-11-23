@@ -38,8 +38,8 @@ def main():
         acoes = rotina_processar_acoes(limite=LIMITE_POR_CLASSE)
         detalhes = {"resultados_reclassificados": resultados_reclassificados, "fii": _detalhes(fii), "acoes": _detalhes(acoes)}
         erro = detalhes["fii"]["erro"] or detalhes["acoes"]["erro"]
-        if erro:
-            raise RuntimeError(str(erro))
+        total_erros = detalhes["fii"]["erros"] + detalhes["acoes"]["erros"]
+        falha = erro or (f"{total_erros} erro(s) na fila documental." if total_erros else None)
 
         # Só usa PDFs que acabaram de ser confirmados no Drive; nunca infere
         # setor de FII a partir de preço, ticker ou fonte não documental.
@@ -49,8 +49,9 @@ def main():
         detalhes["telegram_resumo_enviado"] = enviar_relatorio_processamento_documental(detalhes)
         registrar_resultado(evento, detalhes)
         mensagem = (
-            "Processamento documental concluído: "
-            f"FIIs={detalhes['fii']['processados']}, "
+            ("Processamento documental com falhas: " if falha
+             else "Processamento documental concluído: ")
+            + f"FIIs={detalhes['fii']['processados']}, "
             f"ações={detalhes['acoes']['processados']}, "
             f"Drive={detalhes['fii']['salvo_drive'] + detalhes['acoes']['salvo_drive']}, "
             f"revisão={detalhes['fii']['revisao'] + detalhes['acoes']['revisao']}, "
@@ -60,7 +61,7 @@ def main():
             f"erros={detalhes['fii']['erros'] + detalhes['acoes']['erros']}. "
             f"Telegram={'enviado' if detalhes['telegram_resumo_enviado'] else 'não enviado'}."
         )
-        concluir_evento(evento, sucesso=True, mensagem=mensagem)
+        concluir_evento(evento, sucesso=not falha, mensagem=mensagem, erro=falha)
         print(mensagem)
     except Exception as exc:
         concluir_evento(
@@ -70,6 +71,8 @@ def main():
             erro=type(exc).__name__,
         )
         raise
+    if falha:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
