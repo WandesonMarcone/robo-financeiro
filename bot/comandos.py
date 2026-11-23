@@ -280,13 +280,15 @@ def forcar_documentos_ativo(message):
     def tarefa():
         try:
             if tipo == "FII":
-                from pipeline_dados.coletor_fnet import ColetorFnet
-                dias = int(filtro) if filtro and filtro.isdigit() else 60
+                from pipeline_dados.coletor_fnet import ColetorFnet, DIAS_PADRAO
+                dias = int(filtro) if filtro and filtro.isdigit() else DIAS_PADRAO
                 resultado = ColetorFnet().coletar(dias=dias, ticker=ticker)
             else:
                 from pipeline_dados.coletor_docs_acoes import RelatoriosAcoesCVM
-                ano = int(filtro) if filtro and filtro.isdigit() and len(filtro) == 4 else ano_padrao_coleta()
-                resultado = RelatoriosAcoesCVM().vasculhar_documentos(ano=ano, ticker=ticker)
+                ano = int(filtro) if filtro and filtro.isdigit() and len(filtro) == 4 else None
+                resultado = RelatoriosAcoesCVM().vasculhar_documentos(
+                    ano=ano, ticker=ticker
+                )
             bot.send_message(message.chat.id, f"✅ Busca documental de *{ticker}* concluída.", parse_mode="Markdown")
             _enviar_relatorio_documental(message.chat.id, resultado, titulo="📄 Documentos processados nesta busca")
         except Exception as exc:

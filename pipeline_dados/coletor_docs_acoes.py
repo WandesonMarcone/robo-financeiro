@@ -1,14 +1,14 @@
 """Coleta de documentos IPE de acoes da CVM (CSV em ZIP).
 
 Associa cada documento ao ``Ativo`` pelo CNPJ cadastrado (coluna
-``ativos.cnpj``), nunca pelo ticker. O ano vem do chamador; o padrao, se
-omitido, e o ano civil corrente. Nao baixa o PDF nesta etapa: grava a URL.
+``ativos.cnpj``), nunca pelo ticker. Sem ano explícito, consulta o trimestre
+civil anterior e o trimestre atual. Nao baixa o PDF nesta etapa: grava a URL.
 """
 
 import csv
 import io
 import zipfile
-from datetime import datetime
+from datetime import date, datetime
 
 import requests
 
@@ -42,11 +42,26 @@ TIPOS_DESEJADOS = frozenset(
 )
 
 
+def janela_trimestral_documentos(referencia=None):
+    """Abrange o trimestre civil anterior e o trimestre atual até hoje."""
+    referencia = referencia or date.today()
+    if isinstance(referencia, datetime):
+        referencia = referencia.date()
+    mes_trimestre_atual = ((referencia.month - 1) // 3) * 3 + 1
+    if mes_trimestre_atual == 1:
+        inicio = date(referencia.year - 1, 10, 1)
+    else:
+        inicio = date(referencia.year, mes_trimestre_atual - 3, 1)
+    return inicio, referencia
+
+
 class ResultadoColetaDocs:
     """Contagens da varredura IPE. Nao afirma sucesso se nada foi gravado."""
 
-    def __init__(self, ano):
+    def __init__(self, ano, data_inicio=None, data_fim=None):
         self.ano = ano
+        self.data_inicio = data_inicio
+        self.data_fim = data_fim
         self.status = STATUS_ERRO
         self.http_status = None
         self.informes_encontrados = 0
@@ -69,13 +84,19 @@ class ResultadoColetaDocs:
             self.documentos_novos.append(item)
 
     def detalhes_painel(self):
-        return {"ano": self.ano, "status": self.status, "documentos_arquivo": self.informes_encontrados,
+        return {"ano": self.ano,
+                "data_inicio": self.data_inicio.isoformat() if self.data_inicio else None,
+                "data_fim": self.data_fim.isoformat() if self.data_fim else None,
+                "status": self.status, "documentos_arquivo": self.informes_encontrados,
                 "novos": self.gravados, "ja_existentes": self.ja_existentes, "sem_ativo": self.sem_ativo,
                 "falhas_persistencia": self.falhas_persistencia, "ativos": list(self.por_ativo.values()),
                 "documentos": self.documentos_novos}
 
     def mensagem_telegram(self):
-        ano = self.ano
+        ano = (
+            f"{self.data_inicio.strftime('%d/%m/%Y')} a {self.data_fim.strftime('%d/%m/%Y')}"
+            if self.data_inicio and self.data_fim else str(self.ano)
+        )
         if self.status == STATUS_ARQUIVO_INDISPONIVEL:
             codigo = self.http_status if self.http_status is not None else "—"
             return (
@@ -180,10 +201,18 @@ class RelatoriosAcoesCVM:
         self.session = session
         self.http_get = http_get
 
-    def vasculhar_documentos(self, ano=None, ticker=None):
-        if ano is None:
-            ano = ano_padrao_coleta()
-        resultado = ResultadoColetaDocs(ano)
+    def vasculhar_documentos(self, ano=None, ticker=None, data_inicio=None,
+                             data_fim=None):
+        if ano is None and data_inicio is None and data_fim is None:
+            data_inicio, data_fim = janela_trimestral_documentos()
+        if data_inicio and data_fim and data_inicio > data_fim:
+            raise ValueError("data_inicio deve ser anterior ou igual a data_fim")
+        anos = (
+            list(range(data_inicio.year, data_fim.year + 1))
+            if data_inicio and data_fim else [ano or ano_padrao_coleta()]
+        )
+        ano_resultado = anos[0] if len(anos) == 1 else f"{anos[0]}-{anos[-1]}"
+        resultado = ResultadoColetaDocs(ano_resultado, data_inicio, data_fim)
         ticker_filtro = str(ticker or "").strip().upper() or None
         session_propria = self.session is None
         obter = self.http_get if self.http_get is not None else requests.get
@@ -194,27 +223,29 @@ class RelatoriosAcoesCVM:
 
             session = SessionDB()
 
-        url = URL_IPE.format(ano=ano)
         try:
-            resposta = obter(url, timeout=40)
-            resultado.http_status = getattr(resposta, "status_code", None)
-            if resultado.http_status != 200:
-                resultado.status = STATUS_ARQUIVO_INDISPONIVEL
-                return resultado
+            linhas = []
+            for ano_consulta in anos:
+                resposta = obter(URL_IPE.format(ano=ano_consulta), timeout=40)
+                resultado.http_status = getattr(resposta, "status_code", None)
+                if resultado.http_status != 200:
+                    resultado.status = STATUS_ARQUIVO_INDISPONIVEL
+                    return resultado
 
-            try:
-                linhas = _ler_zip_ipe(resposta.content)
-            except zipfile.BadZipFile:
-                resultado.status = STATUS_ARQUIVO_INVALIDO
-                return resultado
-            except Exception as erro:
-                resultado.status = STATUS_ARQUIVO_INVALIDO
-                resultado.erro = type(erro).__name__
-                return resultado
+                try:
+                    linhas_ano = _ler_zip_ipe(resposta.content)
+                except zipfile.BadZipFile:
+                    resultado.status = STATUS_ARQUIVO_INVALIDO
+                    return resultado
+                except Exception as erro:
+                    resultado.status = STATUS_ARQUIVO_INVALIDO
+                    resultado.erro = type(erro).__name__
+                    return resultado
 
-            if linhas is None:
-                resultado.status = STATUS_ARQUIVO_INVALIDO
-                return resultado
+                if linhas_ano is None:
+                    resultado.status = STATUS_ARQUIVO_INVALIDO
+                    return resultado
+                linhas.extend(linhas_ano)
 
             mapa_cnpj = _mapa_acoes_por_cnpj(session)
 
@@ -237,6 +268,10 @@ class RelatoriosAcoesCVM:
                     data_pub = datetime.strptime(data_limpa, "%Y-%m-%d").date()
                 except (TypeError, ValueError):
                     resultado.ignorados_validacao += 1
+                    continue
+                if data_inicio and data_pub < data_inicio:
+                    continue
+                if data_fim and data_pub > data_fim:
                     continue
 
                 ativo = mapa_cnpj.get(cnpj_limpo)

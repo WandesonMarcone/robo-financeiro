@@ -1,14 +1,69 @@
 """Executa lotes seguros, auditáveis e classificáveis da fila documental."""
 
+from datetime import date, datetime, timedelta
+
+from sqlalchemy import or_
+
 from atualizador_documentos import (
+    SessionDB,
     reclassificar_apresentacoes_resultados_acoes,
     rotina_processar_acoes,
     rotina_processar_pendentes,
 )
+from pipeline_dados.banco_dados import DocumentosQualitativos
+from pipeline_dados.coletor_docs_acoes import janela_trimestral_documentos
 from services.historico_operacional import concluir_evento, iniciar_evento, registrar_resultado
 from services.taxonomia_fiis_automatica import corrigir_taxonomia_fiis
 
 LIMITE_POR_CLASSE = 20
+
+
+def arquivar_fora_da_janela(referencia=None, session=None):
+    """Retira da fila ativa o histórico anterior ao escopo atual do projeto."""
+    referencia = referencia or date.today()
+    if isinstance(referencia, datetime):
+        referencia = referencia.date()
+    inicio_fiis = referencia - timedelta(days=30)
+    inicio_acoes, _ = janela_trimestral_documentos(referencia)
+    propria = session is None
+    session = session or SessionDB()
+    try:
+        fiis = session.query(DocumentosQualitativos).filter(
+            DocumentosQualitativos.status_processamento == "PENDENTE",
+            or_(
+                DocumentosQualitativos.data_publicacao.is_(None),
+                DocumentosQualitativos.data_publicacao < inicio_fiis,
+                DocumentosQualitativos.data_publicacao > referencia,
+            ),
+        ).update(
+            {DocumentosQualitativos.status_processamento: "FORA_JANELA"},
+            synchronize_session=False,
+        )
+        acoes = session.query(DocumentosQualitativos).filter(
+            DocumentosQualitativos.status_processamento == "PENDENTE_ACAO",
+            or_(
+                DocumentosQualitativos.data_publicacao.is_(None),
+                DocumentosQualitativos.data_publicacao < inicio_acoes,
+                DocumentosQualitativos.data_publicacao > referencia,
+            ),
+        ).update(
+            {DocumentosQualitativos.status_processamento: "FORA_JANELA"},
+            synchronize_session=False,
+        )
+        session.commit()
+        return {
+            "fiis": int(fiis or 0),
+            "acoes": int(acoes or 0),
+            "inicio_fiis": inicio_fiis.isoformat(),
+            "inicio_acoes": inicio_acoes.isoformat(),
+            "fim": referencia.isoformat(),
+        }
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        if propria:
+            session.close()
 
 
 def _detalhes(resultado):
@@ -33,10 +88,16 @@ def main():
         mensagem="Processamento documental diário iniciado.",
     )
     try:
+        fora_janela = arquivar_fora_da_janela()
         resultados_reclassificados = reclassificar_apresentacoes_resultados_acoes()
         fii = rotina_processar_pendentes(limite=LIMITE_POR_CLASSE)
         acoes = rotina_processar_acoes(limite=LIMITE_POR_CLASSE)
-        detalhes = {"resultados_reclassificados": resultados_reclassificados, "fii": _detalhes(fii), "acoes": _detalhes(acoes)}
+        detalhes = {
+            "fora_janela": fora_janela,
+            "resultados_reclassificados": resultados_reclassificados,
+            "fii": _detalhes(fii),
+            "acoes": _detalhes(acoes),
+        }
         erro = detalhes["fii"]["erro"] or detalhes["acoes"]["erro"]
         total_erros = detalhes["fii"]["erros"] + detalhes["acoes"]["erros"]
         falha = erro or (f"{total_erros} erro(s) na fila documental." if total_erros else None)
@@ -57,6 +118,7 @@ def main():
             f"revisão={detalhes['fii']['revisao'] + detalhes['acoes']['revisao']}, "
             f"setores corrigidos={taxonomia.get('quantidade_corrigida', 0)}, "
             f"resultados reclassificados={resultados_reclassificados}, "
+            f"histórico fora da janela={fora_janela['fiis'] + fora_janela['acoes']}, "
             f"aguardando fonte FNET={detalhes['fii']['sem_fonte']}, "
             f"erros={detalhes['fii']['erros'] + detalhes['acoes']['erros']}. "
             f"Telegram={'enviado' if detalhes['telegram_resumo_enviado'] else 'não enviado'}."

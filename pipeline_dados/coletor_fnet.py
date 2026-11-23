@@ -18,7 +18,7 @@ STATUS_SEM_NOVOS = "sem_novos"
 STATUS_GRAVADO = "gravado"
 STATUS_ERRO = "erro"
 
-DIAS_PADRAO = 60
+DIAS_PADRAO = 30
 
 
 def normalizar_texto(texto):
