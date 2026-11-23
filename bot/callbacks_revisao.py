@@ -27,9 +27,12 @@ def _editar_painel_revisao(texto, chat_id, message_id, **opcoes):
     except ApiTelegramException as exc:
         if exc.error_code != 400 or "there is no text in the message to edit" not in exc.description:
             raise
-    return bot.edit_message_caption(
-        caption=texto, chat_id=chat_id, message_id=message_id, **opcoes
-    )
+    painel = bot.send_message(chat_id, texto, **opcoes)
+    try:
+        bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=None)
+    except ApiTelegramException:
+        logger.debug("Não foi possível remover os botões da mensagem anterior.")
+    return painel
 
 
 def obter_drive_manager():
