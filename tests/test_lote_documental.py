@@ -1,9 +1,13 @@
 """Limites e relato da fila documental sem acessar serviços externos."""
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
-from atualizador_documentos import ResultadoProcessamento, _selecionar_lote_documental
+from atualizador_documentos import (
+    ResultadoProcessamento,
+    _selecionar_lote_documental,
+    enviar_alerta_revisao_telegram,
+)
 
 
 class TesteLoteDocumental(unittest.TestCase):
@@ -26,6 +30,31 @@ class TesteLoteDocumental(unittest.TestCase):
         self.assertIn("Na fila: 225", texto)
         self.assertIn("Selecionados neste lote: 20", texto)
         self.assertIn("Processados: 18", texto)
+
+    @patch("services.historico_operacional.registrar_notificacao")
+    @patch("atualizador_documentos._enviar_mensagem_telegram")
+    @patch("atualizador_documentos._chat_administrador", return_value="123")
+    def test_alerta_revisao_aceita_checagens_em_dicionarios(
+        self, _chat, enviar_mensagem, _registrar
+    ):
+        enviar_mensagem.return_value = True
+
+        entregue = enviar_alerta_revisao_telegram(
+            "KNRI11",
+            "Relatorio Gerencial",
+            "https://drive.google.com/file/d/arquivo/view",
+            "arquivo",
+            6318,
+            checagens=(
+                {"tipo": "Relatorio Gerencial", "confianca": 80},
+                {"tipo": "Outros", "confianca": 65},
+            ),
+        )
+
+        self.assertTrue(entregue)
+        mensagem = enviar_mensagem.call_args.args[1]
+        self.assertIn("`Relatorio Gerencial` (80%)", mensagem)
+        self.assertIn("`Outros` (65%)", mensagem)
 
 
 if __name__ == "__main__":

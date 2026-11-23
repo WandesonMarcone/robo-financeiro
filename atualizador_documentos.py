@@ -359,10 +359,13 @@ def enviar_alerta_revisao_telegram(
 
     leituras = f"📄 **Leitura Inicial:** `{nome_doc}`"
     if checagens and len(checagens) == 2:
+        checagem_1, checagem_2 = checagens
         leituras = (
             "🤖 **Duas checagens da IA**\n"
-            f"1️⃣ `{checagens[0][0]}` ({checagens[0][1]}%)\n"
-            f"2️⃣ `{checagens[1][0]}` ({checagens[1][1]}%)"
+            f"1️⃣ `{checagem_1.get('tipo', 'Documento')}` "
+            f"({int(checagem_1.get('confianca', 0) or 0)}%)\n"
+            f"2️⃣ `{checagem_2.get('tipo', 'Documento')}` "
+            f"({int(checagem_2.get('confianca', 0) or 0)}%)"
         )
 
     mensagem = (
@@ -735,14 +738,25 @@ def rotina_processar_pendentes(documento_id: int | None = None, ticker: str | No
                     doc_db.url_pdf = link_gerado
                     doc_db.resumo_ia = _resumo_dupla_checagem(detalhes)
                     resultado.revisao += 1
-                    enviar_alerta_revisao_telegram(
-                        ticker,
-                        nome_limpo,
-                        link_gerado,
-                        file_id,
-                        doc_db.id,
-                        checagens=(detalhes["checagem_1"], detalhes["checagem_2"]),
-                    )
+                    try:
+                        enviar_alerta_revisao_telegram(
+                            ticker,
+                            nome_limpo,
+                            link_gerado,
+                            file_id,
+                            doc_db.id,
+                            checagens=(
+                                detalhes["checagem_1"],
+                                detalhes["checagem_2"],
+                            ),
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Documento %s salvo para revisão, mas o alerta do "
+                            "Telegram falhou.",
+                            doc_db.id,
+                            exc_info=True,
+                        )
                 else:
                     doc_db.status_processamento = "ERRO_DRIVE"
                     resultado.erros += 1
