@@ -232,11 +232,16 @@ def enviar_relatorio_processamento_documental(detalhes):
     fii = detalhes.get("fii") or {}
     acoes = detalhes.get("acoes") or {}
     linhas = [
-        "📑 Processamento documental concluído",
+        ("📑 Processamento documental com falhas"
+         if any(lote.get("erros") or lote.get("erro") for lote in (fii, acoes))
+         else "📑 Processamento documental concluído"),
         "",
         f"FIIs: {fii.get('processados', 0)} processados · {fii.get('salvo_drive', 0)} salvos · {fii.get('revisao', 0)} revisão · {fii.get('erros', 0)} erros",
         f"Ações: {acoes.get('processados', 0)} processadas · {acoes.get('salvo_drive', 0)} salvos · {acoes.get('revisao', 0)} revisão · {acoes.get('erros', 0)} erros",
     ]
+    for lote in (fii, acoes):
+        if lote.get("erro"):
+            linhas.append(str(lote["erro"]))
     itens = list(fii.get("itens") or []) + list(acoes.get("itens") or [])
     if itens:
         linhas.extend(["", "Detalhes do lote:"])
@@ -627,6 +632,7 @@ def rotina_processar_pendentes(documento_id: int | None = None, ticker: str | No
         # 2. 🟢 ABRE UMA NOVA SESSÃO EXCLUSIVA PARA ESTE ARQUIVO
         session = SessionDB()
         notificacao = None
+        temp_filename = None
         try:
             doc_db = session.query(DocumentosQualitativos).filter_by(id=doc_id).first()
             if not doc_db:
@@ -750,9 +756,14 @@ def rotina_processar_pendentes(documento_id: int | None = None, ticker: str | No
             )
             if notificacao:
                 resultado.notificados += notificar_documento_disponivel(**notificacao)
-            if os.path.exists(temp_filename): os.remove(temp_filename)
-            time.sleep(6) 
+            time.sleep(6)
 
+        except IAIndisponivelError:
+            session.rollback()
+            resultado.erros += 1
+            resultado.erro = "IA indisponível para dupla classificação FII. Documentos restantes mantidos na fila."
+            logger.warning("%s Documento=%s", resultado.erro, doc_id)
+            break
         except Exception as e:
             # Se der um erro bizarro, cancela SÓ este documento e continua vivo!
             print(f"❌ Erro crítico ao processar o documento {doc_id}: {e}")
@@ -768,8 +779,14 @@ def rotina_processar_pendentes(documento_id: int | None = None, ticker: str | No
             except Exception:
                 session.rollback()
         finally:
-            # 4. 🔴 FECHA A SESSÃO DO ARQUIVO PARA NÃO DAR TIMEOUT
             session.close()
+            if temp_filename:
+                try:
+                    os.remove(temp_filename)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    logger.warning("Falha ao remover PDF temporário do documento %s", doc_id)
     logger.info(
         "Fila PENDENTE encerrada: processados=%s salvo_drive=%s revisao=%s erros=%s notificados=%s",
         resultado.processados,
