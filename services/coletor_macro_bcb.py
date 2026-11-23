@@ -1,5 +1,6 @@
 """Coleta oficial e idempotente de séries BCB/SGS para a Central."""
 from datetime import datetime, timedelta
+import time
 import requests
 from sqlalchemy import text
 
@@ -39,7 +40,16 @@ def coletar_bcb(dias=10, session_factory=None):
                         if codigo == "IPCA" else inicio
                     )
                     url=f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{sgs}/dados?formato=json&dataInicial={inicio_serie}&dataFinal={fim}"
-                    response=requests.get(url,timeout=20); response.raise_for_status(); linhas=response.json()
+                    for tentativa in range(2):
+                        response = requests.get(url, timeout=20)
+                        response.raise_for_status()
+                        try:
+                            linhas = response.json()
+                            break
+                        except requests.exceptions.JSONDecodeError:
+                            if tentativa == 1:
+                                raise
+                            time.sleep(2)
                     gravadas=0
                     for item in linhas:
                         data=datetime.strptime(item["data"], "%d/%m/%Y")
