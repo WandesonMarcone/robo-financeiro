@@ -1,4 +1,4 @@
-"""Regressões da janela trimestral dos documentos IPE/CVM."""
+"""Regressões da janela móvel de 30 dias dos documentos IPE/CVM."""
 
 import csv
 import io
@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from pipeline_dados.banco_dados import Ativo, Base, DocumentosQualitativos, TipoAtivo
 from pipeline_dados.coletor_docs_acoes import (
     RelatoriosAcoesCVM,
-    janela_trimestral_documentos,
+    janela_documental_30_dias,
 )
 from scripts.processar_documentos_pendentes import arquivar_fora_da_janela
 
@@ -34,14 +34,19 @@ def _zip_ipe(linhas):
 
 
 class TesteJanelaDocumentosAcoes(unittest.TestCase):
-    def test_janela_inclui_trimestre_anterior_e_atual(self):
-        inicio, fim = janela_trimestral_documentos(date(2026, 11, 23))
-        self.assertEqual(inicio, date(2026, 7, 1))
+    def test_janela_inclui_somente_ultimos_30_dias(self):
+        inicio, fim = janela_documental_30_dias(date(2026, 11, 23))
+        self.assertEqual(inicio, date(2026, 10, 24))
         self.assertEqual(fim, date(2026, 11, 23))
 
-    def test_janela_do_primeiro_trimestre_cruza_ano(self):
-        inicio, fim = janela_trimestral_documentos(date(2027, 2, 10))
-        self.assertEqual(inicio, date(2026, 10, 1))
+    def test_janela_de_30_dias_cruza_ano(self):
+        inicio, fim = janela_documental_30_dias(date(2027, 1, 10))
+        self.assertEqual(inicio, date(2026, 12, 11))
+        self.assertEqual(fim, date(2027, 1, 10))
+
+    def test_periodo_solicitado_e_limitado_a_30_dias(self):
+        inicio, fim = janela_documental_30_dias(date(2027, 2, 10))
+        self.assertEqual(inicio, date(2027, 1, 11))
         self.assertEqual(fim, date(2027, 2, 10))
 
     def test_coletor_grava_somente_documentos_dentro_da_janela(self):
@@ -66,7 +71,7 @@ class TesteJanelaDocumentosAcoes(unittest.TestCase):
                 {
                     "CNPJ_Companhia": "00.000.000/0001-91",
                     "Link_Download": "https://cvm.example/atual.pdf",
-                    "Data_Referencia": "2026-08-10",
+                    "Data_Referencia": "2026-11-10",
                     "Categoria": "Apresentação de Resultados",
                     "Assunto": "Resultado do terceiro trimestre",
                 },
@@ -125,7 +130,7 @@ class TesteJanelaDocumentosAcoes(unittest.TestCase):
                     status_processamento="PENDENTE_ACAO",
                 ),
                 DocumentosQualitativos(
-                    ativo_id=acao.id, data_publicacao=date(2026, 8, 10),
+                    ativo_id=acao.id, data_publicacao=date(2026, 11, 10),
                     tipo_documento="Documento",
                     status_processamento="PENDENTE_ACAO",
                 ),

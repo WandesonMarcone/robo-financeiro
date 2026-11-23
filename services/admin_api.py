@@ -249,8 +249,7 @@ def _coletar_documentos_isolados(ticker: str, periodo: str | None):
         return ColetorFnet().coletar(dias=int(periodo or 30), ticker=ticker)
     else:
         from pipeline_dados.coletor_docs_acoes import RelatoriosAcoesCVM
-        ano = int(periodo) if periodo and len(periodo) == 4 else None
-        return RelatoriosAcoesCVM().vasculhar_documentos(ano=ano, ticker=ticker)
+        return RelatoriosAcoesCVM().vasculhar_documentos(ticker=ticker)
 
 
 def _indicadores_planilha_para_painel(ticker: str, tipo: str) -> dict:
@@ -968,6 +967,38 @@ def mercado():
         return jsonify({"message": "Não foi possível consultar as séries de mercado no Neon."}), 503
 
 
+@admin_api.route("/api/admin/settings/document-window", methods=["GET", "POST"])
+@exige_admin
+def configuracao_janela_documental():
+    """Consulta ou altera a janela máxima aplicada a todo o fluxo documental."""
+    from services.configuracoes_sistema import (
+        JANELA_DOCUMENTOS_MAXIMA,
+        JANELA_DOCUMENTOS_MINIMA,
+        definir_janela_documentos_dias,
+        obter_janela_documentos_dias,
+    )
+
+    if request.method == "GET":
+        return jsonify({
+            "days": obter_janela_documentos_dias(),
+            "min_days": JANELA_DOCUMENTOS_MINIMA,
+            "max_days": JANELA_DOCUMENTOS_MAXIMA,
+        })
+    try:
+        resultado = definir_janela_documentos_dias((request.get_json(silent=True) or {}).get("days"))
+    except ValueError as exc:
+        return jsonify({"message": str(exc)}), 400
+    except Exception:
+        logger.exception("Falha ao salvar janela documental")
+        return jsonify({"message": "Não foi possível salvar a janela documental no Neon."}), 503
+    return jsonify({
+        **resultado,
+        "min_days": JANELA_DOCUMENTOS_MINIMA,
+        "max_days": JANELA_DOCUMENTOS_MAXIMA,
+        "message": f"Janela documental alterada para {resultado['days']} dias.",
+    })
+
+
 @admin_api.route("/api/admin/instruments", methods=["GET"])
 @exige_admin
 def instrumentos_internacionais():
@@ -1213,12 +1244,14 @@ def executar_comando():
         _executar_em_background(tarefa, _coletar_documentos_isolados, ticker, periodo)
         return jsonify({"message": f"Busca documental de {ticker} iniciada.", "task_id": tarefa}), 202
     if action == "forcar_varredura":
+        from services.configuracoes_sistema import obter_janela_documentos_dias
+        limite = obter_janela_documentos_dias()
         try:
-            dias = int(periodo or 30)
-            if not 1 <= dias <= 365:
+            dias = int(periodo or limite)
+            if not 1 <= dias <= limite:
                 raise ValueError
         except (TypeError, ValueError):
-            return jsonify({"message": "Informe um período entre 1 e 365 dias para a varredura FNET."}), 400
+            return jsonify({"message": f"Informe um período entre 1 e {limite} dias para a varredura FNET."}), 400
         tarefa = _registrar_tarefa(action, f"Varredura de documentos FNET — últimos {dias} dias")
         _executar_em_background(tarefa, _varrer_fnet_pelo_painel, dias)
         return jsonify({"message": f"Varredura FNET dos últimos {dias} dias iniciada.", "task_id": tarefa}), 202

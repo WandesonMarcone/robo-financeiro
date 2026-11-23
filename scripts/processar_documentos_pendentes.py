@@ -11,7 +11,6 @@ from atualizador_documentos import (
     rotina_processar_pendentes,
 )
 from pipeline_dados.banco_dados import DocumentosQualitativos
-from pipeline_dados.coletor_docs_acoes import janela_trimestral_documentos
 from services.historico_operacional import concluir_evento, iniciar_evento, registrar_resultado
 from services.taxonomia_fiis_automatica import corrigir_taxonomia_fiis
 
@@ -23,11 +22,13 @@ def arquivar_fora_da_janela(referencia=None, session=None):
     referencia = referencia or date.today()
     if isinstance(referencia, datetime):
         referencia = referencia.date()
-    inicio_fiis = referencia - timedelta(days=30)
-    inicio_acoes, _ = janela_trimestral_documentos(referencia)
     propria = session is None
     session = session or SessionDB()
     try:
+        from services.configuracoes_sistema import obter_janela_documentos_dias
+        dias = obter_janela_documentos_dias(session)
+        inicio_fiis = referencia - timedelta(days=dias)
+        inicio_acoes = referencia - timedelta(days=dias)
         fiis = session.query(DocumentosQualitativos).filter(
             DocumentosQualitativos.status_processamento == "PENDENTE",
             or_(

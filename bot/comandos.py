@@ -262,7 +262,7 @@ def forcar_documentos_ativo(message):
     """Busca documentos de um único ativo, sem iniciar uma varredura ampla."""
     partes = (message.text or "").split()
     if len(partes) not in (2, 3) or not re.fullmatch(r"[A-Z]{4,6}\d{1,2}", partes[1].upper()):
-        bot.reply_to(message, "⚠️ Uso correto: `/forcar_documentos GARE11 [DIAS|ANO]` ou `/forcar_documentos PETR4 [ANO]`.", parse_mode="Markdown")
+        bot.reply_to(message, "⚠️ Uso correto: `/forcar_documentos GARE11` ou `/forcar_documentos PETR4`.", parse_mode="Markdown")
         return
     ticker = partes[1].upper()
     filtro = partes[2] if len(partes) == 3 else None
@@ -280,8 +280,8 @@ def forcar_documentos_ativo(message):
     def tarefa():
         try:
             if tipo == "FII":
-                from pipeline_dados.coletor_fnet import ColetorFnet, DIAS_PADRAO
-                dias = int(filtro) if filtro and filtro.isdigit() else DIAS_PADRAO
+                from pipeline_dados.coletor_fnet import ColetorFnet
+                dias = int(filtro) if filtro and filtro.isdigit() else None
                 resultado = ColetorFnet().coletar(dias=dias, ticker=ticker)
             else:
                 from pipeline_dados.coletor_docs_acoes import RelatoriosAcoesCVM
@@ -349,9 +349,11 @@ def comando_adicionar(message):
 def acionar_varredura_manual(message):
     chat_id = message.chat.id
     texto = (message.text or "").split()
-    dias = 60
+    from services.configuracoes_sistema import obter_janela_documentos_dias
+    janela_configurada = obter_janela_documentos_dias()
+    dias = janela_configurada
     if len(texto) > 1 and texto[1].isdigit():
-        dias = int(texto[1])
+        dias = min(janela_configurada, max(1, int(texto[1])))
     bot.reply_to(
         message,
         f"Varredura FNET de FIIs (ultimos {dias} dia(s)) em segundo plano. "

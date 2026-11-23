@@ -1,4 +1,4 @@
-"""Descobre documentos IPE/CVM do trimestre anterior e do atual."""
+"""Descobre documentos IPE/CVM dentro da janela móvel de 30 dias."""
 
 from pipeline_dados.coletor_docs_acoes import RelatoriosAcoesCVM
 from services.historico_operacional import concluir_evento, iniciar_evento, registrar_resultado

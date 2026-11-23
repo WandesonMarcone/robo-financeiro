@@ -1,9 +1,9 @@
 """Contingência auditável da descoberta de documentos FNET, sem processar a fila."""
-from pipeline_dados.coletor_fnet import ColetorFnet, DIAS_PADRAO
+from pipeline_dados.coletor_fnet import ColetorFnet
 from services.historico_operacional import iniciar_evento, registrar_resultado, concluir_evento
 
 
-def executar(coletor=None, dias=DIAS_PADRAO):
+def executar(coletor=None, dias=None):
     evento = iniciar_evento(
         "VARREDURA_FNET", origem="GITHUB_ACTIONS",
         mensagem="Contingência diária da descoberta FNET iniciada.",

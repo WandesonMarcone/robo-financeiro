@@ -21,6 +21,12 @@ STATUS_ERRO = "erro"
 DIAS_PADRAO = 30
 
 
+def _data_na_janela(data_documento, dias=DIAS_PADRAO, hoje=None):
+    hoje = hoje or datetime.now().date()
+    limite = hoje - timedelta(days=max(1, int(dias)))
+    return limite <= data_documento <= hoje
+
+
 def normalizar_texto(texto):
     if texto is None:
         return ""
@@ -171,8 +177,7 @@ class ColetorFnet:
         self.session = session
         self.capturar_tudo = capturar_tudo
 
-    def coletar(self, dias=DIAS_PADRAO, ticker=None):
-        resultado = ResultadoVarreduraFnet(dias)
+    def coletar(self, dias=None, ticker=None):
         ticker_filtro = str(ticker or "").strip().upper() or None
         session_propria = self.session is None
         session = self.session
@@ -180,6 +185,11 @@ class ColetorFnet:
             from atualizador_documentos import SessionDB
 
             session = SessionDB()
+
+        from services.configuracoes_sistema import obter_janela_documentos_dias
+        janela_configurada = obter_janela_documentos_dias(session)
+        dias = janela_configurada if dias is None else min(max(1, int(dias)), janela_configurada)
+        resultado = ResultadoVarreduraFnet(dias)
 
         data_busca = (datetime.now() - timedelta(days=dias)).strftime("%d/%m/%Y")
         try:
@@ -205,6 +215,9 @@ class ColetorFnet:
                 data_referencia = _data_referencia_documento(doc)
 
                 if not id_doc or data_referencia is None:
+                    resultado.ignorados_validacao += 1
+                    continue
+                if not _data_na_janela(data_referencia, dias):
                     resultado.ignorados_validacao += 1
                     continue
                 if id_doc in vistos:

@@ -105,6 +105,41 @@ def asset(ticker: str):
         return jsonify({"message": "Ticker inválido."}), 400
 
     requested_type = (request.args.get("asset_type") or "").strip().lower()
+    if requested_type in {"etf", "bdr"}:
+        from services.coletor_etfs_bdrs import detalhe_instrumento_menu
+
+        instrument, metrics = detalhe_instrumento_menu(symbol)
+        if instrument is None or str(instrument.get("tipo") or "").lower() != requested_type:
+            return jsonify({"data": None, "message": "Ativo ainda sem dados consolidados pelo Robô."}), 404
+        metric_map = {
+            str(item.get("chave")): _to_number(item.get("valor_numerico"))
+            for item in metrics
+        }
+        return jsonify({"data": {
+            "ticker": symbol,
+            "asset_type": requested_type,
+            "price": _to_number(instrument.get("fechamento")),
+            "updated_at": (
+                instrument.get("referencia_em").isoformat()
+                if hasattr(instrument.get("referencia_em"), "isoformat")
+                else instrument.get("referencia_em")
+            ),
+            "source": "robo_financeiro",
+            "indicators": {
+                "dy": metric_map.get("dividend_yield"),
+                "pvp": metric_map.get("p_vp"),
+                "pl": metric_map.get("p_l"),
+                "roe": metric_map.get("roe"),
+                "volatility_30d": metric_map.get("volatilidade_30d"),
+                "liquidity_30d_brl": metric_map.get("liquidez_media_30d_brl"),
+                "distance_from_52w_high": metric_map.get("distancia_maxima_1a"),
+            },
+            "classification": {
+                "type": instrument.get("tipo"),
+                "sector": None,
+                "subsector": instrument.get("indice_referencia"),
+            },
+        }})
     is_fii = requested_type == "fii"
 
     # A planilha consolidada é o dado operacional mais atual. Ela usa os mesmos

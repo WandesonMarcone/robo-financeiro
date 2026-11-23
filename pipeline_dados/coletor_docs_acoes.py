@@ -1,14 +1,14 @@
 """Coleta de documentos IPE de acoes da CVM (CSV em ZIP).
 
 Associa cada documento ao ``Ativo`` pelo CNPJ cadastrado (coluna
-``ativos.cnpj``), nunca pelo ticker. Sem ano explícito, consulta o trimestre
-civil anterior e o trimestre atual. Nao baixa o PDF nesta etapa: grava a URL.
+``ativos.cnpj``), nunca pelo ticker. A coleta é limitada à janela móvel dos
+últimos 30 dias. Nao baixa o PDF nesta etapa: grava a URL.
 """
 
 import csv
 import io
 import zipfile
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import requests
 
@@ -28,6 +28,8 @@ URL_IPE = (
     "ipe_cia_aberta_{ano}.zip"
 )
 
+JANELA_DOCUMENTAL_DIAS = 30
+
 TIPOS_DESEJADOS = frozenset(
     {
         "Fato Relevante",
@@ -42,17 +44,22 @@ TIPOS_DESEJADOS = frozenset(
 )
 
 
-def janela_trimestral_documentos(referencia=None):
-    """Abrange o trimestre civil anterior e o trimestre atual até hoje."""
+def janela_documental(referencia=None, dias=JANELA_DOCUMENTAL_DIAS):
+    """Retorna a janela móvel permitida para documentos de ações."""
     referencia = referencia or date.today()
     if isinstance(referencia, datetime):
         referencia = referencia.date()
-    mes_trimestre_atual = ((referencia.month - 1) // 3) * 3 + 1
-    if mes_trimestre_atual == 1:
-        inicio = date(referencia.year - 1, 10, 1)
-    else:
-        inicio = date(referencia.year, mes_trimestre_atual - 3, 1)
-    return inicio, referencia
+    return referencia - timedelta(days=max(1, int(dias))), referencia
+
+
+def janela_documental_30_dias(referencia=None):
+    """Compatibilidade para consumidores antigos e testes da janela padrão."""
+    return janela_documental(referencia, JANELA_DOCUMENTAL_DIAS)
+
+
+def janela_trimestral_documentos(referencia=None):
+    """Compatibilidade: a coleta documental agora é limitada a 30 dias."""
+    return janela_documental_30_dias(referencia)
 
 
 class ResultadoColetaDocs:
@@ -203,8 +210,20 @@ class RelatoriosAcoesCVM:
 
     def vasculhar_documentos(self, ano=None, ticker=None, data_inicio=None,
                              data_fim=None):
-        if ano is None and data_inicio is None and data_fim is None:
-            data_inicio, data_fim = janela_trimestral_documentos()
+        session_propria = self.session is None
+        session = self.session
+        if session_propria:
+            from atualizador_documentos import SessionDB
+
+            session = SessionDB()
+
+        from services.configuracoes_sistema import obter_janela_documentos_dias
+        dias_configurados = obter_janela_documentos_dias(session)
+        if data_fim is None:
+            data_inicio, data_fim = janela_documental(dias=dias_configurados)
+        else:
+            limite_inicio, data_fim = janela_documental(data_fim, dias_configurados)
+            data_inicio = max(data_inicio or limite_inicio, limite_inicio)
         if data_inicio and data_fim and data_inicio > data_fim:
             raise ValueError("data_inicio deve ser anterior ou igual a data_fim")
         anos = (
@@ -214,14 +233,7 @@ class RelatoriosAcoesCVM:
         ano_resultado = anos[0] if len(anos) == 1 else f"{anos[0]}-{anos[-1]}"
         resultado = ResultadoColetaDocs(ano_resultado, data_inicio, data_fim)
         ticker_filtro = str(ticker or "").strip().upper() or None
-        session_propria = self.session is None
         obter = self.http_get if self.http_get is not None else requests.get
-        session = self.session
-
-        if session_propria:
-            from atualizador_documentos import SessionDB
-
-            session = SessionDB()
 
         try:
             linhas = []

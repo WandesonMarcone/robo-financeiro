@@ -6,6 +6,19 @@ import enum
 
 Base = declarative_base()
 
+
+class ConfiguracaoSistema(Base):
+    """Configurações operacionais editáveis pela Central de Controle."""
+
+    __tablename__ = "configuracoes_sistema"
+
+    chave: Mapped[str] = mapped_column(String(80), primary_key=True)
+    valor: Mapped[str] = mapped_column(String(255), nullable=False)
+    descricao: Mapped[Optional[str]] = mapped_column(Text)
+    atualizado_em: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.now
+    )
+
 class TipoAtivo(enum.Enum):
     ACAO = "ACAO"
     FII = "FII"

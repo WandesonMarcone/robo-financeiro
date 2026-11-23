@@ -306,7 +306,7 @@ COMANDOS_AJUDA_ADMIN = (
     ("/atualizar_etfs_bdrs", "Atualiza até 30 ETFs/BDRs cadastrados.", None),
     ("/etfs_bdrs", "Consulta ETFs e BDRs acompanhados.", None),
     ("/adicionar TICKER", "Adiciona um ativo ao monitoramento.", None),
-    ("/forcar_varredura [DIAS]", "Varredura FNET de FIIs (padrao: 30 dias).", "cmd_forcar_varredura"),
+    ("/forcar_varredura [DIAS]", "Varredura FNET de FIIs (limite definido na Central).", "cmd_forcar_varredura"),
     ("/atualizar_ativo TICKER", "Busca isolada de um ativo pelo GitHub Actions.", "cmd_atualizar_ativo"),
     ("/forcar_documentos TICKER [PERIODO]", "Busca documentos somente do ativo informado.", "cmd_forcar_documentos"),
     ("/forcar_docs_acoes [ANO]", "Baixa PDFs de acoes na CVM (padrao: ano civil corrente).", "cmd_forcar_docs_acoes"),
