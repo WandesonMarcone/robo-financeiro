@@ -67,7 +67,7 @@ def buscar_ativo_na_planilha(ticker, is_fii):
             idx_sub = int(getattr(config, "COLUNA_SUBSETOR_ACAO", 34))
             return {
                 "setor": safe_get(row, 1), "preco": safe_get(row, 2), "dy": safe_get(row, 3),
-                "pl": safe_get(row, 5), "pvp": safe_get(row, 6), "roe": safe_get(row, 19),
+                "pl": safe_get(row, 5), "pvp": safe_get(row, 6), "roe": safe_get(row, 19), "vpa": safe_get(row, 28), "lpa": safe_get(row, 29),
                 "subsetor": safe_get(row, idx_sub), "atualizado_em": safe_get(row, 32), "raw": row
             }
     return None
