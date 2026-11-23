@@ -248,6 +248,7 @@ def enviar_relatorio_processamento_documental(detalhes):
         rotulos = {
             "SALVO_DRIVE": "salvo no Drive",
             "AGUARDANDO_REVISAO": "aguarda revisão",
+            "SEM_PDF_FNET": "fonte FNET em formato estruturado",
             "ERRO_DOWNLOAD": "erro de download",
             "ERRO_DRIVE": "erro no Drive",
         }
@@ -558,6 +559,13 @@ def _selecionar_lote_documental(consulta, limite):
     return total, ids
 
 
+def _nome_revisao(ticker, tipo_documento, data_referencia, identificador):
+    """Nome único e rastreável para não juntar documentos distintos no Drive."""
+    return (
+        f"REVISAR_{ticker}_{tipo_documento}_{data_referencia}_"
+        f"{identificador}.pdf"
+    )
+
 
 def reclassificar_apresentacoes_resultados_acoes(session=None):
     """Corrige títulos inequivocos de resultados sem alterar comunicados genéricos."""
@@ -649,9 +657,14 @@ def rotina_processar_pendentes(documento_id: int | None = None, ticker: str | No
 
             pdf_bytes = b3.baixar_pdf(id_doc)
             if not pdf_bytes:
-                doc_db.status_processamento = "ERRO_DOWNLOAD"
+                formato_estruturado = b3.ultimo_erro == "FORMATO_NAO_PDF"
+                doc_db.status_processamento = (
+                    "SEM_PDF_FNET" if formato_estruturado else "ERRO_DOWNLOAD"
+                )
+                doc_db.log_erro = b3.ultimo_erro
                 session.commit()
-                resultado.erros += 1
+                if not formato_estruturado:
+                    resultado.erros += 1
                 resultado.processados += 1
                 resultado.registrar_item(
                     ticker=ticker, tipo=doc_db.tipo_documento,
@@ -730,7 +743,9 @@ def rotina_processar_pendentes(documento_id: int | None = None, ticker: str | No
                 print(f"⚠️ IA incerta ({confianca}%). Enviando para revisão manual...")
                 file_id, link_gerado = drive_manager.upload_pdf_revisao(
                     caminho_arquivo=temp_filename,
-                    nome_arquivo=f"REVISAR_{ticker}_{nome_limpo}_{data_ref}.pdf"
+                    nome_arquivo=_nome_revisao(
+                        ticker, nome_limpo, data_ref, id_doc
+                    ),
                 )
 
                 if file_id:
@@ -930,7 +945,9 @@ def rotina_processar_acoes(ticker: str | None = None, documento_id: int | None =
             if not texto_pdf:
                 file_id, link_gerado = drive_manager.upload_pdf_revisao(
                     caminho_arquivo=temp_filename,
-                    nome_arquivo=f"REVISAR_{ticker}_{nome_limpo}_{data_str}.pdf"
+                    nome_arquivo=_nome_revisao(
+                        ticker, nome_limpo, data_str, doc_db.id
+                    ),
                 )
                 if file_id:
                     doc_db.status_processamento = "AGUARDANDO_REVISAO"

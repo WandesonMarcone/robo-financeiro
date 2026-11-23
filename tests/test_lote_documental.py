@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 
 from atualizador_documentos import (
     ResultadoProcessamento,
+    _nome_revisao,
     _selecionar_lote_documental,
     enviar_alerta_revisao_telegram,
 )
@@ -30,6 +31,16 @@ class TesteLoteDocumental(unittest.TestCase):
         self.assertIn("Na fila: 225", texto)
         self.assertIn("Selecionados neste lote: 20", texto)
         self.assertIn("Processados: 18", texto)
+
+    def test_nome_revisao_distingue_documentos_da_mesma_data(self):
+        primeiro = _nome_revisao(
+            "BTCI11", "Assembleia Geral", "04-11-2026 10:00", "1339000"
+        )
+        segundo = _nome_revisao(
+            "BTCI11", "Assembleia Geral", "04-11-2026 10:00", "1339001"
+        )
+        self.assertNotEqual(primeiro, segundo)
+        self.assertTrue(primeiro.endswith("_1339000.pdf"))
 
     @patch("services.historico_operacional.registrar_notificacao")
     @patch("atualizador_documentos._enviar_mensagem_telegram")
