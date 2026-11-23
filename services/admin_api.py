@@ -246,10 +246,10 @@ def _coletar_documentos_isolados(ticker: str, periodo: str | None):
         session.close()
     if tipo == "FII":
         from pipeline_dados.coletor_fnet import ColetorFnet
-        return ColetorFnet().coletar(dias=int(periodo or 60), ticker=ticker)
+        return ColetorFnet().coletar(dias=int(periodo or 30), ticker=ticker)
     else:
         from pipeline_dados.coletor_docs_acoes import RelatoriosAcoesCVM
-        ano = int(periodo) if periodo and len(periodo) == 4 else datetime.now().year
+        ano = int(periodo) if periodo and len(periodo) == 4 else None
         return RelatoriosAcoesCVM().vasculhar_documentos(ano=ano, ticker=ticker)
 
 
@@ -1214,7 +1214,7 @@ def executar_comando():
         return jsonify({"message": f"Busca documental de {ticker} iniciada.", "task_id": tarefa}), 202
     if action == "forcar_varredura":
         try:
-            dias = int(periodo or 60)
+            dias = int(periodo or 30)
             if not 1 <= dias <= 365:
                 raise ValueError
         except (TypeError, ValueError):

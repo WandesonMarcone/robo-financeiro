@@ -482,7 +482,7 @@ def notificar_documento_disponivel(
 # ==========================================
 # CAMADA 1: COLETA
 # ==========================================
-def rotina_de_coleta_b3(dias=60, session=None, capturar_tudo=None):
+def rotina_de_coleta_b3(dias=30, session=None, capturar_tudo=None):
     from pipeline_dados.coletor_fnet import ColetorFnet
 
     return ColetorFnet(session=session, capturar_tudo=capturar_tudo).coletar(dias=dias)
@@ -826,7 +826,7 @@ def rotina_processar_pendentes(documento_id: int | None = None, ticker: str | No
     )
     return resultado
 
-def rotina_de_atualizacao_em_massa(dias=60, session=None, capturar_tudo=None):
+def rotina_de_atualizacao_em_massa(dias=30, session=None, capturar_tudo=None):
     resultado = rotina_de_coleta_b3(
         dias=dias, session=session, capturar_tudo=capturar_tudo
     )

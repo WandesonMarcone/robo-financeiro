@@ -36,11 +36,13 @@ jobs:
       - name: Instalar dependências
         run: pip install -r requirements.txt
 
-      - name: Descobrir documentos FNET
+      - name: Descobrir documentos atuais de FIIs e ações
         if: github.event.schedule == '30 11 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'descobrir')
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: python -m scripts.varredura_fnet_diaria
+        run: |
+          python -m scripts.varredura_fnet_diaria
+          python -m scripts.varredura_docs_acoes_trimestral
 
       - name: Criar credenciais Google
         if: github.event.schedule == '30 23 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'processar')

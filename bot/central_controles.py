@@ -1006,8 +1006,9 @@ def tratar_callback(call):
                 call.message.chat.id,
                 "📄 Busca documental isolada\n\n"
                 "Envie um comando para buscar somente aquele ativo:\n"
-                "`/forcar_documentos GARE11` para FII (últimos 60 dias)\n"
-                "`/forcar_documentos PETR4 2026` para ação (ano informado).\n\n"
+                "`/forcar_documentos GARE11` para FII (últimos 30 dias)\n"
+                "`/forcar_documentos PETR4` para ação (trimestre anterior e atual).\n"
+                "Informe um ano somente para uma consulta histórica manual.\n\n"
                 "A operação é exclusiva do administrador e envia o resultado final.",
                 parse_mode="Markdown",
             )
