@@ -77,15 +77,17 @@ jobs:
             python atualizador_ciclico.py --limite-total "${{ inputs.limite_total || '30' }}" --orcamento-segundos 180 --pausa-segundos 2
           done
       - name: Atualizar ETFs e BDRs na mesma rodada noturna
+        id: instrumentos_noturnos
         if: github.event.schedule == '15 22 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'atualizacao_noturna')
         run: python -m scripts.coletar_etfs_bdrs --limite 60 --sem-notificacoes
-      - name: Atualizar indicadores macro e Tesouro Direto
-        if: github.event.schedule == '15 22 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'atualizacao_noturna')
-        run: |
-          python -m scripts.coletar_series_macro
-          python -m scripts.coletar_tesouro_direto
+      - name: Atualizar indicadores macro
+        if: steps.instrumentos_noturnos.outcome == 'success'
+        run: python -m scripts.coletar_series_macro
+      - name: Atualizar Tesouro Direto
+        if: ${{ !cancelled() && steps.instrumentos_noturnos.outcome == 'success' }}
+        run: python -m scripts.coletar_tesouro_direto
       - name: Persistir fechamento e auditar cobertura
-        if: github.event.schedule == '15 22 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'atualizacao_noturna')
+        if: ${{ !cancelled() && steps.instrumentos_noturnos.outcome == 'success' }}
         run: |
           python -m scripts.persistir_fechamento_eod
           python -m scripts.auditar_cobertura_noturna --max-atraso-dias 1
