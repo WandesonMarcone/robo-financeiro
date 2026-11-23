@@ -14,6 +14,7 @@ def _eh_pdf(conteudo):
 class FnetDownloader:
     def __init__(self):
         self.session = requests.Session()
+        self.ultimo_erro = None
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -28,6 +29,7 @@ class FnetDownloader:
             pass
 
     def baixar_pdf(self, id_documento, max_bytes=None):
+        self.ultimo_erro = None
         if not self.session.cookies:
             self.iniciar_sessao()
         params = {'id': id_documento}
@@ -42,6 +44,7 @@ class FnetDownloader:
             res.raise_for_status()
             tipo = (res.headers.get("Content-Type") or "").lower()
             if "html" in tipo or "json" in tipo:
+                self.ultimo_erro = "RESPOSTA_INVALIDA"
                 logger.warning("FNET documento %s: resposta HTML/JSON em vez de PDF", id_documento)
                 res.close()
                 return None
@@ -49,6 +52,7 @@ class FnetDownloader:
                 limite = int(max_bytes)
                 tamanho = res.headers.get("Content-Length")
                 if tamanho and str(tamanho).isdigit() and int(tamanho) > limite:
+                    self.ultimo_erro = "LIMITE_TAMANHO"
                     res.close()
                     return None
                 partes = []
@@ -58,22 +62,29 @@ class FnetDownloader:
                         continue
                     total += len(pedaco)
                     if total > limite:
+                        self.ultimo_erro = "LIMITE_TAMANHO"
                         res.close()
                         return None
                     partes.append(pedaco)
                 conteudo = b"".join(partes)
                 res.close()
-                return conteudo if _eh_pdf(conteudo) else None
+                if _eh_pdf(conteudo):
+                    return conteudo
+                self.ultimo_erro = "FORMATO_NAO_PDF"
+                return None
             conteudo = res.content
             if not _eh_pdf(conteudo):
+                self.ultimo_erro = "FORMATO_NAO_PDF"
                 logger.warning("FNET documento %s: conteúdo sem assinatura PDF", id_documento)
                 return None
             return conteudo
         except requests.HTTPError as exc:
             status = exc.response.status_code if exc.response is not None else None
+            self.ultimo_erro = f"HTTP_{status or 'DESCONHECIDO'}"
             logger.warning("FNET documento %s: HTTP %s", id_documento, status)
             return None
         except requests.RequestException as exc:
+            self.ultimo_erro = type(exc).__name__
             logger.warning("FNET documento %s: %s", id_documento, type(exc).__name__)
             return None
 
