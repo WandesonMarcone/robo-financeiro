@@ -1,5 +1,10 @@
+import logging
+
 import requests
 import time
+
+
+logger = logging.getLogger(__name__)
 
 
 def _eh_pdf(conteudo):
@@ -37,6 +42,7 @@ class FnetDownloader:
             res.raise_for_status()
             tipo = (res.headers.get("Content-Type") or "").lower()
             if "html" in tipo or "json" in tipo:
+                logger.warning("FNET documento %s: resposta HTML/JSON em vez de PDF", id_documento)
                 res.close()
                 return None
             if max_bytes:
@@ -59,8 +65,16 @@ class FnetDownloader:
                 res.close()
                 return conteudo if _eh_pdf(conteudo) else None
             conteudo = res.content
-            return conteudo if _eh_pdf(conteudo) else None
-        except Exception:
+            if not _eh_pdf(conteudo):
+                logger.warning("FNET documento %s: conteúdo sem assinatura PDF", id_documento)
+                return None
+            return conteudo
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else None
+            logger.warning("FNET documento %s: HTTP %s", id_documento, status)
+            return None
+        except requests.RequestException as exc:
+            logger.warning("FNET documento %s: %s", id_documento, type(exc).__name__)
             return None
 
     def capturar_tudo(self, data_inicio):
