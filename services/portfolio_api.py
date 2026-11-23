@@ -128,6 +128,7 @@ def asset(ticker: str):
             "pl": _to_number(data.get("pl")),
             "roe": _to_number(data.get("roe")),
             "vpa": _to_number(data.get("vpa")),
+            "lpa": _to_number(data.get("lpa")),
             "monthly_dividend": _to_number(data.get("div_mensal")),
         },
         "classification": {
