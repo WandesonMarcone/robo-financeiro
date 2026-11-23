@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from datetime import date, timedelta
 from functools import wraps
 
 import requests
@@ -136,3 +137,57 @@ def asset(ticker: str):
         },
     }
     return jsonify({"data": payload})
+
+
+@portfolio_api.get("/api/v1/assets/<ticker>/history")
+@requires_portfolio_user
+def asset_history(ticker: str):
+    """Série EOD existente no Neon, limitada a dois anos e sem preenchimento fictício."""
+    symbol = ticker.strip().upper()
+    if not _TICKER.fullmatch(symbol):
+        return jsonify({"message": "Ticker inválido."}), 400
+    requested_type = (request.args.get("asset_type") or "").strip().lower()
+    try:
+        days = max(7, min(int(request.args.get("days") or 365), 730))
+    except ValueError:
+        return jsonify({"message": "Período inválido."}), 400
+    is_fii = requested_type == "fii"
+
+    from sqlalchemy import func
+    from atualizador_documentos import SessionDB
+    from pipeline_dados.banco_dados import Ativo
+    from pipeline_dados.modelos_snapshots import SnapshotAcao, SnapshotFii
+
+    model = SnapshotFii if is_fii else SnapshotAcao
+    since = date.today() - timedelta(days=days)
+    session = SessionDB()
+    try:
+        rows = (
+            session.query(model)
+            .join(Ativo, model.ativo_id == Ativo.id)
+            .filter(func.upper(Ativo.ticker) == symbol)
+            .filter(model.data_referencia >= since)
+            .order_by(model.data_referencia.asc())
+            .all()
+        )
+        points = [
+            {
+                "date": row.data_referencia.isoformat(),
+                "price": float(row.preco) if row.preco is not None else None,
+                "dy": float(row.dy) if row.dy is not None else None,
+                "pvp": float(row.pvp) if row.pvp is not None else None,
+            }
+            for row in rows
+            if row.preco is not None
+        ]
+    finally:
+        session.close()
+
+    coverage = {
+        "requested_days": days,
+        "points": len(points),
+        "first_date": points[0]["date"] if points else None,
+        "last_date": points[-1]["date"] if points else None,
+        "source": "neon_eod_snapshots",
+    }
+    return jsonify({"data": points, "coverage": coverage})
