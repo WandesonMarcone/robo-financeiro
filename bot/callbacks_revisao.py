@@ -2,6 +2,7 @@ import json
 import logging
 import re
 import threading
+from telebot.apihelper import ApiTelegramException
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Imports da nossa nova arquitetura
@@ -17,6 +18,18 @@ logger = logging.getLogger("robo.revisao")
 # Google apenas por importar o modulo (reduz efeitos colaterais em testes).
 _drive_manager = None
 _lote_ia_lock = threading.Lock()
+
+
+def _editar_painel_revisao(texto, chat_id, message_id, **opcoes):
+    """Atualiza também os alertas de revisão enviados com o logo do ativo."""
+    try:
+        return bot.edit_message_text(texto, chat_id, message_id, **opcoes)
+    except ApiTelegramException as exc:
+        if exc.error_code != 400 or "there is no text in the message to edit" not in exc.description:
+            raise
+    return bot.edit_message_caption(
+        caption=texto, chat_id=chat_id, message_id=message_id, **opcoes
+    )
 
 
 def obter_drive_manager():
@@ -80,7 +93,7 @@ def enviar_painel_tickers(chat_id, message_id=None):
                 "Nao ha documentos aguardando revisao."
             )
             if message_id:
-                bot.edit_message_text(
+                _editar_painel_revisao(
                     msg, chat_id, message_id, reply_markup=markup_voltar
                 )
             else:
@@ -116,7 +129,7 @@ def enviar_painel_tickers(chat_id, message_id=None):
             "ou ficaram incertas. Selecione um ativo:"
         )
         if message_id:
-            bot.edit_message_text(msg, chat_id, message_id, reply_markup=markup, parse_mode="Markdown")
+            _editar_painel_revisao(msg, chat_id, message_id, reply_markup=markup, parse_mode="Markdown")
         else:
             bot.send_message(chat_id, msg, reply_markup=markup, parse_mode="Markdown")
     finally:
@@ -429,7 +442,7 @@ def processar_revisao(call):
                  InlineKeyboardButton(text="🔙 Voltar à Central", callback_data="rev_start")
             )
 
-            bot.edit_message_text(f"📑 **Análise: {ticker}**\n\nSelecione o documento para inspecionar:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+            _editar_painel_revisao(f"📑 **Análise: {ticker}**\n\nSelecione o documento para inspecionar:", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
         # AÇÃO: Abrir as opções (Visualizar, Salvar, Apagar) de um documento específico
         elif acao == 'd':
