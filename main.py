@@ -61,7 +61,9 @@ URL_WEBHOOK_PADRAO = "https://robo-fii-v2.onrender.com"
 # ==========================================
 app = Flask(__name__)
 from services.admin_api import admin_api
+from services.portfolio_api import portfolio_api
 app.register_blueprint(admin_api)
+app.register_blueprint(portfolio_api)
 
 
 @app.route('/' + (config.TELEGRAM_BOT_TOKEN or ""), methods=['POST'])
