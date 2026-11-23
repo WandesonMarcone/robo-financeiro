@@ -78,7 +78,13 @@ def requires_portfolio_user(function):
 def _to_number(value):
     if value is None:
         return None
-    text = str(value).strip().replace("R$", "").replace("%", "").replace(".", "").replace(",", ".")
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip().replace("R$", "").replace("%", "").replace(" ", "")
+    if "." in text and "," in text:
+        text = text.replace(".", "").replace(",", ".")
+    elif "," in text:
+        text = text.replace(",", ".")
     try:
         return float(text)
     except ValueError:
