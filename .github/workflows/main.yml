@@ -141,6 +141,7 @@ jobs:
           python -m scripts.coletar_series_macro
           python -m scripts.coletar_tesouro_direto
           python -m scripts.persistir_fechamento_eod
+          python -m scripts.coletar_proventos_eventos --limite-por-classe 20 --janela-dias 75
           python -m scripts.auditar_cobertura_noturna --max-atraso-dias 1
           python -m scripts.auditar_mercado_multiclasse
           python -m scripts.corrigir_taxonomia_fiis --usar-contingencia

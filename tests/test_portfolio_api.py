@@ -1,6 +1,7 @@
 import os
 import unittest
 from datetime import date
+from decimal import Decimal
 from unittest.mock import patch
 
 from flask import Flask
@@ -84,6 +85,48 @@ class PortfolioApiTest(unittest.TestCase):
             response.headers.get("Access-Control-Allow-Origin"),
             "https://wandesonmarcone.github.io",
         )
+
+    @patch("services.portfolio_api._supabase_user", return_value={"id": "user-1"})
+    @patch("atualizador_documentos.SessionDB")
+    def test_returns_income_with_source_quality(self, session_factory, _user):
+        class Result:
+            def mappings(self): return self
+            def all(self):
+                return [{
+                    "data_ex": date(2026, 11, 10), "data_pagamento": None,
+                    "tipo": "DISTRIBUICAO", "valor_unitario": Decimal("0.50"),
+                    "moeda": "BRL", "fonte": "YAHOO_FINANCE",
+                    "qualidade_fonte": "COMPLEMENTAR",
+                }]
+        session_factory.return_value.execute.return_value = Result()
+        response = self.client.get(
+            "/api/v1/assets/BBAS3/income?asset_type=stock&days=30", headers=self.auth
+        )
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(0.5, response.json["data"][0]["amount_per_unit"])
+        self.assertEqual("COMPLEMENTAR", response.json["data"][0]["source_quality"])
+
+    @patch("services.portfolio_api._supabase_user", return_value={"id": "user-1"})
+    @patch("atualizador_documentos.SessionDB")
+    def test_performance_separates_price_and_income(self, session_factory, _user):
+        class PriceResult:
+            def mappings(self): return self
+            def all(self):
+                return [
+                    {"data": date(2026, 11, 1), "preco": Decimal("10")},
+                    {"data": date(2026, 11, 24), "preco": Decimal("11")},
+                ]
+        class IncomeResult:
+            def scalar_one(self): return Decimal("0.50")
+        session_factory.return_value.execute.side_effect = [PriceResult(), IncomeResult()]
+        response = self.client.get(
+            "/api/v1/assets/BBAS3/performance?asset_type=stock&days=30", headers=self.auth
+        )
+        self.assertEqual(200, response.status_code)
+        self.assertAlmostEqual(10, response.json["data"]["price_return_percent"])
+        self.assertAlmostEqual(5, response.json["data"]["income_return_percent"])
+        self.assertAlmostEqual(15, response.json["data"]["simple_total_return_percent"])
+        self.assertFalse(response.json["data"]["personalized_portfolio_return"])
 
 
 if __name__ == "__main__":
