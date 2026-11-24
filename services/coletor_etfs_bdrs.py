@@ -42,25 +42,50 @@ def _numero(valor):
 
 
 def registrar_instrumento(ticker, tipo, simbolo_exterior=None, session_factory=None,
-                          simbolo_yahoo=None):
-    """Inclui um instrumento no cadastro sem fingir que a fonte é oficial."""
+                          simbolo_yahoo=None, nome=None, fonte_cadastro=None,
+                          planilha=None, dados_planilha=None,
+                          indice_referencia=None, gestora=None):
+    """Inclui um instrumento na planilha e, somente depois, no Neon."""
     ticker = str(ticker or "").strip().upper()
     tipo = str(tipo or "").strip().upper()
     if not ticker or tipo not in TIPOS_INSTRUMENTO_MERCADO:
         raise ValueError("ticker ou tipo inválido")
     yahoo = simbolo_yahoo or (f"{ticker}.SA" if tipo in TIPOS_COM_PLANILHA else simbolo_exterior or ticker)
+    from services.planilha_instrumentos import gravar_instrumento_planilha
+
+    gravar_instrumento_planilha(
+        tipo,
+        {
+            "ticker": ticker,
+            "nome": nome,
+            "indice_referencia": indice_referencia,
+            "fonte": fonte_cadastro or "CADASTRO_MANUAL",
+            **(dados_planilha or {}),
+        },
+        planilha=planilha,
+    )
     from atualizador_documentos import SessionDB
     sessao = session_factory() if session_factory else SessionDB()
     try:
         row = sessao.execute(text("""
             INSERT INTO instrumentos_internacionais
-                (ticker, tipo, simbolo_yahoo_br, simbolo_exterior, fonte_cadastro)
-            VALUES (:ticker, :tipo, :yahoo, :externo, 'PAINEL_TELEGRAM')
+                (ticker, tipo, nome, simbolo_yahoo_br, simbolo_exterior,
+                 indice_referencia, gestora, fonte_cadastro)
+            VALUES (:ticker, :tipo, :nome, :yahoo, :externo, :indice, :gestora, :fonte)
             ON CONFLICT (ticker) DO UPDATE SET tipo=EXCLUDED.tipo,
+                nome=COALESCE(EXCLUDED.nome, instrumentos_internacionais.nome),
+                simbolo_yahoo_br=COALESCE(EXCLUDED.simbolo_yahoo_br, instrumentos_internacionais.simbolo_yahoo_br),
                 simbolo_exterior=COALESCE(EXCLUDED.simbolo_exterior, instrumentos_internacionais.simbolo_exterior),
+                indice_referencia=COALESCE(EXCLUDED.indice_referencia, instrumentos_internacionais.indice_referencia),
+                gestora=COALESCE(EXCLUDED.gestora, instrumentos_internacionais.gestora),
                 ativo=TRUE, atualizado_em=NOW()
             RETURNING id, ticker, tipo
-        """), {"ticker": ticker, "tipo": tipo, "yahoo": yahoo, "externo": simbolo_exterior or None}).mappings().one()
+        """), {
+            "ticker": ticker, "tipo": tipo, "nome": nome, "yahoo": yahoo,
+            "externo": simbolo_exterior or None,
+            "indice": indice_referencia, "gestora": gestora,
+            "fonte": fonte_cadastro or "PAINEL_TELEGRAM",
+        }).mappings().one()
         sessao.commit()
         return dict(row)
     except Exception:
@@ -76,32 +101,21 @@ def cadastrar_base_inicial(session_factory=None):
     Não dispara coleta: o chamador decide quando executar a primeira busca,
     mantendo a operação previsível e auditável.
     """
-    from atualizador_documentos import SessionDB
-    sessao = session_factory() if session_factory else SessionDB()
-    try:
-        cadastrados = []
-        for item in BASE_INICIAL_INSTRUMENTOS:
-            sessao.execute(text("""
-                INSERT INTO instrumentos_internacionais
-                  (ticker,tipo,nome,simbolo_yahoo_br,simbolo_exterior,indice_referencia,gestora,fonte_cadastro,ativo)
-                VALUES (:ticker,:tipo,:nome,:yahoo,:externo,:indice,:gestora,'BASE_INICIAL_SISTEMA',TRUE)
-                ON CONFLICT (ticker) DO UPDATE SET
-                  tipo=EXCLUDED.tipo, ativo=TRUE,
-                  nome=COALESCE(instrumentos_internacionais.nome, EXCLUDED.nome),
-                  simbolo_yahoo_br=COALESCE(instrumentos_internacionais.simbolo_yahoo_br, EXCLUDED.simbolo_yahoo_br),
-                  simbolo_exterior=COALESCE(instrumentos_internacionais.simbolo_exterior, EXCLUDED.simbolo_exterior),
-                  indice_referencia=COALESCE(instrumentos_internacionais.indice_referencia, EXCLUDED.indice_referencia),
-                  gestora=COALESCE(instrumentos_internacionais.gestora, EXCLUDED.gestora),
-                  atualizado_em=NOW()
-            """), {**item, "yahoo": item.get("yahoo") or f"{item['ticker']}.SA"})
-            cadastrados.append(item["ticker"])
-        sessao.commit()
-        return {"cadastrados": cadastrados, "quantidade": len(cadastrados)}
-    except Exception:
-        sessao.rollback()
-        raise
-    finally:
-        sessao.close()
+    cadastrados = []
+    for item in BASE_INICIAL_INSTRUMENTOS:
+        registrar_instrumento(
+            item["ticker"], item["tipo"],
+            simbolo_exterior=item.get("externo"),
+            simbolo_yahoo=item.get("yahoo") or f"{item['ticker']}.SA",
+            nome=item.get("nome"), indice_referencia=item.get("indice"),
+            gestora=item.get("gestora"), fonte_cadastro="BASE_INICIAL_SISTEMA",
+            session_factory=session_factory,
+        )
+        cadastrados.append(item["ticker"])
+    return {
+        "cadastrados": cadastrados, "quantidade": len(cadastrados),
+        "ordem_persistencia": "PLANILHA_ANTES_NEON",
+    }
 
 
 def _upsert_metrica(sessao, instrumento_id, chave, valor, unidade, fonte, qualidade="COMPLEMENTAR"):
@@ -186,6 +200,35 @@ def coletar_instrumento(ticker, tipo=None, simbolo_exterior=None, session_factor
         data_ref = historico.index[-1].to_pydatetime().replace(tzinfo=None)
         fechamento = _numero(ultimo.get("Close")); anterior = _numero(historico.iloc[-2].get("Close")) if len(historico) > 1 else None
         variacao = ((fechamento / anterior) - 1) * 100 if fechamento and anterior else None
+        fechamentos = historico["Close"].dropna()
+        retornos = fechamentos.pct_change().dropna()
+        volatilidade = retornos.tail(30).std() * (252 ** .5) * 100 if len(retornos) else None
+        volume_medio = historico["Volume"].tail(30).mean() if len(fechamentos) else None
+        liquidez_media = (historico["Close"] * historico["Volume"]).tail(30).mean() if len(fechamentos) else None
+        distancia_maxima = ((fechamentos.iloc[-1] / fechamentos.max()) - 1) * 100 if len(fechamentos) else None
+        retorno_periodo = ((fechamentos.iloc[-1] / fechamentos.iloc[0]) - 1) * 100 if len(fechamentos) >= 20 else None
+        info = papel.get_info() or {}
+        campos = {"patrimonio_ou_market_cap": (info.get("totalAssets") or info.get("marketCap"), "BRL"),
+                  "dividend_yield": (info.get("dividendYield"), "%"), "p_l": (info.get("trailingPE"), "x"),
+                  "p_vp": (info.get("priceToBook"), "x"), "roe": (info.get("returnOnEquity"), "%"),
+                  "margem_lucro": (info.get("profitMargins"), "%"), "divida_total": (info.get("totalDebt"), "moeda da fonte"),
+                  "caixa": (info.get("totalCash"), "moeda da fonte"), "ev_ebitda": (info.get("enterpriseToEbitda"), "x")}
+        nome = info.get("longName") or info.get("shortName") or instrumento.get("nome")
+
+        # A planilha é a fonte operacional. Se esta gravação falhar, nenhuma
+        # cotação ou métrica é persistida no Neon.
+        from services.planilha_instrumentos import gravar_instrumento_planilha
+        gravar_instrumento_planilha(instrumento["tipo"], {
+            "ticker": ticker, "nome": nome, "fechamento": fechamento,
+            "variacao_percentual": variacao,
+            "indice_referencia": instrumento.get("indice_referencia"),
+            "liquidez": liquidez_media, "volume": volume_medio,
+            "distancia": distancia_maxima, "volatilidade": volatilidade,
+            "retorno": retorno_periodo, "dy": info.get("dividendYield"),
+            "pl": info.get("trailingPE"), "pvp": info.get("priceToBook"),
+            "fonte": "YAHOO_FINANCE", "referencia_em": data_ref,
+        })
+
         sessao.execute(text("""
           INSERT INTO observacoes_instrumentos_internacionais
             (instrumento_id,referencia_em,abertura,maxima,minima,fechamento,volume,variacao_percentual,fonte,qualidade_fonte)
@@ -195,29 +238,20 @@ def coletar_instrumento(ticker, tipo=None, simbolo_exterior=None, session_factor
           fonte=EXCLUDED.fonte,qualidade_fonte=EXCLUDED.qualidade_fonte,coletado_em=NOW()
         """), {"id":instrumento["id"], "data":data_ref, "abertura":_numero(ultimo.get("Open")), "maxima":_numero(ultimo.get("High")),
                   "minima":_numero(ultimo.get("Low")), "fechamento":fechamento, "volume":int(_numero(ultimo.get("Volume")) or 0), "variacao":variacao})
-        fechamentos = historico["Close"].dropna()
-        retornos = fechamentos.pct_change().dropna()
-        if len(retornos):
-            _upsert_metrica(sessao, instrumento["id"], "volatilidade_30d", retornos.tail(30).std() * (252 ** .5) * 100, "% a.a.", "CALCULO_PROPRIO")
+        if volatilidade is not None:
+            _upsert_metrica(sessao, instrumento["id"], "volatilidade_30d", volatilidade, "% a.a.", "CALCULO_PROPRIO")
         if len(fechamentos):
             queda = (fechamentos / fechamentos.cummax() - 1).min() * 100
             _upsert_metrica(sessao, instrumento["id"], "max_drawdown_1a", queda, "%", "CALCULO_PROPRIO")
-            _upsert_metrica(sessao, instrumento["id"], "volume_medio_30d", historico["Volume"].tail(30).mean(), "ações/dia", "YAHOO_FINANCE")
-            _upsert_metrica(sessao, instrumento["id"], "liquidez_media_30d_brl", (historico["Close"] * historico["Volume"]).tail(30).mean(), "BRL/dia", "YAHOO_FINANCE")
-            _upsert_metrica(sessao, instrumento["id"], "distancia_maxima_1a", ((fechamentos.iloc[-1] / fechamentos.max()) - 1) * 100, "%", "CALCULO_PROPRIO")
-            if len(fechamentos) >= 20:
-                _upsert_metrica(sessao, instrumento["id"], "retorno_periodo_coletado", ((fechamentos.iloc[-1] / fechamentos.iloc[0]) - 1) * 100, "%", "CALCULO_PROPRIO")
-        info = papel.get_info() or {}
-        campos = {"patrimonio_ou_market_cap": (info.get("totalAssets") or info.get("marketCap"), "BRL"),
-                  "dividend_yield": (info.get("dividendYield"), "%"), "p_l": (info.get("trailingPE"), "x"),
-                  "p_vp": (info.get("priceToBook"), "x"), "roe": (info.get("returnOnEquity"), "%"),
-                  "margem_lucro": (info.get("profitMargins"), "%"), "divida_total": (info.get("totalDebt"), "moeda da fonte"),
-                  "caixa": (info.get("totalCash"), "moeda da fonte"), "ev_ebitda": (info.get("enterpriseToEbitda"), "x")}
+            _upsert_metrica(sessao, instrumento["id"], "volume_medio_30d", volume_medio, "ações/dia", "YAHOO_FINANCE")
+            _upsert_metrica(sessao, instrumento["id"], "liquidez_media_30d_brl", liquidez_media, "BRL/dia", "YAHOO_FINANCE")
+            _upsert_metrica(sessao, instrumento["id"], "distancia_maxima_1a", distancia_maxima, "%", "CALCULO_PROPRIO")
+            if retorno_periodo is not None:
+                _upsert_metrica(sessao, instrumento["id"], "retorno_periodo_coletado", retorno_periodo, "%", "CALCULO_PROPRIO")
         for chave, (valor, unidade) in campos.items():
             if chave in {"dividend_yield", "roe", "margem_lucro"} and _numero(valor) is not None:
                 valor = float(valor) * 100
             _upsert_metrica(sessao, instrumento["id"], chave, valor, unidade, "YAHOO_FINANCE", "COMPLEMENTAR")
-        nome = info.get("longName") or info.get("shortName")
         sessao.execute(text("UPDATE instrumentos_internacionais SET nome=COALESCE(:nome,nome), moeda_origem=COALESCE(:moeda,moeda_origem), atualizado_em=NOW() WHERE id=:id"), {"id": instrumento["id"], "nome": nome, "moeda": "BRL" if convertido_brl else info.get("currency")})
         oficiais = _coletar_sec(sessao, instrumento) if instrumento["tipo"] == "BDR" else 0
         sessao.commit()
@@ -347,15 +381,10 @@ def coletar_instrumentos_ativos(limite=30, tipo=None, session_factory=None):
             resultado["ativos"].append(coletar_instrumento(ticker, session_factory=session_factory)); resultado["processados"] += 1
         except Exception as exc:
             resultado["falhas"].append({"ticker": ticker, "erro": type(exc).__name__})
-    # A sincronização é feita após a coleta para que cada aba represente uma
-    # fotografia coerente da classe, inclusive quando um ativo falhou.
-    tipos_planilha = [tipo] if tipo in TIPOS_COM_PLANILHA else (["ETF", "BDR"] if not tipo else [])
-    resultado["planilha"] = {}
-    for classe in tipos_planilha:
-        try:
-            resultado["planilha"][classe] = sincronizar_instrumentos_planilha(classe, session_factory=session_factory)
-        except Exception as exc:
-            resultado["planilha"][classe] = {"erro": type(exc).__name__}
+    # Cada ativo foi gravado na planilha antes da respectiva transação no Neon.
+    # A antiga sincronização Neon -> planilha fica disponível apenas como
+    # ferramenta de reconciliação de legado e não participa mais da coleta.
+    resultado["ordem_persistencia"] = "PLANILHA_ANTES_NEON"
     return resultado
 
 
