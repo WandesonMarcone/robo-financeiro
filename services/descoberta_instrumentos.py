@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import os
+import re
 
 import requests
 
@@ -82,7 +83,16 @@ def candidatos_cripto(get=requests.get):
     for item in payload or []:
         simbolo = str(item.get("symbol") or "").strip().upper()
         ranking = item.get("market_cap_rank")
-        if not simbolo or simbolo in STABLECOINS or not ranking or int(ranking) > 20:
+        # A coluna ticker do catálogo aceita até 12 caracteres. Símbolos do
+        # CoinGecko podem conter nomes internos com '_' (ex.: FIGR_HELOC),
+        # que não são pares negociáveis no Yahoo e ainda estouram o limite ao
+        # receber o sufixo BRL. Esses itens não devem entrar no catálogo.
+        if (
+            not re.fullmatch(r"[A-Z0-9]{2,9}", simbolo)
+            or simbolo in STABLECOINS
+            or not ranking
+            or int(ranking) > 20
+        ):
             continue
         preco = item.get("current_price")
         volume = item.get("total_volume")

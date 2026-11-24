@@ -1,8 +1,8 @@
 import unittest
 
 from services.coletor_etfs_bdrs import registrar_instrumento
-from services.descoberta_instrumentos import candidatos_b3, descobrir_e_cadastrar
-from services.planilha_instrumentos import COLUNAS_PLANILHA_INSTRUMENTOS
+from services.descoberta_instrumentos import candidatos_b3, candidatos_cripto, descobrir_e_cadastrar
+from services.planilha_instrumentos import COLUNAS_PLANILHA_INSTRUMENTOS, _atualizar_com_retry
 
 
 class Resposta:
@@ -32,6 +32,22 @@ class Aba:
 
     def freeze(self, **_kwargs):
         return None
+
+
+class APIError(Exception):
+    response = None
+
+
+class AbaInstavel(Aba):
+    def __init__(self, eventos):
+        super().__init__(eventos)
+        self.tentativas = 0
+
+    def update(self, valores, intervalo, value_input_option=None):
+        self.tentativas += 1
+        if self.tentativas < 3:
+            raise APIError("quota temporária")
+        return super().update(valores, intervalo, value_input_option)
 
 
 class Planilha:
@@ -78,6 +94,25 @@ class DescobertaInstrumentosTests(unittest.TestCase):
         ]}
         itens = candidatos_b3("ETF", get=lambda *_a, **_k: Resposta(payload))
         self.assertEqual(["NOVO11"], [x["ticker"] for x in itens])
+
+    def test_lista_cripto_descarta_simbolo_interno_invalido(self):
+        payload = [
+            {"symbol": "figr_heloc", "market_cap_rank": 10, "current_price": 1,
+             "total_volume": 100_000_000, "name": "Inválido"},
+            {"symbol": "btc", "market_cap_rank": 1, "current_price": 500_000,
+             "total_volume": 1_000_000_000, "name": "Bitcoin"},
+        ]
+        itens = candidatos_cripto(get=lambda *_a, **_k: Resposta(payload))
+        self.assertEqual(["BTCBRL"], [x["ticker"] for x in itens])
+
+    def test_planilha_repete_apierror_transitorio(self):
+        eventos = []
+        aba = AbaInstavel(eventos)
+        esperas = []
+        _atualizar_com_retry(aba, [["BOVA11"]], "A2:P2", dormir=esperas.append)
+        self.assertEqual(3, aba.tentativas)
+        self.assertEqual([1, 2], esperas)
+        self.assertEqual("planilha", eventos[-1][0])
 
     def test_cadastro_grava_planilha_antes_do_neon(self):
         eventos = []
