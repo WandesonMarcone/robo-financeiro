@@ -28,3 +28,17 @@ class TestEtfsBdrs(unittest.TestCase):
         item = {"tipo": "CRIPTO", "distancia_maxima_1a": -18,
                 "variacao_percentual": -4.5}
         self.assertIsNotNone(avaliar_oportunidade_instrumento(item))
+
+    def test_cripto_alerta_alta_expressiva(self):
+        item = {"tipo": "CRIPTO", "distancia_maxima_1a": -1,
+                "variacao_percentual": 5.2}
+        avaliacao = avaliar_oportunidade_instrumento(item)
+        self.assertIsNotNone(avaliacao)
+        self.assertTrue(any("alta expressiva" in motivo for motivo in avaliacao["motivos"]))
+
+    def test_moeda_alerta_alta_ou_queda_expressiva(self):
+        alta = {"tipo": "MOEDA", "distancia_maxima_1a": -1,
+                "variacao_percentual": 0.9}
+        queda = {**alta, "variacao_percentual": -0.9}
+        self.assertIsNotNone(avaliar_oportunidade_instrumento(alta))
+        self.assertIsNotNone(avaliar_oportunidade_instrumento(queda))

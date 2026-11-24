@@ -465,18 +465,22 @@ def avaliar_oportunidade_instrumento(item):
     if tipo not in TIPOS_INSTRUMENTO_MERCADO or distancia is None:
         return None
     if tipo == "CRIPTO":
-        if distancia > -10 and (variacao is None or variacao > -4):
+        limite = _numero(os.getenv("ALERTA_CRIPTO_VARIACAO_PCT")) or 4.0
+        if distancia > -10 and (variacao is None or abs(variacao) < limite):
             return None
         pontuacao = min(abs(distancia) / 5, 6) + min(abs(variacao or 0) / 2, 4)
         return {"score": round(pontuacao, 2), "motivos": [
             f"{abs(distancia):.1f}% abaixo da máxima do período coletado",
-            f"variação diária de {variacao:+.2f}%" if variacao is not None else "oscilação relevante no período",
+            (f"alta expressiva de {variacao:+.2f}%" if variacao is not None and variacao > 0
+             else f"queda expressiva de {variacao:+.2f}%" if variacao is not None
+             else "oscilação relevante no período"),
         ]}
     if tipo == "MOEDA":
-        if variacao is None or abs(variacao) < 0.75:
+        limite = _numero(os.getenv("ALERTA_MOEDA_VARIACAO_PCT")) or 0.75
+        if variacao is None or abs(variacao) < limite:
             return None
         return {"score": round(abs(variacao) * 2, 2), "motivos": [
-            f"movimento diário de {variacao:+.2f}%",
+            f"{'alta' if variacao > 0 else 'queda'} cambial de {variacao:+.2f}%",
             "sinal cambial para monitoramento da carteira",
         ]}
     if tipo not in {"ETF", "BDR"} or liquidez is None:

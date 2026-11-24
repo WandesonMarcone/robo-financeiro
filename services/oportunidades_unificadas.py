@@ -29,10 +29,10 @@ def _linha(item):
     if not ticker:
         return None
     if tipo == "CRIPTO" and distancia is not None:
-        movimento = f" | dia {variacao:+.2f}%" if variacao is not None else ""
+        movimento = f" | {'alta' if variacao > 0 else 'queda'} {variacao:+.2f}%" if variacao is not None else ""
         return f"• *{ticker}* — {abs(distancia):.1f}% abaixo da máxima do período{movimento}"
     if tipo == "MOEDA" and variacao is not None:
-        return f"• *{ticker}* — movimento diário de {variacao:+.2f}%"
+        return f"• *{ticker}* — {'alta' if variacao > 0 else 'queda'} cambial de {variacao:+.2f}%"
     if distancia is None or liquidez is None:
         return None
     return (

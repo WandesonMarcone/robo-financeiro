@@ -18,10 +18,29 @@ on:
         options:
           - oportunidades
           - atualizacao_noturna
+          - corrigir_taxonomia_fiis
       limite_total:
         description: Teto por lote de ações e FIIs (1 a 30)
         required: false
         default: '30'
+      novo_ticker:
+        description: Novo ETF/BDR/cripto/moeda para cadastrar antes da varredura (opcional)
+        required: false
+        default: ''
+      nova_classe:
+        description: Classe do novo instrumento
+        required: false
+        type: choice
+        default: ETF
+        options:
+          - ETF
+          - BDR
+          - CRIPTO
+          - MOEDA
+      simbolo_yahoo:
+        description: Símbolo Yahoo, se for diferente do ticker (opcional)
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -43,6 +62,8 @@ jobs:
       LOGO_DEV_TOKEN: ${{ secrets.LOGO_DEV_TOKEN }}
       SEC_EDGAR_USER_AGENT: ${{ secrets.SEC_EDGAR_USER_AGENT }}
       EOD_SNAPSHOTS: 'true'
+      ALERTA_CRIPTO_VARIACAO_PCT: ${{ vars.ALERTA_CRIPTO_VARIACAO_PCT || '4.0' }}
+      ALERTA_MOEDA_VARIACAO_PCT: ${{ vars.ALERTA_MOEDA_VARIACAO_PCT || '0.75' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -57,18 +78,23 @@ jobs:
           with open('credenciais.json', 'w', encoding='utf-8') as arquivo:
               arquivo.write(os.environ['GOOGLE_CREDS'])
 
-      - name: Atualizar instrumentos cotados para a busca de oportunidades
+      - name: Buscar oportunidades — ações, FIIs, ETFs, BDRs, cripto, moedas e Tesouro
         if: github.event.schedule == '0 13,15,17,19,21 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'oportunidades')
-        run: python -m scripts.coletar_etfs_bdrs --limite 60 --sem-notificacoes
-      - name: Atualizar contexto oficial de macro e Tesouro
-        continue-on-error: true
-        if: github.event.schedule == '0 13,15,17,19,21 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'oportunidades')
+        shell: bash
         run: |
-          python -m scripts.coletar_series_macro
-          python -m scripts.coletar_tesouro_direto
-      - name: Buscar sinais de todas as classes
-        if: github.event.schedule == '0 13,15,17,19,21 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'oportunidades')
-        run: python app.py
+          if [ -n "${{ inputs.novo_ticker || '' }}" ]; then
+            python -m scripts.adicionar_instrumento_mercado \
+              --ticker "${{ inputs.novo_ticker }}" \
+              --tipo "${{ inputs.nova_classe }}" \
+              --simbolo-yahoo "${{ inputs.simbolo_yahoo }}"
+          fi
+          for classe in ETF BDR CRIPTO MOEDA; do
+            echo "Atualizando ${classe} antes da triagem de oportunidades"
+            python -m scripts.coletar_etfs_bdrs --tipo "${classe}" --limite 60 --sem-notificacoes
+          done
+          python -m scripts.coletar_series_macro || echo "::warning::Contexto macro temporariamente indisponível"
+          python -m scripts.coletar_tesouro_direto || echo "::warning::Tesouro temporariamente indisponível"
+          python -m scripts.buscar_oportunidades_unificadas
 
       - name: Atualizar e monitorar criptomoedas no fim de semana
         if: github.event.schedule == '0 13,17,22 * * 0,6'
@@ -76,11 +102,15 @@ jobs:
           python -m scripts.coletar_etfs_bdrs --tipo CRIPTO --limite 30 --sem-notificacoes
           python -m scripts.buscar_sinais_multiclasse
 
+      - name: Corrigir setores e segmentos de FIIs
+        if: github.event_name == 'workflow_dispatch' && inputs.modo == 'corrigir_taxonomia_fiis'
+        run: python -m scripts.corrigir_taxonomia_fiis --usar-contingencia
+
       - name: Planejar cobertura integral de ações e FIIs
         if: github.event.schedule == '15 22 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'atualizacao_noturna')
         id: planejar
         run: python -m scripts.planejar_ciclo_noturno --limite-total "${{ inputs.limite_total || '30' }}" --github-output "$GITHUB_OUTPUT"
-      - name: Atualizar ações e FIIs em lotes controlados
+      - name: Atualização noturna multiclasse em lotes controlados
         if: github.event.schedule == '15 22 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'atualizacao_noturna')
         shell: bash
         run: |
@@ -90,23 +120,18 @@ jobs:
             echo "Iniciando lote ${ciclo}/${ciclos}"
             python atualizador_ciclico.py --limite-total "${{ inputs.limite_total || '30' }}" --orcamento-segundos 180 --pausa-segundos 2
           done
-      - name: Atualizar instrumentos cotados na mesma rodada noturna
-        id: instrumentos_noturnos
-        if: github.event.schedule == '15 22 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'atualizacao_noturna')
-        run: python -m scripts.coletar_etfs_bdrs --limite 60 --sem-notificacoes
-      - name: Atualizar indicadores macro
-        if: steps.instrumentos_noturnos.outcome == 'success'
-        run: python -m scripts.coletar_series_macro
-      - name: Atualizar Tesouro Direto
-        if: ${{ !cancelled() && steps.instrumentos_noturnos.outcome == 'success' }}
-        run: python -m scripts.coletar_tesouro_direto
-      - name: Persistir fechamento e auditar cobertura
-        if: ${{ !cancelled() && steps.instrumentos_noturnos.outcome == 'success' }}
-        run: |
+
+          for classe in ETF BDR CRIPTO MOEDA; do
+            echo "Atualização noturna da classe ${classe}"
+            python -m scripts.coletar_etfs_bdrs --tipo "${classe}" --limite 60 --sem-notificacoes
+          done
+
+          python -m scripts.coletar_series_macro
+          python -m scripts.coletar_tesouro_direto
           python -m scripts.persistir_fechamento_eod
           python -m scripts.auditar_cobertura_noturna --max-atraso-dias 1
           python -m scripts.auditar_mercado_multiclasse
-          python -m scripts.corrigir_taxonomia_fiis
+          python -m scripts.corrigir_taxonomia_fiis --usar-contingencia
 
       - name: Avisar administrador somente sobre falha
         if: failure() && !cancelled()
