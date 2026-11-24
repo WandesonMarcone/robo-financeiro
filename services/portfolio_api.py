@@ -23,6 +23,12 @@ _MARKET_TYPES = {
     "currency": "MOEDA", "moeda": "MOEDA", "index": "INDICE", "indice": "INDICE",
     "commodity": "COMMODITY",
 }
+_ASSET_CLASSES = {
+    "stock": "ACAO", "action": "ACAO", "acao": "ACAO",
+    "fii": "FII", "etf": "ETF", "bdr": "BDR",
+    "crypto": "CRIPTO", "cripto": "CRIPTO",
+    "currency": "MOEDA", "moeda": "MOEDA",
+}
 
 
 def _origins() -> set[str]:
@@ -95,6 +101,23 @@ def _to_number(value):
         return float(text)
     except ValueError:
         return None
+
+
+def _period_days(default=30):
+    try:
+        return max(7, min(int(request.args.get("days") or default), 730)), None
+    except ValueError:
+        return None, (jsonify({"message": "Período inválido."}), 400)
+
+
+def _requested_class(required=False):
+    value = (request.args.get("asset_type") or "").strip().lower()
+    asset_class = _ASSET_CLASSES.get(value)
+    if required and not asset_class:
+        return None, (jsonify({"message": "Informe asset_type válido."}), 400)
+    if value and not asset_class:
+        return None, (jsonify({"message": "Classe de ativo inválida."}), 400)
+    return asset_class, None
 
 
 @portfolio_api.get("/api/v1/health")
@@ -273,3 +296,145 @@ def asset_history(ticker: str):
         "source": "neon_eod_snapshots",
     }
     return jsonify({"data": points, "coverage": coverage})
+
+
+@portfolio_api.get("/api/v1/assets/<ticker>/income")
+@requires_portfolio_user
+def asset_income(ticker: str):
+    """Distribuições por cota/ação; fonte e qualidade nunca são ocultadas."""
+    symbol = ticker.strip().upper()
+    if not _TICKER.fullmatch(symbol):
+        return jsonify({"message": "Ticker inválido."}), 400
+    asset_class, error = _requested_class()
+    if error:
+        return error
+    days, error = _period_days()
+    if error:
+        return error
+    from sqlalchemy import text
+    from atualizador_documentos import SessionDB
+
+    since = date.today() - timedelta(days=days)
+    session = SessionDB()
+    try:
+        rows = session.execute(text("""
+            SELECT data_ex,data_pagamento,tipo,valor_unitario,moeda,fonte,qualidade_fonte
+            FROM proventos_ativos
+            WHERE ticker=:ticker AND data_ex>=:desde
+              AND (:classe IS NULL OR classe=:classe)
+            ORDER BY data_ex ASC, tipo ASC
+        """), {"ticker": symbol, "desde": since, "classe": asset_class}).mappings().all()
+    finally:
+        session.close()
+    data = [{
+        "ex_date": row["data_ex"].isoformat(),
+        "payment_date": row["data_pagamento"].isoformat() if row["data_pagamento"] else None,
+        "type": row["tipo"], "amount_per_unit": float(row["valor_unitario"]),
+        "currency": row["moeda"], "source": row["fonte"],
+        "source_quality": row["qualidade_fonte"],
+    } for row in rows]
+    return jsonify({"data": data, "coverage": {"requested_days": days, "events": len(data)}})
+
+
+@portfolio_api.get("/api/v1/assets/<ticker>/corporate-events")
+@requires_portfolio_user
+def asset_corporate_events(ticker: str):
+    symbol = ticker.strip().upper()
+    if not _TICKER.fullmatch(symbol):
+        return jsonify({"message": "Ticker inválido."}), 400
+    asset_class, error = _requested_class()
+    if error:
+        return error
+    days, error = _period_days()
+    if error:
+        return error
+    from sqlalchemy import text
+    from atualizador_documentos import SessionDB
+
+    since = date.today() - timedelta(days=days)
+    session = SessionDB()
+    try:
+        rows = session.execute(text("""
+            SELECT data_referencia,tipo,fator,descricao,fonte,qualidade_fonte
+            FROM eventos_corporativos_ativos
+            WHERE ticker=:ticker AND data_referencia>=:desde
+              AND (:classe IS NULL OR classe=:classe)
+            ORDER BY data_referencia ASC, tipo ASC
+        """), {"ticker": symbol, "desde": since, "classe": asset_class}).mappings().all()
+    finally:
+        session.close()
+    data = [{
+        "date": row["data_referencia"].isoformat(), "type": row["tipo"],
+        "factor": float(row["fator"]) if row["fator"] is not None else None,
+        "description": row["descricao"], "source": row["fonte"],
+        "source_quality": row["qualidade_fonte"],
+    } for row in rows]
+    return jsonify({"data": data, "coverage": {"requested_days": days, "events": len(data)}})
+
+
+@portfolio_api.get("/api/v1/assets/<ticker>/performance")
+@requires_portfolio_user
+def asset_performance(ticker: str):
+    """Retorno do ativo, não da carteira pessoal.
+
+    O total simples supõe uma unidade mantida durante todo o período, sem
+    reinvestimento, impostos ou corretagem. A Carteira calcula TWR/XIRR a partir
+    das transações do usuário.
+    """
+    symbol = ticker.strip().upper()
+    if not _TICKER.fullmatch(symbol):
+        return jsonify({"message": "Ticker inválido."}), 400
+    asset_class, error = _requested_class(required=True)
+    if error:
+        return error
+    days, error = _period_days()
+    if error:
+        return error
+    from sqlalchemy import text
+    from atualizador_documentos import SessionDB
+
+    since = date.today() - timedelta(days=days)
+    session = SessionDB()
+    try:
+        if asset_class in {"ACAO", "FII"}:
+            table = "snapshots_acoes" if asset_class == "ACAO" else "snapshots_fiis"
+            prices = session.execute(text(f"""
+                SELECT s.data_referencia AS data,s.preco
+                FROM {table} s JOIN ativos a ON a.id=s.ativo_id
+                WHERE UPPER(a.ticker)=:ticker AND s.data_referencia>=:desde AND s.preco IS NOT NULL
+                ORDER BY s.data_referencia ASC
+            """), {"ticker": symbol, "desde": since}).mappings().all()
+        elif asset_class in {"ETF", "BDR", "CRIPTO", "MOEDA"}:
+            prices = session.execute(text("""
+                SELECT o.referencia_em AS data,o.fechamento AS preco
+                FROM observacoes_instrumentos_internacionais o
+                JOIN instrumentos_internacionais i ON i.id=o.instrumento_id
+                WHERE UPPER(i.ticker)=:ticker AND i.tipo=:classe
+                  AND o.referencia_em>=:desde AND o.fechamento IS NOT NULL
+                ORDER BY o.referencia_em ASC
+            """), {"ticker": symbol, "classe": asset_class, "desde": since}).mappings().all()
+        else:
+            prices = []
+        income = session.execute(text("""
+            SELECT COALESCE(SUM(valor_unitario),0) AS total
+            FROM proventos_ativos
+            WHERE ticker=:ticker AND classe=:classe AND data_ex>=:desde
+        """), {"ticker": symbol, "classe": asset_class, "desde": since}).scalar_one()
+    finally:
+        session.close()
+    if len(prices) < 2:
+        return jsonify({"data": None, "message": "Histórico insuficiente no período."}), 404
+    start_price, end_price = float(prices[0]["preco"]), float(prices[-1]["preco"])
+    income_per_unit = float(income or 0)
+    price_return = ((end_price / start_price) - 1) * 100
+    income_return = (income_per_unit / start_price) * 100
+    return jsonify({"data": {
+        "ticker": symbol, "asset_type": asset_class.lower(), "requested_days": days,
+        "first_date": str(prices[0]["data"])[:10], "last_date": str(prices[-1]["data"])[:10],
+        "price_start": start_price, "price_end": end_price,
+        "price_return_percent": price_return, "income_per_unit": income_per_unit,
+        "income_return_percent": income_return,
+        "simple_total_return_percent": price_return + income_return,
+        "method": "buy_and_hold_one_unit_without_reinvestment",
+        "personalized_portfolio_return": False,
+    }})
