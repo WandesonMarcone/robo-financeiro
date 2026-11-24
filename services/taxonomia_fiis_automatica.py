@@ -16,6 +16,34 @@ from services.taxonomia_controlada import melhor_evidencia_fii
 
 VALORES_DESCONHECIDOS = {"", "N/D", "N/A", "NA", "-", "PENDENTE DE IA"}
 
+# Catálogo conservador para os FIIs acompanhados pelo administrador. Ele serve
+# de último recurso quando a página pública do Fundamentus omite o ticker ou o
+# segmento. Os valores usam a taxonomia canônica do projeto e nunca substituem
+# uma classificação válida já existente na planilha.
+SEGMENTOS_FII_VERIFICADOS = {
+    "GGRC11": "Logística",
+    "BTLG11": "Logística",
+    "CLIN11": "CRI",
+    "RBRY11": "CRI",
+    "VGIR11": "CRI",
+    "CVBI11": "CRI",
+    "KNUQ11": "CRI",
+    "KNHF11": "CRI",
+    "MCCI11": "CRI",
+    "KNSC11": "CRI",
+    "HSRE11": "Misto",
+    "KNIP11": "CRI",
+    "KNHY11": "CRI",
+    "HGRU11": "Renda Urbana",
+    "HGLG11": "Logística",
+    "KNRI11": "Misto",
+    "SNEL11": "Infraestrutura",
+    "CPTS11": "CRI",
+    "ALZR11": "Misto",
+    "BTRU11": "Renda Urbana",
+    "KNCR11": "CRI",
+}
+
 
 def _desconhecido(valor: object) -> bool:
     return str(valor or "").strip().upper() in VALORES_DESCONHECIDOS
@@ -144,7 +172,9 @@ def corrigir_taxonomia_fiis(planilha=None, segmentos=None, usar_contingencia=Fal
     except Exception:
         bloqueados_manuais = set()
     if usar_contingencia and segmentos is None:
-        segmentos = segmentos_fundamentus()
+        # A fonte ao vivo tem prioridade; o catálogo cobre somente ausências.
+        segmentos = dict(SEGMENTOS_FII_VERIFICADOS)
+        segmentos.update(segmentos_fundamentus())
     segmentos = segmentos or {}
     aba = planilha.worksheet("BD_FIIs")
     linhas = aba.get_all_values()
@@ -166,7 +196,12 @@ def corrigir_taxonomia_fiis(planilha=None, segmentos=None, usar_contingencia=Fal
         else:
             resolucao = resolver_classificacao(ticker, tipo_atual, segmento_atual, segmentos.get(ticker))
             if resolucao:
-                fonte = "FUNDAMENTUS_SEGMENTO_CONTINGENCIA"
+                fonte = (
+                    "FUNDAMENTUS_SEGMENTO_CONTINGENCIA"
+                    if ticker not in SEGMENTOS_FII_VERIFICADOS
+                    or segmentos.get(ticker) != SEGMENTOS_FII_VERIFICADOS.get(ticker)
+                    else "CATALOGO_FII_VERIFICADO"
+                )
         if resolucao is None:
             if _desconhecido(tipo_atual) or _desconhecido(segmento_atual):
                 sem_evidencia.append(ticker)
