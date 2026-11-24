@@ -94,10 +94,19 @@ jobs:
             python -m scripts.descobrir_instrumentos --tipo "${classe}" --limite 3 \
               || echo "::warning::Descoberta ${classe} temporariamente indisponível"
           done
+          classes_atualizadas=0
           for classe in ETF BDR CRIPTO MOEDA; do
             echo "Atualizando ${classe} antes da triagem de oportunidades"
-            python -m scripts.coletar_etfs_bdrs --tipo "${classe}" --limite 60 --sem-notificacoes
+            if python -m scripts.coletar_etfs_bdrs --tipo "${classe}" --limite 60 --sem-notificacoes; then
+              classes_atualizadas=$((classes_atualizadas + 1))
+            else
+              echo "::warning::Atualização ${classe} temporariamente indisponível; as demais classes continuarão"
+            fi
           done
+          if [ "${classes_atualizadas}" -eq 0 ]; then
+            echo "::error::Nenhuma classe de mercado pôde ser atualizada"
+            exit 1
+          fi
           python -m scripts.coletar_series_macro || echo "::warning::Contexto macro temporariamente indisponível"
           python -m scripts.coletar_tesouro_direto || echo "::warning::Tesouro temporariamente indisponível"
           python -m scripts.buscar_oportunidades_unificadas
@@ -133,10 +142,19 @@ jobs:
               || echo "::warning::Descoberta ${classe} temporariamente indisponível"
           done
 
+          classes_atualizadas=0
           for classe in ETF BDR CRIPTO MOEDA; do
             echo "Atualização noturna da classe ${classe}"
-            python -m scripts.coletar_etfs_bdrs --tipo "${classe}" --limite 60 --sem-notificacoes
+            if python -m scripts.coletar_etfs_bdrs --tipo "${classe}" --limite 60 --sem-notificacoes; then
+              classes_atualizadas=$((classes_atualizadas + 1))
+            else
+              echo "::warning::Atualização ${classe} temporariamente indisponível; as demais classes continuarão"
+            fi
           done
+          if [ "${classes_atualizadas}" -eq 0 ]; then
+            echo "::error::Nenhuma classe de mercado pôde ser atualizada"
+            exit 1
+          fi
 
           python -m scripts.coletar_series_macro
           python -m scripts.coletar_tesouro_direto
