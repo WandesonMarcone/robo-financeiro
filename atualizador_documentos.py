@@ -502,6 +502,7 @@ class ResultadoProcessamento:
         self.revisao = 0
         self.erros = 0
         self.sem_fonte = 0
+        self.adiados = 0
         self.notificados = 0
         self.erro = None
         # Mantém a auditoria do lote curta e suficiente para Telegram/Central.
@@ -544,6 +545,7 @@ class ResultadoProcessamento:
             f"Enviados para revisao: {self.revisao}\n"
             f"Erros: {self.erros}\n"
             f"Aguardando link oficial: {self.sem_fonte}\n"
+            f"Adiados por fonte temporariamente indisponivel: {self.adiados}\n"
             f"Seguidores notificados: {self.notificados}"
         )
 
@@ -557,6 +559,34 @@ def _selecionar_lote_documental(consulta, limite):
         DocumentosQualitativos.id.asc(),
     ).limit(tamanho).all()]
     return total, ids
+
+
+def _baixar_pdf_cvm(url_pdf, *, tentativas=3, timeout=(10, 45)):
+    """Baixa um PDF da CVM com repetição e distingue falha temporária.
+
+    A CVM pode demorar ou limitar requisições por alguns minutos. Nesses casos o
+    documento deve continuar pendente para a próxima rodada, sem transformar uma
+    indisponibilidade externa isolada em falha de todo o workflow.
+    """
+    codigos_temporarios = {408, 425, 429, 500, 502, 503, 504}
+    ultimo_erro = None
+    for tentativa in range(1, max(1, int(tentativas)) + 1):
+        try:
+            resposta = requests.get(url_pdf, timeout=timeout)
+            if resposta.status_code == 200:
+                return resposta.content, None, False
+            ultimo_erro = f"HTTP {resposta.status_code}"
+            temporario = resposta.status_code in codigos_temporarios
+            if not temporario:
+                return None, ultimo_erro, False
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            ultimo_erro = f"{type(exc).__name__}: {exc}"
+        except requests.RequestException as exc:
+            return None, f"{type(exc).__name__}: {exc}", False
+
+        if tentativa < tentativas:
+            time.sleep(min(2 ** (tentativa - 1), 4))
+    return None, ultimo_erro or "fonte temporariamente indisponivel", True
 
 
 def _nome_revisao(ticker, tipo_documento, data_referencia, identificador):
@@ -879,18 +909,27 @@ def rotina_processar_acoes(ticker: str | None = None, documento_id: int | None =
 
             print(f"🔄 IA Lendo: {ticker} (Data: {data_str})...")
 
-            try:
-                resposta = requests.get(url_pdf, timeout=15)
-                if resposta.status_code != 200:
-                    doc_db.status_processamento = "ERRO_DOWNLOAD"
+            pdf_bytes, erro_download, falha_temporaria = _baixar_pdf_cvm(url_pdf)
+            if pdf_bytes is None:
+                if falha_temporaria:
+                    print(
+                        "⚠️ CVM temporariamente indisponível; "
+                        f"{ticker} continuará pendente: {erro_download}"
+                    )
+                    doc_db.data_atualizacao = datetime.now()
+                    doc_db.log_erro = f"FONTE_CVM_TEMPORARIA: {erro_download}"[:500]
                     session.commit()
-                    resultado.erros += 1
-                    resultado.processados += 1
+                    resultado.adiados += 1
+                    resultado.registrar_item(
+                        ticker=ticker,
+                        tipo=doc_db.tipo_documento,
+                        status="ADIADO_FONTE_CVM",
+                    )
                     continue
-                pdf_bytes = resposta.content
-            except Exception as e:
-                print(f"⚠️ Erro ao baixar PDF CVM: {e}")
+
+                print(f"⚠️ Erro definitivo ao baixar PDF CVM: {erro_download}")
                 doc_db.status_processamento = "ERRO_DOWNLOAD"
+                doc_db.log_erro = str(erro_download or "ERRO_DOWNLOAD")[:500]
                 session.commit()
                 resultado.erros += 1
                 resultado.processados += 1
