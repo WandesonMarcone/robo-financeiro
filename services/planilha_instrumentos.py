@@ -8,6 +8,7 @@ catálogos diferentes.
 from __future__ import annotations
 
 from datetime import datetime
+import re
 
 
 COLUNAS_PLANILHA_INSTRUMENTOS = (
@@ -26,6 +27,15 @@ ABAS_POR_TIPO = {
     "INDICE": "BD_Indices",
     "COMMODITY": "BD_Commodities",
 }
+
+
+def _parece_linha_instrumento(linha):
+    """Reconhece o formato legado, no qual a aba começava direto nos dados."""
+    if not linha or len(linha) < len(COLUNAS_PLANILHA_INSTRUMENTOS):
+        return False
+    ticker = str(linha[0] or "").strip().upper()
+    fonte = str(linha[13] or "").strip().upper()
+    return bool(re.fullmatch(r"[A-Z0-9.\-=]{2,20}", ticker)) and bool(fonte)
 
 
 def _numero(valor):
@@ -71,8 +81,19 @@ def abrir_planilha_instrumentos(tipo, planilha=None):
             value_input_option="RAW",
         )
         linhas = [list(COLUNAS_PLANILHA_INSTRUMENTOS)]
-    if linhas[0][:len(COLUNAS_PLANILHA_INSTRUMENTOS)] != list(COLUNAS_PLANILHA_INSTRUMENTOS):
-        raise RuntimeError(f"cabecalho_invalido:{aba_nome}")
+    cabecalho = list(COLUNAS_PLANILHA_INSTRUMENTOS)
+    if linhas[0][:len(cabecalho)] != cabecalho:
+        if _parece_linha_instrumento(linhas[0]):
+            # Abas antigas de ETF/BDR foram criadas sem cabeçalho. Insere a
+            # linha 1 sem sobrescrever o primeiro ativo já coletado.
+            aba.insert_row(cabecalho, index=1, value_input_option="RAW")
+            linhas = [cabecalho, *linhas]
+            try:
+                aba.freeze(rows=1, cols=1)
+            except Exception:
+                pass
+        else:
+            raise RuntimeError(f"cabecalho_invalido:{aba_nome}")
     return aba, linhas
 
 
