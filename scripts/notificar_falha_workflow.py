@@ -13,9 +13,11 @@ def mensagem():
     repositorio = os.environ.get("GITHUB_REPOSITORY", "repositório")
     url = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
     run_id = os.environ.get("GITHUB_RUN_ID", "")
+    etapa = os.environ.get("ETAPA_FALHA", "etapa não identificada")
     link = f"{url}/{repositorio}/actions/runs/{run_id}" if run_id else url
     return (
         f"⚠️ {workflow} falhou no GitHub.\n"
+        f"Etapa: {etapa}.\n"
         "Nenhuma atualização posterior foi confirmada.\n"
         f"Log: {link}"
     )

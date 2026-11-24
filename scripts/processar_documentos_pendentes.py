@@ -76,6 +76,7 @@ def _detalhes(resultado):
         "revisao": int(getattr(resultado, "revisao", 0) or 0),
         "erros": int(getattr(resultado, "erros", 0) or 0),
         "sem_fonte": int(getattr(resultado, "sem_fonte", 0) or 0),
+        "adiados": int(getattr(resultado, "adiados", 0) or 0),
         "notificados": int(getattr(resultado, "notificados", 0) or 0),
         "itens": list(getattr(resultado, "itens", []) or []),
         "erro": getattr(resultado, "erro", None),
@@ -121,6 +122,7 @@ def main():
             f"resultados reclassificados={resultados_reclassificados}, "
             f"histórico fora da janela={fora_janela['fiis'] + fora_janela['acoes']}, "
             f"aguardando fonte FNET={detalhes['fii']['sem_fonte']}, "
+            f"adiados pela CVM={detalhes['acoes']['adiados']}, "
             f"erros={detalhes['fii']['erros'] + detalhes['acoes']['erros']}. "
             f"Telegram={'enviado' if detalhes['telegram_resumo_enviado'] else 'não enviado'}."
         )
