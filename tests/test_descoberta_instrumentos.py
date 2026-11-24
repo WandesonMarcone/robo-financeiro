@@ -27,6 +27,12 @@ class Aba:
     def update(self, valores, intervalo, value_input_option=None):
         self.eventos.append(("planilha", intervalo, valores))
 
+    def insert_row(self, valores, index=1, value_input_option=None):
+        self.eventos.append(("cabecalho", index, valores))
+
+    def freeze(self, **_kwargs):
+        return None
+
 
 class Planilha:
     def __init__(self, aba):
@@ -99,6 +105,22 @@ class DescobertaInstrumentosTests(unittest.TestCase):
         )
         self.assertEqual([], chamados)
         self.assertEqual([], resultado["adicionados"])
+
+    def test_aba_legada_sem_cabecalho_preserva_primeiro_ativo(self):
+        eventos = []
+        linha_legada = [
+            "BOVA11", "ETF Ibovespa", "167", "0,5", "Ibovespa",
+            "1", "1", "-18", "50", "8", "—", "10", "—",
+            "YAHOO_FINANCE", "2026-11-17", "17/11/2026 23:08",
+        ]
+        aba = Aba(eventos, linhas=[linha_legada])
+        planilha = Planilha(aba)
+        from services.planilha_instrumentos import listar_tickers_planilha
+
+        self.assertEqual({"BOVA11"}, listar_tickers_planilha("ETF", planilha))
+        self.assertEqual("cabecalho", eventos[0][0])
+        self.assertEqual("TICKER", eventos[0][2][0])
+        self.assertEqual("BOVA11", aba.linhas[0][0])
 
 
 if __name__ == "__main__":
