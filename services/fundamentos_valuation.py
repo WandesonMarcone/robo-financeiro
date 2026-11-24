@@ -57,10 +57,13 @@ CONTAS_EXATAS = {
 }
 
 DESCRICOES = (
+    (("patrimonio", "liquido", "atribuido", "controlador"), "patrimonio_liquido"),
+    (("patrimonio", "liquido", "consolidado"), "patrimonio_liquido"),
     (("lucro", "prejuizo", "periodo"), "lucro_liquido"),
     (("resultado", "liquido", "periodo"), "lucro_liquido"),
     (("lucro", "acao", "basico"), "lpa_basico"),
     (("lucro", "acao", "diluido"), "lpa_diluido"),
+    (("lucro", "acao"), "lpa_diluido"),
     (("depreciacao", "amortizacao"), "depreciacao_amortizacao"),
     (("aquisicao", "imobilizado"), "capex"),
     (("aquisicoes", "imobilizado"), "capex"),
@@ -131,12 +134,18 @@ def _data(valor):
 
 
 def _metrica(conta: str, descricao: str):
-    if conta in CONTAS_EXATAS:
-        return CONTAS_EXATAS[conta]
     texto_desc = _texto(descricao).lower()
+    # O plano de contas de instituições financeiras não usa sempre os mesmos
+    # códigos das companhias industriais. No BPP de bancos, por exemplo, 2.03
+    # é "Provisões" e o patrimônio aparece em 2.07. A descrição oficial deve
+    # prevalecer nesses conceitos para impedir um VPA/ROE materialmente errado.
     for termos, metrica in DESCRICOES:
         if all(termo in texto_desc for termo in termos):
             return metrica
+    if conta == "2.03" and "patrimonio liquido" not in texto_desc:
+        return None
+    if conta in CONTAS_EXATAS:
+        return CONTAS_EXATAS[conta]
     if conta.startswith("3.99.01"):
         return "lpa_basico"
     if conta.startswith("3.99.02"):
@@ -195,10 +204,16 @@ def extrair_demonstracoes_cvm(conteudo, ticker, cnpj, documento, ano):
                         valor = abs(valor)
                     periodicidade = "ANUAL" if documento == "DFP" else "TRIMESTRAL"
                     chave = (fim, metrica)
+                    descricao_normalizada = _texto(descricao)
                     prioridade = 2 if conta in CONTAS_EXATAS or conta.startswith("3.99") else 1
+                    if valor != 0:
+                        prioridade += 10
+                    if metrica == "patrimonio_liquido" and "ATRIBUIDO AO CONTROLADOR" in descricao_normalizada:
+                        prioridade += 20
                     anterior = fatos_por_chave.get(chave)
-                    if anterior and anterior.pop("_prioridade", 0) > prioridade:
-                        anterior["_prioridade"] = 2
+                    prioridade_anterior = anterior.get("_prioridade", 0) if anterior else 0
+                    if anterior and prioridade_anterior > prioridade:
+                        anterior["_prioridade"] = prioridade_anterior
                         fatos_por_chave[chave] = anterior
                         continue
                     fatos_por_chave[chave] = {
@@ -231,7 +246,7 @@ def _fato(ticker, classe, periodo, metrica, valor, unidade, entradas, periodicid
     }
 
 
-def derivar_indicadores(ticker, classe, fundamentos, proventos=None):
+def derivar_indicadores(ticker, classe, fundamentos, proventos=None, eventos=None):
     por_periodo = defaultdict(dict)
     for item in fundamentos:
         if item["periodicidade"] == "ANUAL":
@@ -244,10 +259,23 @@ def derivar_indicadores(ticker, classe, fundamentos, proventos=None):
     capitais = {}
     dividas = {}
     lpas = []
+    desdobramentos = sorted(
+        (evento["data_referencia"], float(evento["fator"]))
+        for evento in (eventos or [])
+        if evento.get("tipo") == "DESDOBRAMENTO_OU_GRUPAMENTO"
+        and float(evento.get("fator") or 0) > 0
+    )
     for periodo in periodos:
         m = por_periodo[periodo]
         lucro = m.get("lucro_liquido")
         lpa = m.get("lpa_diluido") or m.get("lpa_basico")
+        if lpa is not None:
+            fator_posterior = 1.0
+            for data_evento, fator in desdobramentos:
+                if data_evento > periodo:
+                    fator_posterior *= fator
+            if fator_posterior != 1.0:
+                lpa /= fator_posterior
         if lpa is not None:
             indicadores.append(_fato(ticker, classe, periodo, "lpa", lpa, "BRL_ACAO", {"origem": "DRE_CVM"}))
             lpas.append((periodo, lpa))
@@ -465,12 +493,15 @@ def coletar_fundamentos_valuation(ticker, anos=5, planilha=None, session_factory
         from services.proventos_eventos import extrair_eventos_yahoo
         proventos, eventos = extrair_eventos_yahoo(
             ticker, cadastro["classe"], ticker_factory(f"{ticker}.SA"),
-            hoje - timedelta(days=anos * 366), hoje,
+            date(hoje.year - anos, 1, 1), hoje,
         )
     except Exception as exc:
         falhas.append({"fonte": "YAHOO_EVENTOS", "ano": None, "erro": type(exc).__name__})
 
-    indicadores = derivar_indicadores(ticker, cadastro["classe"], fundamentos, proventos=proventos)
+    indicadores = derivar_indicadores(
+        ticker, cadastro["classe"], fundamentos,
+        proventos=proventos, eventos=eventos,
+    )
     setor = cadastro.get("setor")
     if cadastro["classe"] == "ACAO" and not setor:
         try:

@@ -4,6 +4,7 @@ import zipfile
 from datetime import date
 
 from services.fundamentos_valuation import (
+    _metrica,
     avaliar_cobertura,
     derivar_indicadores,
     extrair_demonstracoes_cvm,
@@ -32,6 +33,14 @@ def _zip_dfp(ano=2025):
 
 
 class FundamentosValuationTest(unittest.TestCase):
+    def test_plano_bancario_nao_confunde_provisoes_com_patrimonio(self):
+        self.assertIsNone(_metrica("2.03", "Provisões"))
+        self.assertEqual(
+            _metrica("2.07.01", "Patrimônio Líquido Atribuído ao Controlador"),
+            "patrimonio_liquido",
+        )
+        self.assertEqual(_metrica("3.99", "Lucro por Ação (R$/Ação)"), "lpa_diluido")
+
     def test_extrai_somente_cnpj_e_respeita_escala(self):
         fatos = extrair_demonstracoes_cvm(
             _zip_dfp(), "BBAS3", "00.000.000/0001-91", "DFP", 2025,
@@ -61,6 +70,26 @@ class FundamentosValuationTest(unittest.TestCase):
         indicadores = derivar_indicadores("BBAS3", "ACAO", fundamentos, proventos)
         nomes = {item["indicador"] for item in indicadores}
         self.assertTrue({"lpa", "vpa", "roe", "dpa", "payout", "crescimento_lpa_5a", "divida_liquida"} <= nomes)
+
+    def test_normaliza_lpa_anterior_ao_desdobramento(self):
+        fundamentos = [
+            {"periodo_fim": date(2023, 12, 31), "periodicidade": "ANUAL", "metrica": "lpa_diluido", "valor": 10.0},
+            {"periodo_fim": date(2024, 12, 31), "periodicidade": "ANUAL", "metrica": "lpa_diluido", "valor": 6.0},
+        ]
+        eventos = [{
+            "data_referencia": date(2024, 4, 15),
+            "tipo": "DESDOBRAMENTO_OU_GRUPAMENTO",
+            "fator": 2.0,
+        }]
+        indicadores = derivar_indicadores(
+            "BBAS3", "ACAO", fundamentos, eventos=eventos,
+        )
+        lpas = {
+            item["exercicio"]: item["valor"]
+            for item in indicadores if item["indicador"] == "lpa"
+        }
+        self.assertEqual(lpas[2023], 5.0)
+        self.assertEqual(lpas[2024], 6.0)
 
     def test_banco_bloqueia_fcff_e_preserva_fcfe(self):
         periodo = date(2025, 12, 31)
