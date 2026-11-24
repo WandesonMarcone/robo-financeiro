@@ -13,7 +13,7 @@ class TestOportunidadesUnificadas(unittest.TestCase):
                 "BDR": [{"ticker": "A1MD34", "distancia_maxima_1a": -15.5,
                          "liquidez_media_30d_brl": 80_000}],
             }
-            return dados[tipo]
+            return dados.get(tipo, [])
 
         pacote = montar_digest_oportunidades_instrumentos(listar=listar)
 

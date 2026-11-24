@@ -13,6 +13,11 @@ on:
       - 'modules/utils.py'
       - 'modules/relatorio_mercado.py'
       - 'services/oportunidades_unificadas.py'
+      - 'services/coletor_etfs_bdrs.py'
+      - 'services/portfolio_api.py'
+      - 'services/sinais_macro_tesouro.py'
+      - 'scripts/auditar_mercado_multiclasse.py'
+      - 'scripts/buscar_sinais_multiclasse.py'
       - 'tests/test_oportunidades_unificadas.py'
       - 'tests/test_triagem_fiis.py'
       - 'services/admin_api.py'
@@ -63,6 +68,11 @@ on:
       - 'modules/utils.py'
       - 'modules/relatorio_mercado.py'
       - 'services/oportunidades_unificadas.py'
+      - 'services/coletor_etfs_bdrs.py'
+      - 'services/portfolio_api.py'
+      - 'services/sinais_macro_tesouro.py'
+      - 'scripts/auditar_mercado_multiclasse.py'
+      - 'scripts/buscar_sinais_multiclasse.py'
       - 'tests/test_oportunidades_unificadas.py'
       - 'tests/test_triagem_fiis.py'
       - 'services/admin_api.py'
@@ -119,5 +129,5 @@ jobs:
         run: pip install -r requirements.txt
       - name: Validar módulos e fluxos seguros
         run: |
-          python -m py_compile fnet_scraper.py bot/callbacks_revisao.py app.py atualizador_ciclico.py atualizador_documentos.py scripts/processar_documentos_pendentes.py modules/lotes_atualizacao.py modules/scraper_acoes.py modules/scraper_fiis.py modules/utils.py services/admin_api.py bot/callbacks_menus.py services/coletor_etfs_bdrs.py services/oportunidades_unificadas.py pipeline_dados/tipos_documento.py modules/GoogleDriveManager.py services/orquestrador.py services/coletor_tesouro_direto.py pipeline_dados/coletor_fnet.py pipeline_dados/coletor_docs_acoes.py scripts/notificar_falha_workflow.py scripts/notificar_sucesso_atualizacao.py scripts/varredura_fnet_diaria.py scripts/varredura_docs_acoes_trimestral.py scripts/coletar_tesouro_direto.py scripts/coletar_series_macro.py
+          python -m py_compile fnet_scraper.py bot/callbacks_revisao.py app.py atualizador_ciclico.py atualizador_documentos.py scripts/processar_documentos_pendentes.py modules/lotes_atualizacao.py modules/scraper_acoes.py modules/scraper_fiis.py modules/utils.py services/admin_api.py bot/callbacks_menus.py services/coletor_etfs_bdrs.py services/oportunidades_unificadas.py services/sinais_macro_tesouro.py services/portfolio_api.py pipeline_dados/tipos_documento.py modules/GoogleDriveManager.py services/orquestrador.py services/coletor_tesouro_direto.py pipeline_dados/coletor_fnet.py pipeline_dados/coletor_docs_acoes.py scripts/notificar_falha_workflow.py scripts/notificar_sucesso_atualizacao.py scripts/varredura_fnet_diaria.py scripts/varredura_docs_acoes_trimestral.py scripts/coletar_tesouro_direto.py scripts/coletar_series_macro.py scripts/auditar_mercado_multiclasse.py scripts/buscar_sinais_multiclasse.py
           python -m unittest discover -s tests -p 'test_*.py' -v

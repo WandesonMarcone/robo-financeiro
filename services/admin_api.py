@@ -381,10 +381,10 @@ def _ativos_para_painel(limite: int = 300, busca: str | None = None,
             "salvos_drive": int(linha.salvos_drive or 0),
             "ultimo_documento_em": linha.ultimo_documento_em.isoformat() if linha.ultimo_documento_em else None,
         } for linha in linhas]
-        # ETFs e BDRs têm cadastro próprio e não possuem fluxo documental.
+        # Instrumentos cotados têm cadastro próprio e não possuem fluxo documental.
         # Ainda assim, são ativos acompanhados e precisam entrar em "Todos"
         # e no contador da Central, sem fingir que são ações ou FIIs.
-        if tipo in (None, "", "ETF", "BDR"):
+        if tipo in (None, "", "ETF", "BDR", "CRIPTO", "MOEDA", "INDICE", "COMMODITY"):
             internacionais = session.execute(text("""
                 WITH ultima AS (
                     SELECT DISTINCT ON (instrumento_id) instrumento_id, referencia_em
@@ -412,6 +412,8 @@ def _ativos_para_painel(limite: int = 300, busca: str | None = None,
             "fiis": sum(item["tipo"] == "FII" for item in ativos),
             "etfs": sum(item["tipo"] == "ETF" for item in ativos),
             "bdrs": sum(item["tipo"] == "BDR" for item in ativos),
+            "criptos": sum(item["tipo"] == "CRIPTO" for item in ativos),
+            "moedas": sum(item["tipo"] == "MOEDA" for item in ativos),
             "documentos": sum(item["documentos"] for item in ativos),
         }
         return ativos, totais
@@ -1002,13 +1004,13 @@ def configuracao_janela_documental():
 @admin_api.route("/api/admin/instruments", methods=["GET"])
 @exige_admin
 def instrumentos_internacionais():
-    """ETFs e BDRs têm cadastro e métricas próprios, sem se passar por ações."""
+    """Instrumentos cotados têm cadastro e métricas próprios por classe."""
     from atualizador_documentos import SessionDB
     from sqlalchemy import text
     sessao = SessionDB()
     try:
         tipo = str(request.args.get("type") or "").upper().strip()
-        if tipo and tipo not in {"ETF", "BDR"}:
+        if tipo and tipo not in {"ETF", "BDR", "CRIPTO", "MOEDA", "INDICE", "COMMODITY"}:
             return jsonify({"message": "Tipo inválido."}), 400
         linhas = sessao.execute(text("""
           WITH ultima AS (
@@ -1065,8 +1067,8 @@ def detalhe_instrumento_internacional(ticker):
 def oportunidades_instrumentos_internacionais():
     """Triagem explicável; candidatos não são recomendação de investimento."""
     tipo = str(request.args.get("type") or "").upper().strip()
-    if tipo not in {"ETF", "BDR"}:
-        return jsonify({"message": "Escolha ETF ou BDR."}), 400
+    if tipo not in {"ETF", "BDR", "CRIPTO", "MOEDA"}:
+        return jsonify({"message": "Escolha ETF, BDR, CRIPTO ou MOEDA."}), 400
     try:
         from services.coletor_etfs_bdrs import listar_oportunidades_instrumentos
         itens = listar_oportunidades_instrumentos(tipo=tipo)
@@ -1102,8 +1104,8 @@ def executar_comando():
     if action == "status":
         return jsonify({"message": "Status atualizado."})
     if action == "registrar_instrumento":
-        if not ticker or tipo_instrumento not in {"ETF", "BDR"}:
-            return jsonify({"message": "Informe ticker e escolha ETF ou BDR."}), 400
+        if not ticker or tipo_instrumento not in {"ETF", "BDR", "CRIPTO", "MOEDA", "INDICE", "COMMODITY"}:
+            return jsonify({"message": "Informe ticker e uma classe de mercado válida."}), 400
         try:
             from services.coletor_etfs_bdrs import registrar_instrumento
             item = registrar_instrumento(ticker, tipo_instrumento, simbolo_exterior)
@@ -1111,16 +1113,16 @@ def executar_comando():
         except Exception:
             return jsonify({"message": "Não foi possível cadastrar: confirme que a migração 0016 foi aplicada no Neon."}), 503
     if action == "adicionar_ativo_acompanhado":
-        if not ticker or tipo_ativo not in {"ACAO", "FII", "ETF", "BDR"}:
-            return jsonify({"message": "Informe ticker e escolha Ação, FII, ETF ou BDR."}), 400
-        if tipo_ativo in {"ETF", "BDR"}:
+        if not ticker or tipo_ativo not in {"ACAO", "FII", "ETF", "BDR", "CRIPTO", "MOEDA", "INDICE", "COMMODITY"}:
+            return jsonify({"message": "Informe ticker e uma classe de ativo válida."}), 400
+        if tipo_ativo in {"ETF", "BDR", "CRIPTO", "MOEDA", "INDICE", "COMMODITY"}:
             try:
                 from services.coletor_etfs_bdrs import registrar_instrumento
                 item = registrar_instrumento(ticker, tipo_ativo, simbolo_exterior)
                 return jsonify({"message": f"{item['ticker']} incluído como {item['tipo']}. Atualize a categoria para buscar a primeira referência."})
             except Exception:
                 logger.exception("Falha ao cadastrar instrumento internacional")
-                return jsonify({"message": "Não foi possível cadastrar o ETF/BDR."}), 503
+                return jsonify({"message": "Não foi possível cadastrar o instrumento."}), 503
         try:
             import config
             from modules.utils import conectar_gspread
@@ -1142,19 +1144,19 @@ def executar_comando():
             resultado = cadastrar_base_inicial()
             return jsonify({"message": f"Base inicial cadastrada: {resultado['quantidade']} instrumentos. Atualize-os para buscar a primeira referência."})
         except Exception:
-            return jsonify({"message": "Não foi possível cadastrar a base inicial de ETFs/BDRs."}), 503
+            return jsonify({"message": "Não foi possível cadastrar a base inicial multiclasse."}), 503
     if action == "atualizar_instrumento":
         if not ticker:
-            return jsonify({"message": "Informe o ticker do ETF ou BDR."}), 400
+            return jsonify({"message": "Informe o ticker do instrumento."}), 400
         from services.coletor_etfs_bdrs import coletar_instrumento
-        tarefa = _registrar_tarefa(action, f"Atualização de ETF/BDR: {ticker}", ticker)
+        tarefa = _registrar_tarefa(action, f"Atualização de instrumento: {ticker}", ticker)
         _executar_em_background(tarefa, coletar_instrumento, ticker, tipo_instrumento or None, simbolo_exterior)
         return jsonify({"message": f"Atualização de {ticker} iniciada; origem e qualidade aparecerão na ficha.", "task_id": tarefa}), 202
     if action == "atualizar_instrumentos":
         from services.coletor_etfs_bdrs import coletar_instrumentos_ativos
-        tarefa = _registrar_tarefa(action, "Atualização dos ETFs e BDRs cadastrados")
+        tarefa = _registrar_tarefa(action, "Atualização dos instrumentos cadastrados")
         _executar_em_background(tarefa, coletar_instrumentos_ativos, 30)
-        return jsonify({"message": "Atualização de até 30 ETFs/BDRs cadastrados iniciada.", "task_id": tarefa}), 202
+        return jsonify({"message": "Atualização de até 30 instrumentos cadastrados iniciada.", "task_id": tarefa}), 202
     if action == "salvar_classificacao_manual":
         if not ticker:
             return jsonify({"message": "Informe o ticker do ativo."}), 400

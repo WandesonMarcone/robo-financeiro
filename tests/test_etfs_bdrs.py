@@ -17,3 +17,14 @@ class TestEtfsBdrs(unittest.TestCase):
         item = {"tipo": "BDR", "liquidez_media_30d_brl": 2_000,
                 "distancia_maxima_1a": -30, "volatilidade_30d": 25}
         self.assertIsNone(avaliar_oportunidade_instrumento(item))
+
+    def test_base_inicial_inclui_cripto_e_dolar_sem_backfill(self):
+        tipos = {x["ticker"]: x["tipo"] for x in BASE_INICIAL_INSTRUMENTOS}
+        self.assertEqual(tipos["BTCBRL"], "CRIPTO")
+        self.assertEqual(tipos["ETHBRL"], "CRIPTO")
+        self.assertEqual(tipos["USDBRL"], "MOEDA")
+
+    def test_cripto_usa_regra_propria_sem_exigir_liquidez_b3(self):
+        item = {"tipo": "CRIPTO", "distancia_maxima_1a": -18,
+                "variacao_percentual": -4.5}
+        self.assertIsNotNone(avaliar_oportunidade_instrumento(item))

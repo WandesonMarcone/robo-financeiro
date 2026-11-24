@@ -18,6 +18,11 @@ from flask import Blueprint, jsonify, request
 portfolio_api = Blueprint("portfolio_api", __name__)
 logger = logging.getLogger(__name__)
 _TICKER = re.compile(r"^[A-Z0-9._-]{1,16}$")
+_MARKET_TYPES = {
+    "etf": "ETF", "bdr": "BDR", "crypto": "CRIPTO", "cripto": "CRIPTO",
+    "currency": "MOEDA", "moeda": "MOEDA", "index": "INDICE", "indice": "INDICE",
+    "commodity": "COMMODITY",
+}
 
 
 def _origins() -> set[str]:
@@ -97,6 +102,16 @@ def health():
     return jsonify({"status": "ok", "service": "portfolio-market-readonly"})
 
 
+@portfolio_api.get("/api/v1/market/overview")
+@requires_portfolio_user
+def market_overview():
+    """Macro, índices e Tesouro já consolidados pelo mesmo robô."""
+    from services.painel_mercado import resumo_mercado
+
+    data = resumo_mercado()
+    return jsonify({"data": data, "source": "robo_financeiro"})
+
+
 @portfolio_api.get("/api/v1/assets/<ticker>")
 @requires_portfolio_user
 def asset(ticker: str):
@@ -105,11 +120,11 @@ def asset(ticker: str):
         return jsonify({"message": "Ticker inválido."}), 400
 
     requested_type = (request.args.get("asset_type") or "").strip().lower()
-    if requested_type in {"etf", "bdr"}:
+    if requested_type in _MARKET_TYPES:
         from services.coletor_etfs_bdrs import detalhe_instrumento_menu
 
         instrument, metrics = detalhe_instrumento_menu(symbol)
-        if instrument is None or str(instrument.get("tipo") or "").lower() != requested_type:
+        if instrument is None or str(instrument.get("tipo") or "").upper() != _MARKET_TYPES[requested_type]:
             return jsonify({"data": None, "message": "Ativo ainda sem dados consolidados pelo Robô."}), 404
         metric_map = {
             str(item.get("chave")): _to_number(item.get("valor_numerico"))
@@ -188,6 +203,37 @@ def asset_history(ticker: str):
     except ValueError:
         return jsonify({"message": "Período inválido."}), 400
     is_fii = requested_type == "fii"
+
+    if requested_type in _MARKET_TYPES:
+        from sqlalchemy import text
+        from atualizador_documentos import SessionDB
+
+        since = date.today() - timedelta(days=days)
+        session = SessionDB()
+        try:
+            rows = session.execute(text("""
+                SELECT o.referencia_em, o.fechamento, o.variacao_percentual
+                FROM observacoes_instrumentos_internacionais o
+                JOIN instrumentos_internacionais i ON i.id=o.instrumento_id
+                WHERE UPPER(i.ticker)=:ticker AND i.tipo=:tipo
+                  AND o.referencia_em >= :desde
+                ORDER BY o.referencia_em ASC
+            """), {"ticker": symbol, "tipo": _MARKET_TYPES[requested_type], "desde": since}).mappings().all()
+            points = [{
+                "date": row["referencia_em"].date().isoformat(),
+                "price": float(row["fechamento"]) if row["fechamento"] is not None else None,
+                "change_percent": float(row["variacao_percentual"]) if row["variacao_percentual"] is not None else None,
+            } for row in rows if row["fechamento"] is not None]
+        finally:
+            session.close()
+        coverage = {
+            "requested_days": days,
+            "points": len(points),
+            "first_date": points[0]["date"] if points else None,
+            "last_date": points[-1]["date"] if points else None,
+            "source": "neon_market_eod",
+        }
+        return jsonify({"data": points, "coverage": coverage})
 
     from sqlalchemy import func
     from atualizador_documentos import SessionDB

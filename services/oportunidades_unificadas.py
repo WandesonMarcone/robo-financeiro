@@ -1,4 +1,4 @@
-"""Consolida candidatos de ETFs e BDRs para o alerta de mercado.
+"""Consolida sinais de todas as classes cotadas para o alerta de mercado.
 
 Os critérios e a leitura do banco continuam em ``coletor_etfs_bdrs``. Este
 módulo apenas transforma candidatos já calculados em uma mensagem curta e
@@ -10,7 +10,7 @@ from __future__ import annotations
 from services.coletor_etfs_bdrs import listar_oportunidades_instrumentos
 
 
-_ICONE = {"ETF": "🌐", "BDR": "🌍"}
+_ICONE = {"ETF": "🌐", "BDR": "🌍", "CRIPTO": "₿", "MOEDA": "💱"}
 
 
 def _numero(valor):
@@ -24,7 +24,16 @@ def _linha(item):
     ticker = str(item.get("ticker") or "").strip().upper()
     distancia = _numero(item.get("distancia_maxima_1a"))
     liquidez = _numero(item.get("liquidez_media_30d_brl"))
-    if not ticker or distancia is None or liquidez is None:
+    tipo = str(item.get("tipo") or "").upper()
+    variacao = _numero(item.get("variacao_percentual"))
+    if not ticker:
+        return None
+    if tipo == "CRIPTO" and distancia is not None:
+        movimento = f" | dia {variacao:+.2f}%" if variacao is not None else ""
+        return f"• *{ticker}* — {abs(distancia):.1f}% abaixo da máxima do período{movimento}"
+    if tipo == "MOEDA" and variacao is not None:
+        return f"• *{ticker}* — movimento diário de {variacao:+.2f}%"
+    if distancia is None or liquidez is None:
         return None
     return (
         f"• *{ticker}* — {abs(distancia):.1f}% abaixo da máxima do período "
@@ -50,10 +59,11 @@ def montar_digest_oportunidades_instrumentos(
 
     grupos = []
     itens = []
-    for tipo in ("ETF", "BDR"):
+    for tipo in ("ETF", "BDR", "CRIPTO", "MOEDA"):
         candidatos = buscar(tipo=tipo, limite=limite) or []
         linhas = []
         for candidato in candidatos:
+            candidato = {"tipo": tipo, **candidato}
             linha = _linha(candidato)
             if not linha:
                 continue
@@ -75,7 +85,7 @@ def montar_digest_oportunidades_instrumentos(
         return {"texto": "", "tickers": [], "tipo": "instrumento", "itens": []}
 
     texto = (
-        "🔎 *Oportunidades monitoradas — ETFs e BDRs*\n\n"
+        "🔎 *Sinais monitorados — mercado multiclasse*\n\n"
         + "\n\n".join(grupos)
         + "\n\n_É uma triagem automática, não uma recomendação de investimento._"
     )

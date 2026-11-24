@@ -1,12 +1,12 @@
-"""Coleta e notifica uma classe internacional por execução do Actions."""
+"""Coleta e notifica uma classe cotada por execução do Actions."""
 import argparse
 
-from services.coletor_etfs_bdrs import coletar_instrumentos_ativos
+from services.coletor_etfs_bdrs import TIPOS_INSTRUMENTO_MERCADO, coletar_instrumentos_ativos
 from services.notificacoes_instrumentos import notificar_atualizacoes_diarias, notificar_resumo_admin
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--tipo", choices=["ETF", "BDR"], default=None)
+    parser.add_argument("--tipo", choices=sorted(TIPOS_INSTRUMENTO_MERCADO), default=None)
     parser.add_argument("--limite", type=int, default=30)
     parser.add_argument("--sem-notificacoes", action="store_true")
     args = parser.parse_args()

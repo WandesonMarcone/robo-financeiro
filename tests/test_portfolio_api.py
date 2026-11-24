@@ -56,6 +56,20 @@ class PortfolioApiTest(unittest.TestCase):
         self.assertEqual(response.json["data"]["classification"]["subsector"], "S&P 500")
         self.assertEqual(response.json["data"]["indicators"]["volatility_30d"], 18.4)
 
+    @patch("services.portfolio_api._supabase_user", return_value={"id": "user-1"})
+    @patch("services.coletor_etfs_bdrs.detalhe_instrumento_menu")
+    def test_returns_crypto_from_same_readonly_api(self, detail, _user):
+        detail.return_value = ({
+            "ticker": "BTCBRL", "tipo": "CRIPTO", "fechamento": 510000,
+            "referencia_em": date(2026, 11, 23), "indice_referencia": None,
+        }, [{"chave": "volatilidade_30d", "valor_numerico": 52.1}])
+        response = self.client.get(
+            "/api/v1/assets/BTCBRL?asset_type=crypto", headers=self.auth
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["data"]["price"], 510000.0)
+        self.assertEqual(response.json["data"]["classification"]["type"], "CRIPTO")
+
     def test_rejects_request_without_session(self):
         response = self.client.get("/api/v1/assets/BBAS3?asset_type=stock")
         self.assertEqual(response.status_code, 401)

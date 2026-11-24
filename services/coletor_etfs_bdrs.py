@@ -1,4 +1,4 @@
-"""Coleta auditável para ETFs e BDRs.
+"""Coleta auditável para instrumentos cotados de várias classes.
 
 O fechamento negociado na B3 é obtido por fonte complementar de mercado;
 documentos, composição e dados fundamentais oficiais entram somente quando a
@@ -16,6 +16,10 @@ from sqlalchemy import text
 # Lista inicial deliberadamente pequena. Ela dá cobertura aos principais tipos
 # de exposição sem transformar o robô em um rastreador indiscriminado de toda a
 # B3. Metadados já preenchidos manualmente não são sobrescritos pelo cadastro.
+TIPOS_INSTRUMENTO_MERCADO = frozenset({"ETF", "BDR", "CRIPTO", "MOEDA", "INDICE", "COMMODITY"})
+TIPOS_COM_PLANILHA = frozenset({"ETF", "BDR"})
+
+
 BASE_INICIAL_INSTRUMENTOS = (
     {"ticker": "BOVA11", "tipo": "ETF", "nome": "iShares Ibovespa Fundo de Índice", "externo": "IBOV", "indice": "Ibovespa", "gestora": "BlackRock"},
     {"ticker": "IVVB11", "tipo": "ETF", "nome": "iShares S&P 500 Fundo de Investimento", "externo": "IVV", "indice": "S&P 500", "gestora": "BlackRock"},
@@ -23,6 +27,9 @@ BASE_INICIAL_INSTRUMENTOS = (
     {"ticker": "XFIX11", "tipo": "ETF", "nome": "Trend ETF IFIX Fundo de Índice", "externo": "IFIX", "indice": "IFIX", "gestora": "XP Asset"},
     {"ticker": "GOLD11", "tipo": "ETF", "nome": "Trend ETF LBMA Ouro", "externo": "GOLD", "indice": "LBMA Gold Price", "gestora": "XP Asset"},
     {"ticker": "HMRN31", "tipo": "BDR", "nome": "Homerun Resources Inc.", "externo": "HMR", "indice": None, "gestora": None},
+    {"ticker": "BTCBRL", "tipo": "CRIPTO", "nome": "Bitcoin em reais", "externo": "BTC-BRL", "yahoo": "BTC-BRL", "indice": None, "gestora": None},
+    {"ticker": "ETHBRL", "tipo": "CRIPTO", "nome": "Ethereum em reais", "externo": "ETH-BRL", "yahoo": "ETH-BRL", "indice": None, "gestora": None},
+    {"ticker": "USDBRL", "tipo": "MOEDA", "nome": "Dólar comercial em reais", "externo": "BRL=X", "yahoo": "BRL=X", "indice": None, "gestora": None},
 )
 
 
@@ -34,12 +41,14 @@ def _numero(valor):
         return None
 
 
-def registrar_instrumento(ticker, tipo, simbolo_exterior=None, session_factory=None):
-    """Inclui ETF/BDR no cadastro sem fingir que os metadados são oficiais."""
+def registrar_instrumento(ticker, tipo, simbolo_exterior=None, session_factory=None,
+                          simbolo_yahoo=None):
+    """Inclui um instrumento no cadastro sem fingir que a fonte é oficial."""
     ticker = str(ticker or "").strip().upper()
     tipo = str(tipo or "").strip().upper()
-    if not ticker or tipo not in {"ETF", "BDR"}:
+    if not ticker or tipo not in TIPOS_INSTRUMENTO_MERCADO:
         raise ValueError("ticker ou tipo inválido")
+    yahoo = simbolo_yahoo or (f"{ticker}.SA" if tipo in TIPOS_COM_PLANILHA else simbolo_exterior or ticker)
     from atualizador_documentos import SessionDB
     sessao = session_factory() if session_factory else SessionDB()
     try:
@@ -51,7 +60,7 @@ def registrar_instrumento(ticker, tipo, simbolo_exterior=None, session_factory=N
                 simbolo_exterior=COALESCE(EXCLUDED.simbolo_exterior, instrumentos_internacionais.simbolo_exterior),
                 ativo=TRUE, atualizado_em=NOW()
             RETURNING id, ticker, tipo
-        """), {"ticker": ticker, "tipo": tipo, "yahoo": f"{ticker}.SA", "externo": simbolo_exterior or None}).mappings().one()
+        """), {"ticker": ticker, "tipo": tipo, "yahoo": yahoo, "externo": simbolo_exterior or None}).mappings().one()
         sessao.commit()
         return dict(row)
     except Exception:
@@ -84,7 +93,7 @@ def cadastrar_base_inicial(session_factory=None):
                   indice_referencia=COALESCE(instrumentos_internacionais.indice_referencia, EXCLUDED.indice_referencia),
                   gestora=COALESCE(instrumentos_internacionais.gestora, EXCLUDED.gestora),
                   atualizado_em=NOW()
-            """), {**item, "yahoo": f"{item['ticker']}.SA"})
+            """), {**item, "yahoo": item.get("yahoo") or f"{item['ticker']}.SA"})
             cadastrados.append(item["ticker"])
         sessao.commit()
         return {"cadastrados": cadastrados, "quantidade": len(cadastrados)}
@@ -303,14 +312,14 @@ def sincronizar_instrumentos_planilha(tipo, session_factory=None):
 
 
 def coletar_instrumentos_ativos(limite=30, tipo=None, session_factory=None):
-    """Atualiza uma classe por vez quando ``tipo`` for ETF ou BDR.
+    """Atualiza uma classe cotada por vez ou todas em uma única rodada.
 
     O limite continua intencionalmente baixo para proteger a fonte e o job;
     classes diferentes não disputam a mesma fila ou relatório de término.
     """
     tipo = str(tipo or "").strip().upper()
-    if tipo and tipo not in {"ETF", "BDR"}:
-        raise ValueError("tipo deve ser ETF ou BDR")
+    if tipo and tipo not in TIPOS_INSTRUMENTO_MERCADO:
+        raise ValueError("tipo de instrumento inválido")
     from atualizador_documentos import SessionDB
     sessao = session_factory() if session_factory else SessionDB()
     try:
@@ -329,7 +338,7 @@ def coletar_instrumentos_ativos(limite=30, tipo=None, session_factory=None):
             resultado["falhas"].append({"ticker": ticker, "erro": type(exc).__name__})
     # A sincronização é feita após a coleta para que cada aba represente uma
     # fotografia coerente da classe, inclusive quando um ativo falhou.
-    tipos_planilha = [tipo] if tipo else ["ETF", "BDR"]
+    tipos_planilha = [tipo] if tipo in TIPOS_COM_PLANILHA else (["ETF", "BDR"] if not tipo else [])
     resultado["planilha"] = {}
     for classe in tipos_planilha:
         try:
@@ -360,14 +369,14 @@ def listar_instrumentos_telegram(limite=20, session_factory=None):
     finally:
         sessao.close()
     if not linhas:
-        return "📭 Ainda não há ETFs ou BDRs cadastrados para consulta."
-    texto = ["🌐 *ETFs e BDRs acompanhados*"]
+        return "📭 Ainda não há instrumentos de mercado cadastrados para consulta."
+    texto = ["🌐 *Instrumentos de mercado acompanhados*"]
     for item in linhas:
         preco = f"R$ {float(item['fechamento']):.2f}" if item["fechamento"] is not None else "sem cotação"
         variacao = f" · {float(item['variacao_percentual']):+.2f}%" if item["variacao_percentual"] is not None else ""
         referencia = str(item["referencia_em"] or "")[:10]
         texto.append(f"• *{item['ticker']}* ({item['tipo']}): {preco}{variacao}{f' · {referencia}' if referencia else ''}")
-    texto.append("\nDados de fechamento e indicadores; não há varredura documental para estes ativos.")
+    texto.append("\nDados de fechamento e indicadores; documentos só se aplicam às classes que os publicam.")
     return "\n".join(texto)
 
 
@@ -436,12 +445,30 @@ def detalhe_instrumento_menu(ticker, session_factory=None):
 
 
 def avaliar_oportunidade_instrumento(item):
-    """Aplica uma triagem conservadora; nunca equivale a recomendação de compra."""
+    """Aplica critérios próprios por classe; nunca equivale a recomendação."""
     tipo = str(item.get("tipo") or "").upper()
     liquidez = _numero(item.get("liquidez_media_30d_brl"))
     distancia = _numero(item.get("distancia_maxima_1a"))
     volatilidade = _numero(item.get("volatilidade_30d"))
-    if tipo not in {"ETF", "BDR"} or liquidez is None or distancia is None:
+    variacao = _numero(item.get("variacao_percentual"))
+    if tipo not in TIPOS_INSTRUMENTO_MERCADO or distancia is None:
+        return None
+    if tipo == "CRIPTO":
+        if distancia > -10 and (variacao is None or variacao > -4):
+            return None
+        pontuacao = min(abs(distancia) / 5, 6) + min(abs(variacao or 0) / 2, 4)
+        return {"score": round(pontuacao, 2), "motivos": [
+            f"{abs(distancia):.1f}% abaixo da máxima do período coletado",
+            f"variação diária de {variacao:+.2f}%" if variacao is not None else "oscilação relevante no período",
+        ]}
+    if tipo == "MOEDA":
+        if variacao is None or abs(variacao) < 0.75:
+            return None
+        return {"score": round(abs(variacao) * 2, 2), "motivos": [
+            f"movimento diário de {variacao:+.2f}%",
+            "sinal cambial para monitoramento da carteira",
+        ]}
+    if tipo not in {"ETF", "BDR"} or liquidez is None:
         return None
     piso_liquidez = 100_000 if tipo == "ETF" else 30_000
     queda_minima = -7 if tipo == "ETF" else -12
