@@ -59,6 +59,7 @@ CONTAS_EXATAS = {
 DESCRICOES = (
     (("patrimonio", "liquido", "atribuido", "controlador"), "patrimonio_liquido"),
     (("patrimonio", "liquido", "consolidado"), "patrimonio_liquido"),
+    (("atribuido", "socios", "empresa", "controladora"), "lucro_liquido"),
     (("lucro", "prejuizo", "periodo"), "lucro_liquido"),
     (("resultado", "liquido", "periodo"), "lucro_liquido"),
     (("lucro", "acao", "basico"), "lpa_basico"),
@@ -210,6 +211,11 @@ def extrair_demonstracoes_cvm(conteudo, ticker, cnpj, documento, ano):
                         prioridade += 10
                     if metrica == "patrimonio_liquido" and "ATRIBUIDO AO CONTROLADOR" in descricao_normalizada:
                         prioridade += 20
+                    if metrica == "lucro_liquido" and conta.startswith("3.11.01"):
+                        # O LPA pertence aos acionistas da controladora. Usar o
+                        # lucro consolidado (3.11) inclui não controladores e
+                        # distorce ações médias, VPA, ROE e múltiplos.
+                        prioridade += 20
                     anterior = fatos_por_chave.get(chave)
                     prioridade_anterior = anterior.get("_prioridade", 0) if anterior else 0
                     if anterior and prioridade_anterior > prioridade:
@@ -356,8 +362,13 @@ def _persistir(sessao, fundamentos, indicadores, coberturas):
               (identificador,ticker,cnpj,classe,periodo_inicio,periodo_fim,exercicio,periodicidade,documento,escopo,demonstracao,conta_codigo,metrica,valor,unidade,moeda,fonte,qualidade_fonte,url_origem)
             VALUES
               (:identificador,:ticker,:cnpj,:classe,:periodo_inicio,:periodo_fim,:exercicio,:periodicidade,:documento,:escopo,:demonstracao,:conta_codigo,:metrica,:valor,:unidade,:moeda,:fonte,:qualidade_fonte,:url_origem)
-            ON CONFLICT (identificador) DO UPDATE SET valor=EXCLUDED.valor,fonte=EXCLUDED.fonte,
-              qualidade_fonte=EXCLUDED.qualidade_fonte,url_origem=EXCLUDED.url_origem,atualizado_em=NOW()
+            ON CONFLICT (identificador) DO UPDATE SET
+              cnpj=EXCLUDED.cnpj,periodo_inicio=EXCLUDED.periodo_inicio,periodo_fim=EXCLUDED.periodo_fim,
+              exercicio=EXCLUDED.exercicio,periodicidade=EXCLUDED.periodicidade,documento=EXCLUDED.documento,
+              escopo=EXCLUDED.escopo,demonstracao=EXCLUDED.demonstracao,conta_codigo=EXCLUDED.conta_codigo,
+              metrica=EXCLUDED.metrica,valor=EXCLUDED.valor,unidade=EXCLUDED.unidade,moeda=EXCLUDED.moeda,
+              fonte=EXCLUDED.fonte,qualidade_fonte=EXCLUDED.qualidade_fonte,
+              url_origem=EXCLUDED.url_origem,atualizado_em=NOW()
         """), item)
     for item in indicadores:
         parametros = {**item, "entradas_json": json.dumps(item.get("entradas") or {}, ensure_ascii=False)}
