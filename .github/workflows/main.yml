@@ -7,7 +7,7 @@ on:
     # 19h15 de Brasília: atualização noturna única após o pregão.
     - cron: '15 22 * * 1-5'
     # Criptomoedas não fecham no fim de semana: mantém o histórico 24x7.
-    - cron: '0 13,17,21 * * 0,6'
+    - cron: '0 13,17,22 * * 0,6'
   workflow_dispatch:
     inputs:
       modo:
@@ -71,7 +71,7 @@ jobs:
         run: python app.py
 
       - name: Atualizar e monitorar criptomoedas no fim de semana
-        if: github.event.schedule == '0 13,17,21 * * 0,6'
+        if: github.event.schedule == '0 13,17,22 * * 0,6'
         run: |
           python -m scripts.coletar_etfs_bdrs --tipo CRIPTO --limite 30 --sem-notificacoes
           python -m scripts.buscar_sinais_multiclasse
