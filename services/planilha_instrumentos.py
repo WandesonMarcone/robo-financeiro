@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import re
+import time
 
 
 COLUNAS_PLANILHA_INSTRUMENTOS = (
@@ -44,6 +45,26 @@ def _numero(valor):
         return numero if numero == numero else None
     except (TypeError, ValueError):
         return None
+
+
+def _erro_transitorio_planilha(exc):
+    """Reconhece limite/indisponibilidade temporária da API do Sheets."""
+    resposta = getattr(exc, "response", None)
+    status = getattr(resposta, "status_code", None)
+    return exc.__class__.__name__ == "APIError" and status in {None, 429, 500, 502, 503, 504}
+
+
+def _atualizar_com_retry(aba, valores, intervalo, tentativas=4, dormir=time.sleep):
+    for tentativa in range(1, tentativas + 1):
+        try:
+            return aba.update(
+                valores, intervalo,
+                value_input_option="USER_ENTERED",
+            )
+        except Exception as exc:
+            if tentativa >= tentativas or not _erro_transitorio_planilha(exc):
+                raise
+            dormir(2 ** (tentativa - 1))
 
 
 def abrir_planilha_instrumentos(tipo, planilha=None):
@@ -150,9 +171,8 @@ def gravar_instrumento_planilha(tipo, dados, planilha=None):
         referencia,
         datetime.now().astimezone().strftime("%d/%m/%Y %H:%M"),
     ]]
-    aba.update(
-        linha, f"A{numero_linha}:P{numero_linha}",
-        value_input_option="USER_ENTERED",
+    _atualizar_com_retry(
+        aba, linha, f"A{numero_linha}:P{numero_linha}",
     )
     return {"aba": ABAS_POR_TIPO[tipo], "ticker": ticker, "linha": numero_linha}
 
