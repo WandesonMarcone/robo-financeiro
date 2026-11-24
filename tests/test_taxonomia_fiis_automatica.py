@@ -34,3 +34,6 @@ class TaxonomiaFiisAutomaticaTests(unittest.TestCase):
 
     def test_sem_fonte_nao_inventa(self):
         self.assertIsNone(resolver_classificacao("TEST11", "N/A", "N/A", ""))
+
+    def test_nan_da_fonte_nao_e_segmento(self):
+        self.assertIsNone(resolver_classificacao("TEST11", "N/D", "N/D", "nan"))
