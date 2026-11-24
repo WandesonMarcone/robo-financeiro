@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 import io
+import time
 import unicodedata
 from datetime import datetime
 
@@ -57,8 +58,18 @@ def coletar_tesouro_direto(session_factory=None):
     """Baixa o CSV oficial e grava a última data-base por título/vencimento."""
     from atualizador_documentos import SessionDB
 
-    resposta = requests.get(URL_TESOURO, timeout=90)
-    resposta.raise_for_status()
+    ultimo_erro = None
+    for tentativa in range(3):
+        try:
+            resposta = requests.get(URL_TESOURO, timeout=90)
+            resposta.raise_for_status()
+            break
+        except requests.RequestException as exc:
+            ultimo_erro = exc
+            if tentativa < 2:
+                time.sleep(2 ** tentativa)
+    else:
+        raise RuntimeError("TESOURO_FONTE_INDISPONIVEL") from ultimo_erro
     conteudo = resposta.content.decode("utf-8-sig", errors="replace")
     leitor = csv.DictReader(io.StringIO(conteudo), delimiter=";")
     linhas = list(leitor)
