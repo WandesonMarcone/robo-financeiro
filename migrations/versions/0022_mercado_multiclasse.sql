@@ -10,8 +10,8 @@ ALTER TABLE instrumentos_internacionais
 INSERT INTO instrumentos_internacionais
     (ticker, tipo, nome, simbolo_yahoo_br, simbolo_exterior, fonte_cadastro, ativo)
 VALUES
-    ('BTCBRL', 'CRIPTO', 'Bitcoin em reais', 'BTC-BRL', 'BTC-BRL', 'BASE_INICIAL_SISTEMA', TRUE),
-    ('ETHBRL', 'CRIPTO', 'Ethereum em reais', 'ETH-BRL', 'ETH-BRL', 'BASE_INICIAL_SISTEMA', TRUE),
+    ('BTCBRL', 'CRIPTO', 'Bitcoin em reais', 'BTC-USD', 'BTC-USD', 'BASE_INICIAL_SISTEMA', TRUE),
+    ('ETHBRL', 'CRIPTO', 'Ethereum em reais', 'ETH-USD', 'ETH-USD', 'BASE_INICIAL_SISTEMA', TRUE),
     ('USDBRL', 'MOEDA', 'Dólar comercial em reais', 'BRL=X', 'BRL=X', 'BASE_INICIAL_SISTEMA', TRUE)
 ON CONFLICT (ticker) DO UPDATE SET
     tipo=EXCLUDED.tipo,

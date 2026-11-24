@@ -17,3 +17,5 @@ if __name__ == "__main__":
         )
         resultado["resumo_admin_enviado"] = notificar_resumo_admin(resultado, args.tipo)
     print(resultado)
+    if resultado.get("falhas"):
+        raise SystemExit("coleta_instrumentos_incompleta")

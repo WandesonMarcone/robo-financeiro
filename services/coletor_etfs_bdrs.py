@@ -27,8 +27,8 @@ BASE_INICIAL_INSTRUMENTOS = (
     {"ticker": "XFIX11", "tipo": "ETF", "nome": "Trend ETF IFIX Fundo de Índice", "externo": "IFIX", "indice": "IFIX", "gestora": "XP Asset"},
     {"ticker": "GOLD11", "tipo": "ETF", "nome": "Trend ETF LBMA Ouro", "externo": "GOLD", "indice": "LBMA Gold Price", "gestora": "XP Asset"},
     {"ticker": "HMRN31", "tipo": "BDR", "nome": "Homerun Resources Inc.", "externo": "HMR", "indice": None, "gestora": None},
-    {"ticker": "BTCBRL", "tipo": "CRIPTO", "nome": "Bitcoin em reais", "externo": "BTC-BRL", "yahoo": "BTC-BRL", "indice": None, "gestora": None},
-    {"ticker": "ETHBRL", "tipo": "CRIPTO", "nome": "Ethereum em reais", "externo": "ETH-BRL", "yahoo": "ETH-BRL", "indice": None, "gestora": None},
+    {"ticker": "BTCBRL", "tipo": "CRIPTO", "nome": "Bitcoin em reais", "externo": "BTC-USD", "yahoo": "BTC-USD", "indice": None, "gestora": None},
+    {"ticker": "ETHBRL", "tipo": "CRIPTO", "nome": "Ethereum em reais", "externo": "ETH-USD", "yahoo": "ETH-USD", "indice": None, "gestora": None},
     {"ticker": "USDBRL", "tipo": "MOEDA", "nome": "Dólar comercial em reais", "externo": "BRL=X", "yahoo": "BRL=X", "indice": None, "gestora": None},
 )
 
@@ -171,6 +171,17 @@ def coletar_instrumento(ticker, tipo=None, simbolo_exterior=None, session_factor
         historico = papel.history(period="1y", interval="1d", auto_adjust=False)
         if historico is None or historico.empty:
             raise RuntimeError("COTACAO_NAO_DISPONIVEL")
+        convertido_brl = instrumento["tipo"] == "CRIPTO" and str(simbolo).upper().endswith("-USD")
+        if convertido_brl:
+            cambio = yf.Ticker("BRL=X").history(period="1y", interval="1d", auto_adjust=False)
+            if cambio is None or cambio.empty:
+                raise RuntimeError("CAMBIO_USD_BRL_NAO_DISPONIVEL")
+            fator = cambio["Close"].reindex(historico.index, method="ffill")
+            for coluna in ("Open", "High", "Low", "Close"):
+                historico[coluna] = historico[coluna] * fator
+            historico = historico.dropna(subset=["Close"])
+            if historico.empty:
+                raise RuntimeError("CONVERSAO_CRIPTO_BRL_SEM_INTERSECAO")
         ultimo = historico.iloc[-1]
         data_ref = historico.index[-1].to_pydatetime().replace(tzinfo=None)
         fechamento = _numero(ultimo.get("Close")); anterior = _numero(historico.iloc[-2].get("Close")) if len(historico) > 1 else None
@@ -207,7 +218,7 @@ def coletar_instrumento(ticker, tipo=None, simbolo_exterior=None, session_factor
                 valor = float(valor) * 100
             _upsert_metrica(sessao, instrumento["id"], chave, valor, unidade, "YAHOO_FINANCE", "COMPLEMENTAR")
         nome = info.get("longName") or info.get("shortName")
-        sessao.execute(text("UPDATE instrumentos_internacionais SET nome=COALESCE(:nome,nome), moeda_origem=COALESCE(:moeda,moeda_origem), atualizado_em=NOW() WHERE id=:id"), {"id": instrumento["id"], "nome": nome, "moeda": info.get("currency")})
+        sessao.execute(text("UPDATE instrumentos_internacionais SET nome=COALESCE(:nome,nome), moeda_origem=COALESCE(:moeda,moeda_origem), atualizado_em=NOW() WHERE id=:id"), {"id": instrumento["id"], "nome": nome, "moeda": "BRL" if convertido_brl else info.get("currency")})
         oficiais = _coletar_sec(sessao, instrumento) if instrumento["tipo"] == "BDR" else 0
         sessao.commit()
         return {
