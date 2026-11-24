@@ -372,6 +372,98 @@ def asset_corporate_events(ticker: str):
     return jsonify({"data": data, "coverage": {"requested_days": days, "events": len(data)}})
 
 
+@portfolio_api.get("/api/v1/assets/<ticker>/fundamentals")
+@requires_portfolio_user
+def asset_fundamentals(ticker: str):
+    """Fatos oficiais e indicadores derivados, sem premissas de valuation."""
+    symbol = ticker.strip().upper()
+    if not _TICKER.fullmatch(symbol):
+        return jsonify({"message": "Ticker inválido."}), 400
+    try:
+        years = max(3, min(int(request.args.get("years") or 5), 5))
+    except ValueError:
+        return jsonify({"message": "Histórico deve ser de 3, 4 ou 5 anos."}), 400
+    from sqlalchemy import text
+    from atualizador_documentos import SessionDB
+
+    since = date.today().replace(month=1, day=1) - timedelta(days=years * 366)
+    session = SessionDB()
+    try:
+        facts = session.execute(text("""
+            SELECT periodo_inicio,periodo_fim,exercicio,periodicidade,documento,escopo,
+                   demonstracao,conta_codigo,metrica,valor,unidade,moeda,fonte,
+                   qualidade_fonte,url_origem,atualizado_em
+            FROM fundamentos_ativos
+            WHERE ticker=:ticker AND periodo_fim>=:desde
+            ORDER BY periodo_fim ASC,metrica ASC
+        """), {"ticker": symbol, "desde": since}).mappings().all()
+        indicators = session.execute(text("""
+            SELECT periodo_fim,exercicio,periodicidade,indicador,valor,unidade,
+                   formula_versao,qualidade,atualizado_em
+            FROM indicadores_valuation_ativos
+            WHERE ticker=:ticker AND periodo_fim>=:desde
+            ORDER BY periodo_fim ASC,indicador ASC
+        """), {"ticker": symbol, "desde": since}).mappings().all()
+    finally:
+        session.close()
+    def serializar(row):
+        result = dict(row)
+        for key, value in list(result.items()):
+            if hasattr(value, "isoformat"):
+                result[key] = value.isoformat()
+            elif key == "valor" and value is not None:
+                result[key] = float(value)
+        return result
+    return jsonify({
+        "data": {
+            "ticker": symbol,
+            "facts": [serializar(row) for row in facts],
+            "derived_indicators": [serializar(row) for row in indicators],
+        },
+        "coverage": {
+            "requested_years": years,
+            "facts": len(facts),
+            "derived_indicators": len(indicators),
+            "source_policy": "official_first_sheet_before_neon",
+        },
+    })
+
+
+@portfolio_api.get("/api/v1/assets/<ticker>/coverage")
+@requires_portfolio_user
+def asset_valuation_coverage(ticker: str):
+    """Explica quais métodos têm dados e quais campos ainda bloqueiam cálculo."""
+    symbol = ticker.strip().upper()
+    if not _TICKER.fullmatch(symbol):
+        return jsonify({"message": "Ticker inválido."}), 400
+    from sqlalchemy import text
+    from atualizador_documentos import SessionDB
+
+    session = SessionDB()
+    try:
+        rows = session.execute(text("""
+            SELECT classe,metodo,status,anos_disponiveis,periodo_inicial,periodo_final,
+                   campos_presentes,campos_ausentes,observacao,atualizado_em
+            FROM cobertura_valuation_ativos
+            WHERE ticker=:ticker ORDER BY metodo
+        """), {"ticker": symbol}).mappings().all()
+    finally:
+        session.close()
+    data = []
+    for row in rows:
+        item = dict(row)
+        for key in ("periodo_inicial", "periodo_final", "atualizado_em"):
+            if item.get(key) is not None:
+                item[key] = item[key].isoformat()
+        data.append(item)
+    return jsonify({
+        "data": data,
+        "ticker": symbol,
+        "ready": [item["metodo"] for item in data if item["status"] in {"PRONTO", "PREMISSAS_NECESSARIAS"}],
+        "blocked": [item["metodo"] for item in data if item["status"] in {"INSUFICIENTE", "NAO_APLICAVEL"}],
+    })
+
+
 @portfolio_api.get("/api/v1/assets/<ticker>/performance")
 @requires_portfolio_user
 def asset_performance(ticker: str):

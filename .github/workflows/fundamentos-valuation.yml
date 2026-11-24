@@ -1,0 +1,59 @@
+name: Fundamentos para valuation
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticker:
+        description: "Ação ou FII (ex.: BBAS3 ou MXRF11)"
+        required: true
+        type: string
+      anos:
+        description: "Histórico fundamental"
+        required: true
+        type: choice
+        default: '5'
+        options:
+          - '3'
+          - '4'
+          - '5'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fundamentos-valuation-${{ inputs.ticker }}
+  cancel-in-progress: false
+
+jobs:
+  coletar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDENTIALS }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+      - name: Criar credencial temporária do Google
+        shell: python
+        run: |
+          import os
+          with open('credenciais.json', 'w', encoding='utf-8') as arquivo:
+              arquivo.write(os.environ['GOOGLE_CREDS'])
+      - name: Coletar DFP, ITR, proventos e cobertura dos métodos
+        run: >-
+          python -m scripts.coletar_fundamentos_valuation
+          --ticker "${{ inputs.ticker }}"
+          --anos "${{ inputs.anos }}"
+      - name: Avisar administrador somente sobre falha
+        if: failure() && !cancelled()
+        continue-on-error: true
+        env:
+          ETAPA_FALHA: fundamentos para valuation de ${{ inputs.ticker }}
+        run: python -m scripts.notificar_falha_workflow
