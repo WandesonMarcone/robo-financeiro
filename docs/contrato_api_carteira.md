@@ -12,6 +12,8 @@ somente leitura e exigem o token Supabase do usuário da Carteira em
 - `GET /api/v1/assets/{ticker}/income?asset_type=...&days=30`
 - `GET /api/v1/assets/{ticker}/corporate-events?asset_type=...&days=30`
 - `GET /api/v1/assets/{ticker}/performance?asset_type=...&days=30`
+- `GET /api/v1/assets/{ticker}/fundamentals?years=5`
+- `GET /api/v1/assets/{ticker}/coverage`
 - `GET /api/v1/market/overview`
 
 O período aceito vai de 7 a 730 dias. A Carteira pode usar 30, 120 ou outro
@@ -47,3 +49,19 @@ O Robô grava primeiro nas abas `BD_Proventos` e
 `BD_Eventos_Corporativos`; somente depois confirma a mesma informação no Neon.
 A coleta usa lote rotativo e janela curta sobreposta, sem carregar anos de
 histórico.
+
+## Fundamentos e valuation
+
+`fundamentals` expõe fatos contábeis oficiais e indicadores derivados, sem
+inventar premissas futuras. A coleta é isolada, por ativo, com 3 a 5 anos, e
+não participa da atualização noturna nem da busca de oportunidades.
+
+`coverage` informa, para cada método, os campos presentes e ausentes. Os
+status possíveis são `PRONTO`, `PARCIAL`, `INSUFICIENTE`, `NAO_APLICAVEL` e
+`PREMISSAS_NECESSARIAS`. Este último significa que os dados observados estão
+presentes, mas crescimento, taxa de desconto, WACC, custo de capital ou margem
+de segurança precisam ser definidos pela Carteira/usuário.
+
+A Carteira deve bloquear o cálculo quando `coverage` indicar insuficiência.
+Instituições financeiras não devem usar FCFF industrial; priorize FCFE, lucro
+residual, Gordon ou métodos de dividendos conforme a cobertura informada.

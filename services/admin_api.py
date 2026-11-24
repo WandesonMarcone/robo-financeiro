@@ -287,7 +287,9 @@ def _indicadores_planilha_para_painel(ticker: str, tipo: str) -> dict:
     }
 
 
-def _monitorar_atualizacao_isolada(evento_id: int | None, ticker: str, iniciado_ts: float) -> None:
+def _monitorar_atualizacao_isolada(evento_id: int | None, ticker: str, iniciado_ts: float,
+                                   workflow="atualizacao-isolada.yml", max_tentativas=30,
+                                   mensagem_sucesso=None) -> None:
     """Converte o aceite do dispatch no resultado real do workflow, quando visível."""
     import time
     import requests
@@ -297,10 +299,10 @@ def _monitorar_atualizacao_isolada(evento_id: int | None, ticker: str, iniciado_
     repo = (os.environ.get("GITHUB_REPOSITORY") or "WandesonMarcone/robo-financeiro").strip()
     if not token:
         return
-    url = f"https://api.github.com/repos/{repo}/actions/workflows/atualizacao-isolada.yml/runs?event=workflow_dispatch&per_page=5"
+    url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow}/runs?event=workflow_dispatch&per_page=5"
     headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {token}"}
     encontrado = None
-    for tentativa in range(30):  # até ~10 min; o workflow possui orçamento de 9 min
+    for tentativa in range(max_tentativas):
         time.sleep(12 if tentativa == 0 else 20)
         try:
             resposta = requests.get(url, headers=headers, timeout=12)
@@ -325,7 +327,7 @@ def _monitorar_atualizacao_isolada(evento_id: int | None, ticker: str, iniciado_
                     sucesso = encontrado.get("conclusion") == "success"
                     registrar_progresso(evento_id, "Workflow concluído com sucesso." if sucesso else f"Workflow terminou em {encontrado.get('conclusion') or 'falha'}.")
                     concluir_evento(evento_id, sucesso=sucesso,
-                                   mensagem=("Atualização isolada concluída no GitHub Actions. Reabra o ativo para consultar os indicadores atualizados."
+                                   mensagem=((mensagem_sucesso or "Atualização isolada concluída no GitHub Actions. Reabra o ativo para consultar os indicadores atualizados.")
                                              if sucesso else "Atualização isolada terminou com falha no GitHub Actions."),
                                    erro=None if sucesso else str(encontrado.get("conclusion") or "GITHUB_ACTION_FAILED"))
                     return
@@ -615,6 +617,23 @@ def _detalhe_ativo_para_painel(ticker: str) -> dict | None:
                 }
         except Exception:
             session.rollback()
+        cobertura_valuation = []
+        try:
+            linhas_cobertura = session.execute(text("""
+                SELECT metodo,status,anos_disponiveis,periodo_inicial,periodo_final,
+                       campos_ausentes,observacao,atualizado_em
+                FROM cobertura_valuation_ativos
+                WHERE ticker=:ticker ORDER BY metodo
+            """), {"ticker": ticker}).mappings().all()
+            cobertura_valuation = [{
+                "method": x["metodo"], "status": x["status"], "years": x["anos_disponiveis"],
+                "first_period": x["periodo_inicial"].isoformat() if x["periodo_inicial"] else None,
+                "last_period": x["periodo_final"].isoformat() if x["periodo_final"] else None,
+                "missing": x["campos_ausentes"] or [], "note": x["observacao"],
+                "updated_at": x["atualizado_em"].isoformat() if x["atualizado_em"] else None,
+            } for x in linhas_cobertura]
+        except Exception:
+            session.rollback()
         return {
             "ticker": ativo.ticker, "tipo": tipo,
             "documents": [_serializar_documento(doc, ativo.ticker, tipo) for doc in documentos],
@@ -624,6 +643,7 @@ def _detalhe_ativo_para_painel(ticker: str) -> dict | None:
                 DocumentosQualitativos.status_processamento == ("PENDENTE" if tipo == "FII" else "PENDENTE_ACAO"),
             ).scalar() or 0,
             "financial": dados,
+            "valuation_coverage": cobertura_valuation,
             "manual_classification": classificacao_manual,
             "last_scan": {
                 "type": ultima_operacao.tipo, "status": ultima_operacao.status,
@@ -1237,6 +1257,43 @@ def executar_comando():
         threading.Thread(target=_monitorar_atualizacao_isolada, args=(evento_id, ticker, datetime.now().timestamp()), daemon=True).start()
         return jsonify({
             "message": "Atualização enviada ao GitHub Actions. O histórico mostrará o andamento e só marcará concluída após o workflow terminar.",
+            "task_id": evento_id,
+        }), 202
+    if action == "coletar_fundamentos_valuation":
+        if not ticker:
+            return jsonify({"message": "Informe o ticker da ação ou do FII."}), 400
+        try:
+            anos = max(3, min(int(periodo or 5), 5))
+        except ValueError:
+            return jsonify({"message": "Escolha um histórico de 3, 4 ou 5 anos."}), 400
+        from services.github_actions import disparar_fundamentos_valuation
+        from services.historico_operacional import iniciar_evento, registrar_progresso, concluir_evento
+        evento_id = iniciar_evento(
+            action, origem="PAINEL_ADMIN", ticker=ticker,
+            mensagem=f"Coleta de fundamentos de {ticker} — {anos} anos",
+            detalhes={"anos": anos, "workflow": "fundamentos-valuation.yml"},
+        )
+        registrar_progresso(evento_id, "Solicitando coleta isolada ao GitHub Actions.")
+        ok, mensagem = disparar_fundamentos_valuation(ticker, anos)
+        if not ok:
+            concluir_evento(evento_id, sucesso=False, erro=mensagem)
+            return jsonify({"message": mensagem}), 503
+        registrar_progresso(
+            evento_id,
+            "Workflow aceito. A coleta seguirá fonte oficial, planilha e depois Neon.",
+        )
+        threading.Thread(
+            target=_monitorar_atualizacao_isolada,
+            args=(evento_id, ticker, datetime.now().timestamp()),
+            kwargs={
+                "workflow": "fundamentos-valuation.yml",
+                "max_tentativas": 110,
+                "mensagem_sucesso": "Fundamentos coletados. Consulte a cobertura dos métodos e os dados históricos do ativo.",
+            },
+            daemon=True,
+        ).start()
+        return jsonify({
+            "message": f"Coleta de {anos} anos para {ticker} enviada. Acompanhe o workflow e depois consulte a cobertura dos métodos.",
             "task_id": evento_id,
         }), 202
     if action == "forcar_documentos":
