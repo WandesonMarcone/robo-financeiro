@@ -17,5 +17,8 @@ if __name__ == "__main__":
         )
         resultado["resumo_admin_enviado"] = notificar_resumo_admin(resultado, args.tipo)
     print(resultado)
-    if resultado.get("falhas"):
+    # Uma fonte complementar pode falhar para um ticker isolado. Se ao menos
+    # um ativo foi atualizado, a rodada é parcial e não deve derrubar todo o
+    # workflow unificado nem gerar um falso alarme no Telegram.
+    if resultado.get("falhas") and not resultado.get("ativos"):
         raise SystemExit("coleta_instrumentos_incompleta")
