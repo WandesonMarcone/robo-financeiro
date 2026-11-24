@@ -32,6 +32,20 @@ def _zip_dfp(ano=2025):
     return conteudo.getvalue()
 
 
+def _zip_dfp_controladora(ano=2024):
+    campos = "CNPJ_CIA;DT_REFER;DT_INI_EXERC;DT_FIM_EXERC;ORDEM_EXERC;CD_CONTA;DS_CONTA;VL_CONTA;ESCALA_MOEDA\n"
+    dre = campos + "\n".join([
+        f"00.000.000/0001-91;{ano}-12-31;{ano}-01-01;{ano}-12-31;ÚLTIMO;3.11;Lucro/Prejuízo Consolidado do Período;29171;MIL",
+        f"00.000.000/0001-91;{ano}-12-31;{ano}-01-01;{ano}-12-31;ÚLTIMO;3.11.01;Atribuído a Sócios da Empresa Controladora;26480;MIL",
+        f"00.000.000/0001-91;{ano}-12-31;{ano}-01-01;{ano}-12-31;ÚLTIMO;3.11.02;Atribuído a Sócios Não Controladores;2691;MIL",
+        f"00.000.000/0001-91;{ano}-12-31;{ano}-01-01;{ano}-12-31;ÚLTIMO;3.99;Lucro por Ação;4,62;UNIDADE",
+    ])
+    conteudo = io.BytesIO()
+    with zipfile.ZipFile(conteudo, "w") as pacote:
+        pacote.writestr(f"dfp_cia_aberta_DRE_con_{ano}.csv", dre.encode("latin1"))
+    return conteudo.getvalue()
+
+
 class FundamentosValuationTest(unittest.TestCase):
     def test_plano_bancario_nao_confunde_provisoes_com_patrimonio(self):
         self.assertIsNone(_metrica("2.03", "Provisões"))
@@ -50,6 +64,14 @@ class FundamentosValuationTest(unittest.TestCase):
         self.assertEqual(mapa["lpa_diluido"]["valor"], 2.0)
         self.assertEqual(mapa["patrimonio_liquido"]["valor"], 500_000)
         self.assertTrue(all(item["ticker"] == "BBAS3" for item in fatos))
+
+    def test_prioriza_lucro_atribuido_a_controladora(self):
+        fatos = extrair_demonstracoes_cvm(
+            _zip_dfp_controladora(), "BBAS3", "00.000.000/0001-91", "DFP", 2024,
+        )
+        mapa = {item["metrica"]: item for item in fatos}
+        self.assertEqual(mapa["lucro_liquido"]["valor"], 26_480_000)
+        self.assertEqual(mapa["lucro_liquido"]["conta_codigo"], "3.11.01")
 
     def test_deriva_lpa_vpa_payout_crescimento_e_divida(self):
         fundamentos = []
