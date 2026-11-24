@@ -86,7 +86,7 @@ def _gravar_estado(aba, linha, cursor_acoes, cursor_fiis, pendentes_acoes, pende
         agora_sp,
     ]]
     return executar_gravacao_com_retentativa(
-        lambda: aba.update(f"B{linha}:F{linha}", valores),
+        lambda: aba.update(valores, f"B{linha}:F{linha}"),
         "Estado do ciclo", sleep=sleep,
     )
 
