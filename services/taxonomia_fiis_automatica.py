@@ -14,7 +14,9 @@ from modules.taxonomia_fiis import MACROS_FII, classificar_fii, segmento_fii_can
 from services.taxonomia_controlada import melhor_evidencia_fii
 
 
-VALORES_DESCONHECIDOS = {"", "N/D", "N/A", "NA", "-", "PENDENTE DE IA"}
+VALORES_DESCONHECIDOS = {
+    "", "N/D", "N/A", "NA", "-", "NAN", "NONE", "NULL", "PENDENTE DE IA",
+}
 
 # Catálogo conservador para os FIIs acompanhados pelo administrador. Ele serve
 # de último recurso quando a página pública do Fundamentus omite o ticker ou o
