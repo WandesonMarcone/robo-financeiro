@@ -6,21 +6,12 @@ from datetime import datetime
 
 ABAS = {
     "fundamentos": (
-        "BD_Fundamentos",
-        (
-            "IDENTIFICADOR", "TICKER", "CNPJ", "CLASSE", "PERÍODO INÍCIO",
-            "PERÍODO FIM", "EXERCÍCIO", "PERIODICIDADE", "DOCUMENTO", "ESCOPO",
-            "DEMONSTRAÇÃO", "CONTA", "MÉTRICA", "VALOR", "UNIDADE", "MOEDA",
-            "FONTE", "QUALIDADE", "URL ORIGEM", "ATUALIZADO EM",
-        ),
+        "BD_Fundamentos_Periodos",
+        ("CHAVE","TICKER","CLASSE","PERÍODO FIM","EXERCÍCIO","PERIODICIDADE","DOCUMENTO","MÉTRICAS E FONTES (JSON)","ATUALIZADO EM"),
     ),
     "indicadores": (
-        "BD_Indicadores_Valuation",
-        (
-            "IDENTIFICADOR", "TICKER", "CLASSE", "PERÍODO FIM", "EXERCÍCIO",
-            "PERIODICIDADE", "INDICADOR", "VALOR", "UNIDADE", "FÓRMULA",
-            "QUALIDADE", "ATUALIZADO EM",
-        ),
+        "BD_Indicadores_Periodos",
+        ("CHAVE","TICKER","CLASSE","PERÍODO FIM","EXERCÍCIO","PERIODICIDADE","DOCUMENTO","INDICADORES (JSON)","ATUALIZADO EM"),
     ),
     "cobertura": (
         "BD_Cobertura_Valuation",
@@ -33,8 +24,8 @@ ABAS = {
 }
 
 LINHAS_POR_ABA = {
-    "fundamentos": 50000,
-    "indicadores": 20000,
+    "fundamentos": 2000,
+    "indicadores": 2000,
     "cobertura": 10000,
 }
 
@@ -109,31 +100,35 @@ def _upsert(tipo: str, registros, linha_factory, planilha=None) -> int:
     if proxima - 1 > aba.row_count:
         aba.add_rows(max(1000, proxima - 1 - aba.row_count))
     for inicio in range(0, len(atualizacoes), 500):
-        aba.batch_update(atualizacoes[inicio:inicio + 500], value_input_option="USER_ENTERED")
+        aba.batch_update(atualizacoes[inicio:inicio + 500], value_input_option="RAW" if tipo != "cobertura" else "USER_ENTERED")
     return len(atualizacoes)
 
 
 def gravar_fundamentos_planilha(fundamentos, indicadores, coberturas, planilha=None):
     """Persiste as três camadas no Sheets; falha impede o commit no Neon."""
-    fundamentos_gravados = _upsert(
-        "fundamentos", fundamentos,
-        lambda x, agora: [
-            x["identificador"], x["ticker"], x.get("cnpj") or "", x["classe"],
-            str(x.get("periodo_inicio") or ""), str(x["periodo_fim"]), x["exercicio"],
-            x["periodicidade"], x["documento"], x.get("escopo") or "CONSOLIDADO",
-            x.get("demonstracao") or "", x.get("conta_codigo") or "", x["metrica"],
-            x["valor"], x.get("unidade") or "BRL", x.get("moeda") or "BRL",
-            x["fonte"], x["qualidade_fonte"], x.get("url_origem") or "", agora,
-        ], planilha=planilha,
-    )
-    indicadores_gravados = _upsert(
-        "indicadores", indicadores,
-        lambda x, agora: [
-            x["identificador"], x["ticker"], x["classe"], str(x["periodo_fim"]),
-            x["exercicio"], x["periodicidade"], x["indicador"], x["valor"],
-            x["unidade"], x["formula_versao"], x.get("qualidade") or "DERIVADO", agora,
-        ], planilha=planilha,
-    )
+    from services.fundamentos_consolidados import agrupar, chave_planilha, json_itens
+    def gravar_periodos(tipo, registros):
+        grupos = agrupar(registros, tipo)
+        for g in grupos:
+            g["identificador"] = chave_planilha(g)
+        # Merge por identificador preserva métricas não retornadas numa coleta parcial.
+        if grupos:
+            aba, linhas, _ = _abrir(tipo, planilha=planilha)
+            existentes = {str(l[0]): n+2 for n,l in enumerate(linhas[1:]) if l and l[0]}
+            por_ler = [(g, existentes[g["identificador"]]) for g in grupos if g["identificador"] in existentes]
+            if por_ler:
+                import json
+                respostas = aba.batch_get([f"H{n}" for _,n in por_ler])
+                for (g,_), resposta in zip(por_ler,respostas):
+                    if resposta and resposta[0] and resposta[0][0]:
+                        anterior = json.loads(resposta[0][0])
+                        g["itens"] = {**anterior, **g["itens"]}
+        return _upsert(tipo,grupos,lambda g,agora:[
+            g["identificador"],g["ticker"],g["classe"],str(g["periodo_fim"]),
+            g["exercicio"],g["periodicidade"],g["documento"],json_itens(g["itens"]),agora
+        ],planilha=planilha)
+    fundamentos_gravados = gravar_periodos("fundamentos",fundamentos)
+    indicadores_gravados = gravar_periodos("indicadores",indicadores)
     cobertura_gravada = _upsert(
         "cobertura", coberturas,
         lambda x, agora: [

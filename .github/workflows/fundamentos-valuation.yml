@@ -55,6 +55,8 @@ jobs:
         # A indisponibilidade momentânea da FCA não pode bloquear uma fila que
         # já possui identidades oficialmente validadas no Neon.
         continue-on-error: true
+      - name: Migrar fundamentos para armazenamento por período
+        run: python -m scripts.migrar_fundamentos_consolidados
       - name: Coletar DFP, ITR, proventos e cobertura dos métodos
         env:
           TICKER: ${{ inputs.ticker }}
