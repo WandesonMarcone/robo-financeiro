@@ -571,6 +571,15 @@ def gerar_painel_ativo(ticker, tipo, chat_id, message_id=None, message=None):
     else:
         texto += f"📊 **P/L:** {indicadores.get('pl', 'N/A')} | ⚖️ **P/VP:** {indicadores.get('pvp', 'N/A')}\n📈 **ROE:** {indicadores.get('roe', 'N/A')}"
 
+    if not is_fii:
+        from services.capital_emissor import resumo_capital
+        capital = resumo_capital(ticker)
+        def qtd(v):
+            return f"{v:,}".replace(",", ".") if v is not None else "Não confirmado"
+        texto += f"\n🏢 **Ações do ticker:** {qtd(capital['ticker_shares'])}"
+        texto += f"\n**Total da empresa:** {qtd(capital['company_shares'])}"
+        if capital.get("reference_date"):
+            texto += f"\nRef. capital: {capital['reference_date']}"
     # No modo texto, mantém o link invisível já usado pelo projeto para forçar
     # a prévia da imagem sem alterar o conteúdo visível.
     link_invisivel = (

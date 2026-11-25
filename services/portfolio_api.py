@@ -210,6 +210,9 @@ def asset(ticker: str):
             "subsector": data.get("subsetor"),
         },
     }
+    if not is_fii:
+        from services.capital_emissor import resumo_capital
+        payload["share_capital"] = resumo_capital(symbol)
     return jsonify({"data": payload})
 
 

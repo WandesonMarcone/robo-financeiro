@@ -15,3 +15,12 @@ class TestCapital(unittest.TestCase):
     def test_ticker_b3(self):
         self.assertEqual(normalizar_ticker_acao("B3SA3"),"B3SA3")
         self.assertIsNone(normalizar_ticker_acao("TICKER"))
+
+
+    def test_quantidades_nao_somam_classes(self):
+        from services.capital_emissor import quantidades
+        c={"emitidas":3000000,"classes":{"TEST3":{"emitidas":1000000},"TEST4":{"emitidas":2000000}}}
+        self.assertEqual(quantidades(c,"TEST3")["ticker_shares"],1000000)
+        self.assertEqual(quantidades(c,"TEST4")["company_shares"],3000000)
+        self.assertIsNone(quantidades(c,"TEST11")["ticker_shares"])
+        self.assertIsNone(quantidades(None,"TEST3")["company_shares"])
