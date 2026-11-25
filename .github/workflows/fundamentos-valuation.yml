@@ -48,6 +48,10 @@ jobs:
           import os
           with open('credenciais.json', 'w', encoding='utf-8') as arquivo:
               arquivo.write(os.environ['GOOGLE_CREDS'])
+      - name: Validar CNPJs oficiais das ações — CVM
+        # A fila não usa mapas manuais; a FCA atual e os arquivos oficiais
+        # recentes são conciliados antes de escolher o lote.
+        run: python -m scripts.sincronizar_cnpj_acoes
       - name: Coletar DFP, ITR, proventos e cobertura dos métodos
         env:
           TICKER: ${{ inputs.ticker }}

@@ -18,8 +18,11 @@ if __name__ == "__main__":
         resultado = executar_fila(limite=args.limite)
         Path("resultado-fundamentos.json").write_text(json.dumps(resultado, ensure_ascii=False, default=str), encoding="utf-8")
         print(json.dumps(resultado, ensure_ascii=False, default=str))
-        if resultado["falhas"]:
-            raise SystemExit("fila_fundamentos_com_falhas")
+        # Falhas por ativo já ficam persistidas com retentativa automática.
+        # O workflow só representa indisponibilidade total quando nenhum ativo
+        # gerou resultado aproveitável no lote.
+        if not resultado.get("sucessos"):
+            raise SystemExit("fila_fundamentos_sem_sucessos")
         raise SystemExit(0)
     if not args.ticker:
         parser.error("informe --ticker ou --automatico")

@@ -9,6 +9,14 @@ def mensagem(resultado):
     itens = resultado.get("processados", [])
     linhas = ["📊 Fundamentos — rodada concluída",
               f"Universo: {resultado.get('universo', len(itens))} | Processados: {len(itens)}"]
+    progresso = resultado.get("progresso") or {}
+    if progresso:
+        linhas.append(
+            "Progresso geral: "
+            f"{progresso.get('concluidos', 0)}/{progresso.get('total', resultado.get('universo', 0))} com dados "
+            f"(✅ {progresso.get('ok', 0)} | 🟡 {progresso.get('parciais', 0)} | "
+            f"❌ {progresso.get('falhas', 0)} | ⏳ {progresso.get('pendentes', 0)} pendentes)"
+        )
     for item in itens:
         d = item.get("detalhe", {})
         estado = item["estado"]
@@ -16,7 +24,10 @@ def mensagem(resultado):
         linhas.append(f"{simbolo} {item['ticker']} — {estado}: {d.get('fundamentos', 0)} fundamentos, {d.get('indicadores', 0)} indicadores, {d.get('proventos', 0)} proventos")
         if d.get("motivo"):
             linhas.append("  " + str(d["motivo"])[:150])
-    linhas.append(f"Falhas de coleta: {len(resultado.get('falhas', []))}")
+    falhas = resultado.get("falhas", [])
+    linhas.append(f"Falhas desta rodada: {len(falhas)}")
+    if falhas:
+        linhas.append("Reprocessamento automático programado para: " + ", ".join(falhas[:10]))
     if not itens:
         linhas.append("Nenhum ativo processado nesta rodada.")
     run = os.environ.get("GITHUB_RUN_ID")
