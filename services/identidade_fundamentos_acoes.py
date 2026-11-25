@@ -1,29 +1,18 @@
-"""Resolve ticker de ação pelo FCA oficial, sem alterar cadastros legados."""
+"""Resolve identidade oficial utilizando o mesmo parser do cadastro central."""
 from datetime import date
-from pipeline_dados.coletor_catalogo_cvm import (
-    ColetorCatalogoCVM, _selecionar_mais_recente, _texto, _sem_acento, _mercado_valido,
-)
-from pipeline_dados.coletor_fiis import normalizar_cnpj
+from pipeline_dados.coletor_catalogo_cvm import ColetorCatalogoCVM
+from services.cadastro_cnpj_oficial import extrair_cadastro
 
 def mapa_fca(geral, valores):
-    setores = {}
-    for _, linha in _selecionar_mais_recente(geral, ["CNPJ_Companhia"]).iterrows():
-        cnpj = normalizar_cnpj(_texto(linha.get("CNPJ_Companhia")))
-        if cnpj:
-            setores[cnpj] = _texto(linha.get("Setor_Atividade"))
-    candidatos = {}
-    for _, linha in _selecionar_mais_recente(valores, ["CNPJ_Companhia", "Codigo_Negociacao"]).iterrows():
-        ticker = _texto(linha.get("Codigo_Negociacao")).upper()
-        cnpj = normalizar_cnpj(_texto(linha.get("CNPJ_Companhia")))
-        tipo = _sem_acento(linha.get("Tipo"))
-        if not ticker or cnpj not in setores or not _mercado_valido(linha.get("Mercado")):
-            continue
-        if not any(t in tipo for t in ("acao", "acoes", "unit")) or _texto(linha.get("Data_Fim_Negociacao")):
-            continue
-        candidatos.setdefault(ticker, {})[cnpj] = setores[cnpj]
-    return {ticker: {"ticker": ticker, "cnpj": next(iter(v)), "classe": "ACAO",
-                     "setor": next(iter(v.values())), "fonte_cadastro": "FCA_CVM"}
-            for ticker, v in candidatos.items() if len(v) == 1}
+    # Compatibilidade com fixtures antigas; o arquivo oficial tem ambas as colunas.
+    geral = geral.copy()
+    valores = valores.copy()
+    if "Nome_Empresarial" not in geral:
+        geral["Nome_Empresarial"] = geral["CNPJ_Companhia"]
+    if "Data_Fim_Negociacao" not in valores:
+        valores["Data_Fim_Negociacao"] = ""
+    mapa, _ = extrair_cadastro(geral,valores)
+    return {ticker: dict(item, classe="ACAO", fonte_cadastro="FCA_CVM") for ticker,item in mapa.items()}
 
 class IdentidadeFCA:
     def __init__(self, http_get=None, ano=None):
@@ -38,6 +27,10 @@ class IdentidadeFCA:
             try:
                 geral, valores, _ = self.coletor.baixar_dataframes(self.ano)
                 self.mapa = mapa_fca(geral, valores)
+                print(f"FCA {self.ano}: {len(self.mapa)} vínculos para coleta de fundamentos")
+                if not self.mapa:
+                    self.falha = "SEM_VINCULOS"
             except Exception as exc:
                 self.falha = type(exc).__name__
+                print(f"FCA {self.ano}: {self.falha}: {str(exc)[:200]}")
         return self.mapa.get(ticker)

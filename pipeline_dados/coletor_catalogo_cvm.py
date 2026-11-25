@@ -74,7 +74,7 @@ class FonteCatalogoIndisponivel(RuntimeError):
 
 
 def _texto(valor):
-    if valor is None or (isinstance(valor, float) and pd.isna(valor)):
+    if valor is None or pd.isna(valor):
         return ""
     return str(valor).strip()
 
@@ -354,7 +354,7 @@ class ColetorCatalogoCVM:
                 resumo["linhas_mercado_invalido"] += 1
                 resumo["linhas_ignoradas"] += 1
                 continue
-            if not _tipo_valor_valido(linha.get("Tipo")):
+            if not _tipo_valor_valido(linha.get("Valor_Mobiliario", linha.get("Tipo"))):
                 resumo["linhas_tipo_invalido"] += 1
                 resumo["linhas_ignoradas"] += 1
                 continue

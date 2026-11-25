@@ -7,33 +7,32 @@ from pathlib import Path
 
 def mensagem(resultado):
     itens = resultado.get("processados", [])
-    linhas = ["📊 Fundamentos — rodada concluída",
-              f"Universo: {resultado.get('universo', len(itens))} | Processados: {len(itens)}"]
     progresso = resultado.get("progresso") or {}
-    if progresso:
-        linhas.append(
-            "Progresso geral: "
-            f"{progresso.get('concluidos', 0)}/{progresso.get('total', resultado.get('universo', 0))} com dados "
-            f"(✅ {progresso.get('ok', 0)} | 🟡 {progresso.get('parciais', 0)} | "
-            f"❌ {progresso.get('falhas', 0)} | ⏳ {progresso.get('pendentes', 0)} pendentes)"
-        )
+    grupos = {}
     for item in itens:
         d = item.get("detalhe", {})
+        motivo = str(d.get("motivo") or "").lower()
+        falhas = d.get("falhas") or []
         estado = item["estado"]
-        simbolo = {"OK": "✅", "PARCIAL": "🟡", "FALHA": "❌"}.get(estado, "•")
-        linhas.append(f"{simbolo} {item['ticker']} — {estado}: {d.get('fundamentos', 0)} fundamentos, {d.get('indicadores', 0)} indicadores, {d.get('proventos', 0)} proventos")
-        if d.get("motivo"):
-            linhas.append("  " + str(d["motivo"])[:150])
-    falhas = resultado.get("falhas", [])
-    linhas.append(f"Falhas desta rodada: {len(falhas)}")
-    if falhas:
-        linhas.append("Reprocessamento automático programado para: " + ", ".join(falhas[:10]))
+        if estado == "FALHA":
+            if "cnpj" in motivo or any(f.get("fonte") == "FCA" for f in falhas if isinstance(f,dict)):
+                rotulo = "❌ CNPJ não confirmado"
+            elif any(f.get("erro") == "SEM_DEMONSTRACOES_PARA_CNPJ" for f in falhas if isinstance(f,dict)):
+                rotulo = "❌ Sem balanços"
+            else:
+                rotulo = "❌ Falha"
+        else:
+            rotulo = "✅ Atualizados" if estado == "OK" else "🟡 Parciais"
+        grupos.setdefault(rotulo,[]).append(item["ticker"])
+    linhas = ["📊 Fundamentos"]
+    for rotulo,tickers in grupos.items():
+        linhas.append(rotulo + ": " + ", ".join(tickers))
     if not itens:
-        linhas.append("Nenhum ativo processado nesta rodada.")
-    run = os.environ.get("GITHUB_RUN_ID")
-    if run:
-        linhas.append(f"https://github.com/{os.environ.get('GITHUB_REPOSITORY', '')}/actions/runs/{run}")
+        linhas.append("Nenhum ativo pendente nesta rodada.")
+    if progresso:
+        linhas.append(f"Base: {progresso.get('concluidos',0)}/{progresso.get('total',resultado.get('universo',0))} com dados")
     return "\n".join(linhas)
+
 
 def enviar(resultado):
     import config

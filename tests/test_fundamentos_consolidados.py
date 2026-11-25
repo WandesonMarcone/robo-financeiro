@@ -18,13 +18,13 @@ class TestConsolidacao(unittest.TestCase):
         self.assertEqual(len(g[0]["itens"]),3)
         self.assertIn("123.45678901",json_itens(g[0]["itens"]))
         self.assertIn('"fonte":"CVM"',json_itens(g[0]["itens"]))
-    def test_retencao_apenas_anual_com_minimo(self):
+    def test_retencao_anual_e_trimestre_corrente(self):
         f=[fato(m,2025,"ANUAL") for m in ("receita_liquida","lucro_liquido","patrimonio_liquido")]
         f += [fato("lucro_liquido",2025,"TRIMESTRAL"),fato("lucro_liquido",2026,"TRIMESTRAL"),
               fato("lucro_liquido",2024,"TRIMESTRAL"),fato("lucro_liquido",2025,"TRIMESTRAL","FII11","FII")]
         ret,_=filtrar_historico(f,[],2026)
-        self.assertEqual(len(ret),6)
+        self.assertEqual(len(ret),5)
         self.assertNotIn(f[3],ret)
         self.assertIn(f[4],ret)
-        self.assertIn(f[5],ret)
+        self.assertNotIn(f[5],ret)
         self.assertIn(f[6],ret)

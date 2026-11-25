@@ -6,7 +6,7 @@ from scripts.notificar_fundamentos import mensagem
 class TestIdentidade(unittest.TestCase):
     def test_mapa_oficial_e_ambiguidade(self):
         geral = pd.DataFrame([{"CNPJ_Companhia": c, "Setor_Atividade": "Financeiro"} for c in ("28.195.667/0001-06", "05.878.397/0001-32")])
-        valores = pd.DataFrame([{"CNPJ_Companhia": c, "Codigo_Negociacao": t, "Tipo": "Ações", "Mercado": "Bolsa"} for c,t in [("28.195.667/0001-06","ABCB4"),("05.878.397/0001-32","ALOS3"),("28.195.667/0001-06","AMB3"),("05.878.397/0001-32","AMB3")]])
+        valores = pd.DataFrame([{"CNPJ_Companhia": c, "Codigo_Negociacao": t, "Valor_Mobiliario": "Ações Ordinárias", "Mercado": "Bolsa"} for c,t in [("28.195.667/0001-06","ABCB4"),("05.878.397/0001-32","ALOS3"),("28.195.667/0001-06","AMB3"),("05.878.397/0001-32","AMB3")]])
         mapa = mapa_fca(geral, valores)
         self.assertEqual(mapa["ABCB4"]["cnpj"], "28195667000106")
         self.assertEqual(mapa["ALOS3"]["cnpj"], "05878397000132")
@@ -15,7 +15,8 @@ class TestIdentidade(unittest.TestCase):
     def test_resumo_nao_oculta_falha(self):
         s = mensagem({"universo":135,"processados":[{"ticker":"ABCB4","estado":"FALHA","detalhe":{"motivo":"CNPJ ausente"}}],"falhas":["ABCB4"]})
         self.assertIn("ABCB4", s)
-        self.assertIn("Falhas desta rodada: 1", s)
+        self.assertIn("CNPJ não confirmado", s)
+        self.assertNotIn("fundamentos,", s)
 
     def test_resumo_exibe_progresso_do_universo(self):
         s = mensagem({
@@ -23,4 +24,4 @@ class TestIdentidade(unittest.TestCase):
             "progresso": {"total": 135, "concluidos": 8, "ok": 5, "parciais": 3, "falhas": 2, "pendentes": 125},
         })
         self.assertIn("8/135", s)
-        self.assertIn("125 pendentes", s)
+        self.assertLess(len(s), 160)

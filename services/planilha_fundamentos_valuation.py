@@ -143,3 +143,28 @@ def gravar_fundamentos_planilha(fundamentos, indicadores, coberturas, planilha=N
         "indicadores": indicadores_gravados,
         "coberturas": cobertura_gravada,
     }
+
+def limpar_trimestres_antigos(planilha=None, ano_corrente=None):
+    """Remove somente as linhas de ações trimestrais antigas nas abas ativas."""
+    from datetime import date
+    ano = ano_corrente or date.today().year
+    planilha = planilha or _planilha_padrao()
+    removidas = 0
+    for tipo in ("fundamentos","indicadores"):
+        aba, linhas, _ = _abrir(tipo, planilha)
+        numeros = []
+        for numero, linha in enumerate(linhas[1:],2):
+            partes = str(linha[0]).split("|") if linha else []
+            if len(partes)==6 and partes[1]=="ACAO" and partes[4]=="TRIMESTRAL" and partes[3].isdigit() and int(partes[3])<ano:
+                numeros.append(numero)
+        # Descendente; não desloca as posições que ainda serão removidas.
+        blocos = []
+        for n in numeros:
+            if blocos and n==blocos[-1][1]+1:
+                blocos[-1][1]=n
+            else:
+                blocos.append([n,n])
+        for inicio,fim in reversed(blocos):
+            aba.delete_rows(inicio,fim)
+            removidas += fim-inicio+1
+    return removidas
