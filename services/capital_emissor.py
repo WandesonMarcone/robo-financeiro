@@ -95,16 +95,27 @@ def quantidades(capital, ticker):
             "reference_date": capital.get("referencia"),
             "source": capital.get("fonte")}
 
+def _resumo(ticker, cnpj, capital, observacoes):
+    from services.capital_yahoo import resumir
+    yahoo=resumir(ticker,cnpj,observacoes)
+    if capital:
+        return {**yahoo, **quantidades(capital,ticker), "status":"CONCILIADO_OFICIAL",
+                "ticker_basis":"EMITIDAS_OFICIAIS","company_basis":"EMITIDAS_OFICIAIS"}
+    return yahoo
+
 def resumo_capital(ticker):
-    """Contrato compartilhado pelas interfaces; falha de leitura não vira zero."""
     try:
-        info = obter_capital(ticker)
+        info=obter_capital(ticker)
+        if not info:
+            return {"status":"PENDENTE_CONCILIACAO", **quantidades(None,ticker)}
+        from pipeline_dados.conexao import obter_session_factory
+        from services.capital_yahoo import ler
+        with obter_session_factory()() as s:
+            observacoes=ler(s,info["cnpj"])
+        return {**_resumo(ticker,info["cnpj"],info.get("capital"),observacoes),
+                "cnpj":info["cnpj"], "name":info["name"], "tickers":info["tickers"]}
     except Exception:
         return {"status":"INDISPONIVEL", **quantidades(None,ticker)}
-    if not info:
-        return {"status":"PENDENTE_CONCILIACAO", **quantidades(None,ticker)}
-    return {**quantidades(info.get("capital"),ticker), "status":info["status"],
-            "cnpj":info["cnpj"], "name":info["name"], "tickers":info["tickers"]}
 
 def espelhar_planilha(planilha=None, session_factory=None):
     """Uma consulta SQL e uma escrita em lote; mantém as posições A:AJ."""
@@ -116,18 +127,20 @@ def espelhar_planilha(planilha=None, session_factory=None):
         session_factory = obter_session_factory()
     aba=planilha.worksheet("BD_Acoes")
     cab=aba.row_values(1)
-    if len(cab)<38 or cab[36:38]!=["Nº AÇÕES DO TICKER (OFICIAL)","Nº TOTAL DE AÇÕES DA EMPRESA"]:
+    if len(cab)<38 or cab[36] not in ("Nº AÇÕES DO TICKER (OFICIAL)","Nº AÇÕES INFORMADAS DO TICKER") or cab[37]!="Nº TOTAL DE AÇÕES DA EMPRESA":
         raise ValueError("layout_capital_esperado_AK_AL")
     tickers=aba.col_values(1)[1:]
     if not tickers:
         return 0
     with session_factory() as s:
+        from services.capital_yahoo import ler
+        observacoes=ler(s)
         if not s.execute(text("SELECT to_regclass('public.capital_social_emissores')")).scalar():
-            return 0
+            s.execute(text(DDL))
         rows=s.execute(text("""
-            SELECT c.ticker, p.emitidas,p.classes,p.referencia,p.fonte
+            SELECT c.ticker,c.cnpj,p.emitidas,p.classes,p.referencia,p.fonte
             FROM cadastro_cnpj_acoes c
-            JOIN LATERAL (
+            LEFT JOIN LATERAL (
                 SELECT emitidas,classes,referencia,fonte FROM capital_social_emissores
                 WHERE cnpj=c.cnpj AND qualidade='CONCILIADO_OFICIAL'
                 ORDER BY referencia DESC,atualizado_em DESC LIMIT 1
@@ -139,10 +152,11 @@ def espelhar_planilha(planilha=None, session_factory=None):
     for t in tickers:
         t=str(t).strip().upper()
         r=mapa.get(t) or {}
-        q=quantidades(r,t)
-        nota=(f"Capital emitido. Ref. {r['referencia']}. Fonte: {r['fonte']}. "
-              "Não somar totais entre classes do mesmo emissor."
-              if r else "Pendente de conciliação oficial. Ausência não significa zero.")
+        q=_resumo(t,r.get("cnpj"),r if r.get("emitidas") is not None else None,observacoes)
+        nota=(f"Fonte: {q.get('source')}. Ref./coleta: {q.get('reference_date')}. "
+              + ("Capital emitido oficial. " if q["status"]=="CONCILIADO_OFICIAL" else
+                 "Yahoo: quantidade informada, total implícito estimado; não equivale necessariamente ao capital emitido. ")
+              + "Não somar totais entre classes do mesmo emissor.")
         valores=[]
         for chave in ("ticker_shares","company_shares"):
             v=q[chave]
@@ -155,7 +169,11 @@ def espelhar_planilha(planilha=None, session_factory=None):
     if aba.col_values(1)[1:] != tickers:
         raise RuntimeError("BD_Acoes_alterada_durante_espelhamento")
     planilha.batch_update({"requests":[{"updateCells":{
+        "start":{"sheetId":aba.id,"rowIndex":0,"columnIndex":36},
+        "rows":[{"values":[{"userEnteredValue":{"stringValue":"Nº AÇÕES INFORMADAS DO TICKER"},"note":"Yahoo: quantidade informada sem conciliação por classe, ou capital oficial quando disponível."},
+        {"userEnteredValue":{"stringValue":"Nº TOTAL DE AÇÕES DA EMPRESA"},"note":"Capital oficial quando disponível; caso contrário total implícito estimado do Yahoo. Consulte a nota de cada célula."}]}],
+        "fields":"userEnteredValue,note"}},{"updateCells":{
         "range":{"sheetId":aba.id,"startRowIndex":1,"endRowIndex":len(tickers)+1,
                  "startColumnIndex":36,"endColumnIndex":38},
         "rows":linhas,"fields":"userEnteredValue,note"}}]})
-    return len(mapa)
+    return sum(1 for r in mapa.values() if r.get("emitidas") is not None or any(o["cnpj"]==r["cnpj"] for o in observacoes))

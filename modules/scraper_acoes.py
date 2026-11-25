@@ -200,6 +200,7 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, 
 
     tentados = []
     falhas = []
+    observacoes_capital = []
     for ticker in fila:
         if prazo_monotonic is not None and clock() >= prazo_monotonic:
             print("⏱️ Prazo do lote de ações atingido; mantendo o restante para o próximo ciclo.")
@@ -253,7 +254,11 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, 
                 )
             roe = _fund("ROE")
             dy = _fund("Div.Yield")
-            # Não confundir sharesOutstanding do fornecedor com a quantidade emitida por classe.
+            from services.capital_yahoo import observar
+            obs_capital = observar(ticker, yf_info)
+            if obs_capital:
+                observacoes_capital.append(obs_capital)
+            # AK:AL são espelhadas do Neon; E é legada.
             qtd_acoes = None
             p_ativo = _fund("P/Ativo")
             marg_bruta = _fund("Mrg Bruta")
@@ -401,6 +406,12 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, 
         if pausa_entre_ativos:
             sleep(pausa_entre_ativos)
 
+    if observacoes_capital:
+        try:
+            from services.capital_yahoo import persistir
+            print(f"Capital Yahoo: {persistir(observacoes_capital)} tickers armazenados")
+        except Exception as exc:
+            print(f"⚠️ Capital Yahoo não persistido: {type(exc).__name__}")
     # --- MONTAGEM MODULAR COM SEPARADOR ---
     def _bloco(titulo, itens, alerta=False, tag=""):
         if not itens:

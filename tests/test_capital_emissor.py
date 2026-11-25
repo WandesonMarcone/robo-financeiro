@@ -24,3 +24,15 @@ class TestCapital(unittest.TestCase):
         self.assertEqual(quantidades(c,"TEST4")["company_shares"],3000000)
         self.assertIsNone(quantidades(c,"TEST11")["ticker_shares"])
         self.assertIsNone(quantidades(None,"TEST3")["company_shares"])
+
+    def test_yahoo_nao_soma_classes_nem_units(self):
+        from datetime import datetime, timezone
+        from services.capital_yahoo import observar, resumir
+        now=datetime.now(timezone.utc)
+        obs=[{"ticker":t,"cnpj":"123","shares_outstanding":q,"implied_shares_outstanding":i,"coletado_em":now}
+             for t,q,i in [("TEST3",100,300),("TEST4",200,300),("TEST11",100,999)]]
+        self.assertEqual(resumir("TEST3","123",obs)["company_shares"],300)
+        self.assertIsNone(resumir("TEST11","123",obs)["ticker_shares"])
+        obs[1]["implied_shares_outstanding"]=400
+        self.assertIsNone(resumir("TEST3","123",obs)["company_shares"])
+        self.assertIsNone(observar("TEST3",{"sharesOutstanding":0,"impliedSharesOutstanding":float("nan")}))
