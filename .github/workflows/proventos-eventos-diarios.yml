@@ -1,0 +1,49 @@
+name: Proventos e eventos diários
+
+on:
+  schedule:
+    # 21h de Brasília, após o fechamento e independente da atualização noturna.
+    - cron: '0 0 * * 2-6'
+  workflow_dispatch:
+    inputs:
+      limite_por_classe:
+        description: Tickers por classe, de 1 a 30
+        required: false
+        default: '20'
+      janela_dias:
+        description: Janela de consulta no Yahoo, de 30 a 120 dias
+        required: false
+        default: '75'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: proventos-eventos-diarios
+  cancel-in-progress: false
+
+jobs:
+  coletar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDENTIALS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+      - name: Criar credencial temporária do Google
+        shell: python
+        run: |
+          import os
+          with open('credenciais.json', 'w', encoding='utf-8') as arquivo:
+              arquivo.write(os.environ['GOOGLE_CREDS'])
+      - name: Coletar proventos e eventos de todas as classes
+        run: |
+          python -m scripts.coletar_proventos_eventos \
+            --limite-por-classe "${{ inputs.limite_por_classe || '20' }}" \
+            --janela-dias "${{ inputs.janela_dias || '75' }}"
