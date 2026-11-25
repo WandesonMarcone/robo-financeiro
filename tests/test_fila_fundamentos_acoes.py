@@ -2,7 +2,7 @@ import unittest
 import io
 import zipfile
 from datetime import datetime, timedelta, timezone, date
-from services.fila_fundamentos_acoes import selecionar_pendentes
+from services.fila_fundamentos_acoes import selecionar_pendentes, resumo_progresso
 from services.fundamentos_valuation import avaliar_cobertura, _escala, extrair_demonstracoes_cvm
 
 class TestFilaFundamentos(unittest.TestCase):
@@ -13,6 +13,23 @@ class TestFilaFundamentos(unittest.TestCase):
             "ITSA4": {"ultima_tentativa": agora, "proxima_tentativa": agora + timedelta(days=1)}
         }
         self.assertEqual(selecionar_pendentes(["BBAS3", "PETR4", "ITSA4"], estados, agora, 2), ["PETR4", "BBAS3"])
+
+    def test_prioriza_reprocessamento_de_falha(self):
+        agora = datetime(2026, 11, 25, tzinfo=timezone.utc)
+        estados = {
+            "AZZA3": {"estado": "FALHA", "ultima_tentativa": agora - timedelta(hours=1), "proxima_tentativa": agora},
+        }
+        self.assertEqual(selecionar_pendentes(["AZZA3", "PETR4"], estados, agora, 2), ["AZZA3", "PETR4"])
+
+    def test_progresso_usa_universo_completo(self):
+        progresso = resumo_progresso(
+            ["BBAS3", "PETR4", "ITSA4", "VALE3"],
+            {"BBAS3": {"estado": "OK"}, "PETR4": {"estado": "PARCIAL"}, "ITSA4": {"estado": "FALHA"}},
+        )
+        self.assertEqual(progresso["total"], 4)
+        self.assertEqual(progresso["concluidos"], 2)
+        self.assertEqual(progresso["falhas"], 1)
+        self.assertEqual(progresso["pendentes"], 1)
 
     def test_nao_confunde_campos_espalhados_com_historico(self):
         fatos = [{"periodo_fim": date(ano, 12, 31), "periodicidade": "ANUAL", "metrica": "lpa" if ano < 2025 else "vpa"} for ano in range(2021, 2026)]
