@@ -66,6 +66,14 @@ DESCRICOES = (
     (("lucro", "acao", "diluido"), "lpa_diluido"),
     (("lucro", "acao"), "lpa_diluido"),
     (("depreciacao", "amortizacao"), "depreciacao_amortizacao"),
+    (("depreciacoes", "amortizacoes"), "depreciacao_amortizacao"),
+    (("depreciacao", "exaustao"), "depreciacao_amortizacao"),
+    (("investimentos", "imobilizado"), "capex"),
+    (("compra", "imobilizado"), "capex"),
+    (("aquisicao", "intangivel"), "capex_intangivel"),
+    (("captacao", "emprestimos"), "captacao_divida"),
+    (("pagamento", "emprestimos"), "amortizacao_divida"),
+    (("amortizacao", "emprestimos"), "amortizacao_divida"),
     (("aquisicao", "imobilizado"), "capex"),
     (("aquisicoes", "imobilizado"), "capex"),
     (("adicao", "imobilizado"), "capex"),
@@ -158,10 +166,10 @@ def _escala(linha, metrica):
     escala = _texto(linha.get("ESCALA_MOEDA"))
     if metrica in {"lpa_basico", "lpa_diluido"}:
         return 1.0
+    if "MILHAO" in escala or "MILHOES" in escala:
+        return 1_000_000.0
     if "MIL" in escala:
         return 1000.0
-    if "MILHAO" in escala:
-        return 1_000_000.0
     return 1.0
 
 
@@ -263,7 +271,6 @@ def derivar_indicadores(ticker, classe, fundamentos, proventos=None, eventos=Non
     indicadores = []
     periodos = sorted(por_periodo)
     capitais = {}
-    dividas = {}
     lpas = []
     desdobramentos = sorted(
         (evento["data_referencia"], float(evento["fator"]))
@@ -297,12 +304,17 @@ def derivar_indicadores(ticker, classe, fundamentos, proventos=None, eventos=Non
         if imposto is not None and antes not in {None, 0}:
             taxa = min(1.0, max(0.0, abs(imposto / antes)))
             indicadores.append(_fato(ticker, classe, periodo, "taxa_imposto_efetiva", taxa, "FRACAO", {"impostos": imposto, "lucro_antes_impostos": antes}))
-        divida = (m.get("divida_curto_prazo") or 0) + (m.get("divida_longo_prazo") or 0)
+        curto, longo = m.get("divida_curto_prazo"), m.get("divida_longo_prazo")
         caixa = m.get("caixa_equivalentes")
-        if divida or caixa is not None:
-            divida_liquida = divida - (caixa or 0)
-            dividas[periodo] = divida
-            indicadores.append(_fato(ticker, classe, periodo, "divida_liquida", divida_liquida, "BRL", {"divida_bruta": divida, "caixa": caixa or 0}))
+        if curto is not None and longo is not None and caixa is not None:
+            divida = curto + longo
+            indicadores.append(_fato(ticker, classe, periodo, "divida_liquida", divida - caixa, "BRL", {"divida_bruta": divida, "caixa": caixa}))
+        if m.get("captacao_divida") is not None and m.get("amortizacao_divida") is not None:
+            indicadores.append(_fato(ticker, classe, periodo, "captacao_liquida_divida", abs(m["captacao_divida"]) - abs(m["amortizacao_divida"]), "BRL", {"origem": "DFC"}))
+        if m.get("ebit") is not None and m.get("depreciacao_amortizacao") is not None:
+            indicadores.append(_fato(ticker, classe, periodo, "ebitda", m["ebit"] + m["depreciacao_amortizacao"], "BRL", {"origem": "EBIT_DA"}))
+        if m.get("fluxo_caixa_operacional") is not None and m.get("capex") is not None:
+            indicadores.append(_fato(ticker, classe, periodo, "fluxo_caixa_livre", m["fluxo_caixa_operacional"] - m["capex"] - abs(m.get("capex_intangivel") or 0), "BRL", {"origem": "FCO_CAPEX_IMOBILIZADO", "intangivel_identificado": m.get("capex_intangivel") is not None}))
         ac, pc = m.get("ativo_circulante"), m.get("passivo_circulante")
         if ac is not None and pc is not None:
             capitais[periodo] = ac - pc
@@ -312,11 +324,9 @@ def derivar_indicadores(ticker, classe, fundamentos, proventos=None, eventos=Non
             if lpa not in {None, 0}:
                 indicadores.append(_fato(ticker, classe, periodo, "payout", dpa / lpa, "FRACAO", {"dpa": dpa, "lpa": lpa}))
     for anterior, atual in zip(periodos, periodos[1:]):
-        if anterior in capitais and atual in capitais:
+        if anterior in capitais and atual in capitais and atual.year == anterior.year + 1:
             indicadores.append(_fato(ticker, classe, atual, "variacao_capital_giro", capitais[atual] - capitais[anterior], "BRL", {"capital_giro_atual": capitais[atual], "capital_giro_anterior": capitais[anterior]}))
-        if anterior in dividas and atual in dividas:
-            indicadores.append(_fato(ticker, classe, atual, "captacao_liquida_divida", dividas[atual] - dividas[anterior], "BRL", {"divida_atual": dividas[atual], "divida_anterior": dividas[anterior]}))
-    if len(lpas) >= 2 and lpas[0][1] > 0 and lpas[-1][1] > 0:
+    if len(lpas) >= 5 and all(b[0].year == a[0].year + 1 for a, b in zip(lpas, lpas[1:])) and all(v > 0 for _, v in lpas):
         anos = max(1, lpas[-1][0].year - lpas[0][0].year)
         crescimento = (lpas[-1][1] / lpas[0][1]) ** (1 / anos) - 1
         indicadores.append(_fato(ticker, classe, lpas[-1][0], "crescimento_lpa_5a", crescimento, "FRACAO", {"lpa_inicial": lpas[0][1], "lpa_final": lpas[-1][1], "anos": anos}, "PONTUAL"))
@@ -329,21 +339,46 @@ def avaliar_cobertura(ticker, classe, fundamentos, indicadores, setor=None):
     for item in [*fundamentos, *indicadores]:
         por_ano[item["periodo_fim"].year].add(item.get("metrica") or item.get("indicador"))
     anos = sorted(por_ano)
+    anuais = defaultdict(set)
+    for item in [*fundamentos, *indicadores]:
+        if item.get("periodicidade") == "ANUAL":
+            anuais[item["periodo_fim"].year].add(item.get("metrica") or item.get("indicador"))
+    if classe == "ACAO":
+        anos = sorted(anuais)
     presentes = set().union(*por_ano.values()) if por_ano else set()
+    crescimento = next((i.get("valor") for i in reversed(indicadores) if i.get("indicador") == "crescimento_lpa_5a"), None)
     coberturas = []
     setor_financeiro = any(palavra in _texto(setor) for palavra in ("BANCO", "FINANCEIR", "SEGURO"))
     for metodo, necessarios in metodos.items():
         ausentes = sorted(necessarios - presentes)
+        if classe == "ACAO":
+            for campo in sorted(necessarios & presentes):
+                if campo == "crescimento_lpa_5a":
+                    if crescimento is None:
+                        ausentes.append(campo)
+                    continue
+                minimo = 4 if campo == "variacao_capital_giro" else 5
+                if sum(campo in anuais[ano] for ano in anos[-5:]) < minimo:
+                    ausentes.append(campo + "_historico")
+            if anos and (len(anos) < 5 or anos[-1] - anos[-5] != 4):
+                ausentes.append("cinco_exercicios_consecutivos")
         status = "PRONTO" if not ausentes and len(anos) >= 5 else "PARCIAL" if presentes & necessarios else "INSUFICIENTE"
         observacao = "Dados observados; premissas futuras continuam sendo definidas na Carteira."
         if status == "PRONTO" and metodo in {"GORDON_DDM", "LUCRO_PROJETADO", "DCF_FCFF", "DCF_FCFE", "LUCRO_RESIDUAL"}:
             status = "PREMISSAS_NECESSARIAS"
+        if metodo == "PETER_LYNCH_PEG" and crescimento is not None and crescimento <= 0:
+            status = "NAO_APLICAVEL"
+            observacao = "PEG não interpretável com crescimento não positivo."
+        if metodo in {"BAZIN", "DIVIDENDOS_PRECO_TETO", "GORDON_DDM"} and status in {"PRONTO", "PREMISSAS_NECESSARIAS"}:
+            status = "PARCIAL"
+            ausentes.append("conciliacao_oficial_proventos")
         if setor_financeiro and metodo == "DCF_FCFF":
             status = "NAO_APLICAVEL"
             observacao = "FCFF tradicional não é recomendado para instituições financeiras; usar FCFE, lucro residual ou dividendos."
-        if metodo == "MULTIPLOS_PARES" and not ausentes:
-            status = "PARCIAL"
-            ausentes = ["universo_pares_setoriais"]
+        if metodo == "MULTIPLOS_PARES":
+            if status == "PRONTO":
+                status = "PARCIAL"
+            ausentes.append("universo_pares_setoriais")
         coberturas.append({
             "identificador": _id(ticker, classe, metodo), "chave": f"{ticker}|{classe}|{metodo}",
             "ticker": ticker, "classe": classe, "metodo": metodo, "status": status,
@@ -400,28 +435,23 @@ def _persistir(sessao, fundamentos, indicadores, coberturas):
 
 
 def _cadastro_ativo(sessao, ticker):
+    # Catálogo oficial também cobre ativos ainda não presentes na tabela legada.
     linha = sessao.execute(text("""
-        SELECT ticker,regexp_replace(cnpj,'[^0-9]','','g') AS cnpj,
-               CASE WHEN tipo::text ILIKE '%FII%' THEN 'FII' ELSE 'ACAO' END AS classe
-        FROM ativos WHERE UPPER(ticker)=:ticker LIMIT 1
+        SELECT ticker, cnpj, classe, setor FROM (
+            SELECT ticker, regexp_replace(cnpj,'[^0-9]','','g') AS cnpj,
+                   CASE WHEN tipo::text ILIKE '%FII%' THEN 'FII' ELSE 'ACAO' END AS classe,
+                   setor, 0 AS prioridade
+            FROM ativos_catalogo WHERE UPPER(ticker)=:ticker
+            UNION ALL
+            SELECT ticker, regexp_replace(cnpj,'[^0-9]','','g'),
+                   CASE WHEN tipo::text ILIKE '%FII%' THEN 'FII' ELSE 'ACAO' END,
+                   NULL, 1
+            FROM ativos WHERE UPPER(ticker)=:ticker
+        ) cadastro WHERE length(cnpj)=14 ORDER BY prioridade LIMIT 1
     """), {"ticker": ticker}).mappings().first()
     if not linha:
-        raise ValueError("ativo_nao_cadastrado")
-    if not normalizar_cnpj(linha["cnpj"]):
-        raise ValueError("cnpj_do_ativo_invalido")
-    cadastro = dict(linha)
-    try:
-        classificacao = sessao.execute(text("""
-            SELECT CONCAT_WS(' ',classe,segmento,subtipo) AS setor
-            FROM classificacoes_ativos c
-            JOIN ativos a ON a.id=c.ativo_id
-            WHERE UPPER(a.ticker)=:ticker AND c.vigente=TRUE
-            ORDER BY c.atualizado_em DESC NULLS LAST LIMIT 1
-        """), {"ticker": ticker}).mappings().first()
-        cadastro["setor"] = classificacao["setor"] if classificacao else None
-    except Exception:
-        cadastro["setor"] = None
-    return cadastro
+        raise ValueError("ativo_sem_cnpj_cadastrado")
+    return dict(linha)
 
 
 def coletar_fundamentos_valuation(ticker, anos=5, planilha=None, session_factory=None,
@@ -454,15 +484,15 @@ def coletar_fundamentos_valuation(ticker, anos=5, planilha=None, session_factory
                 fundamentos.extend(extrair_demonstracoes_cvm(resposta.content, ticker, cadastro["cnpj"], "DFP", ano))
             except Exception as exc:
                 falhas.append({"fonte": "DFP", "ano": ano, "erro": type(exc).__name__})
-        try:
-            url = URL_CVM["ITR"].format(ano=hoje.year)
-            resposta = obter(url, timeout=90)
-            if getattr(resposta, "status_code", None) == 200:
-                fundamentos.extend(extrair_demonstracoes_cvm(resposta.content, ticker, cadastro["cnpj"], "ITR", hoje.year))
-            else:
-                falhas.append({"fonte": "ITR", "ano": hoje.year, "erro": f"HTTP_{resposta.status_code}"})
-        except Exception as exc:
-            falhas.append({"fonte": "ITR", "ano": hoje.year, "erro": type(exc).__name__})
+        for ano in range(hoje.year - anos + 1, hoje.year + 1):
+            try:
+                url = URL_CVM["ITR"].format(ano=ano)
+                resposta = obter(url, timeout=90)
+                if getattr(resposta, "status_code", None) != 200:
+                    raise RuntimeError(f"HTTP_{getattr(resposta, 'status_code', 'SEM_STATUS')}")
+                fundamentos.extend(extrair_demonstracoes_cvm(resposta.content, ticker, cadastro["cnpj"], "ITR", ano))
+            except Exception as exc:
+                falhas.append({"fonte": "ITR", "ano": ano, "erro": type(exc).__name__})
     else:
         # O coletor legado já conhece as mudanças de cabeçalhos dos informes.
         from pipeline_dados.coletor_fiis import _ler_zip_informes, _float_cvm

@@ -72,7 +72,9 @@ def _abrir(tipo: str, planilha=None):
             aba.freeze(rows=1, cols=1)
         except Exception:
             pass
-    linhas = aba.get_all_values()
+    linhas = aba.get("A1:" + _coluna(len(colunas)) + "1")
+    chaves = aba.col_values(1)
+    linhas = [linhas[0]] + [[chave] for chave in chaves[1:]] if linhas else []
     if not linhas:
         aba.update([list(colunas)], f"A1:{_coluna(len(colunas))}1", value_input_option="RAW")
         linhas = [list(colunas)]
@@ -104,7 +106,10 @@ def _upsert(tipo: str, registros, linha_factory, planilha=None) -> int:
             "range": f"A{numero}:{_coluna(quantidade_colunas)}{numero}",
             "values": [valores],
         })
-    aba.batch_update(atualizacoes, value_input_option="USER_ENTERED")
+    if proxima - 1 > aba.row_count:
+        aba.add_rows(max(1000, proxima - 1 - aba.row_count))
+    for inicio in range(0, len(atualizacoes), 500):
+        aba.batch_update(atualizacoes[inicio:inicio + 500], value_input_option="USER_ENTERED")
     return len(atualizacoes)
 
 
