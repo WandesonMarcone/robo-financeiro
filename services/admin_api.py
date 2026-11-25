@@ -860,6 +860,9 @@ def detalhe_ativo(ticker: str):
         return jsonify({"message": "Não foi possível carregar a ficha do ativo agora."}), 503
     if detalhe is None:
         return jsonify({"message": "Ativo não encontrado no cadastro-base."}), 404
+    if detalhe.get("tipo") == "ACAO":
+        from services.capital_emissor import resumo_capital
+        detalhe["share_capital"] = resumo_capital(ticker)
     return jsonify(detalhe)
 
 

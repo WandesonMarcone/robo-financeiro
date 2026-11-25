@@ -338,14 +338,15 @@ def derivar_indicadores(ticker, classe, fundamentos, proventos=None, eventos=Non
             indicadores.append(_fato(ticker, classe, periodo, "acoes_media_diluida", acoes, "ACOES", {"lucro_liquido": lucro, "lpa": lpa}))
         patrimonio = m.get("patrimonio_liquido")
         quantidade = m.get("acoes_circulacao_ex_tesouraria")
-        if patrimonio is not None and quantidade and quantidade > 0:
+        from services.capital_emissor import escala_suspeita
+        if patrimonio is not None and quantidade and quantidade > 0 and not escala_suspeita(quantidade,lucro,lpa):
             fator_posterior = 1.0
             for data_evento, fator in desdobramentos:
                 if data_evento > periodo:
                     fator_posterior *= fator
             quantidade *= fator_posterior
             indicadores.append(_fato(ticker, classe, periodo, "vpa", patrimonio / quantidade, "BRL_ACAO", {"patrimonio_liquido": patrimonio, "acoes": quantidade, "origem": "COMPOSICAO_CAPITAL"}))
-        elif patrimonio is not None and acoes:
+        elif patrimonio is not None and acoes and not quantidade:
             indicadores.append(_fato(ticker, classe, periodo, "vpa", patrimonio / acoes, "BRL_ACAO", {"patrimonio_liquido": patrimonio, "acoes": acoes, "origem": "ESTIMATIVA_ACOES_MEDIA_DILUIDA"}))
         if patrimonio not in {None, 0} and lucro is not None:
             indicadores.append(_fato(ticker, classe, periodo, "roe", lucro / patrimonio, "FRACAO", {"lucro_liquido": lucro, "patrimonio_liquido": patrimonio}))
@@ -442,6 +443,8 @@ def avaliar_cobertura(ticker, classe, fundamentos, indicadores, setor=None):
 def _persistir(sessao, fundamentos, indicadores, coberturas):
     from services.fundamentos_consolidados import persistir_grupos
     persistir_grupos(sessao, fundamentos, indicadores)
+    from services.capital_emissor import persistir_observacoes
+    persistir_observacoes(sessao, fundamentos)
     for item in coberturas:
         parametros = {
             **item,

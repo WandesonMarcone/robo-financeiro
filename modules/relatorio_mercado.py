@@ -570,14 +570,18 @@ def eh_oportunidade_fii(pvp, dy, liquidez=None, vacancia=None, filtros=None):
 
 def eh_oportunidade_acao(pl, pvp, dy, roe, liquidez=None, ticker=None, filtros=None):
     f = filtros or (getattr(config, "FILTROS_FIXOS", {}) or {}).get("acao") or {}
-    if ticker is not None and not ticker_no_mapa_b3(ticker):
-        return False
+    if ticker is not None:
+        from services.universo_acoes import normalizar_ticker_acao
+        if not normalizar_ticker_acao(ticker):
+            return False
     try:
         pl = float(pl)
         pvp = float(pvp)
         dy = float(dy)
         roe = float(roe)
     except (TypeError, ValueError):
+        return False
+    if not all(math.isfinite(v) for v in (pl,pvp,dy,roe)) or pl<=0 or pvp<=0 or dy<0 or roe<=0:
         return False
     if not (f.get("pl_min", 3) <= pl <= f.get("pl_max", 12)):
         return False
@@ -590,7 +594,7 @@ def eh_oportunidade_acao(pl, pvp, dy, roe, liquidez=None, ticker=None, filtros=N
     liq_min = f.get("liquidez_min")
     if liq_min is not None:
         try:
-            if float(liquidez) < liq_min:
+            if not math.isfinite(float(liquidez)) or float(liquidez) < liq_min:
                 return False
         except (TypeError, ValueError):
             return False

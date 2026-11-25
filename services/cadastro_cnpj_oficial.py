@@ -56,7 +56,7 @@ def extrair_cadastro(geral, valores):
     candidatos = {}
     for _, linha in _selecionar_mais_recente(valores, ["CNPJ_Companhia","Codigo_Negociacao"]).iterrows():
         cnpj, ticker = linha["CNPJ_Companhia"], linha["Codigo_Negociacao"]
-        if cnpj not in empresas or not re.fullmatch(r"[A-Z]{4}[0-9]{1,2}", ticker):
+        if cnpj not in empresas or not re.fullmatch(r"[A-Z][A-Z0-9]{3}[0-9]{1,2}", ticker):
             continue
         tipo = _sem_acento(linha.get(coluna_tipo))
         if not tipo or not any(t in tipo for t in ("acao","acoes","unit")) or any(t in tipo for t in ("bdr","debenture","recibo","direito")):
@@ -111,13 +111,18 @@ def sincronizar(session_factory=None, planilha=None, coletor=None, hoje=None,
     if coletor is None:
         from pipeline_dados.coletor_catalogo_cvm import ColetorCatalogoCVM
         coletor = ColetorCatalogoCVM()
-    universo = {str(x).strip().upper() for x in planilha.worksheet("BD_Acoes").col_values(1)[1:]
-                if re.fullmatch(r"[A-Z]{4}[0-9]{1,2}", str(x).strip().upper())}
+    from services.universo_acoes import ler_planilha, sincronizar_universo
+    universo = ler_planilha(planilha)
     with session_factory() as s:
-        universo.update(r[0].upper() for r in s.execute(text("""
-            SELECT ticker FROM ativos WHERE tipo::text='ACAO'
-            UNION SELECT ticker FROM ativos_catalogo WHERE tipo::text='ACAO'
-        """)) if r[0])
+        sincronizar_universo(s, universo)
+        s.execute(text(DDL))
+        anteriores = {r["ticker"]: dict(r) for r in s.execute(text("SELECT ticker,cnpj,nome_emissor FROM cadastro_cnpj_acoes")).mappings()}
+        s.commit()
+    autorizados = set(universo)
+    universo = {t for t in autorizados if not cnpj_valido(anteriores.get(t,{}).get("cnpj")) or not anteriores.get(t,{}).get("nome_emissor")}
+    if not universo:
+        return {"universo":len(autorizados),"confirmados":len(autorizados),"novos":0,
+                "alterados":[],"nao_localizados":[],"ambiguos":[],"fontes_consultadas":[],"falhas_fontes":[]}
     hoje = hoje or date.today()
     # A FCA do ano corrente pode ainda não trazer uma companhia recém-listada,
     # em reorganização societária ou com a publicação pendente. Nunca usamos o
@@ -172,7 +177,7 @@ def sincronizar(session_factory=None, planilha=None, coletor=None, hoje=None,
                 WHERE ticker=:ticker AND estado<>'EM_COLETA'
             """), [{"ticker":t} for t in mudaram])
         s.commit()
-    return {"universo":len(universo), "confirmados":len(selecionados),
+    return {"universo":len(autorizados), "confirmados":len(autorizados-universo)+len(selecionados),
             "novos":sum(t not in anteriores for t in selecionados),
             "alterados":[t for t in mudaram if t in anteriores],
             "nao_localizados":sorted(universo-set(selecionados)),

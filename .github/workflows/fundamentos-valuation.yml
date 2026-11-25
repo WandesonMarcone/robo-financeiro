@@ -82,6 +82,10 @@ jobs:
           else
             python -m scripts.coletar_fundamentos_valuation --automatico --limite "$LIMITE"
           fi
+      - name: Espelhar composição oficial do capital na planilha
+        if: always() && !cancelled()
+        continue-on-error: true
+        run: python -m scripts.espelhar_capital_emissor
       - name: Enviar resumo da rodada ao Telegram
         if: always() && !cancelled() && hashFiles('resultado-fundamentos.json') != ''
         continue-on-error: true
