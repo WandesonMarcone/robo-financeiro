@@ -48,6 +48,8 @@ jobs:
           import os
           with open('credenciais.json', 'w', encoding='utf-8') as arquivo:
               arquivo.write(os.environ['GOOGLE_CREDS'])
+      - name: Migrar fundamentos para armazenamento por período
+        run: python -m scripts.migrar_fundamentos_consolidados
       - name: Coletar DFP, ITR, proventos e cobertura dos métodos
         env:
           TICKER: ${{ inputs.ticker }}

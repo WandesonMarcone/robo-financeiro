@@ -440,30 +440,8 @@ def avaliar_cobertura(ticker, classe, fundamentos, indicadores, setor=None):
 
 
 def _persistir(sessao, fundamentos, indicadores, coberturas):
-    for item in fundamentos:
-        sessao.execute(text("""
-            INSERT INTO fundamentos_ativos
-              (identificador,ticker,cnpj,classe,periodo_inicio,periodo_fim,exercicio,periodicidade,documento,escopo,demonstracao,conta_codigo,metrica,valor,unidade,moeda,fonte,qualidade_fonte,url_origem)
-            VALUES
-              (:identificador,:ticker,:cnpj,:classe,:periodo_inicio,:periodo_fim,:exercicio,:periodicidade,:documento,:escopo,:demonstracao,:conta_codigo,:metrica,:valor,:unidade,:moeda,:fonte,:qualidade_fonte,:url_origem)
-            ON CONFLICT (identificador) DO UPDATE SET
-              cnpj=EXCLUDED.cnpj,periodo_inicio=EXCLUDED.periodo_inicio,periodo_fim=EXCLUDED.periodo_fim,
-              exercicio=EXCLUDED.exercicio,periodicidade=EXCLUDED.periodicidade,documento=EXCLUDED.documento,
-              escopo=EXCLUDED.escopo,demonstracao=EXCLUDED.demonstracao,conta_codigo=EXCLUDED.conta_codigo,
-              metrica=EXCLUDED.metrica,valor=EXCLUDED.valor,unidade=EXCLUDED.unidade,moeda=EXCLUDED.moeda,
-              fonte=EXCLUDED.fonte,qualidade_fonte=EXCLUDED.qualidade_fonte,
-              url_origem=EXCLUDED.url_origem,atualizado_em=NOW()
-        """), item)
-    for item in indicadores:
-        parametros = {**item, "entradas_json": json.dumps(item.get("entradas") or {}, ensure_ascii=False)}
-        sessao.execute(text("""
-            INSERT INTO indicadores_valuation_ativos
-              (identificador,ticker,classe,periodo_fim,exercicio,periodicidade,indicador,valor,unidade,formula_versao,entradas,qualidade)
-            VALUES
-              (:identificador,:ticker,:classe,:periodo_fim,:exercicio,:periodicidade,:indicador,:valor,:unidade,:formula_versao,CAST(:entradas_json AS JSONB),:qualidade)
-            ON CONFLICT (identificador) DO UPDATE SET valor=EXCLUDED.valor,entradas=EXCLUDED.entradas,
-              formula_versao=EXCLUDED.formula_versao,qualidade=EXCLUDED.qualidade,atualizado_em=NOW()
-        """), parametros)
+    from services.fundamentos_consolidados import persistir_grupos
+    persistir_grupos(sessao, fundamentos, indicadores)
     for item in coberturas:
         parametros = {
             **item,
@@ -553,13 +531,13 @@ def coletar_fundamentos_valuation(ticker, anos=5, planilha=None, session_factory
                 fundamentos.extend(extrair_demonstracoes_cvm(resposta.content, ticker, cadastro["cnpj"], "DFP", ano))
             except Exception as exc:
                 falhas.append({"fonte": "DFP", "ano": ano, "erro": type(exc).__name__})
-        for ano in range(hoje.year - anos + 1, hoje.year + 1):
+        for ano in (hoje.year,):
             try:
                 url = URL_CVM["ITR"].format(ano=ano)
                 resposta = obter(url, timeout=90)
                 if getattr(resposta, "status_code", None) != 200:
                     raise RuntimeError(f"HTTP_{getattr(resposta, 'status_code', 'SEM_STATUS')}")
-                fundamentos.extend(extrair_demonstracoes_cvm(resposta.content, ticker, cadastro["cnpj"], "ITR", ano))
+                fundamentos.extend(f for f in extrair_demonstracoes_cvm(resposta.content, ticker, cadastro["cnpj"], "ITR", ano) if f["periodo_fim"].year == hoje.year)
             except Exception as exc:
                 falhas.append({"fonte": "ITR", "ano": ano, "erro": type(exc).__name__})
     else:
@@ -633,6 +611,8 @@ def coletar_fundamentos_valuation(ticker, anos=5, planilha=None, session_factory
     sessao = session_factory()
     try:
         _persistir(sessao, fundamentos, indicadores, coberturas)
+        from services.fundamentos_consolidados import podar_trimestres
+        podar_trimestres(sessao, fundamentos, hoje.year)
         from services.proventos_eventos import _persistir as persistir_eventos
         persistir_eventos(sessao, proventos, eventos)
         sessao.commit()
