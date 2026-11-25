@@ -84,7 +84,23 @@ def consultar_ticker(sessao, ticker):
     r = sessao.execute(text("SELECT ticker,cnpj,nome_emissor,setor,codigo_cvm,fonte FROM cadastro_cnpj_acoes WHERE ticker=:ticker"), {"ticker": ticker}).mappings().first()
     return dict(r) if r else None
 
-def sincronizar(session_factory=None, planilha=None, coletor=None, hoje=None):
+
+def combinar_mapas_oficiais(mapas_por_ano):
+    """Une FCA(s) com precedência do ano atual, sem escolher ambiguidade."""
+    mapa, referencias, ambiguos = {}, {}, set()
+    for ano, mapa_ano, ambiguos_ano, fonte in mapas_por_ano:
+        for ticker, cadastro in mapa_ano.items():
+            if ticker not in mapa:
+                mapa[ticker] = cadastro
+                referencias[ticker] = {"ano": ano, "fonte": fonte}
+        ambiguos.update(ambiguos_ano)
+    for ticker in ambiguos:
+        mapa.pop(ticker, None)
+        referencias.pop(ticker, None)
+    return mapa, referencias, ambiguos
+
+def sincronizar(session_factory=None, planilha=None, coletor=None, hoje=None,
+                anos_retroativos=3):
     if session_factory is None:
         from pipeline_dados.conexao import obter_session_factory
         session_factory = obter_session_factory()
@@ -102,11 +118,26 @@ def sincronizar(session_factory=None, planilha=None, coletor=None, hoje=None):
             UNION SELECT ticker FROM ativos_catalogo WHERE tipo::text='ACAO'
         """)) if r[0])
     hoje = hoje or date.today()
-    geral, valores, fonte = coletor.baixar_dataframes(hoje.year)
-    mapa, ambiguos = extrair_cadastro(geral,valores)
-    if not mapa:
+    # A FCA do ano corrente pode ainda não trazer uma companhia recém-listada,
+    # em reorganização societária ou com a publicação pendente. Nunca usamos o
+    # mapa manual: procuramos somente arquivos FCA oficiais anteriores e
+    # mantemos a referência de qual arquivo confirmou cada vínculo.
+    mapas_por_ano = []
+    erros_fontes = []
+    for ano in range(hoje.year, max(hoje.year - int(anos_retroativos), 2000) - 1, -1):
+        try:
+            geral, valores, fonte = coletor.baixar_dataframes(ano)
+            mapa_ano, ambiguos_ano = extrair_cadastro(geral, valores)
+            if mapa_ano:
+                mapas_por_ano.append((ano, mapa_ano, set(ambiguos_ano), fonte))
+        except Exception as exc:
+            erros_fontes.append({"ano": ano, "erro": type(exc).__name__})
+    if not mapas_por_ano:
         raise ValueError("FCA_sem_vinculos_validos")
-    selecionados = sorted(universo & mapa.keys())
+    # O ano mais recente tem precedência; o histórico apenas preenche o que
+    # não foi localizado nele. Ambiguidade nunca é resolvida por chute.
+    mapa, referencias, ambiguos = combinar_mapas_oficiais(mapas_por_ano)
+    selecionados = sorted(universo & set(mapa))
     if not selecionados:
         raise ValueError("FCA_sem_correspondencias_no_universo")
     with session_factory() as s:
@@ -120,7 +151,9 @@ def sincronizar(session_factory=None, planilha=None, coletor=None, hoje=None):
               nome_emissor=EXCLUDED.nome_emissor,setor=EXCLUDED.setor,
               codigo_cvm=EXCLUDED.codigo_cvm,fonte=EXCLUDED.fonte,
               referencia_fonte=EXCLUDED.referencia_fonte,validado_em=NOW()
-        """), [dict(mapa[t],fonte=fonte) for t in selecionados])
+        """), [dict(mapa[t], fonte=referencias[t]["fonte"],
+                     referencia_fonte=f'{referencias[t]["fonte"]}#ano={referencias[t]["ano"]}')
+               for t in selecionados])
         # Reprioriza apenas ativos cuja identidade mudou ou passou a existir.
         # A fila pode ainda não existir na primeira instalação.
         fila_existe = s.execute(text("SELECT to_regclass('public.fila_fundamentos_acoes')")).scalar()
@@ -135,4 +168,6 @@ def sincronizar(session_factory=None, planilha=None, coletor=None, hoje=None):
             "novos":sum(t not in anteriores for t in selecionados),
             "alterados":[t for t in mudaram if t in anteriores],
             "nao_localizados":sorted(universo-set(selecionados)),
-            "ambiguos":sorted(universo & set(ambiguos)), "fonte":fonte}
+            "ambiguos":sorted(universo & set(ambiguos)),
+            "fontes_consultadas": [item[3] for item in mapas_por_ano],
+            "falhas_fontes": erros_fontes}

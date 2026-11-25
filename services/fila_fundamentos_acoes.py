@@ -35,8 +35,32 @@ def selecionar_pendentes(universo, estados, agora, limite):
         if proxima and proxima > agora:
             continue
         tentativa = estado.get("ultima_tentativa")
-        candidatos.append((tentativa is not None, tentativa or agora, ticker))
+        # Itens que deram erro devem voltar antes dos itens inéditos: quando a
+        # sincronização oficial encontra o CNPJ que faltava, eles são a forma
+        # mais rápida de confirmar que a correção realmente funcionou.
+        prioridade = 0 if estado.get("estado") == "FALHA" else 1 if tentativa is None else 2
+        candidatos.append((prioridade, tentativa or agora, ticker))
     return [item[2] for item in sorted(candidatos)[:limite]]
+
+
+def resumo_progresso(universo, estados):
+    """Resumo estável para Telegram; não confunde o lote com o universo."""
+    universo = set(universo)
+    contagens = {"OK": 0, "PARCIAL": 0, "FALHA": 0, "EM_COLETA": 0}
+    for ticker in universo:
+        estado = str((estados.get(ticker) or {}).get("estado") or "PENDENTE")
+        if estado in contagens:
+            contagens[estado] += 1
+    concluidos = contagens["OK"] + contagens["PARCIAL"]
+    return {
+        "total": len(universo),
+        "concluidos": concluidos,
+        "ok": contagens["OK"],
+        "parciais": contagens["PARCIAL"],
+        "falhas": contagens["FALHA"],
+        "em_coleta": contagens["EM_COLETA"],
+        "pendentes": max(0, len(universo) - sum(contagens.values())),
+    }
 
 class CacheCVM:
     """Reutiliza cada ZIP oficial no lote, sem guardar tudo em RAM."""
@@ -106,7 +130,10 @@ def executar_fila(limite=4, prazo_segundos=900, session_factory=None, planilha=N
                 ok = False
                 estado = "FALHA"
                 detalhe = {"erro": type(exc).__name__, "motivo": str(exc)[:200] if isinstance(exc, ValueError) else "consultar logs"}
-            dias = 7 if ok else 1
+            # Falhas entram automaticamente em novo lote no mesmo dia; assim
+            # uma indisponibilidade de fonte não deixa a ação parada até a
+            # próxima semana. Sucesso parcial é revisitado em dois dias.
+            dias = 7 if ok else 0.25
             if ok and detalhe.get("falhas"):
                 dias = 2
             with session_factory() as sessao:
@@ -120,7 +147,15 @@ def executar_fila(limite=4, prazo_segundos=900, session_factory=None, planilha=N
                 sessao.commit()
             resumo = {"ticker": ticker, "estado": estado, "detalhe": detalhe}
             resultado["processados"].append(resumo)
+            estados[ticker] = {
+                "estado": estado,
+                "proxima_tentativa": agora + timedelta(days=dias),
+            }
             if not ok or detalhe.get("falhas"):
                 resultado["falhas"].append(ticker)
             time.sleep(1)
+    resultado["progresso"] = resumo_progresso(universo, estados)
+    resultado["sucessos"] = sum(
+        1 for item in resultado["processados"] if item["estado"] in {"OK", "PARCIAL"}
+    )
     return resultado

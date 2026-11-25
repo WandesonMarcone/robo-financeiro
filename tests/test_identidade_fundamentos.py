@@ -15,4 +15,12 @@ class TestIdentidade(unittest.TestCase):
     def test_resumo_nao_oculta_falha(self):
         s = mensagem({"universo":135,"processados":[{"ticker":"ABCB4","estado":"FALHA","detalhe":{"motivo":"CNPJ ausente"}}],"falhas":["ABCB4"]})
         self.assertIn("ABCB4", s)
-        self.assertIn("Falhas de coleta: 1", s)
+        self.assertIn("Falhas desta rodada: 1", s)
+
+    def test_resumo_exibe_progresso_do_universo(self):
+        s = mensagem({
+            "universo": 135, "processados": [], "falhas": [],
+            "progresso": {"total": 135, "concluidos": 8, "ok": 5, "parciais": 3, "falhas": 2, "pendentes": 125},
+        })
+        self.assertIn("8/135", s)
+        self.assertIn("125 pendentes", s)

@@ -48,6 +48,13 @@ jobs:
           import os
           with open('credenciais.json', 'w', encoding='utf-8') as arquivo:
               arquivo.write(os.environ['GOOGLE_CREDS'])
+      - name: Validar CNPJs oficiais das ações — CVM
+        # A fila não usa mapas manuais; a FCA atual e os arquivos oficiais
+        # recentes são conciliados antes de escolher o lote.
+        run: python -m scripts.sincronizar_cnpj_acoes
+        # A indisponibilidade momentânea da FCA não pode bloquear uma fila que
+        # já possui identidades oficialmente validadas no Neon.
+        continue-on-error: true
       - name: Migrar fundamentos para armazenamento por período
         run: python -m scripts.migrar_fundamentos_consolidados
       - name: Coletar DFP, ITR, proventos e cobertura dos métodos
