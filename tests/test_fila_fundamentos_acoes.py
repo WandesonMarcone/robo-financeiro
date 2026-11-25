@@ -1,7 +1,9 @@
 import unittest
+import io
+import zipfile
 from datetime import datetime, timedelta, timezone, date
 from services.fila_fundamentos_acoes import selecionar_pendentes
-from services.fundamentos_valuation import avaliar_cobertura, _escala
+from services.fundamentos_valuation import avaliar_cobertura, _escala, extrair_demonstracoes_cvm
 
 class TestFilaFundamentos(unittest.TestCase):
     def test_prioriza_novos_e_respeita_retry(self):
@@ -16,6 +18,14 @@ class TestFilaFundamentos(unittest.TestCase):
         fatos = [{"periodo_fim": date(ano, 12, 31), "periodicidade": "ANUAL", "metrica": "lpa" if ano < 2025 else "vpa"} for ano in range(2021, 2026)]
         metodos = {x["metodo"]: x for x in avaliar_cobertura("TEST3", "ACAO", fatos, [])}
         self.assertEqual(metodos["GRAHAM"]["status"], "PARCIAL")
+
+    def test_composicao_capital(self):
+        b = io.BytesIO()
+        with zipfile.ZipFile(b, "w") as z:
+            z.writestr("dfp_cia_aberta_DRE_con_2025.csv", "CNPJ_CIA;DT_FIM_EXERC;ORDEM_EXERC;CD_CONTA;DS_CONTA;VL_CONTA;ESCALA_MOEDA\n00.000.000/0001-91;2025-12-31;ULTIMO;3.01;Receita;100;MIL\n")
+            z.writestr("dfp_cia_aberta_composicao_capital_2025.csv", "CNPJ_CIA;DT_REFER;VERSAO;QT_ACAO_ORDIN_CAP_INTEGR;QT_ACAO_PREF_CAP_INTEGR;QT_ACAO_TOTAL_CAP_INTEGR;QT_ACAO_TOTAL_TESOURO\n00.000.000/0001-91;2025-12-31;1;80;20;100;5\n")
+        fatos = extrair_demonstracoes_cvm(b.getvalue(), "TEST3", "00.000.000/0001-91", "DFP", 2025)
+        self.assertEqual({f["metrica"]: f["valor"] for f in fatos}["acoes_circulacao_ex_tesouraria"], 95)
 
     def test_escala_milhoes(self):
         self.assertEqual(_escala({"ESCALA_MOEDA": "MILHÃO"}, "receita_liquida"), 1000000)

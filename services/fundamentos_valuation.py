@@ -242,6 +242,47 @@ def extrair_demonstracoes_cvm(conteudo, ticker, cnpj, documento, ano):
                         "qualidade_fonte": "OFICIAL", "url_origem": URL_CVM[documento].format(ano=ano),
                         "_prioridade": prioridade,
                     }
+        # Composição de capital é uma fonte oficial separada da DRE.
+        nome_capital = f"{documento.lower()}_cia_aberta_composicao_capital_{ano}.csv"
+        nomes = {nome.lower(): nome for nome in pacote.namelist()}
+        if nome_capital in nomes:
+            with pacote.open(nomes[nome_capital]) as arquivo:
+                leitor = csv.DictReader(io.TextIOWrapper(arquivo, encoding="latin1"), delimiter=";")
+                for linha in leitor:
+                    if normalizar_cnpj(linha.get("CNPJ_CIA")) != cnpj_alvo:
+                        continue
+                    fim = _data(linha.get("DT_REFER"))
+                    if not fim:
+                        continue
+                    campos = {
+                        "acoes_ordinarias": "QT_ACAO_ORDIN_CAP_INTEGR",
+                        "acoes_preferenciais": "QT_ACAO_PREF_CAP_INTEGR",
+                        "acoes_emitidas": "QT_ACAO_TOTAL_CAP_INTEGR",
+                        "acoes_tesouraria": "QT_ACAO_TOTAL_TESOURO",
+                    }
+                    valores = {k: _numero(linha.get(v)) for k, v in campos.items()}
+                    total, tesouraria = valores["acoes_emitidas"], valores["acoes_tesouraria"]
+                    if total is not None and tesouraria is not None and total >= tesouraria:
+                        valores["acoes_circulacao_ex_tesouraria"] = total - tesouraria
+                    for metrica, valor in valores.items():
+                        if valor is None or valor < 0:
+                            continue
+                        chave = (fim, metrica)
+                        versao = _numero(linha.get("VERSAO")) or 0
+                        if fatos_por_chave.get(chave, {}).get("_prioridade", -1) > versao:
+                            continue
+                        fatos_por_chave[chave] = {
+                            "identificador": _id(ticker, documento, fim, metrica, "CVM"),
+                            "ticker": ticker, "cnpj": cnpj_alvo, "classe": "ACAO",
+                            "periodo_inicio": None, "periodo_fim": fim, "exercicio": fim.year,
+                            "periodicidade": "ANUAL" if documento == "DFP" else "TRIMESTRAL",
+                            "documento": documento, "escopo": "CONSOLIDADO",
+                            "demonstracao": "COMPOSICAO_CAPITAL", "conta_codigo": campos.get(metrica),
+                            "metrica": metrica, "valor": valor, "unidade": "QUANTIDADE",
+                            "moeda": "BRL", "fonte": "CVM_DADOS_ABERTOS",
+                            "qualidade_fonte": "DERIVADO" if metrica == "acoes_circulacao_ex_tesouraria" else "OFICIAL",
+                            "url_origem": URL_CVM[documento].format(ano=ano), "_prioridade": versao,
+                        }
     fatos = []
     for fato in fatos_por_chave.values():
         fato.pop("_prioridade", None)
@@ -296,8 +337,16 @@ def derivar_indicadores(ticker, classe, fundamentos, proventos=None, eventos=Non
         if acoes and acoes > 0:
             indicadores.append(_fato(ticker, classe, periodo, "acoes_media_diluida", acoes, "ACOES", {"lucro_liquido": lucro, "lpa": lpa}))
         patrimonio = m.get("patrimonio_liquido")
-        if patrimonio is not None and acoes:
-            indicadores.append(_fato(ticker, classe, periodo, "vpa", patrimonio / acoes, "BRL_ACAO", {"patrimonio_liquido": patrimonio, "acoes": acoes}))
+        quantidade = m.get("acoes_circulacao_ex_tesouraria")
+        if patrimonio is not None and quantidade and quantidade > 0:
+            fator_posterior = 1.0
+            for data_evento, fator in desdobramentos:
+                if data_evento > periodo:
+                    fator_posterior *= fator
+            quantidade *= fator_posterior
+            indicadores.append(_fato(ticker, classe, periodo, "vpa", patrimonio / quantidade, "BRL_ACAO", {"patrimonio_liquido": patrimonio, "acoes": quantidade, "origem": "COMPOSICAO_CAPITAL"}))
+        elif patrimonio is not None and acoes:
+            indicadores.append(_fato(ticker, classe, periodo, "vpa", patrimonio / acoes, "BRL_ACAO", {"patrimonio_liquido": patrimonio, "acoes": acoes, "origem": "ESTIMATIVA_ACOES_MEDIA_DILUIDA"}))
         if patrimonio not in {None, 0} and lucro is not None:
             indicadores.append(_fato(ticker, classe, periodo, "roe", lucro / patrimonio, "FRACAO", {"lucro_liquido": lucro, "patrimonio_liquido": patrimonio}))
         imposto, antes = m.get("impostos_sobre_lucro"), m.get("lucro_antes_impostos")
@@ -313,8 +362,8 @@ def derivar_indicadores(ticker, classe, fundamentos, proventos=None, eventos=Non
             indicadores.append(_fato(ticker, classe, periodo, "captacao_liquida_divida", abs(m["captacao_divida"]) - abs(m["amortizacao_divida"]), "BRL", {"origem": "DFC"}))
         if m.get("ebit") is not None and m.get("depreciacao_amortizacao") is not None:
             indicadores.append(_fato(ticker, classe, periodo, "ebitda", m["ebit"] + m["depreciacao_amortizacao"], "BRL", {"origem": "EBIT_DA"}))
-        if m.get("fluxo_caixa_operacional") is not None and m.get("capex") is not None:
-            indicadores.append(_fato(ticker, classe, periodo, "fluxo_caixa_livre", m["fluxo_caixa_operacional"] - m["capex"] - abs(m.get("capex_intangivel") or 0), "BRL", {"origem": "FCO_CAPEX_IMOBILIZADO", "intangivel_identificado": m.get("capex_intangivel") is not None}))
+        if all(m.get(k) is not None for k in ("fluxo_caixa_operacional", "capex", "capex_intangivel")):
+            indicadores.append(_fato(ticker, classe, periodo, "fluxo_caixa_livre", m["fluxo_caixa_operacional"] - m["capex"] - abs(m["capex_intangivel"]), "BRL", {"origem": "FCO_CAPEX_IMOBILIZADO_INTANGIVEL"}))
         ac, pc = m.get("ativo_circulante"), m.get("passivo_circulante")
         if ac is not None and pc is not None:
             capitais[periodo] = ac - pc
