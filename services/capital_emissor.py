@@ -135,14 +135,27 @@ def espelhar_planilha(planilha=None, session_factory=None):
             WHERE c.ticker=ANY(:tickers)
         """),{"tickers":[str(t).strip().upper() for t in tickers]}).mappings()
         mapa={r["ticker"]:dict(r) for r in rows}
-    valores=[]
+    linhas=[]
     for t in tickers:
         t=str(t).strip().upper()
-        q=quantidades(mapa.get(t),t)
-        valores.append([q["ticker_shares"] if q["ticker_shares"] is not None else "",
-                        q["company_shares"] if q["company_shares"] is not None else ""])
+        r=mapa.get(t) or {}
+        q=quantidades(r,t)
+        nota=(f"Capital emitido. Ref. {r['referencia']}. Fonte: {r['fonte']}. "
+              "Não somar totais entre classes do mesmo emissor."
+              if r else "Pendente de conciliação oficial. Ausência não significa zero.")
+        valores=[]
+        for chave in ("ticker_shares","company_shares"):
+            v=q[chave]
+            celula={"note":nota if v is not None else "Quantidade não confirmada. Ausência não significa zero."}
+            if v is not None:
+                celula["userEnteredValue"]={"numberValue":v}
+            valores.append(celula)
+        linhas.append({"values":valores})
     # Confirma que a ordenação não mudou durante a leitura do Neon.
     if aba.col_values(1)[1:] != tickers:
         raise RuntimeError("BD_Acoes_alterada_durante_espelhamento")
-    aba.update(values=valores,range_name=f"AK2:AL{len(tickers)+1}",value_input_option="RAW")
+    planilha.batch_update({"requests":[{"updateCells":{
+        "range":{"sheetId":aba.id,"startRowIndex":1,"endRowIndex":len(tickers)+1,
+                 "startColumnIndex":36,"endColumnIndex":38},
+        "rows":linhas,"fields":"userEnteredValue,note"}}]})
     return len(mapa)
