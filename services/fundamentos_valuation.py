@@ -504,7 +504,7 @@ def _cadastro_ativo(sessao, ticker):
 
 
 def coletar_fundamentos_valuation(ticker, anos=5, planilha=None, session_factory=None,
-                                  http_get=None, ticker_factory=None, hoje=None):
+                                  http_get=None, ticker_factory=None, hoje=None, identidade_resolver=None):
     ticker = str(ticker or "").strip().upper()
     if not re.fullmatch(r"[A-Z0-9]{4,10}", ticker):
         raise ValueError("ticker_invalido")
@@ -516,12 +516,28 @@ def coletar_fundamentos_valuation(ticker, anos=5, planilha=None, session_factory
         session_factory = SessionDB
     sessao = session_factory()
     try:
-        cadastro = _cadastro_ativo(sessao, ticker)
+        try:
+            cadastro = _cadastro_ativo(sessao, ticker)
+        except ValueError:
+            cadastro = None
     finally:
         sessao.close()
 
     fundamentos = []
     falhas = []
+    if cadastro is None or cadastro["classe"] == "ACAO":
+        if identidade_resolver is None:
+            from services.identidade_fundamentos_acoes import IdentidadeFCA
+            identidade_resolver = IdentidadeFCA(http_get=obter, ano=hoje.year)
+        oficial = identidade_resolver(ticker)
+        if oficial:
+            if cadastro and cadastro["cnpj"] != oficial["cnpj"]:
+                print(f"Identidade {ticker}: divergência cadastral; FCA oficial selecionado")
+            cadastro = oficial
+        elif getattr(identidade_resolver, "falha", None):
+            falhas.append({"fonte": "FCA", "ano": hoje.year, "erro": identidade_resolver.falha})
+    if cadastro is None:
+        raise ValueError("ativo_sem_cnpj_confirmado")
     if cadastro["classe"] == "ACAO":
         anos_dfp = list(range(hoje.year - anos, hoje.year))
         for ano in anos_dfp:
@@ -574,6 +590,9 @@ def coletar_fundamentos_valuation(ticker, anos=5, planilha=None, session_factory
                         })
             except Exception as exc:
                 falhas.append({"fonte": "FII_MENSAL", "ano": ano, "erro": type(exc).__name__})
+
+    if not fundamentos:
+        falhas.append({"fonte": "CVM", "ano": None, "erro": "SEM_DEMONSTRACOES_PARA_CNPJ"})
 
     proventos, eventos = [], []
     try:

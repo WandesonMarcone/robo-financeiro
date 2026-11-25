@@ -58,8 +58,12 @@ jobs:
           else
             python -m scripts.coletar_fundamentos_valuation --automatico --limite 4
           fi
-      - name: Avisar administrador somente sobre falha
-        if: failure() && !cancelled()
+      - name: Enviar resumo da rodada ao Telegram
+        if: always() && !cancelled() && hashFiles('resultado-fundamentos.json') != ''
+        continue-on-error: true
+        run: python -m scripts.notificar_fundamentos
+      - name: Avisar administrador sobre interrupção sem relatório
+        if: failure() && !cancelled() && hashFiles('resultado-fundamentos.json') == ''
         continue-on-error: true
         env:
           ETAPA_FALHA: fundamentos para valuation de ${{ inputs.ticker }}
