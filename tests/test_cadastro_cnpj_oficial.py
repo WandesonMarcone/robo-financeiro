@@ -1,6 +1,6 @@
 import unittest
 import pandas as pd
-from services.cadastro_cnpj_oficial import cnpj_valido, extrair_cadastro
+from services.cadastro_cnpj_oficial import cnpj_valido, extrair_cadastro, combinar_mapas_oficiais
 
 class TestCadastroCNPJ(unittest.TestCase):
     def test_digitos(self):
@@ -19,3 +19,26 @@ class TestCadastroCNPJ(unittest.TestCase):
         self.assertEqual(mapa["PETR3"]["cnpj"],mapa["PETR4"]["cnpj"])
         self.assertNotIn("ANTG3",mapa)
         self.assertEqual(ambiguos,["AMBG3"])
+
+    def test_historico_oficial_preenche_ausencia_sem_substituir_atual(self):
+        atual = {"PETR4": {"cnpj": "33000167000101"}}
+        anterior = {
+            "PETR4": {"cnpj": "00000000000000"},
+            "AZZA3": {"cnpj": "12345678000199"},
+        }
+        mapa, referencias, ambiguos = combinar_mapas_oficiais([
+            (2026, atual, set(), "fca-2026"),
+            (2025, anterior, set(), "fca-2025"),
+        ])
+        self.assertEqual(mapa["PETR4"]["cnpj"], "33000167000101")
+        self.assertEqual(mapa["AZZA3"]["cnpj"], "12345678000199")
+        self.assertEqual(referencias["AZZA3"]["ano"], 2025)
+        self.assertFalse(ambiguos)
+
+    def test_ambiguidade_nunca_usa_historico_como_chute(self):
+        mapa, referencias, _ = combinar_mapas_oficiais([
+            (2026, {}, {"TEST3"}, "fca-2026"),
+            (2025, {"TEST3": {"cnpj": "12345678000199"}}, set(), "fca-2025"),
+        ])
+        self.assertNotIn("TEST3", mapa)
+        self.assertNotIn("TEST3", referencias)
