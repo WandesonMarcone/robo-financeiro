@@ -164,7 +164,19 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, 
             if o in todas_originais and o not in cat_populares
             and precisa_atualizar(o, mapa_atualizacao, agora_dt, sp_tz)
         ][:limite_opp]
-        cat_novatas = [c for c in opps_brutas if c not in todas][:2]
+        # Descoberta continua ativa. A inclusão exige vínculo oficial atual.
+        identidades_novas = {}
+        candidatos = [c for c in opps_brutas if c not in todas][:8] if tickers_lote is None else []
+        if candidatos:
+            from services.identidade_fundamentos_acoes import IdentidadeFCA
+            resolver = IdentidadeFCA()
+            for candidato in candidatos:
+                identidade = resolver(candidato)
+                if identidade:
+                    identidades_novas[candidato] = identidade
+                if len(identidades_novas) >= 2:
+                    break
+        cat_novatas = list(identidades_novas)
         todas.extend(cat_novatas)
     else:
         cat_opps = []
@@ -241,7 +253,8 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, 
                 )
             roe = _fund("ROE")
             dy = _fund("Div.Yield")
-            qtd_acoes = converter_numero(yf_info.get("sharesOutstanding"))
+            # Não confundir sharesOutstanding do fornecedor com a quantidade emitida por classe.
+            qtd_acoes = None
             p_ativo = _fund("P/Ativo")
             marg_bruta = _fund("Mrg Bruta")
             marg_ebit = _fund("Mrg Ebit")
@@ -263,6 +276,8 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, 
             valores = {}
             if ticker in cat_novatas:
                 valores["A"] = ticker
+                valores["AJ"] = identidades_novas[ticker]["cnpj"]
+                valores["AH"] = identidades_novas[ticker]["nome_emissor"]
             valores["B"] = setor
             if sub_setor and sub_setor != SETOR_PADRAO[1]:
                 valores["AI"] = sub_setor

@@ -213,6 +213,22 @@ def asset(ticker: str):
     return jsonify({"data": payload})
 
 
+@portfolio_api.get("/api/v1/assets/<ticker>/capital")
+@requires_portfolio_user
+def asset_capital(ticker):
+    from services.capital_emissor import obter_capital
+    symbol=ticker.strip().upper()
+    if not _TICKER.fullmatch(symbol):
+        return jsonify({"message":"Ticker inválido."}),400
+    try:
+        resultado=obter_capital(symbol)
+    except Exception:
+        return jsonify({"message":"Capital temporariamente indisponível."}),503
+    if resultado is None:
+        return jsonify({"data":None,"message":"Emissor não identificado."}),404
+    return jsonify({"data":resultado})
+
+
 @portfolio_api.get("/api/v1/assets/<ticker>/history")
 @requires_portfolio_user
 def asset_history(ticker: str):

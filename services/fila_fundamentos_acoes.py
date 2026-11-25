@@ -89,15 +89,12 @@ def executar_fila(limite=10, prazo_segundos=900, session_factory=None, planilha=
         planilha = _planilha_padrao()
     limite = max(1, min(10, int(limite)))
     inicio = time.monotonic()
-    universo = {str(v).strip().upper() for v in planilha.worksheet("BD_Acoes").col_values(1)[1:]
-                if re.fullmatch(r"[A-Z0-9]{4,10}", str(v).strip().upper())}
+    from services.universo_acoes import ler_planilha, sincronizar_universo
+    universo = ler_planilha(planilha)
     with session_factory() as sessao:
         sessao.execute(text(DDL))
+        sincronizar_universo(sessao, universo)
         sessao.commit()
-        universo.update(r[0].upper() for r in sessao.execute(text("""
-            SELECT ticker FROM ativos_catalogo WHERE tipo::text='ACAO'
-            UNION SELECT ticker FROM ativos WHERE tipo::text='ACAO'
-        """)) if r[0] and re.fullmatch(r"[A-Z0-9]{4,10}", r[0].upper()))
         estados = {r["ticker"]: dict(r) for r in sessao.execute(text(
             "SELECT * FROM fila_fundamentos_acoes")).mappings()}
     agora = datetime.now(timezone.utc)
