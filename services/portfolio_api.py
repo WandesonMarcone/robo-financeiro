@@ -13,7 +13,7 @@ from datetime import date, timedelta
 from functools import wraps
 
 import requests
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, Response
 
 portfolio_api = Blueprint("portfolio_api", __name__)
 logger = logging.getLogger(__name__)
@@ -135,6 +135,55 @@ def market_overview():
     return jsonify({"data": data, "source": "robo_financeiro"})
 
 
+@portfolio_api.get("/api/v1/assets")
+@requires_portfolio_user
+def assets_catalog():
+    from services.portfolio_catalogo import CLASSES, obter_catalogo, paginar
+    classe=(request.args.get("asset_type") or "").strip().lower()
+    if classe=="fixed_income":
+        return jsonify({"message":"Catálogo de renda fixa ainda não disponível."}),501
+    if classe not in CLASSES:
+        return jsonify({"message":"Informe asset_type válido."}),400
+    try:
+        page=int(request.args.get("page","1"))
+        page_size=int(request.args.get("page_size","24"))
+        q=request.args.get("q","").strip()
+        setor=request.args.get("sector","").strip()
+        if not (1<=page<=100000 and 1<=page_size<=100 and len(q)<=100 and len(setor)<=100):
+            raise ValueError("parâmetro inválido")
+    except (ValueError,TypeError):
+        return jsonify({"message":"Parâmetros de paginação ou filtro inválidos."}),400
+    try:
+        return jsonify(paginar(obter_catalogo(classe),page,page_size,q,setor))
+    except Exception:
+        logger.warning("Catálogo consolidado indisponível para %s",classe)
+        return jsonify({"message":"Catálogo temporariamente indisponível."}),503
+
+
+@portfolio_api.get("/api/v1/media/logos/<asset_type>/<logo_key>/<version>")
+def logo_web(asset_type,logo_key,version):
+    from services.portfolio_logos_web import ler_logo
+    try:
+        dados=ler_logo(asset_type,logo_key,version)
+    except Exception:
+        return jsonify({"message":"Mídia indisponível."}),503
+    if dados is None:
+        return jsonify({"message":"Logo não localizada."}),404
+    response=Response(dados,mimetype="image/webp")
+    response.set_etag(version)
+    response.headers["Cache-Control"]="public, max-age=86400, immutable"
+    response.headers["X-Content-Type-Options"]="nosniff"
+    return response.make_conditional(request)
+
+
+def _identidade_catalogo(classe,ticker):
+    try:
+        from services.portfolio_catalogo import obter_item
+        return obter_item(classe,ticker) or {}
+    except Exception:
+        return {}
+
+
 @portfolio_api.get("/api/v1/assets/<ticker>")
 @requires_portfolio_user
 def asset(ticker: str):
@@ -153,8 +202,11 @@ def asset(ticker: str):
             str(item.get("chave")): _to_number(item.get("valor_numerico"))
             for item in metrics
         }
+        identidade = _identidade_catalogo("crypto" if requested_type=="cripto" else requested_type,symbol) if requested_type in {"etf","bdr","crypto","cripto"} else {}
         return jsonify({"data": {
             "ticker": symbol,
+            "name": identidade.get("name") or instrument.get("nome"),
+            "logo_url": identidade.get("logo_url"),
             "asset_type": requested_type,
             "price": _to_number(instrument.get("fechamento")),
             "updated_at": (
@@ -178,7 +230,10 @@ def asset(ticker: str):
                 "subsector": instrument.get("indice_referencia"),
             },
         }})
+    if requested_type not in {"","stock","action","acao","fii"}:
+        return jsonify({"message":"Classe de ativo inválida."}),400
     is_fii = requested_type == "fii"
+    identidade = _identidade_catalogo("fii" if is_fii else "stock",symbol)
 
     # A planilha consolidada é o dado operacional mais atual. Ela usa os mesmos
     # pipelines e a mesma base SQL/Neon já mantidos pelo Robô Financeiro.
@@ -186,11 +241,15 @@ def asset(ticker: str):
     data = buscar_ativo_na_planilha(symbol, is_fii)
     if data is None and not is_fii:
         data = buscar_ativo_na_planilha(symbol, False)
-    if data is None:
+    if data is None and not identidade:
         return jsonify({"data": None, "message": "Ativo ainda sem dados consolidados pelo Robô."}), 404
+    if data is None:
+        data = {"preco":identidade.get("price"),"atualizado_em":identidade.get("updated_at"),"setor":identidade.get("sector"),"subsetor":identidade.get("subsector")}
 
     payload = {
         "ticker": symbol,
+        "name": identidade.get("name"),
+        "logo_url": identidade.get("logo_url"),
         "asset_type": "fii" if is_fii else (requested_type or "stock"),
         "price": _to_number(data.get("preco")),
         "updated_at": data.get("atualizado_em"),

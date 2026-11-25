@@ -65,3 +65,7 @@ de segurança precisam ser definidos pela Carteira/usuário.
 A Carteira deve bloquear o cálculo quando `coverage` indicar insuficiência.
 Instituições financeiras não devem usar FCFF industrial; priorize FCFE, lucro
 residual, Gordon ou métodos de dividendos conforme a cobertura informada.
+
+## Catálogo navegável e logos web
+
+Implementação inicial em revisão: GET /api/v1/assets, paginação, filtros e nome/logo_url no detalhe. Consulte [especificação](./especificacao_catalogo_logos_carteira.md). Fonte atual de listagem: união dos cadastros SQL e snapshots; ativos exclusivos da planilha ainda precisam ser conciliados. Logos web desativadas por padrão até confirmar direitos de uso e executar cache aprovado. Não representa deploy validado.
