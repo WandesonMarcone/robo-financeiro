@@ -55,11 +55,19 @@ def selecionar_lote(tickers, limite, hoje=None):
     return [tickers[(inicio + indice) % len(tickers)] for indice in range(limite)]
 
 
-def extrair_eventos_yahoo(ticker, classe, papel, desde, ate):
-    historico = papel.history(
-        start=desde.isoformat(), end=(ate + timedelta(days=1)).isoformat(),
-        interval="1d", auto_adjust=False, actions=True,
-    )
+def extrair_eventos_yahoo(ticker, classe, papel, desde, ate, tentativas=2, espera_retentativa=3):
+    """Consulta o Yahoo novamente antes de registrar uma falha pontual."""
+    for tentativa in range(max(1, int(tentativas))):
+        try:
+            historico = papel.history(
+                start=desde.isoformat(), end=(ate + timedelta(days=1)).isoformat(),
+                interval="1d", auto_adjust=False, actions=True,
+            )
+            break
+        except Exception:
+            if tentativa + 1 >= max(1, int(tentativas)):
+                raise
+            time.sleep(float(espera_retentativa) * (tentativa + 1))
     if historico is None or historico.empty:
         return [], []
     proventos, eventos = [], []

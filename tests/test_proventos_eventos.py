@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from services.proventos_eventos import coletar_proventos_eventos, selecionar_lote
+from services.proventos_eventos import coletar_proventos_eventos, extrair_eventos_yahoo, selecionar_lote
 
 
 class WorksheetNotFound(Exception):
@@ -83,6 +83,24 @@ class ProventosEventosTests(unittest.TestCase):
         primeiro = selecionar_lote(tickers, 2, hoje=date(2026, 11, 24))
         segundo = selecionar_lote(tickers, 2, hoje=date(2026, 11, 25))
         self.assertNotEqual(primeiro, segundo)
+
+    def test_reconsulta_falha_transitoria_do_yahoo(self):
+        class PapelInstavel:
+            chamadas = 0
+
+            def history(self, **_kwargs):
+                self.chamadas += 1
+                if self.chamadas == 1:
+                    raise RuntimeError("falha transitória")
+                return Papel().history()
+
+        with patch("services.proventos_eventos.time.sleep") as espera:
+            proventos, eventos = extrair_eventos_yahoo(
+                "BBAS3", "ACAO", PapelInstavel(), date(2026, 10, 1), date(2026, 11, 1)
+            )
+        self.assertEqual(1, len(proventos))
+        self.assertEqual(1, len(eventos))
+        espera.assert_called_once_with(3.0)
 
     def test_planilha_e_confirmada_antes_do_neon(self):
         eventos = []

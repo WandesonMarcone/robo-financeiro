@@ -46,4 +46,5 @@ jobs:
         run: |
           python -m scripts.coletar_proventos_eventos \
             --limite-por-classe "${{ inputs.limite_por_classe || '20' }}" \
-            --janela-dias "${{ inputs.janela_dias || '75' }}"
+            --janela-dias "${{ inputs.janela_dias || '75' }}" \
+            --pausa-segundos 3

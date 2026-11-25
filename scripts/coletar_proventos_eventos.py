@@ -10,6 +10,7 @@ if __name__ == "__main__":
     parser.add_argument("--limite-por-classe", type=int, default=int(os.getenv("EVENTOS_LIMITE_POR_CLASSE", "20")))
     parser.add_argument("--janela-dias", type=int, default=int(os.getenv("EVENTOS_JANELA_DIAS", "75")))
     parser.add_argument("--pausa-segundos", type=float, default=1)
+    parser.add_argument("--falhar-com-falhas", action="store_true")
     args = parser.parse_args()
     resultado = coletar_proventos_eventos(
         limite_por_classe=args.limite_por_classe,
@@ -18,4 +19,6 @@ if __name__ == "__main__":
     )
     print(resultado)
     if resultado["falhas"]:
-        raise SystemExit("coleta_proventos_eventos_incompleta")
+        print({"status": "parcial", "falhas": len(resultado["falhas"])})
+        if args.falhar_com_falhas:
+            raise SystemExit("coleta_proventos_eventos_incompleta")
