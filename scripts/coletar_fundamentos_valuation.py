@@ -10,7 +10,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--ticker")
     parser.add_argument("--automatico", action="store_true")
-    parser.add_argument("--limite", type=int, default=4)
+    parser.add_argument("--limite", type=int, default=10)
     parser.add_argument("--anos", type=int, default=5, choices=(3, 4, 5))
     args = parser.parse_args()
     if args.automatico:

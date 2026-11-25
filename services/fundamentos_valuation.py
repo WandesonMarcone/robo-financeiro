@@ -507,7 +507,7 @@ def coletar_fundamentos_valuation(ticker, anos=5, planilha=None, session_factory
 
     fundamentos = []
     falhas = []
-    if cadastro is None or cadastro["classe"] == "ACAO":
+    if cadastro is None or (cadastro["classe"] == "ACAO" and not cadastro.get("fonte")):
         if identidade_resolver is None:
             from services.identidade_fundamentos_acoes import IdentidadeFCA
             identidade_resolver = IdentidadeFCA(http_get=obter, ano=hoje.year)

@@ -132,6 +132,9 @@ def sincronizar(session_factory=None, planilha=None, coletor=None, hoje=None,
             print(f"FCA {ano}: {len(geral)} emissores/linhas, {len(valores)} valores, {len(mapa_ano)} vínculos, {len(ambiguos_ano)} ambiguidades; colunas={list(valores.columns)}")
             if mapa_ano:
                 mapas_por_ano.append((ano, mapa_ano, set(ambiguos_ano), fonte))
+                parcial, _, _ = combinar_mapas_oficiais(mapas_por_ano)
+                if universo <= set(parcial):
+                    break
             else:
                 erros_fontes.append({"ano": ano, "erro": "SEM_VINCULOS"})
         except Exception as exc:

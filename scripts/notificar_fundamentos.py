@@ -8,29 +8,25 @@ from pathlib import Path
 def mensagem(resultado):
     itens = resultado.get("processados", [])
     progresso = resultado.get("progresso") or {}
-    linhas = ["📊 Fundamentos"]
+    grupos = {}
     for item in itens:
         d = item.get("detalhe", {})
-        ticker = item["ticker"]
-        estado = item["estado"]
         motivo = str(d.get("motivo") or "").lower()
         falhas = d.get("falhas") or []
+        estado = item["estado"]
         if estado == "FALHA":
             if "cnpj" in motivo or any(f.get("fonte") == "FCA" for f in falhas if isinstance(f,dict)):
-                rotulo = "CNPJ não confirmado"
+                rotulo = "❌ CNPJ não confirmado"
             elif any(f.get("erro") == "SEM_DEMONSTRACOES_PARA_CNPJ" for f in falhas if isinstance(f,dict)):
-                rotulo = "sem balanços"
+                rotulo = "❌ Sem balanços"
             else:
-                rotulo = "falha na coleta"
-            linhas.append(f"❌ {ticker} — {rotulo}")
+                rotulo = "❌ Falha"
         else:
-            simbolo = "✅" if estado == "OK" else "🟡"
-            rotulo = "atualizado" if estado == "OK" else "dados parciais"
-            metodos = d.get("metodos_prontos")
-            total = d.get("metodos_total")
-            if metodos is not None and total:
-                rotulo += f" ({metodos}/{total} métodos com dados)"
-            linhas.append(f"{simbolo} {ticker} — {rotulo}")
+            rotulo = "✅ Atualizados" if estado == "OK" else "🟡 Parciais"
+        grupos.setdefault(rotulo,[]).append(item["ticker"])
+    linhas = ["📊 Fundamentos"]
+    for rotulo,tickers in grupos.items():
+        linhas.append(rotulo + ": " + ", ".join(tickers))
     if not itens:
         linhas.append("Nenhum ativo pendente nesta rodada.")
     if progresso:

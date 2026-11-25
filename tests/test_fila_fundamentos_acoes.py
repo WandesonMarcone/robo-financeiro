@@ -14,12 +14,12 @@ class TestFilaFundamentos(unittest.TestCase):
         }
         self.assertEqual(selecionar_pendentes(["BBAS3", "PETR4", "ITSA4"], estados, agora, 2), ["PETR4", "BBAS3"])
 
-    def test_prioriza_reprocessamento_de_falha(self):
+    def test_novos_nao_ficam_bloqueados_por_falhas(self):
         agora = datetime(2026, 11, 25, tzinfo=timezone.utc)
         estados = {
             "AZZA3": {"estado": "FALHA", "ultima_tentativa": agora - timedelta(hours=1), "proxima_tentativa": agora},
         }
-        self.assertEqual(selecionar_pendentes(["AZZA3", "PETR4"], estados, agora, 2), ["AZZA3", "PETR4"])
+        self.assertEqual(selecionar_pendentes(["AZZA3", "PETR4"], estados, agora, 2), ["PETR4", "AZZA3"])
 
     def test_progresso_usa_universo_completo(self):
         progresso = resumo_progresso(

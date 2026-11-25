@@ -2,13 +2,27 @@ name: Fundamentos para valuation
 
 on:
   schedule:
-    - cron: '37 */4 * * *'
+    - cron: '37 */2 * * *'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fundamentos-valuation.yml'
   workflow_dispatch:
     inputs:
       ticker:
         description: "Ticker individual; vazio executa fila automática de ações"
         required: false
         type: string
+      limite:
+        description: "Teto de ações por lote (1 a 10)"
+        required: false
+        type: choice
+        default: '10'
+        options:
+          - '4'
+          - '6'
+          - '8'
+          - '10'
       anos:
         description: "Histórico fundamental"
         required: true
@@ -61,11 +75,12 @@ jobs:
         env:
           TICKER: ${{ inputs.ticker }}
           ANOS: ${{ inputs.anos || '5' }}
+          LIMITE: ${{ inputs.limite || '10' }}
         run: |
           if [ -n "$TICKER" ]; then
             python -m scripts.coletar_fundamentos_valuation --ticker "$TICKER" --anos "$ANOS"
           else
-            python -m scripts.coletar_fundamentos_valuation --automatico --limite 4
+            python -m scripts.coletar_fundamentos_valuation --automatico --limite "$LIMITE"
           fi
       - name: Enviar resumo da rodada ao Telegram
         if: always() && !cancelled() && hashFiles('resultado-fundamentos.json') != ''

@@ -38,7 +38,7 @@ def selecionar_pendentes(universo, estados, agora, limite):
         # Itens que deram erro devem voltar antes dos itens inéditos: quando a
         # sincronização oficial encontra o CNPJ que faltava, eles são a forma
         # mais rápida de confirmar que a correção realmente funcionou.
-        prioridade = 0 if estado.get("estado") == "FALHA" else 1 if tentativa is None else 2
+        prioridade = 0 if tentativa is None else 1 if estado.get("estado") == "FALHA" else 2
         candidatos.append((prioridade, tentativa or agora, ticker))
     return [item[2] for item in sorted(candidatos)[:limite]]
 
@@ -79,7 +79,7 @@ class CacheCVM:
             arquivo.write_bytes(resposta.content)
         return resposta
 
-def executar_fila(limite=4, prazo_segundos=900, session_factory=None, planilha=None,
+def executar_fila(limite=10, prazo_segundos=900, session_factory=None, planilha=None,
                   coletar=coletar_fundamentos_valuation):
     if session_factory is None:
         from atualizador_documentos import SessionDB
@@ -123,7 +123,7 @@ def executar_fila(limite=4, prazo_segundos=900, session_factory=None, planilha=N
             try:
                 retorno = coletar(ticker, anos=5, planilha=planilha, session_factory=session_factory, http_get=cache, identidade_resolver=identidade)
                 ok = retorno.get("status") == "ok"
-                parcial = bool(retorno.get("falhas")) or retorno.get("metodos_prontos", 0) < 10
+                parcial = bool(retorno.get("falhas")) or retorno.get("metodos_prontos", 0) < retorno.get("metodos_total", 10)
                 estado = "PARCIAL" if ok and parcial else "OK" if ok else "FALHA"
                 detalhe = retorno
             except Exception as exc:
@@ -133,7 +133,7 @@ def executar_fila(limite=4, prazo_segundos=900, session_factory=None, planilha=N
             # Falhas entram automaticamente em novo lote no mesmo dia; assim
             # uma indisponibilidade de fonte não deixa a ação parada até a
             # próxima semana. Sucesso parcial é revisitado em dois dias.
-            dias = 7 if ok else 0.25
+            dias = 7 if ok and not parcial else 2 if ok else 0.25
             if ok and detalhe.get("falhas"):
                 dias = 2
             with session_factory() as sessao:
@@ -153,7 +153,7 @@ def executar_fila(limite=4, prazo_segundos=900, session_factory=None, planilha=N
             }
             if not ok or detalhe.get("falhas"):
                 resultado["falhas"].append(ticker)
-            time.sleep(1)
+            time.sleep(2)
     resultado["progresso"] = resumo_progresso(universo, estados)
     resultado["sucessos"] = sum(
         1 for item in resultado["processados"] if item["estado"] in {"OK", "PARCIAL"}

@@ -52,12 +52,12 @@ def anuais_validos(fundamentos, ano_corrente):
     return {chave for chave, metricas in campos.items() if MINIMO_ANUAL <= metricas}
 
 def filtrar_historico(fundamentos, indicadores, ano_corrente):
-    """Não elimina trimestre antigo se o anual correspondente estiver incompleto."""
-    anuais = anuais_validos(fundamentos, ano_corrente)
+    """Somente trimestres do exercício corrente na base ativa de ações."""
     def manter(item):
         return not (item["classe"] == "ACAO" and item["periodicidade"] == "TRIMESTRAL"
-                    and (item["ticker"],int(item["exercicio"])) in anuais)
+                    and int(item["exercicio"]) < ano_corrente)
     return [x for x in fundamentos if manter(x)], [x for x in indicadores if manter(x)]
+
 
 def persistir_grupos(sessao, fundamentos, indicadores):
     grupos = agrupar(fundamentos,"fundamentos") + agrupar(indicadores,"indicadores")
@@ -99,13 +99,13 @@ WHERE p.camada='indicadores'
 """
 
 def podar_trimestres(sessao, fundamentos, ano_corrente):
-    anuais = anuais_validos(fundamentos, ano_corrente)
-    if anuais:
-        sessao.execute(text("""
-            DELETE FROM fundamentos_periodos
-            WHERE classe='ACAO' AND periodicidade='TRIMESTRAL'
-              AND ticker=:ticker AND exercicio=:exercicio
-        """), [{"ticker":t,"exercicio":a} for t,a in sorted(anuais)])
+    # Aplica a política de retenção mesmo quando o DFP ainda não chegou.
+    # Dados antigos da migração inicial permanecem no backup.
+    sessao.execute(text("""
+        DELETE FROM fundamentos_periodos
+        WHERE classe='ACAO' AND periodicidade='TRIMESTRAL' AND exercicio<:ano
+    """), {"ano":ano_corrente})
+
 
 def migrar(session_factory=None, planilha=None, ano_corrente=None):
     """Migração transacional e idempotente; preserva originais para auditoria."""
@@ -117,6 +117,8 @@ def migrar(session_factory=None, planilha=None, ano_corrente=None):
         s.execute(text("SELECT pg_advisory_xact_lock(260025)"))
         tipo = s.execute(text("SELECT relkind FROM pg_class WHERE oid=to_regclass('public.fundamentos_ativos')")).scalar()
         if tipo == "v":
+            podar_trimestres(s,[],ano_corrente)
+            s.commit()
             return {"status":"ja_migrado"}
         if tipo != "r":
             raise RuntimeError("base_original_ausente")
