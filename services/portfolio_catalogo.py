@@ -53,15 +53,23 @@ def _ler_neon(classe, session_factory=None):
     with session_factory() as s:
         if classe in ("stock","fii"):
             snapshot = "snapshots_acoes" if classe=="stock" else "snapshots_fiis"
+            universo_oficial = classe=="stock" and bool(s.execute(
+                text("SELECT to_regclass('public.universo_acoes_autorizadas')")
+            ).scalar())
             oficial = classe=="stock" and bool(s.execute(text("SELECT to_regclass('public.cadastro_cnpj_acoes')")).scalar())
             # Identificadores SQL são constantes internas, nunca entrada do usuário.
             join_oficial = "LEFT JOIN cadastro_cnpj_acoes co ON co.ticker=u.ticker" if oficial else ""
             nome_oficial = "co.nome_emissor," if oficial else ""
             setor_oficial = "co.setor," if oficial else ""
+            selecao_universo = (
+                "SELECT ticker FROM universo_acoes_autorizadas"
+                if universo_oficial else
+                "SELECT ticker FROM ativos WHERE tipo::text=:tipo "
+                "UNION SELECT ticker FROM ativos_catalogo WHERE tipo::text=:tipo"
+            )
             sql = f"""
                 WITH universo AS (
-                    SELECT ticker FROM ativos WHERE tipo::text=:tipo
-                    UNION SELECT ticker FROM ativos_catalogo WHERE tipo::text=:tipo
+                    {selecao_universo}
                 )
                 SELECT u.ticker, COALESCE({nome_oficial}e.nome_comercial,e.nome,c.nome_emissor) AS name,
                        COALESCE(sc.setor,c.setor,{setor_oficial}NULL) AS sector,
