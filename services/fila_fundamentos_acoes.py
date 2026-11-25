@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import logging
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -25,6 +26,26 @@ CREATE TABLE IF NOT EXISTS fila_fundamentos_acoes (
     detalhe JSONB NOT NULL DEFAULT '{}'::jsonb
 )
 """
+
+logger = logging.getLogger(__name__)
+
+
+def resumo_erro(exc, limite=240):
+    """Registra a causa operacional sem persistir credenciais por acidente."""
+    mensagem = " ".join(str(exc or "").split())
+    mensagem = re.sub(
+        r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+",
+        r"\1[redigido]",
+        mensagem,
+    )
+    mensagem = re.sub(
+        r"(?i)\b(api[_-]?key|token|password|secret|client_secret)\b"
+        r"(\s*[:=]\s*)[^\s,;]+",
+        r"\1\2[redigido]",
+        mensagem,
+    )
+    mensagem = re.sub(r"([?&])[^\s#]+", r"\1[parâmetros redigidos]", mensagem)
+    return mensagem[:limite] or "sem mensagem fornecida"
 
 def selecionar_pendentes(universo, estados, agora, limite):
     """Não deixa um ativo com erro impedir a entrada dos demais."""
@@ -126,7 +147,14 @@ def executar_fila(limite=10, prazo_segundos=900, session_factory=None, planilha=
             except Exception as exc:
                 ok = False
                 estado = "FALHA"
-                detalhe = {"erro": type(exc).__name__, "motivo": str(exc)[:200] if isinstance(exc, ValueError) else "consultar logs"}
+                motivo = resumo_erro(exc)
+                logger.warning(
+                    "Coleta de fundamentos falhou para %s (%s): %s",
+                    ticker,
+                    type(exc).__name__,
+                    motivo,
+                )
+                detalhe = {"erro": type(exc).__name__, "motivo": motivo}
             # Falhas entram automaticamente em novo lote no mesmo dia; assim
             # uma indisponibilidade de fonte não deixa a ação parada até a
             # próxima semana. Sucesso parcial é revisitado em dois dias.
