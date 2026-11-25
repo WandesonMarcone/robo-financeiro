@@ -65,3 +65,7 @@ de segurança precisam ser definidos pela Carteira/usuário.
 A Carteira deve bloquear o cálculo quando `coverage` indicar insuficiência.
 Instituições financeiras não devem usar FCFF industrial; priorize FCFE, lucro
 residual, Gordon ou métodos de dividendos conforme a cobertura informada.
+
+## Extensão proposta: catálogo navegável e logos web
+
+A [especificação de catálogo e logos](./especificacao_catalogo_logos_carteira.md) descreve o próximo contrato necessário à Carteira Consolidada. Esta extensão está pendente de implementação e validação; não faz parte dos endpoints atualmente disponíveis.
