@@ -52,6 +52,9 @@ jobs:
         # A fila não usa mapas manuais; a FCA atual e os arquivos oficiais
         # recentes são conciliados antes de escolher o lote.
         run: python -m scripts.sincronizar_cnpj_acoes
+        # A indisponibilidade momentânea da FCA não pode bloquear uma fila que
+        # já possui identidades oficialmente validadas no Neon.
+        continue-on-error: true
       - name: Coletar DFP, ITR, proventos e cobertura dos métodos
         env:
           TICKER: ${{ inputs.ticker }}
