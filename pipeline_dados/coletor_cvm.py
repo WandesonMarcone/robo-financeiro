@@ -128,10 +128,13 @@ class ResultadoColetaAcoes:
 
 
 def _mapa_acoes_por_cnpj(session):
+    from services.cadastro_cnpj_oficial import ler_cadastro
+    oficiais = ler_cadastro(session)
     mapa = {}
     consulta = session.query(Ativo).filter(Ativo.tipo == TipoAtivo.ACAO)
     for ativo in consulta:
-        chave = normalizar_cnpj(ativo.cnpj)
+        oficial = oficiais.get(str(ativo.ticker or "").upper())
+        chave = oficial["cnpj"] if oficial else normalizar_cnpj(ativo.cnpj)
         if chave is None:
             continue
         if chave not in mapa:

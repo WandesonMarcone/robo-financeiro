@@ -484,6 +484,10 @@ def _persistir(sessao, fundamentos, indicadores, coberturas):
 
 
 def _cadastro_ativo(sessao, ticker):
+    from services.cadastro_cnpj_oficial import consultar_ticker
+    oficial = consultar_ticker(sessao, ticker)
+    if oficial:
+        return dict(oficial, classe="ACAO")
     # Catálogo oficial também cobre ativos ainda não presentes na tabela legada.
     linha = sessao.execute(text("""
         SELECT ticker, cnpj, classe, setor FROM (
