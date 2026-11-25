@@ -280,10 +280,15 @@ def _cnpj_conhecido(ticker):
     chave = normalizar_ticker(ticker)
     if not chave:
         return None
-    mapa = getattr(config, "MAPA_CNPJ_B3", {}) or {}
-    for cnpj, tkr in mapa.items():
-        if normalizar_ticker(tkr) == chave:
-            return cnpj
+    try:
+        from pipeline_dados.conexao import obter_session_factory
+        from services.cadastro_cnpj_oficial import consultar_ticker
+        with obter_session_factory()() as sessao:
+            cadastro = consultar_ticker(sessao, chave)
+            if cadastro:
+                return cadastro["cnpj"]
+    except Exception:
+        logger.debug("Cadastro oficial indisponível para %s", chave, exc_info=True)
     return None
 
 

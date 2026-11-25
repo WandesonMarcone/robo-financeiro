@@ -1,0 +1,21 @@
+import unittest
+import pandas as pd
+from services.cadastro_cnpj_oficial import cnpj_valido, extrair_cadastro
+
+class TestCadastroCNPJ(unittest.TestCase):
+    def test_digitos(self):
+        self.assertEqual(cnpj_valido("33.000.167/0001-01"),"33000167000101")
+        self.assertEqual(cnpj_valido("05.878.397/0001-32"),"05878397000132")
+        self.assertIsNone(cnpj_valido("31.628.739/0001-04"))
+        self.assertIsNone(cnpj_valido("00000000000000"))
+
+    def test_multiplas_classes_e_ambiguos(self):
+        geral=pd.DataFrame([{"CNPJ_Companhia":c,"Nome_Empresarial":n} for c,n in [("33.000.167/0001-01","Petrobras"),("05.878.397/0001-32","Allos")]])
+        valores=pd.DataFrame([{"CNPJ_Companhia":c,"Codigo_Negociacao":t,"Tipo":"Ações","Mercado":"Bolsa","Data_Fim_Negociacao":fim} for c,t,fim in [
+            ("33.000.167/0001-01","PETR3",""),("33.000.167/0001-01","PETR4",""),
+            ("05.878.397/0001-32","ALOS3",""),("05.878.397/0001-32","ANTG3","2020-01-01"),
+            ("33.000.167/0001-01","AMBG3",""),("05.878.397/0001-32","AMBG3","")]])
+        mapa, ambiguos=extrair_cadastro(geral,valores)
+        self.assertEqual(mapa["PETR3"]["cnpj"],mapa["PETR4"]["cnpj"])
+        self.assertNotIn("ANTG3",mapa)
+        self.assertEqual(ambiguos,["AMBG3"])
