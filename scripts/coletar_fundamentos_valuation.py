@@ -1,6 +1,7 @@
 """Executa a coleta isolada de fundamentos para um ativo."""
 import argparse
 import json
+from pathlib import Path
 
 from services.fundamentos_valuation import coletar_fundamentos_valuation
 
@@ -15,6 +16,7 @@ if __name__ == "__main__":
     if args.automatico:
         from services.fila_fundamentos_acoes import executar_fila
         resultado = executar_fila(limite=args.limite)
+        Path("resultado-fundamentos.json").write_text(json.dumps(resultado, ensure_ascii=False, default=str), encoding="utf-8")
         print(json.dumps(resultado, ensure_ascii=False, default=str))
         if resultado["falhas"]:
             raise SystemExit("fila_fundamentos_com_falhas")
@@ -22,6 +24,8 @@ if __name__ == "__main__":
     if not args.ticker:
         parser.error("informe --ticker ou --automatico")
     resultado = coletar_fundamentos_valuation(args.ticker, anos=args.anos)
+    resumo = {"universo": 1, "processados": [{"ticker": args.ticker, "estado": "PARCIAL" if resultado.get("status") == "ok" else "FALHA", "detalhe": resultado}], "falhas": [args.ticker] if resultado.get("status") != "ok" or resultado.get("falhas") else []}
+    Path("resultado-fundamentos.json").write_text(json.dumps(resumo, ensure_ascii=False, default=str), encoding="utf-8")
     print(json.dumps(resultado, ensure_ascii=False, default=str))
     if resultado.get("status") != "ok":
         raise SystemExit("coleta_fundamentos_sem_dados")

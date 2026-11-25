@@ -81,6 +81,8 @@ def executar_fila(limite=4, prazo_segundos=900, session_factory=None, planilha=N
     resultado = {"universo": len(universo), "selecionados": lote, "processados": [], "falhas": []}
     with TemporaryDirectory(prefix="fundamentos-cvm-") as pasta:
         cache = CacheCVM(pasta)
+        from services.identidade_fundamentos_acoes import IdentidadeFCA
+        identidade = IdentidadeFCA(http_get=cache)
         for ticker in lote:
             if time.monotonic() - inicio > prazo_segundos:
                 break
@@ -95,7 +97,7 @@ def executar_fila(limite=4, prazo_segundos=900, session_factory=None, planilha=N
                 """), {"ticker": ticker})
                 sessao.commit()
             try:
-                retorno = coletar(ticker, anos=5, planilha=planilha, session_factory=session_factory, http_get=cache)
+                retorno = coletar(ticker, anos=5, planilha=planilha, session_factory=session_factory, http_get=cache, identidade_resolver=identidade)
                 ok = retorno.get("status") == "ok"
                 parcial = bool(retorno.get("falhas")) or retorno.get("metodos_prontos", 0) < 10
                 estado = "PARCIAL" if ok and parcial else "OK" if ok else "FALHA"
