@@ -20,9 +20,12 @@ class PortfolioApiTest(unittest.TestCase):
             "PORTFOLIO_WEB_ORIGINS": "https://wandesonmarcone.github.io",
         })
         self.env.start()
+        self.identidade = patch("services.portfolio_api._identidade_catalogo",return_value={})
+        self.identidade.start()
         self.auth = {"Authorization": "Bearer valid-token"}
 
     def tearDown(self):
+        self.identidade.stop()
         self.env.stop()
 
     @patch("services.portfolio_api._supabase_user", return_value={"id": "user-1"})
