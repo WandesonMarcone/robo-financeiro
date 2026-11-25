@@ -7,33 +7,36 @@ from pathlib import Path
 
 def mensagem(resultado):
     itens = resultado.get("processados", [])
-    linhas = ["📊 Fundamentos — rodada concluída",
-              f"Universo: {resultado.get('universo', len(itens))} | Processados: {len(itens)}"]
     progresso = resultado.get("progresso") or {}
-    if progresso:
-        linhas.append(
-            "Progresso geral: "
-            f"{progresso.get('concluidos', 0)}/{progresso.get('total', resultado.get('universo', 0))} com dados "
-            f"(✅ {progresso.get('ok', 0)} | 🟡 {progresso.get('parciais', 0)} | "
-            f"❌ {progresso.get('falhas', 0)} | ⏳ {progresso.get('pendentes', 0)} pendentes)"
-        )
+    linhas = ["📊 Fundamentos"]
     for item in itens:
         d = item.get("detalhe", {})
+        ticker = item["ticker"]
         estado = item["estado"]
-        simbolo = {"OK": "✅", "PARCIAL": "🟡", "FALHA": "❌"}.get(estado, "•")
-        linhas.append(f"{simbolo} {item['ticker']} — {estado}: {d.get('fundamentos', 0)} fundamentos, {d.get('indicadores', 0)} indicadores, {d.get('proventos', 0)} proventos")
-        if d.get("motivo"):
-            linhas.append("  " + str(d["motivo"])[:150])
-    falhas = resultado.get("falhas", [])
-    linhas.append(f"Falhas desta rodada: {len(falhas)}")
-    if falhas:
-        linhas.append("Reprocessamento automático programado para: " + ", ".join(falhas[:10]))
+        motivo = str(d.get("motivo") or "").lower()
+        falhas = d.get("falhas") or []
+        if estado == "FALHA":
+            if "cnpj" in motivo or any(f.get("fonte") == "FCA" for f in falhas if isinstance(f,dict)):
+                rotulo = "CNPJ não confirmado"
+            elif any(f.get("erro") == "SEM_DEMONSTRACOES_PARA_CNPJ" for f in falhas if isinstance(f,dict)):
+                rotulo = "sem balanços"
+            else:
+                rotulo = "falha na coleta"
+            linhas.append(f"❌ {ticker} — {rotulo}")
+        else:
+            simbolo = "✅" if estado == "OK" else "🟡"
+            rotulo = "atualizado" if estado == "OK" else "dados parciais"
+            metodos = d.get("metodos_prontos")
+            total = d.get("metodos_total")
+            if metodos is not None and total:
+                rotulo += f" ({metodos}/{total} métodos com dados)"
+            linhas.append(f"{simbolo} {ticker} — {rotulo}")
     if not itens:
-        linhas.append("Nenhum ativo processado nesta rodada.")
-    run = os.environ.get("GITHUB_RUN_ID")
-    if run:
-        linhas.append(f"https://github.com/{os.environ.get('GITHUB_REPOSITORY', '')}/actions/runs/{run}")
+        linhas.append("Nenhum ativo pendente nesta rodada.")
+    if progresso:
+        linhas.append(f"Base: {progresso.get('concluidos',0)}/{progresso.get('total',resultado.get('universo',0))} com dados")
     return "\n".join(linhas)
+
 
 def enviar(resultado):
     import config

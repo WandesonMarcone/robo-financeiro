@@ -521,6 +521,10 @@ def coletar_fundamentos_valuation(ticker, anos=5, planilha=None, session_factory
     if cadastro is None:
         raise ValueError("ativo_sem_cnpj_confirmado")
     if cadastro["classe"] == "ACAO":
+        from services.cadastro_cnpj_oficial import cnpj_valido
+        if not cnpj_valido(cadastro["cnpj"]):
+            raise ValueError("cnpj_invalido_aguardando_confirmacao_oficial")
+    if cadastro["classe"] == "ACAO":
         anos_dfp = list(range(hoje.year - anos, hoje.year))
         for ano in anos_dfp:
             url = URL_CVM["DFP"].format(ano=ano)
@@ -626,6 +630,9 @@ def coletar_fundamentos_valuation(ticker, anos=5, planilha=None, session_factory
         "status": "ok" if fundamentos else "falha",
         "ticker": ticker, "classe": cadastro["classe"], "anos_solicitados": anos,
         "fundamentos": len(fundamentos), "indicadores": len(indicadores),
+        "periodos_anuais": len({f["exercicio"] for f in fundamentos if f["periodicidade"] == "ANUAL"}),
+        "periodos_trimestrais": len({f["periodo_fim"] for f in fundamentos if f["periodicidade"] == "TRIMESTRAL"}),
+        "metodos_total": sum(1 for item in coberturas if item["status"] != "NAO_APLICAVEL"),
         "proventos": len(proventos), "eventos": len(eventos),
         "metodos_prontos": sum(1 for item in coberturas if item["status"] in {"PRONTO", "PREMISSAS_NECESSARIAS"}),
         "falhas": falhas, "planilha": planilha_resultado,

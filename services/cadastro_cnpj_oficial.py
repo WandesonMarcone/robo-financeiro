@@ -34,7 +34,8 @@ def extrair_cadastro(geral, valores):
     from pipeline_dados.coletor_catalogo_cvm import (
         _selecionar_mais_recente, _texto, _sem_acento, _mercado_valido,
     )
-    obrigatorias = {"CNPJ_Companhia", "Codigo_Negociacao", "Tipo", "Data_Fim_Negociacao"}
+    coluna_tipo = "Valor_Mobiliario" if "Valor_Mobiliario" in valores.columns else "Tipo"
+    obrigatorias = {"CNPJ_Companhia", "Codigo_Negociacao", coluna_tipo, "Data_Fim_Negociacao"}
     if not obrigatorias.issubset(valores.columns) or not {"CNPJ_Companhia","Nome_Empresarial"}.issubset(geral.columns):
         raise ValueError("layout_FCA_nao_reconhecido")
     geral = geral.copy()
@@ -57,8 +58,8 @@ def extrair_cadastro(geral, valores):
         cnpj, ticker = linha["CNPJ_Companhia"], linha["Codigo_Negociacao"]
         if cnpj not in empresas or not re.fullmatch(r"[A-Z]{4}[0-9]{1,2}", ticker):
             continue
-        tipo = _sem_acento(linha.get("Tipo"))
-        if not any(t in tipo for t in ("acao","acoes","unit")):
+        tipo = _sem_acento(linha.get(coluna_tipo))
+        if not tipo or not any(t in tipo for t in ("acao","acoes","unit")) or any(t in tipo for t in ("bdr","debenture","recibo","direito")):
             continue
         if not _mercado_valido(linha.get("Mercado")) or _texto(linha.get("Data_Fim_Negociacao")):
             continue
@@ -128,12 +129,16 @@ def sincronizar(session_factory=None, planilha=None, coletor=None, hoje=None,
         try:
             geral, valores, fonte = coletor.baixar_dataframes(ano)
             mapa_ano, ambiguos_ano = extrair_cadastro(geral, valores)
+            print(f"FCA {ano}: {len(geral)} emissores/linhas, {len(valores)} valores, {len(mapa_ano)} vínculos, {len(ambiguos_ano)} ambiguidades; colunas={list(valores.columns)}")
             if mapa_ano:
                 mapas_por_ano.append((ano, mapa_ano, set(ambiguos_ano), fonte))
+            else:
+                erros_fontes.append({"ano": ano, "erro": "SEM_VINCULOS"})
         except Exception as exc:
             erros_fontes.append({"ano": ano, "erro": type(exc).__name__})
+            print(f"FCA {ano}: {type(exc).__name__}: {str(exc)[:200]}")
     if not mapas_por_ano:
-        raise ValueError("FCA_sem_vinculos_validos")
+        raise ValueError(f"FCA_sem_vinculos_validos: {erros_fontes}")
     # O ano mais recente tem precedência; o histórico apenas preenche o que
     # não foi localizado nele. Ambiguidade nunca é resolvida por chute.
     mapa, referencias, ambiguos = combinar_mapas_oficiais(mapas_por_ano)
