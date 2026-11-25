@@ -18,6 +18,22 @@ class TesteNotificacaoFalhaWorkflow(unittest.TestCase):
         self.assertIn("Etapa: processamento de documentos pendentes.", texto)
         self.assertIn("/actions/runs/123", texto)
 
+    def test_distingue_conclusao_parcial_de_falha_total(self):
+        ambiente = {
+            "GITHUB_WORKFLOW": "Mercado unificado",
+            "GITHUB_REPOSITORY": "WandesonMarcone/robo-financeiro",
+            "GITHUB_RUN_ID": "456",
+            "FALHA_PARCIAL": "true",
+            "ETAPA_FALHA": "Tesouro Direto",
+        }
+        with patch.dict("os.environ", ambiente, clear=True):
+            texto = mensagem()
+
+        self.assertIn("concluiu com falha parcial", texto)
+        self.assertIn("Fonte(s) indisponível(is): Tesouro Direto", texto)
+        self.assertIn("demais etapas", texto)
+        self.assertNotIn("falhou no GitHub", texto)
+
 
 if __name__ == "__main__":
     unittest.main()

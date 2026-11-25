@@ -15,6 +15,13 @@ def mensagem():
     run_id = os.environ.get("GITHUB_RUN_ID", "")
     etapa = os.environ.get("ETAPA_FALHA", "etapa não identificada")
     link = f"{url}/{repositorio}/actions/runs/{run_id}" if run_id else url
+    if os.environ.get("FALHA_PARCIAL", "").strip().lower() in {"1", "true", "sim"}:
+        return (
+            f"⚠️ {workflow} concluiu com falha parcial.\n"
+            f"Fonte(s) indisponível(is): {etapa}.\n"
+            "As demais etapas da atualização noturna foram concluídas.\n"
+            f"Log: {link}"
+        )
     return (
         f"⚠️ {workflow} falhou no GitHub.\n"
         f"Etapa: {etapa}.\n"

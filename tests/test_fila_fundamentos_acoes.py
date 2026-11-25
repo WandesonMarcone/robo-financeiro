@@ -2,7 +2,7 @@ import unittest
 import io
 import zipfile
 from datetime import datetime, timedelta, timezone, date
-from services.fila_fundamentos_acoes import selecionar_pendentes, resumo_progresso
+from services.fila_fundamentos_acoes import selecionar_pendentes, resumo_progresso, resumo_erro
 from services.fundamentos_valuation import avaliar_cobertura, _escala, extrair_demonstracoes_cvm
 
 class TestFilaFundamentos(unittest.TestCase):
@@ -30,6 +30,17 @@ class TestFilaFundamentos(unittest.TestCase):
         self.assertEqual(progresso["concluidos"], 2)
         self.assertEqual(progresso["falhas"], 1)
         self.assertEqual(progresso["pendentes"], 1)
+
+    def test_resumo_erro_preserva_motivo_api_sem_segredos(self):
+        motivo = resumo_erro(RuntimeError(
+            "APIError 429: quota exceeded; token=abc123 Bearer eyJhbGciOiJ.fake"
+        ))
+        self.assertIn("APIError 429: quota exceeded", motivo)
+        self.assertNotIn("abc123", motivo)
+        self.assertNotIn("eyJhbGciOiJ.fake", motivo)
+
+    def test_resumo_erro_tem_limite_de_tamanho(self):
+        self.assertEqual(len(resumo_erro(RuntimeError("x" * 500))), 240)
 
     def test_nao_confunde_campos_espalhados_com_historico(self):
         fatos = [{"periodo_fim": date(ano, 12, 31), "periodicidade": "ANUAL", "metrica": "lpa" if ano < 2025 else "vpa"} for ano in range(2021, 2026)]
