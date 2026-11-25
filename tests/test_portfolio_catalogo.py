@@ -3,13 +3,45 @@ from unittest.mock import patch
 from flask import Flask
 from io import BytesIO
 from PIL import Image
-from services.portfolio_catalogo import paginar
+from services.portfolio_catalogo import paginar, _ler_neon
 from services.portfolio_logos_web import converter,chave_valida
 from services.portfolio_api import portfolio_api
 
 ROWS=[{"ticker":"BBAS3","name":"Banco do Brasil","sector":"Financeiro"},{"ticker":"ABEV3","name":"Ambev","sector":"Consumo"},{"ticker":"B3SA3","name":"B3","sector":"Financeiro"}]
 
+class CatalogResult:
+    def __init__(self, rows=(), scalar=None): self.rows,self.value=rows,scalar
+    def scalar(self): return self.value
+    def mappings(self): return self
+    def __iter__(self): return iter(self.rows)
+
+class CatalogSession:
+    def __init__(self, oficial): self.oficial,self.sql=oficial,[]
+    def __enter__(self): return self
+    def __exit__(self,*args): pass
+    def execute(self, statement, params=None):
+        query=str(statement);self.sql.append(query)
+        if "universo_acoes_autorizadas" in query and "to_regclass" in query:
+            return CatalogResult(scalar=self.oficial)
+        if "cadastro_cnpj_acoes" in query and "to_regclass" in query:
+            return CatalogResult(scalar=False)
+        return CatalogResult()
+
 class CatalogTest(unittest.TestCase):
+    def test_acoes_usam_lista_autorizada_quando_disponivel(self):
+        session=CatalogSession(True)
+        _ler_neon("stock",session_factory=lambda:session)
+        consulta=next(q for q in session.sql if "WITH universo AS" in q)
+        self.assertIn("SELECT ticker FROM universo_acoes_autorizadas",consulta)
+        self.assertNotIn("UNION SELECT ticker FROM ativos_catalogo",consulta)
+
+    def test_catalogo_mantem_fallback_antes_da_migracao_da_lista(self):
+        session=CatalogSession(False)
+        _ler_neon("stock",session_factory=lambda:session)
+        consulta=next(q for q in session.sql if "WITH universo AS" in q)
+        self.assertIn("SELECT ticker FROM ativos WHERE tipo::text=:tipo",consulta)
+        self.assertIn("UNION SELECT ticker FROM ativos_catalogo",consulta)
+
     def test_paginar(self):
         r=paginar(ROWS,page=1,page_size=1,sector="Financeiro")
         self.assertEqual(r["data"][0]["ticker"],"B3SA3")
