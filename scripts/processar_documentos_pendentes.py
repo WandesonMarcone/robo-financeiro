@@ -1,6 +1,7 @@
 """Executa lotes seguros, auditáveis e classificáveis da fila documental."""
 
 from datetime import date, datetime, timedelta
+import argparse
 
 from sqlalchemy import or_
 
@@ -12,6 +13,7 @@ from atualizador_documentos import (
 )
 from pipeline_dados.banco_dados import DocumentosQualitativos
 from services.historico_operacional import concluir_evento, iniciar_evento, registrar_resultado
+from services.resultados_operacionais import FALHOU, classificar_resultado
 from services.taxonomia_fiis_automatica import corrigir_taxonomia_fiis
 
 LIMITE_POR_CLASSE = 20
@@ -83,7 +85,7 @@ def _detalhes(resultado):
     }
 
 
-def main():
+def main(arquivo_resultado=None):
     evento = iniciar_evento(
         "PROCESSAMENTO_DOCUMENTAL",
         origem="GITHUB_ACTIONS",
@@ -102,7 +104,7 @@ def main():
         }
         erro = detalhes["fii"]["erro"] or detalhes["acoes"]["erro"]
         total_erros = detalhes["fii"]["erros"] + detalhes["acoes"]["erros"]
-        falha = erro or (f"{total_erros} erro(s) na fila documental." if total_erros else None)
+        pendentes = detalhes["fii"]["sem_fonte"] + detalhes["acoes"]["adiados"]
 
         # Só usa PDFs que acabaram de ser confirmados no Drive; nunca infere
         # setor de FII a partir de preço, ticker ou fonte não documental.
@@ -110,10 +112,15 @@ def main():
         detalhes["taxonomia"] = taxonomia
         from atualizador_documentos import enviar_relatorio_processamento_documental
         detalhes["telegram_resumo_enviado"] = enviar_relatorio_processamento_documental(detalhes)
+        estado = classificar_resultado(
+            processados=detalhes["fii"]["processados"] + detalhes["acoes"]["processados"],
+            falhas=total_erros + (1 if erro else 0),
+            pendentes=pendentes,
+        )
+        detalhes["status"] = estado
         registrar_resultado(evento, detalhes)
         mensagem = (
-            ("Processamento documental com falhas: " if falha
-             else "Processamento documental concluído: ")
+            (f"Processamento documental {estado.lower()}: ")
             + f"FIIs={detalhes['fii']['processados']}, "
             f"ações={detalhes['acoes']['processados']}, "
             f"Drive={detalhes['fii']['salvo_drive'] + detalhes['acoes']['salvo_drive']}, "
@@ -126,7 +133,12 @@ def main():
             f"erros={detalhes['fii']['erros'] + detalhes['acoes']['erros']}. "
             f"Telegram={'enviado' if detalhes['telegram_resumo_enviado'] else 'não enviado'}."
         )
-        concluir_evento(evento, sucesso=not falha, mensagem=mensagem, erro=falha)
+        falha = erro or (f"{total_erros} erro(s) na fila documental." if total_erros else None)
+        concluir_evento(evento, sucesso=estado != FALHOU, mensagem=mensagem,
+                        erro=falha, status=estado)
+        if arquivo_resultado:
+            with open(arquivo_resultado, "a", encoding="utf-8") as arquivo:
+                arquivo.write(f"status={estado}\n")
         print(mensagem)
     except Exception as exc:
         concluir_evento(
@@ -136,9 +148,11 @@ def main():
             erro=type(exc).__name__,
         )
         raise
-    if falha:
+    if estado == FALHOU:
         raise SystemExit(1)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--arquivo-resultado")
+    main(arquivo_resultado=parser.parse_args().arquivo_resultado)
