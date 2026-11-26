@@ -24,11 +24,12 @@ if __name__ == "__main__":
             pausa_segundos=args.pausa_segundos,
         )
         pendentes = 1 if (resultado.get("espelho_planilha") or {}).get("estado") == "PENDENTE" else 0
+        oficiais = resultado.get("pagamentos_oficiais") or {}
+        pendentes += oficiais.get("pendentes", 0) + oficiais.get("conflitos", 0)
         estado = classificar_resultado(processados=resultado.get("processados"),
                                        falhas=len(resultado.get("falhas") or []), pendentes=pendentes)
         resultado["status"] = estado
         registrar_resultado(evento, resultado)
-        oficiais = resultado.get("pagamentos_oficiais") or {}
         mensagem = (f"Proventos e eventos: {estado.lower()}; "
                     f"processados={resultado['processados']}, proventos={resultado['proventos']}, "
                     f"eventos={resultado['eventos']}, pagamentos B3 confirmados={oficiais.get('confirmados', 0)}, "
