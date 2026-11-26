@@ -1,9 +1,8 @@
-"""Fonte operacional dos instrumentos de mercado.
+"""Espelho operacional dos instrumentos de mercado.
 
-Toda inclusão ou atualização de ativo não documental passa primeiro pela
-planilha. O Neon recebe a mesma informação somente depois de a gravação na
-planilha ter sido confirmada. Isso evita que painel, Telegram e banco tenham
-catálogos diferentes.
+O Neon é a fonte central. A planilha permanece como lista operacional e
+espelho visível; quando ela estiver indisponível, a próxima sincronização em
+lote a recompõe sem perder o registro central.
 """
 from __future__ import annotations
 
