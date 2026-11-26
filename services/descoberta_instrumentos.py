@@ -120,7 +120,15 @@ def descobrir_e_cadastrar(tipo, limite=3, *, planilha=None, get=requests.get,
                            registrar=registrar_instrumento):
     tipo = str(tipo or "").strip().upper()
     limite = max(0, min(int(limite), 10))
-    existentes = listar_tickers_planilha(tipo, planilha=planilha)
+    # A planilha é a lista visível, mas uma indisponibilidade transitória não
+    # pode paralisar o cadastro no Neon. O upsert central impede duplicidade
+    # e a próxima sincronização repõe o espelho.
+    espelho_lista = "OK"
+    try:
+        existentes = listar_tickers_planilha(tipo, planilha=planilha)
+    except Exception:
+        existentes = set()
+        espelho_lista = "PENDENTE"
     candidatos = candidatos_cripto(get=get) if tipo == "CRIPTO" else candidatos_b3(tipo, get=get)
     novos = []
     falhas = []
@@ -144,5 +152,6 @@ def descobrir_e_cadastrar(tipo, limite=3, *, planilha=None, get=requests.get,
     return {
         "tipo": tipo, "encontrados": len(candidatos), "adicionados": novos,
         "falhas": falhas, "ordem_persistencia": "NEON_ANTES_PLANILHA",
+        "espelho_lista": espelho_lista,
     }
 
