@@ -156,6 +156,20 @@ class DescobertaInstrumentosTests(unittest.TestCase):
         self.assertEqual([], chamados)
         self.assertEqual([], resultado["adicionados"])
 
+    def test_descoberta_continua_quando_lista_planilha_falha(self):
+        payload = {"stocks": [
+            {"stock": "NOVO11", "name": "ETF Novo", "close": 10,
+             "change": 1, "volume": 1000, "subType": "etf"},
+        ]}
+        chamados = []
+        resultado = descobrir_e_cadastrar(
+            "ETF", planilha=PlanilhaIndisponivel(),
+            get=lambda *_a, **_k: Resposta(payload),
+            registrar=lambda *a, **k: chamados.append((a, k)) or {"ticker": a[0]},
+        )
+        self.assertEqual("PENDENTE", resultado["espelho_lista"])
+        self.assertEqual("NOVO11", chamados[0][0][0])
+
     def test_aba_legada_sem_cabecalho_preserva_primeiro_ativo(self):
         eventos = []
         linha_legada = [
