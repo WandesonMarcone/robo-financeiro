@@ -30,6 +30,7 @@ def espelhar_acoes_oficiais(sessao):
                NOW()
           FROM universo_acoes_autorizadas u
           LEFT JOIN cadastro_cnpj_acoes co ON co.ticker=u.ticker
+         WHERE u.ativo=TRUE
         ON CONFLICT (ticker) DO UPDATE SET
           tipo=EXCLUDED.tipo,
           cnpj=COALESCE(EXCLUDED.cnpj,ativos_catalogo.cnpj),
@@ -45,7 +46,7 @@ def espelhar_acoes_oficiais(sessao):
         SELECT DISTINCT co.cnpj,co.nome_emissor,co.nome_emissor,'CVM_FCA',NOW(),NOW()
           FROM universo_acoes_autorizadas u
           JOIN cadastro_cnpj_acoes co ON co.ticker=u.ticker
-         WHERE co.cnpj IS NOT NULL AND co.nome_emissor IS NOT NULL
+         WHERE u.ativo=TRUE AND co.cnpj IS NOT NULL AND co.nome_emissor IS NOT NULL
         ON CONFLICT (cnpj) DO UPDATE SET
           nome=EXCLUDED.nome,razao_social=EXCLUDED.razao_social,
           fonte=EXCLUDED.fonte,atualizado_em=NOW()
@@ -57,6 +58,7 @@ def espelhar_acoes_oficiais(sessao):
           JOIN cadastro_cnpj_acoes co ON co.ticker=u.ticker
           JOIN empresas e ON e.cnpj=co.cnpj
           JOIN ativos a ON a.ticker=u.ticker
+         WHERE u.ativo=TRUE
         ON CONFLICT (ativo_id) DO UPDATE SET
           empresa_id=EXCLUDED.empresa_id,fonte=EXCLUDED.fonte,
           evidencia=EXCLUDED.evidencia
