@@ -70,7 +70,16 @@ jobs:
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
           DRIVE_ROOT_FOLDER_ID: ${{ secrets.DRIVE_ROOT_FOLDER_ID }}
-        run: python -m scripts.processar_documentos_pendentes
+        run: python -m scripts.processar_documentos_pendentes --arquivo-resultado "$GITHUB_OUTPUT"
+      - name: Avisar administrador sobre conclusão parcial
+        if: success() && steps.processar.outputs.status == 'PARCIAL'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+          FALHA_PARCIAL: 'true'
+          ETAPA_FALHA: processamento documental parcial; consulte a Central de Controle
+        run: python -m scripts.notificar_falha_workflow
 
       - name: Avisar administrador somente sobre falha
         if: failure() && !cancelled()

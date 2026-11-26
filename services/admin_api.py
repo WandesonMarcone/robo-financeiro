@@ -801,7 +801,10 @@ def status():
             recentes = [{
                 "id": item["id"], "action": item["type"],
                 "label": item["message"] or item["type"], "target": item["ticker"],
-                "status": {"CONCLUIDA": "ok", "FALHOU": "falha"}.get(item["status"], "em_andamento"),
+                "status": {
+                    "CONCLUIDA": "ok", "SUCESSO_TOTAL": "ok",
+                    "PARCIAL": "parcial", "FALHOU": "falha",
+                }.get(item["status"], "em_andamento"),
                 "when": item["finished_at"] or item["started_at"] or "",
             } for item in auditoria["operations"]]
             pendentes = sum(1 for item in auditoria["operations"] if item["status"] == "EM_ANDAMENTO")

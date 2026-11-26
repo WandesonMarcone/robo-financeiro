@@ -36,7 +36,13 @@ def iniciar_evento(tipo: str, *, origem: str = "SISTEMA", ticker: str | None = N
 
 
 def concluir_evento(evento_id: int | None, *, sucesso: bool, mensagem: str | None = None,
-                    erro: str | None = None) -> None:
+                    erro: str | None = None, status: str | None = None) -> None:
+    """Conclui um evento com ``SUCESSO_TOTAL``, ``PARCIAL`` ou ``FALHOU``.
+
+    Chamadores antigos continuam gravando os estados legados ``CONCLUIDA`` e
+    ``FALHOU``. O argumento ``status`` existe para as rotinas que conseguem
+    distinguir cobertura incompleta de uma falha integral.
+    """
     if not evento_id:
         return
     try:
@@ -46,7 +52,10 @@ def concluir_evento(evento_id: int | None, *, sucesso: bool, mensagem: str | Non
         try:
             evento = session.get(EventoOperacional, evento_id)
             if evento:
-                evento.status = "CONCLUIDA" if sucesso else "FALHOU"
+                estado = str(status or "").upper()
+                if estado not in {"SUCESSO_TOTAL", "PARCIAL", "FALHOU"}:
+                    estado = "CONCLUIDA" if sucesso else "FALHOU"
+                evento.status = estado
                 evento.concluido_em = datetime.now()
                 if mensagem:
                     evento.mensagem = mensagem

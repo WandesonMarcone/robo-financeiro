@@ -1948,6 +1948,10 @@ def auditar_documentos_drive(session=None, drive_manager=None):
             except Exception:
                 resumo["falhas"] += 1
                 continue
+            if existe is None:
+                resumo["falhas"] += 1
+                logger.warning("Validação do Drive inconclusiva para documento %s", doc.id)
+                continue
             if existe:
                 continue
             try:
