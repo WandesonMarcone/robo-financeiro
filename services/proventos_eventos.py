@@ -121,7 +121,7 @@ def _persistir(sessao, proventos, eventos):
 def coletar_proventos_eventos(limite_por_classe=20, janela_dias=75, pausa_segundos=1,
                               planilha=None, session_factory=None, ticker_factory=None,
                               hoje=None):
-    """Coleta lote rotativo e confirma Sheets antes de cada transação Neon."""
+    """Coleta e confirma Neon; depois espelha o lote no Sheets."""
     hoje = hoje or date.today()
     janela_dias = max(30, min(int(janela_dias), 120))
     desde = hoje - timedelta(days=janela_dias)
@@ -136,7 +136,8 @@ def coletar_proventos_eventos(limite_por_classe=20, janela_dias=75, pausa_segund
 
     resultado = {"processados": 0, "proventos": 0, "eventos": 0, "sem_eventos": 0,
                  "falhas": [], "janela_dias": janela_dias,
-                 "ordem_persistencia": "PLANILHA_ANTES_NEON"}
+                 "ordem_persistencia": "NEON_ANTES_PLANILHA"}
+    proventos_espelho, eventos_espelho, tickers_espelho = [], [], []
     for classe, tickers in universo.items():
         for ticker in selecionar_lote(tickers, limite_por_classe, hoje=hoje):
             try:
@@ -147,7 +148,6 @@ def coletar_proventos_eventos(limite_por_classe=20, janela_dias=75, pausa_segund
                     resultado["sem_eventos"] += 1
                     resultado["processados"] += 1
                     continue
-                gravar_eventos_planilha(proventos, eventos, planilha=planilha)
                 sessao = session_factory()
                 try:
                     _persistir(sessao, proventos, eventos)
@@ -157,6 +157,9 @@ def coletar_proventos_eventos(limite_por_classe=20, janela_dias=75, pausa_segund
                     raise
                 finally:
                     sessao.close()
+                proventos_espelho.extend(proventos)
+                eventos_espelho.extend(eventos)
+                tickers_espelho.append((ticker, classe))
                 resultado["processados"] += 1
                 resultado["proventos"] += len(proventos)
                 resultado["eventos"] += len(eventos)
@@ -164,4 +167,17 @@ def coletar_proventos_eventos(limite_por_classe=20, janela_dias=75, pausa_segund
                 resultado["falhas"].append({"ticker": ticker, "classe": classe, "erro": type(exc).__name__})
             if pausa_segundos:
                 time.sleep(float(pausa_segundos))
+    if proventos_espelho or eventos_espelho:
+        try:
+            resultado["espelho_planilha"] = gravar_eventos_planilha(
+                proventos_espelho, eventos_espelho, planilha=planilha
+            )
+        except Exception as espelho_exc:
+            for ticker, classe in tickers_espelho:
+                resultado["falhas"].append({
+                    "ticker": ticker, "classe": classe,
+                    "erro": "ESPELHO_PLANILHA_PENDENTE",
+                    "causa": type(espelho_exc).__name__,
+                })
+            resultado["espelho_planilha"] = {"estado": "PENDENTE"}
     return resultado

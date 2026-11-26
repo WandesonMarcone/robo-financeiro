@@ -59,15 +59,21 @@ def coletar_tesouro_direto(session_factory=None):
     from atualizador_documentos import SessionDB
 
     ultimo_erro = None
-    for tentativa in range(3):
+    for tentativa in range(5):
         try:
-            resposta = requests.get(URL_TESOURO, timeout=90)
+            resposta = requests.get(
+                URL_TESOURO,
+                timeout=(15, 60),
+                headers={"User-Agent": "SistemaFinanceiro/2.0 (historical market-data collector)"},
+            )
             resposta.raise_for_status()
             break
         except requests.RequestException as exc:
             ultimo_erro = exc
-            if tentativa < 2:
-                time.sleep(2 ** tentativa)
+            if tentativa < 4:
+                espera = min(30, 2 ** (tentativa + 1))
+                print(f"Tesouro Transparente indisponível temporariamente; nova tentativa em {espera}s.")
+                time.sleep(espera)
     else:
         raise RuntimeError("TESOURO_FONTE_INDISPONIVEL") from ultimo_erro
     conteudo = resposta.content.decode("utf-8-sig", errors="replace")

@@ -1,4 +1,4 @@
-"""Espelho operacional de proventos e eventos, sempre antes do Neon."""
+"""Espelho operacional de proventos e eventos já persistidos no Neon."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -36,7 +36,8 @@ def _abrir(tipo: str, planilha=None):
             aba.freeze(rows=1, cols=1)
         except Exception:
             pass
-    linhas = aba.get_all_values()
+    from modules.resiliencia_planilha import executar_com_retentativa
+    linhas = executar_com_retentativa(aba.get_all_values, f"Leitura da aba {nome}")
     if not linhas:
         aba.update([list(colunas)], f"A1:{chr(64 + len(colunas))}1", value_input_option="RAW")
         linhas = [list(colunas)]
@@ -46,7 +47,8 @@ def _abrir(tipo: str, planilha=None):
 
 
 def gravar_eventos_planilha(proventos, eventos, planilha=None):
-    """Confirma todos os eventos no Sheets antes de liberar o commit SQL."""
+    """Espelha eventos, ampliando a aba antes de ultrapassar seu limite."""
+    from modules.resiliencia_planilha import executar_com_retentativa
     gravados = {"proventos": 0, "eventos": 0}
     agora = datetime.now().astimezone().strftime("%d/%m/%Y %H:%M")
     for tipo, itens, chave_resultado in (
@@ -83,6 +85,15 @@ def gravar_eventos_planilha(proventos, eventos, planilha=None):
                 ]
                 fim = "J"
             atualizacoes.append({"range": f"A{numero}:{fim}{numero}", "values": [valores]})
-        aba.batch_update(atualizacoes, value_input_option="USER_ENTERED")
+        ultima_linha = max((int(atualizacao["range"].split(":", 1)[0][1:]) for atualizacao in atualizacoes), default=1)
+        if ultima_linha > aba.row_count:
+            executar_com_retentativa(
+                lambda: aba.add_rows(max(1000, ultima_linha - aba.row_count)),
+                f"Expansão da aba {ABAS_EVENTOS[tipo][0]}",
+            )
+        executar_com_retentativa(
+            lambda: aba.batch_update(atualizacoes, value_input_option="USER_ENTERED"),
+            f"Gravação em lote na aba {ABAS_EVENTOS[tipo][0]}",
+        )
         gravados[chave_resultado] += len(atualizacoes)
     return gravados

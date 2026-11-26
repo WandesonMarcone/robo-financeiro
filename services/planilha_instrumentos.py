@@ -55,11 +55,12 @@ def _erro_transitorio_planilha(exc):
 
 
 def _atualizar_com_retry(aba, valores, intervalo, tentativas=4, dormir=time.sleep):
+    from modules.resiliencia_planilha import executar_com_retentativa
     for tentativa in range(1, tentativas + 1):
         try:
-            return aba.update(
-                valores, intervalo,
-                value_input_option="USER_ENTERED",
+            return executar_com_retentativa(
+                lambda: aba.update(valores, intervalo, value_input_option="USER_ENTERED"),
+                "Atualização da planilha de mercado", sleep=dormir, tentativas=1,
             )
         except Exception as exc:
             if tentativa >= tentativas or not _erro_transitorio_planilha(exc):
@@ -95,7 +96,8 @@ def abrir_planilha_instrumentos(tipo, planilha=None):
             aba.freeze(rows=1, cols=1)
         except Exception:
             pass
-    linhas = aba.get_all_values()
+    from modules.resiliencia_planilha import executar_com_retentativa
+    linhas = executar_com_retentativa(aba.get_all_values, f"Leitura da aba {aba_nome}")
     if not linhas:
         aba.update(
             [list(COLUNAS_PLANILHA_INSTRUMENTOS)], "A1:P1",
@@ -171,6 +173,14 @@ def gravar_instrumento_planilha(tipo, dados, planilha=None):
         referencia,
         datetime.now().astimezone().strftime("%d/%m/%Y %H:%M"),
     ]]
+    linhas_usadas = len(existentes)
+    linhas_totais = getattr(aba, "row_count", max(500, linhas_usadas))
+    if numero_linha > linhas_totais:
+        from modules.resiliencia_planilha import executar_com_retentativa
+        executar_com_retentativa(
+            lambda: aba.add_rows(max(500, numero_linha - linhas_totais)),
+            f"Expansão da aba {ABAS_POR_TIPO[tipo]}",
+        )
     _atualizar_com_retry(
         aba, linha, f"A{numero_linha}:P{numero_linha}",
     )
