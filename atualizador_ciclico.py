@@ -220,10 +220,26 @@ def executar(limite_total=30, orcamento_segundos=540, pausa_segundos=2.0, planil
     }
     saida["acoes"] = {"tentados": digest_acoes.get("tentados") or [], "falhas": digest_acoes.get("falhas") or [], "gravacoes": len(atualizacoes_acoes)}
     saida["fiis"] = {"tentados": digest_fiis.get("tentados") or [], "falhas": digest_fiis.get("falhas") or [], "gravacoes": len(atualizacoes_fiis)}
+    from services.resultados_operacionais import FALHOU, classificar_resultado
+    tentados = len(saida["acoes"]["tentados"]) + len(saida["fiis"]["tentados"])
+    falhas = len(saida["acoes"]["falhas"]) + len(saida["fiis"]["falhas"])
+    # Persistência pendente é uma falha de cobertura, mesmo que a consulta da
+    # fonte tenha respondido. Não marca uma atualização isolada como completa.
+    if lote_acoes and not sucesso_acoes:
+        falhas += 1
+    if lote_fiis and not sucesso_fiis:
+        falhas += 1
+    saida["status"] = classificar_resultado(
+        processados=max(0, tentados - falhas), falhas=falhas,
+    )
     try:
         registrar_resultado(evento_id, saida)
-        concluir_evento(evento_id, sucesso=bool(sucesso_acoes or sucesso_fiis),
-                        mensagem=f"Ciclo concluído: {len(saida['acoes']['tentados'])} ações e {len(saida['fiis']['tentados'])} FIIs tentados.")
+        concluir_evento(
+            evento_id, sucesso=saida["status"] != FALHOU, status=saida["status"],
+            mensagem=(f"Ciclo {saida['status'].lower()}: "
+                      f"{len(saida['acoes']['tentados'])} ações e "
+                      f"{len(saida['fiis']['tentados'])} FIIs tentados."),
+        )
     except Exception:
         pass
     return saida
@@ -235,9 +251,15 @@ def main():
     parser.add_argument("--orcamento-segundos", type=int, default=540)
     parser.add_argument("--pausa-segundos", type=float, default=2.0)
     parser.add_argument("--ticker", default="")
+    parser.add_argument("--arquivo-resultado")
     args = parser.parse_args()
     resultado = executar(args.limite_total, args.orcamento_segundos, args.pausa_segundos, ticker=args.ticker)
+    if args.arquivo_resultado:
+        with open(args.arquivo_resultado, "a", encoding="utf-8") as arquivo:
+            arquivo.write(f"status={resultado['status']}\n")
     print(resultado)
+    if resultado["status"] == "FALHOU":
+        raise SystemExit("atualizacao_isolada_sem_sucesso")
 
 
 if __name__ == "__main__":
