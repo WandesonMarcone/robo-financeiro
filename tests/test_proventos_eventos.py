@@ -6,7 +6,8 @@ import pandas as pd
 import requests
 
 from services.proventos_eventos import (
-    coletar_proventos_eventos, extrair_eventos_yahoo, extrair_proventos_oficiais_b3,
+    coletar_proventos_eventos, conciliar_pagamentos_b3, extrair_eventos_yahoo,
+    extrair_proventos_oficiais_b3,
     selecionar_lote,
 )
 
@@ -106,16 +107,40 @@ class ProventosEventosTests(unittest.TestCase):
 
         def get(url, **_kwargs):
             if "GetInitialCompanies" in url:
-                return Resposta({"results": [{"issuingCompany": "PETR", "tradingName": "PETROBRAS"}]})
-            return Resposta({"results": [
-                {"assetIssued": "PETR4", "paymentDate": "21/12/2026", "lastDatePriorEx": "21/08/2026", "rate": "0,47156696", "label": "DIVIDENDO", "isinCode": "BRPETRACNPR6"},
-                {"assetIssued": "PETR3", "paymentDate": "21/12/2026", "lastDatePriorEx": "21/08/2026", "rate": "0,47156696"},
-            ]})
+                return Resposta({"results": [{"issuingCompany": "PETR", "codeCVM": "9512"}]})
+            if "GetDetail" in url:
+                return Resposta({"otherCodes": [
+                    {"code": "PETR3", "isin": "BRPETRACNOR9"},
+                    {"code": "PETR4", "isin": "BRPETRACNPR6"},
+                ]})
+            self.assertIn("GetListedSupplementCompany", url)
+            return Resposta([{"code": "PETR", "cashDividends": [
+                {"assetIssued": "BRPETRACNPR6", "isinCode": "BRPETRACNPR6", "paymentDate": "21/12/2026", "lastDatePrior": "21/08/2026", "rate": "0,47156696", "label": "DIVIDENDO"},
+                {"assetIssued": "BRPETRACNOR9", "isinCode": "BRPETRACNOR9", "paymentDate": "23/11/2026", "lastDatePrior": "21/08/2026", "rate": "0,47156696"},
+            ]}])
 
         itens = extrair_proventos_oficiais_b3("PETR4", http_get=get)
         self.assertEqual(1, len(itens))
         self.assertEqual(date(2026, 12, 21), itens[0]["data_pagamento"])
         self.assertEqual(date(2026, 8, 21), itens[0]["data_com"])
+        self.assertEqual("BRPETRACNPR6", itens[0]["isin"])
+
+    def test_data_oficial_divergente_fica_em_conflito(self):
+        sessao = Mock()
+        sessao.execute.return_value.mappings.return_value.all.return_value = [{
+            "id": 10, "identificador": "evento", "data_pagamento": date(2026, 11, 23),
+        }]
+        resultado = conciliar_pagamentos_b3(sessao, "PETR4", oficiais=[{
+            "ticker": "PETR4", "classe": "ACAO", "isin": "BRPETRACNPR6",
+            "data_com": date(2026, 8, 21), "data_pagamento": date(2026, 12, 21),
+            "valor_unitario": 0.47, "tipo_original": "DIVIDENDO",
+            "fonte": "B3_LISTED_COMPANIES", "url_fonte": "https://www.b3.com.br/",
+        }])
+
+        self.assertEqual(1, resultado["conflitos"])
+        self.assertEqual(0, resultado["confirmados"])
+        self.assertEqual(2, sessao.execute.call_count)
+        self.assertEqual("CONFLITO", sessao.execute.call_args.args[1]["status"])
 
     def test_lote_rotativo_nao_repete_sempre_o_inicio(self):
         tickers = ["A", "B", "C", "D", "E"]

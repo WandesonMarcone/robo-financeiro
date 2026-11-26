@@ -11,6 +11,7 @@ from base64 import b64encode
 from datetime import date, timedelta
 from hashlib import sha256
 import json
+import math
 import re
 import time
 
@@ -92,17 +93,11 @@ def _b3_json(metodo, parametros, http_get=requests.get):
         resposta.raise_for_status()
     elif int(getattr(resposta, "status_code", 200)) >= 400:
         raise RuntimeError(f"B3_HTTP_{resposta.status_code}")
-    dados = resposta.json()
-    return dados if isinstance(dados, dict) else {}
+    return resposta.json()
 
 
 def extrair_proventos_oficiais_b3(ticker, http_get=requests.get):
-    """Consulta a API pública da B3 e retém somente a classe do ticker.
-
-    A B3 informa a data-com e a data de pagamento. A data-ex nunca é
-    calculada aqui: ela só é associada quando já houver um evento de mercado
-    compatível, evitando errar feriados e mudanças de calendário de pregão.
-    """
+    """Resolve na B3 o ISIN do ticker e consulta as datas de pagamento."""
     ticker = str(ticker or "").upper().strip()
     emissor = re.sub(r"\d+$", "", ticker)
     catalogo = _b3_json("GetInitialCompanies", {
@@ -110,39 +105,51 @@ def extrair_proventos_oficiais_b3(ticker, http_get=requests.get):
     }, http_get=http_get)
     empresa = next((item for item in catalogo.get("results", [])
                     if str(item.get("issuingCompany") or "").upper() == emissor), None)
-    if not empresa:
+    if not empresa or not empresa.get("codeCVM"):
         return []
-    nome_pregao = str(empresa.get("tradingName") or "").replace("/", "").replace(".", "").strip()
-    if not nome_pregao:
+
+    detalhe = _b3_json("GetDetail", {
+        "codeCVM": str(empresa["codeCVM"]), "language": "pt-br",
+    }, http_get=http_get)
+    isins = {
+        str(item["isin"]).strip().upper()
+        for item in detalhe.get("otherCodes", [])
+        if str(item.get("code") or "").strip().upper() == ticker and item.get("isin")
+    }
+    if len(isins) != 1:
         return []
+
+    metodo = "GetListedSupplementCompany"
+    parametros = {"issuingCompany": emissor, "language": "pt-br"}
+    suplementos = _b3_json(metodo, parametros, http_get=http_get)
+    if not isinstance(suplementos, list):
+        raise RuntimeError("B3_SUPLEMENTO_FORMATO_INESPERADO")
+    isin = next(iter(isins))
+    url_fonte = _b3_url(metodo, parametros)
     oficiais = []
-    pagina = 1
-    while pagina <= 20:
-        parametros = {"language": "pt-br", "pageNumber": pagina, "pageSize": 120, "tradingName": nome_pregao}
-        dados = _b3_json("GetListedCashDividends", parametros, http_get=http_get)
-        itens = list(dados.get("results") or [])
-        for item in itens:
-            ativo = str(item.get("assetIssued") or item.get("ticker") or "").upper().strip()
-            if ativo != ticker:
+    for suplemento in suplementos:
+        if str(suplemento.get("code") or "").strip().upper() != emissor:
+            continue
+        for item in suplemento.get("cashDividends") or []:
+            if str(item.get("isinCode") or "").strip().upper() != isin:
                 continue
             pagamento = _data_oficial(item.get("paymentDate"))
-            valor = item.get("rate", item.get("valueCash"))
             try:
-                valor = float(str(valor).replace(".", "").replace(",", ".")) if isinstance(valor, str) and "," in str(valor) else float(valor)
-            except (TypeError, ValueError):
+                taxa = item["rate"]
+                if isinstance(taxa, str) and "," in taxa:
+                    taxa = taxa.replace(".", "").replace(",", ".")
+                valor = float(taxa)
+            except (KeyError, TypeError, ValueError):
                 continue
-            if not pagamento or valor <= 0:
+            if not pagamento or not math.isfinite(valor) or valor <= 0:
                 continue
             oficiais.append({
-                "ticker": ticker, "classe": "ACAO", "isin": str(item.get("isinCode") or "") or None,
-                "data_com": _data_oficial(item.get("lastDatePriorEx") or item.get("lastDatePriorExDate")),
+                "ticker": ticker, "classe": "ACAO", "isin": isin,
+                "data_com": _data_oficial(item.get("lastDatePrior")),
                 "data_pagamento": pagamento, "valor_unitario": valor,
-                "tipo_original": str(item.get("label") or item.get("corporateAction") or "PROVENTO"),
-                "fonte": "B3_LISTED_COMPANIES", "url_fonte": _b3_url("GetListedCashDividends", parametros),
+                "tipo_original": str(item.get("label") or "PROVENTO"),
+                "fonte": "B3_LISTED_COMPANIES", "url_fonte": url_fonte,
             })
-        if not itens or len(itens) < 120:
-            break
-        pagina += 1
     return oficiais
 
 
@@ -161,10 +168,11 @@ def conciliar_pagamentos_b3(sessao, ticker, http_get=requests.get, oficiais=None
         candidatos = []
         if oficial.get("data_com"):
             candidatos = sessao.execute(text("""
-                SELECT id, identificador, data_ex, valor_unitario FROM proventos_ativos
+                SELECT id, identificador, data_pagamento FROM proventos_ativos
                 WHERE ticker=:ticker AND classe='ACAO'
                   AND data_ex >= :data_com AND data_ex <= :limite
                   AND ABS(valor_unitario - :valor) <= :tolerancia
+                ORDER BY id FOR UPDATE
             """), {
                 "ticker": oficial["ticker"], "data_com": oficial["data_com"],
                 "limite": oficial["data_com"] + timedelta(days=7), "valor": oficial["valor_unitario"],
@@ -173,6 +181,10 @@ def conciliar_pagamentos_b3(sessao, ticker, http_get=requests.get, oficiais=None
         status = "CONFIRMADO" if len(candidatos) == 1 else "CONFLITO" if len(candidatos) > 1 else "PENDENTE_DATA_EX"
         provento_id = candidatos[0]["id"] if len(candidatos) == 1 else None
         detalhe = None if status == "CONFIRMADO" else ("Mais de um evento complementar compatível." if candidatos else "Aguardando data-ex compatível.")
+        if status == "CONFIRMADO" and candidatos[0]["data_pagamento"] not in (None, oficial["data_pagamento"]):
+            status = "CONFLITO"
+            provento_id = None
+            detalhe = "Já existe uma data de pagamento divergente para o evento."
         sessao.execute(text("""
             INSERT INTO conciliacoes_proventos_oficiais
               (chave,ticker,classe,isin,data_com,data_pagamento,tipo_original,valor_unitario,fonte,url_fonte,status,provento_id,detalhe)
