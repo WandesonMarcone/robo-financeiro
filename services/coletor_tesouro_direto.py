@@ -15,10 +15,13 @@ from datetime import datetime
 import requests
 from sqlalchemy import text
 
-URL_TESOURO = (
+URLS_TESOURO = (
     "https://www.tesourotransparente.gov.br/ckan/dataset/"
     "df56aa42-484a-4a59-8184-7676580c81e3/resource/"
-    "796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv"
+    "796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv",
+    "https://www.tesourodireto.com.br/ckan/dataset/"
+    "df56aa42-484a-4a59-8184-7676580c81e3/resource/"
+    "796d2059-14e9-44e3-80c9-2d9e30b405c1/download/PrecoTaxaTesouroDireto.csv",
 )
 
 
@@ -59,22 +62,28 @@ def coletar_tesouro_direto(session_factory=None):
     from atualizador_documentos import SessionDB
 
     ultimo_erro = None
-    for tentativa in range(5):
-        try:
-            resposta = requests.get(
-                URL_TESOURO,
-                timeout=(15, 60),
-                headers={"User-Agent": "SistemaFinanceiro/2.0 (historical market-data collector)"},
-            )
-            resposta.raise_for_status()
+    resposta = None
+    fonte_url = None
+    for url in URLS_TESOURO:
+        for tentativa in range(3):
+            try:
+                resposta = requests.get(
+                    url,
+                    timeout=(15, 60),
+                    headers={"User-Agent": "SistemaFinanceiro/2.0 (historical market-data collector)"},
+                )
+                resposta.raise_for_status()
+                fonte_url = url
+                break
+            except requests.RequestException as exc:
+                ultimo_erro = exc
+                if tentativa < 2:
+                    espera = min(30, 2 ** (tentativa + 1))
+                    print(f"Tesouro Direto indisponível temporariamente; nova tentativa em {espera}s.")
+                    time.sleep(espera)
+        if resposta is not None and fonte_url:
             break
-        except requests.RequestException as exc:
-            ultimo_erro = exc
-            if tentativa < 4:
-                espera = min(30, 2 ** (tentativa + 1))
-                print(f"Tesouro Transparente indisponível temporariamente; nova tentativa em {espera}s.")
-                time.sleep(espera)
-    else:
+    if resposta is None or fonte_url is None:
         raise RuntimeError("TESOURO_FONTE_INDISPONIVEL") from ultimo_erro
     conteudo = resposta.content.decode("utf-8-sig", errors="replace")
     leitor = csv.DictReader(io.StringIO(conteudo), delimiter=";")
@@ -126,7 +135,7 @@ def coletar_tesouro_direto(session_factory=None):
             })
             gravadas += 1
         sessao.commit()
-        return {"fonte": "Tesouro Transparente", "gravadas": gravadas,
+        return {"fonte": "Tesouro Transparente", "url_fonte": fonte_url, "gravadas": gravadas,
                 "referencia": ultima.date().isoformat()}
     except Exception:
         sessao.rollback()
