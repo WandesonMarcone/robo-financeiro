@@ -4,7 +4,10 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from services.proventos_eventos import coletar_proventos_eventos, extrair_eventos_yahoo, selecionar_lote
+from services.proventos_eventos import (
+    coletar_proventos_eventos, extrair_eventos_yahoo, extrair_proventos_oficiais_b3,
+    selecionar_lote,
+)
 
 
 class WorksheetNotFound(Exception):
@@ -82,6 +85,30 @@ class Sessao:
 
 
 class ProventosEventosTests(unittest.TestCase):
+    def test_b3_retem_pagamento_oficial_da_mesma_classe(self):
+        class Resposta:
+            def __init__(self, dados):
+                self.dados = dados
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self.dados
+
+        def get(url, **_kwargs):
+            if "GetInitialCompanies" in url:
+                return Resposta({"results": [{"issuingCompany": "PETR", "tradingName": "PETROBRAS"}]})
+            return Resposta({"results": [
+                {"assetIssued": "PETR4", "paymentDate": "21/12/2026", "lastDatePriorEx": "21/08/2026", "rate": "0,47156696", "label": "DIVIDENDO", "isinCode": "BRPETRACNPR6"},
+                {"assetIssued": "PETR3", "paymentDate": "21/12/2026", "lastDatePriorEx": "21/08/2026", "rate": "0,47156696"},
+            ]})
+
+        itens = extrair_proventos_oficiais_b3("PETR4", http_get=get)
+        self.assertEqual(1, len(itens))
+        self.assertEqual(date(2026, 12, 21), itens[0]["data_pagamento"])
+        self.assertEqual(date(2026, 8, 21), itens[0]["data_com"])
+
     def test_lote_rotativo_nao_repete_sempre_o_inicio(self):
         tickers = ["A", "B", "C", "D", "E"]
         primeiro = selecionar_lote(tickers, 2, hoje=date(2026, 11, 24))
@@ -112,6 +139,7 @@ class ProventosEventosTests(unittest.TestCase):
             limite_por_classe=1, janela_dias=30, pausa_segundos=0,
             planilha=Planilha(eventos), session_factory=lambda: Sessao(eventos),
             ticker_factory=lambda _simbolo: Papel(), hoje=date(2026, 11, 24),
+            b3_fetcher=lambda _ticker: [],
         )
         tipos = [item[0] for item in eventos]
         self.assertEqual(1, resultado["proventos"])
