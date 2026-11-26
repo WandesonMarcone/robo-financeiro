@@ -610,11 +610,8 @@ def coletar_fundamentos_valuation(ticker, anos=5, planilha=None, session_factory
             setor = None
     coberturas = avaliar_cobertura(ticker, cadastro["classe"], fundamentos, indicadores, setor=setor)
 
-    from services.planilha_fundamentos_valuation import gravar_fundamentos_planilha
-    from services.planilha_eventos_mercado import gravar_eventos_planilha
-    planilha_resultado = gravar_fundamentos_planilha(fundamentos, indicadores, coberturas, planilha=planilha)
-    gravar_eventos_planilha(proventos, eventos, planilha=planilha)
-
+    # O Neon é a base central: um problema no espelho do Sheets não pode
+    # descartar fundamentos já coletados da CVM.
     sessao = session_factory()
     try:
         _persistir(sessao, fundamentos, indicadores, coberturas)
@@ -629,6 +626,21 @@ def coletar_fundamentos_valuation(ticker, anos=5, planilha=None, session_factory
     finally:
         sessao.close()
 
+    planilha_resultado = {"estado": "PENDENTE", "fundamentos": 0, "indicadores": 0, "coberturas": 0}
+    try:
+        from services.planilha_fundamentos_valuation import gravar_fundamentos_planilha
+        from services.planilha_eventos_mercado import gravar_eventos_planilha
+        planilha_resultado = gravar_fundamentos_planilha(
+            fundamentos, indicadores, coberturas, planilha=planilha
+        )
+        gravar_eventos_planilha(proventos, eventos, planilha=planilha)
+        planilha_resultado["estado"] = "OK"
+    except Exception as exc:
+        detalhe = {"fonte": "GOOGLE_SHEETS_ESPELHO", "erro": type(exc).__name__}
+        falhas.append(detalhe)
+        planilha_resultado.update({"estado": "PENDENTE", "erro": type(exc).__name__})
+        print(f"Espelho do Sheets pendente para {ticker}; dados confirmados no Neon ({type(exc).__name__}).")
+
     return {
         "status": "ok" if fundamentos else "falha",
         "ticker": ticker, "classe": cadastro["classe"], "anos_solicitados": anos,
@@ -639,5 +651,5 @@ def coletar_fundamentos_valuation(ticker, anos=5, planilha=None, session_factory
         "proventos": len(proventos), "eventos": len(eventos),
         "metodos_prontos": sum(1 for item in coberturas if item["status"] in {"PRONTO", "PREMISSAS_NECESSARIAS"}),
         "falhas": falhas, "planilha": planilha_resultado,
-        "ordem_persistencia": "FONTE_PLANILHA_NEON",
+        "ordem_persistencia": "FONTE_NEON_ESPELHO_SHEETS",
     }

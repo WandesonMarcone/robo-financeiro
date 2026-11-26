@@ -45,7 +45,7 @@ def registrar_instrumento(ticker, tipo, simbolo_exterior=None, session_factory=N
                           simbolo_yahoo=None, nome=None, fonte_cadastro=None,
                           planilha=None, dados_planilha=None,
                           indice_referencia=None, gestora=None):
-    """Inclui um instrumento na planilha e, somente depois, no Neon."""
+    """Cadastra o instrumento mantendo a planilha como catálogo operacional."""
     ticker = str(ticker or "").strip().upper()
     tipo = str(tipo or "").strip().upper()
     if not ticker or tipo not in TIPOS_INSTRUMENTO_MERCADO:
@@ -168,7 +168,8 @@ def _coletar_sec(sessao, instrumento):
     return gravadas
 
 
-def coletar_instrumento(ticker, tipo=None, simbolo_exterior=None, session_factory=None):
+def coletar_instrumento(ticker, tipo=None, simbolo_exterior=None, session_factory=None,
+                        espelhar_planilha=True):
     """Grava preço histórico e métricas calculáveis, com origem explícita."""
     ticker = str(ticker or "").strip().upper()
     if tipo:
@@ -215,20 +216,6 @@ def coletar_instrumento(ticker, tipo=None, simbolo_exterior=None, session_factor
                   "caixa": (info.get("totalCash"), "moeda da fonte"), "ev_ebitda": (info.get("enterpriseToEbitda"), "x")}
         nome = info.get("longName") or info.get("shortName") or instrumento.get("nome")
 
-        # A planilha é a fonte operacional. Se esta gravação falhar, nenhuma
-        # cotação ou métrica é persistida no Neon.
-        from services.planilha_instrumentos import gravar_instrumento_planilha
-        gravar_instrumento_planilha(instrumento["tipo"], {
-            "ticker": ticker, "nome": nome, "fechamento": fechamento,
-            "variacao_percentual": variacao,
-            "indice_referencia": instrumento.get("indice_referencia"),
-            "liquidez": liquidez_media, "volume": volume_medio,
-            "distancia": distancia_maxima, "volatilidade": volatilidade,
-            "retorno": retorno_periodo, "dy": info.get("dividendYield"),
-            "pl": info.get("trailingPE"), "pvp": info.get("priceToBook"),
-            "fonte": "YAHOO_FINANCE", "referencia_em": data_ref,
-        })
-
         sessao.execute(text("""
           INSERT INTO observacoes_instrumentos_internacionais
             (instrumento_id,referencia_em,abertura,maxima,minima,fechamento,volume,variacao_percentual,fonte,qualidade_fonte)
@@ -255,12 +242,22 @@ def coletar_instrumento(ticker, tipo=None, simbolo_exterior=None, session_factor
         sessao.execute(text("UPDATE instrumentos_internacionais SET nome=COALESCE(:nome,nome), moeda_origem=COALESCE(:moeda,moeda_origem), atualizado_em=NOW() WHERE id=:id"), {"id": instrumento["id"], "nome": nome, "moeda": "BRL" if convertido_brl else info.get("currency")})
         oficiais = _coletar_sec(sessao, instrumento) if instrumento["tipo"] == "BDR" else 0
         sessao.commit()
+        # A sincronização do Sheets é feita uma vez por classe ao final do
+        # lote, reduzindo leituras/escritas repetidas e respeitando a cota.
+        espelho = "PENDENTE" if espelhar_planilha else "AGUARDANDO_LOTE"
+        if espelhar_planilha:
+            try:
+                sincronizar_instrumentos_planilha(instrumento["tipo"], session_factory=session_factory)
+                espelho = "OK"
+            except Exception as exc:
+                print(f"Cotação {ticker} persistida no Neon; espelho Sheets pendente ({type(exc).__name__}).")
         return {
             "ticker": ticker, "tipo": instrumento["tipo"],
             "referencia": data_ref.date().isoformat(), "preco": fechamento,
             "variacao": variacao,
             "metricas": len([v for v, _ in campos.values() if v is not None]),
             "oficiais_sec": oficiais,
+            "espelho_planilha": espelho,
         }
     except Exception:
         sessao.rollback()
@@ -285,11 +282,13 @@ def sincronizar_instrumentos_planilha(tipo, session_factory=None):
     manuais existentes e só declara sucesso quando há fechamento válido.
     """
     tipo = str(tipo or "").upper()
-    if tipo not in {"ETF", "BDR"}:
-        raise ValueError("tipo deve ser ETF ou BDR")
+    if not tipo:
+        resultados = [sincronizar_instrumentos_planilha(classe, session_factory) for classe in TIPOS_INSTRUMENTO_MERCADO]
+        return {"abas": resultados, "gravadas": sum(item["gravadas"] for item in resultados)}
+    from services.planilha_instrumentos import ABAS_POR_TIPO, abrir_planilha_instrumentos
+    if tipo not in ABAS_POR_TIPO:
+        raise ValueError("tipo de instrumento sem aba operacional")
     from atualizador_documentos import SessionDB
-    from modules.utils import conectar_gspread
-    import config
 
     sessao = session_factory() if session_factory else SessionDB()
     try:
@@ -322,12 +321,8 @@ def sincronizar_instrumentos_planilha(tipo, session_factory=None):
     finally:
         sessao.close()
 
-    aba_nome = "BD_ETFs" if tipo == "ETF" else "BD_BDRs"
-    planilha = conectar_gspread().open_by_url(config.SPREADSHEET_URL)
-    aba = planilha.worksheet(aba_nome)
-    existentes = aba.get_all_values()
-    if not existentes or existentes[0][:len(COLUNAS_PLANILHA_INSTRUMENTOS)] != list(COLUNAS_PLANILHA_INSTRUMENTOS):
-        raise RuntimeError(f"cabecalho_invalido:{aba_nome}")
+    aba_nome = ABAS_POR_TIPO[tipo]
+    aba, existentes = abrir_planilha_instrumentos(tipo)
     por_ticker = {str(linha[0]).strip().upper(): indice + 1 for indice, linha in enumerate(existentes[1:]) if linha and linha[0].strip()}
     agora = datetime.now().astimezone().strftime("%d/%m/%Y %H:%M")
     atualizacoes = []
@@ -352,7 +347,16 @@ def sincronizar_instrumentos_planilha(tipo, session_factory=None):
             atualizacoes.append({"range": f"A{proxima_linha}:P{proxima_linha}", "values": [linha]})
             proxima_linha += 1
     if atualizacoes:
-        aba.batch_update(atualizacoes, value_input_option="USER_ENTERED")
+        from modules.resiliencia_planilha import executar_com_retentativa
+        if proxima_linha - 1 > aba.row_count:
+            executar_com_retentativa(
+                lambda: aba.add_rows(max(500, proxima_linha - 1 - aba.row_count)),
+                f"Expansão da aba {aba_nome}",
+            )
+        executar_com_retentativa(
+            lambda: aba.batch_update(atualizacoes, value_input_option="USER_ENTERED"),
+            f"Sincronização em lote da aba {aba_nome}",
+        )
     return {"aba": aba_nome, "linhas": len(linhas), "gravadas": len(atualizacoes)}
 
 
@@ -378,13 +382,20 @@ def coletar_instrumentos_ativos(limite=30, tipo=None, session_factory=None):
     resultado = {"tipo": tipo or "TODOS", "processados": 0, "falhas": [], "ativos": []}
     for ticker in tickers:
         try:
-            resultado["ativos"].append(coletar_instrumento(ticker, session_factory=session_factory)); resultado["processados"] += 1
+            resultado["ativos"].append(coletar_instrumento(
+                ticker, session_factory=session_factory, espelhar_planilha=False
+            )); resultado["processados"] += 1
         except Exception as exc:
             resultado["falhas"].append({"ticker": ticker, "erro": type(exc).__name__})
-    # Cada ativo foi gravado na planilha antes da respectiva transação no Neon.
-    # A antiga sincronização Neon -> planilha fica disponível apenas como
-    # ferramenta de reconciliação de legado e não participa mais da coleta.
-    resultado["ordem_persistencia"] = "PLANILHA_ANTES_NEON"
+    # Uma leitura e uma gravação em lote por classe. Se o espelho falhar,
+    # reexecutar sincronizar_instrumentos_planilha repõe a partir do Neon.
+    for classe in [tipo] if tipo else sorted({item["tipo"] for item in resultado["ativos"]}):
+        try:
+            sincronizar_instrumentos_planilha(classe, session_factory=session_factory)
+        except Exception as exc:
+            resultado["falhas"].append({"classe": classe, "erro": "ESPELHO_PLANILHA_PENDENTE",
+                                        "causa": type(exc).__name__})
+    resultado["ordem_persistencia"] = "NEON_ANTES_PLANILHA"
     return resultado
 
 

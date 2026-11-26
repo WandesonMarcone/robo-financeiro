@@ -15,6 +15,10 @@ class Aba:
     def __init__(self, linhas, eventos):
         self.linhas = linhas
         self.eventos = eventos
+        self.row_count = 1000
+
+    def add_rows(self, quantidade):
+        self.row_count += quantidade
 
     def get_all_values(self):
         return self.linhas
@@ -102,7 +106,7 @@ class ProventosEventosTests(unittest.TestCase):
         self.assertEqual(1, len(eventos))
         espera.assert_called_once_with(3.0)
 
-    def test_planilha_e_confirmada_antes_do_neon(self):
+    def test_neon_e_confirmado_antes_do_espelho_planilha(self):
         eventos = []
         resultado = coletar_proventos_eventos(
             limite_por_classe=1, janela_dias=30, pausa_segundos=0,
@@ -112,8 +116,8 @@ class ProventosEventosTests(unittest.TestCase):
         tipos = [item[0] for item in eventos]
         self.assertEqual(1, resultado["proventos"])
         self.assertEqual(1, resultado["eventos"])
-        self.assertLess(tipos.index("planilha"), tipos.index("neon"))
-        self.assertEqual("PLANILHA_ANTES_NEON", resultado["ordem_persistencia"])
+        self.assertLess(tipos.index("neon"), tipos.index("planilha"))
+        self.assertEqual("NEON_ANTES_PLANILHA", resultado["ordem_persistencia"])
 
 
 if __name__ == "__main__":

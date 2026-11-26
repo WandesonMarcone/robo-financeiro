@@ -1,4 +1,4 @@
-"""Espelho auditável de fundamentos e cobertura, sempre antes do Neon."""
+"""Espelho auditável de fundamentos já persistidos no Neon."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -63,9 +63,8 @@ def _abrir(tipo: str, planilha=None):
             aba.freeze(rows=1, cols=1)
         except Exception:
             pass
-    linhas = aba.get("A1:" + _coluna(len(colunas)) + "1")
-    chaves = aba.col_values(1)
-    linhas = [linhas[0]] + [[chave] for chave in chaves[1:]] if linhas else []
+    from modules.resiliencia_planilha import executar_com_retentativa
+    linhas = executar_com_retentativa(aba.get_all_values, f"Leitura da aba {nome}")
     if not linhas:
         aba.update([list(colunas)], f"A1:{_coluna(len(colunas))}1", value_input_option="RAW")
         linhas = [list(colunas)]
@@ -74,10 +73,10 @@ def _abrir(tipo: str, planilha=None):
     return aba, linhas, len(colunas)
 
 
-def _upsert(tipo: str, registros, linha_factory, planilha=None) -> int:
+def _upsert(tipo: str, registros, linha_factory, planilha=None, estado_aba=None) -> int:
     if not registros:
         return 0
-    aba, linhas, quantidade_colunas = _abrir(tipo, planilha=planilha)
+    aba, linhas, quantidade_colunas = estado_aba or _abrir(tipo, planilha=planilha)
     existentes = {
         str(linha[0]).strip(): indice + 2
         for indice, linha in enumerate(linhas[1:])
@@ -97,36 +96,48 @@ def _upsert(tipo: str, registros, linha_factory, planilha=None) -> int:
             "range": f"A{numero}:{_coluna(quantidade_colunas)}{numero}",
             "values": [valores],
         })
+    from modules.resiliencia_planilha import executar_com_retentativa
     if proxima - 1 > aba.row_count:
-        aba.add_rows(max(1000, proxima - 1 - aba.row_count))
+        executar_com_retentativa(
+            lambda: aba.add_rows(max(1000, proxima - 1 - aba.row_count)),
+            f"Expansão da aba {ABAS[tipo][0]}",
+        )
     for inicio in range(0, len(atualizacoes), 500):
-        aba.batch_update(atualizacoes[inicio:inicio + 500], value_input_option="RAW" if tipo != "cobertura" else "USER_ENTERED")
+        lote = atualizacoes[inicio:inicio + 500]
+        executar_com_retentativa(
+            lambda lote=lote: aba.batch_update(
+                lote, value_input_option="RAW" if tipo != "cobertura" else "USER_ENTERED"
+            ),
+            f"Gravação em lote na aba {ABAS[tipo][0]}",
+        )
     return len(atualizacoes)
 
 
 def gravar_fundamentos_planilha(fundamentos, indicadores, coberturas, planilha=None):
-    """Persiste as três camadas no Sheets; falha impede o commit no Neon."""
+    """Espelha em lotes fundamentos já persistidos no Neon."""
     from services.fundamentos_consolidados import agrupar, chave_planilha, json_itens
     def gravar_periodos(tipo, registros):
         grupos = agrupar(registros, tipo)
         for g in grupos:
             g["identificador"] = chave_planilha(g)
         # Merge por identificador preserva métricas não retornadas numa coleta parcial.
+        estado_aba = _abrir(tipo, planilha=planilha) if grupos else None
         if grupos:
-            aba, linhas, _ = _abrir(tipo, planilha=planilha)
+            aba, linhas, _ = estado_aba
             existentes = {str(l[0]): n+2 for n,l in enumerate(linhas[1:]) if l and l[0]}
             por_ler = [(g, existentes[g["identificador"]]) for g in grupos if g["identificador"] in existentes]
             if por_ler:
                 import json
-                respostas = aba.batch_get([f"H{n}" for _,n in por_ler])
-                for (g,_), resposta in zip(por_ler,respostas):
-                    if resposta and resposta[0] and resposta[0][0]:
-                        anterior = json.loads(resposta[0][0])
+                for g, numero in por_ler:
+                    linha = linhas[numero - 1] if numero - 1 < len(linhas) else []
+                    anterior_json = linha[7] if len(linha) > 7 else ""
+                    if anterior_json:
+                        anterior = json.loads(anterior_json)
                         g["itens"] = {**anterior, **g["itens"]}
         return _upsert(tipo,grupos,lambda g,agora:[
             g["identificador"],g["ticker"],g["classe"],str(g["periodo_fim"]),
             g["exercicio"],g["periodicidade"],g["documento"],json_itens(g["itens"]),agora
-        ],planilha=planilha)
+        ],planilha=planilha,estado_aba=estado_aba)
     fundamentos_gravados = gravar_periodos("fundamentos",fundamentos)
     indicadores_gravados = gravar_periodos("indicadores",indicadores)
     cobertura_gravada = _upsert(
