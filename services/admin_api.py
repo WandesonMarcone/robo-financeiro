@@ -1088,6 +1088,48 @@ def detalhe_instrumento_internacional(ticker):
         sessao.close()
 
 
+@admin_api.route("/api/admin/opportunities/stocks", methods=["GET"])
+@exige_admin
+def oportunidades_acoes():
+    """Retorna a triagem explicável persistida pelo workflow de oportunidades."""
+    from atualizador_documentos import SessionDB
+    from sqlalchemy import text
+
+    limite = min(max(int(request.args.get("limit", 100)), 1), 500)
+    elegiveis = str(request.args.get("eligible", "true")).lower() not in {"0", "false", "nao"}
+    sessao = SessionDB()
+    try:
+        linhas = sessao.execute(text("""
+            SELECT ticker, classe, referencia_em, score, elegivel, motivos, criterios,
+                   fonte, criado_em
+            FROM oportunidades_triagem
+            WHERE (:elegiveis = FALSE OR elegivel = TRUE)
+            ORDER BY referencia_em DESC, score DESC NULLS LAST, ticker
+            LIMIT :limite
+        """), {"elegiveis": elegiveis, "limite": limite}).mappings().all()
+        itens = []
+        for linha in linhas:
+            item = dict(linha)
+            for chave in ("referencia_em", "criado_em"):
+                if item.get(chave):
+                    item[chave] = item[chave].isoformat()
+            itens.append(item)
+        return jsonify({
+            "class": "ACAO",
+            "opportunities": itens,
+            "criteria": {
+                "description": "Triagem de ações brasileiras por múltiplos, rentabilidade e liquidez. Os limites registrados em cada linha são os efetivamente usados pelo workflow.",
+                "fields": ["pl", "pvp", "dy", "roe", "liquidez_2m"],
+                "source": "oportunidades_triagem",
+            },
+        })
+    except Exception:
+        logger.exception("Falha ao consultar oportunidades de ações no painel")
+        return jsonify({"message": "Não foi possível consultar as oportunidades de ações agora."}), 503
+    finally:
+        sessao.close()
+
+
 @admin_api.route("/api/admin/opportunities/instruments", methods=["GET"])
 @exige_admin
 def oportunidades_instrumentos_internacionais():
