@@ -121,6 +121,8 @@ def executar_fila(limite=10, prazo_segundos=900, session_factory=None, planilha=
     agora = datetime.now(timezone.utc)
     lote = selecionar_pendentes(universo, estados, agora, limite)
     resultado = {"universo": len(universo), "selecionados": lote, "processados": [], "falhas": []}
+    espelho_fundamentos, espelho_indicadores = [], []
+    espelho_coberturas, espelho_proventos, espelho_eventos = [], [], []
     with TemporaryDirectory(prefix="fundamentos-cvm-") as pasta:
         cache = CacheCVM(pasta)
         from services.identidade_fundamentos_acoes import IdentidadeFCA
@@ -139,7 +141,17 @@ def executar_fila(limite=10, prazo_segundos=900, session_factory=None, planilha=
                 """), {"ticker": ticker})
                 sessao.commit()
             try:
-                retorno = coletar(ticker, anos=5, planilha=planilha, session_factory=session_factory, http_get=cache, identidade_resolver=identidade)
+                retorno = coletar(
+                    ticker, anos=5, planilha=planilha,
+                    session_factory=session_factory, http_get=cache,
+                    identidade_resolver=identidade, espelhar_planilha=False,
+                )
+                espelho = retorno.pop("espelho_lote", None) or {}
+                espelho_fundamentos.extend(espelho.get("fundamentos") or [])
+                espelho_indicadores.extend(espelho.get("indicadores") or [])
+                espelho_coberturas.extend(espelho.get("coberturas") or [])
+                espelho_proventos.extend(espelho.get("proventos") or [])
+                espelho_eventos.extend(espelho.get("eventos") or [])
                 ok = retorno.get("status") == "ok"
                 parcial = bool(retorno.get("falhas")) or retorno.get("metodos_prontos", 0) < retorno.get("metodos_total", 10)
                 estado = "PARCIAL" if ok and parcial else "OK" if ok else "FALHA"
@@ -179,6 +191,24 @@ def executar_fila(limite=10, prazo_segundos=900, session_factory=None, planilha=
             if not ok or detalhe.get("falhas"):
                 resultado["falhas"].append(ticker)
             time.sleep(2)
+    # Um espelho por lote reduz dezenas de leituras/gravações para no máximo
+    # quatro. Neon já foi confirmado acima, então uma falha aqui permanece
+    # recuperável na próxima rodada sem perder fundamentos.
+    if espelho_fundamentos or espelho_indicadores or espelho_proventos or espelho_eventos:
+        try:
+            from services.planilha_fundamentos_valuation import gravar_fundamentos_planilha
+            from services.planilha_eventos_mercado import gravar_eventos_planilha
+            gravar_fundamentos_planilha(espelho_fundamentos, espelho_indicadores, espelho_coberturas, planilha=planilha)
+            gravar_eventos_planilha(espelho_proventos, espelho_eventos, planilha=planilha)
+            resultado["espelho_planilha"] = "OK"
+        except Exception as exc:
+            resultado["espelho_planilha"] = "PENDENTE"
+            resultado["erro_espelho_planilha"] = type(exc).__name__
+            for item in resultado["processados"]:
+                item["detalhe"]["planilha"] = {"estado": "PENDENTE", "erro": type(exc).__name__}
+                if item["estado"] == "OK":
+                    item["estado"] = "PARCIAL"
+            logger.warning("Espelho consolidado do Sheets pendente: %s", type(exc).__name__)
     resultado["progresso"] = resumo_progresso(universo, estados)
     resultado["sucessos"] = sum(
         1 for item in resultado["processados"] if item["estado"] in {"OK", "PARCIAL"}
