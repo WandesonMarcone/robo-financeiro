@@ -119,6 +119,16 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, p
     if not fila_total: 
         return [], montar_digest("", [], "fii"), aba_fiis
 
+    # Consulta automática de segmento somente quando a tabela principal não o fornece.
+    # A fonte é carregada uma vez por lote e não por ticker.
+    segmentos_automaticos = {}
+    if "Segmento" not in getattr(df, "columns", []):
+        try:
+            from services.taxonomia_fiis_automatica import segmentos_fundamentus
+            segmentos_automaticos = segmentos_fundamentus()
+        except Exception:
+            segmentos_automaticos = {}
+
     batch_updates = []
     relatorio_fixas = []
     relatorio_opps = []
@@ -167,6 +177,8 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, p
             qtd_imoveis = _fund('Qtd de imóveis')   # 0 imóveis é legítimo
             vacancia_fund = _fund('Vacância Média') # Vacância 0 é legítima
             segmento_fund = f.get('Segmento') if fundamentus_ok else None
+            if not isinstance(segmento_fund, str) or segmento_fund.strip() in ('', '-'):
+                segmento_fund = segmentos_automaticos.get(ticker)
 
             if isinstance(segmento_fund, str) and segmento_fund.strip() not in ('', '-'):
                 setor = segmento_fund.strip()
