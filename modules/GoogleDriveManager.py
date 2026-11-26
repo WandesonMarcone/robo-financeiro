@@ -359,7 +359,11 @@ class GoogleDriveManager:
             return None
 
     def arquivo_existe(self, file_id):
-        """True se o arquivo ainda existe no Drive (404/410 = False)."""
+        """True/False para existência conhecida; ``None`` se o Drive falhar.
+
+        Um erro transitório não pode ser interpretado como arquivo inexistente,
+        pois a auditoria poderia remover do Neon um documento ainda válido.
+        """
         if not file_id:
             return False
         try:
@@ -377,7 +381,7 @@ class GoogleDriveManager:
             if _erro_arquivo_ausente(e):
                 return False
             logger.debug("Falha ao checar arquivo no Drive", exc_info=True)
-            return False
+            return None
 
     def deletar_arquivo(self, file_id):
         """Apaga o arquivo do Google Drive. 404/410 conta como ja apagado."""
