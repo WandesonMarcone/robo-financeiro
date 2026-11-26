@@ -7,10 +7,14 @@ mantendo o mesmo contrato.
 """
 from __future__ import annotations
 
+from base64 import b64encode
 from datetime import date, timedelta
 from hashlib import sha256
+import json
+import re
 import time
 
+import requests
 from sqlalchemy import text
 
 
@@ -53,6 +57,142 @@ def selecionar_lote(tickers, limite, hoje=None):
     hoje = hoje or date.today()
     inicio = ((hoje.toordinal() - 1) * limite) % len(tickers)
     return [tickers[(inicio + indice) % len(tickers)] for indice in range(limite)]
+
+
+_B3_PROXY = "https://sistemaswebb3-listados.b3.com.br/listedCompaniesProxy/CompanyCall"
+
+
+def _data_oficial(valor):
+    """Converte somente datas explícitas devolvidas pela fonte oficial."""
+    if isinstance(valor, date):
+        return valor
+    texto = str(valor or "").strip()
+    for formato in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+        try:
+            from datetime import datetime
+            return datetime.strptime(texto[:10], formato).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _b3_url(metodo, parametros):
+    serializado = json.dumps(parametros, separators=(",", ":"), ensure_ascii=False)
+    token = b64encode(serializado.encode("utf-8")).decode("ascii")
+    return f"{_B3_PROXY}/{metodo}/{token}"
+
+
+def _b3_json(metodo, parametros, http_get=requests.get):
+    resposta = http_get(
+        _b3_url(metodo, parametros),
+        headers={"Accept": "application/json", "User-Agent": "robo-financeiro/2.0"},
+        timeout=20,
+    )
+    if hasattr(resposta, "raise_for_status"):
+        resposta.raise_for_status()
+    elif int(getattr(resposta, "status_code", 200)) >= 400:
+        raise RuntimeError(f"B3_HTTP_{resposta.status_code}")
+    dados = resposta.json()
+    return dados if isinstance(dados, dict) else {}
+
+
+def extrair_proventos_oficiais_b3(ticker, http_get=requests.get):
+    """Consulta a API pública da B3 e retém somente a classe do ticker.
+
+    A B3 informa a data-com e a data de pagamento. A data-ex nunca é
+    calculada aqui: ela só é associada quando já houver um evento de mercado
+    compatível, evitando errar feriados e mudanças de calendário de pregão.
+    """
+    ticker = str(ticker or "").upper().strip()
+    emissor = re.sub(r"\d+$", "", ticker)
+    catalogo = _b3_json("GetInitialCompanies", {
+        "language": "pt-br", "pageNumber": 1, "pageSize": 20, "company": emissor,
+    }, http_get=http_get)
+    empresa = next((item for item in catalogo.get("results", [])
+                    if str(item.get("issuingCompany") or "").upper() == emissor), None)
+    if not empresa:
+        return []
+    nome_pregao = str(empresa.get("tradingName") or "").replace("/", "").replace(".", "").strip()
+    if not nome_pregao:
+        return []
+    oficiais = []
+    pagina = 1
+    while pagina <= 20:
+        parametros = {"language": "pt-br", "pageNumber": pagina, "pageSize": 120, "tradingName": nome_pregao}
+        dados = _b3_json("GetListedCashDividends", parametros, http_get=http_get)
+        itens = list(dados.get("results") or [])
+        for item in itens:
+            ativo = str(item.get("assetIssued") or item.get("ticker") or "").upper().strip()
+            if ativo != ticker:
+                continue
+            pagamento = _data_oficial(item.get("paymentDate"))
+            valor = item.get("rate", item.get("valueCash"))
+            try:
+                valor = float(str(valor).replace(".", "").replace(",", ".")) if isinstance(valor, str) and "," in str(valor) else float(valor)
+            except (TypeError, ValueError):
+                continue
+            if not pagamento or valor <= 0:
+                continue
+            oficiais.append({
+                "ticker": ticker, "classe": "ACAO", "isin": str(item.get("isinCode") or "") or None,
+                "data_com": _data_oficial(item.get("lastDatePriorEx") or item.get("lastDatePriorExDate")),
+                "data_pagamento": pagamento, "valor_unitario": valor,
+                "tipo_original": str(item.get("label") or item.get("corporateAction") or "PROVENTO"),
+                "fonte": "B3_LISTED_COMPANIES", "url_fonte": _b3_url("GetListedCashDividends", parametros),
+            })
+        if not itens or len(itens) < 120:
+            break
+        pagina += 1
+    return oficiais
+
+
+def _chave_oficial(item):
+    return _id(item["ticker"], item["classe"], item.get("isin") or "", item.get("data_com") or "", item["data_pagamento"],
+               f"{float(item['valor_unitario']):.10f}", item["fonte"])
+
+
+def conciliar_pagamentos_b3(sessao, ticker, http_get=requests.get, oficiais=None):
+    """Associa pagamento oficial a um único evento complementar compatível."""
+    resultado = {"consultados": 0, "confirmados": 0, "pendentes": 0, "conflitos": 0, "datas": {}}
+    oficiais = extrair_proventos_oficiais_b3(ticker, http_get=http_get) if oficiais is None else oficiais
+    for oficial in oficiais:
+        resultado["consultados"] += 1
+        chave = _chave_oficial(oficial)
+        candidatos = []
+        if oficial.get("data_com"):
+            candidatos = sessao.execute(text("""
+                SELECT id, identificador, data_ex, valor_unitario FROM proventos_ativos
+                WHERE ticker=:ticker AND classe='ACAO'
+                  AND data_ex >= :data_com AND data_ex <= :limite
+                  AND ABS(valor_unitario - :valor) <= :tolerancia
+            """), {
+                "ticker": oficial["ticker"], "data_com": oficial["data_com"],
+                "limite": oficial["data_com"] + timedelta(days=7), "valor": oficial["valor_unitario"],
+                "tolerancia": max(0.00000001, abs(oficial["valor_unitario"]) * 0.00001),
+            }).mappings().all()
+        status = "CONFIRMADO" if len(candidatos) == 1 else "CONFLITO" if len(candidatos) > 1 else "PENDENTE_DATA_EX"
+        provento_id = candidatos[0]["id"] if len(candidatos) == 1 else None
+        detalhe = None if status == "CONFIRMADO" else ("Mais de um evento complementar compatível." if candidatos else "Aguardando data-ex compatível.")
+        sessao.execute(text("""
+            INSERT INTO conciliacoes_proventos_oficiais
+              (chave,ticker,classe,isin,data_com,data_pagamento,tipo_original,valor_unitario,fonte,url_fonte,status,provento_id,detalhe)
+            VALUES (:chave,:ticker,:classe,:isin,:data_com,:data_pagamento,:tipo_original,:valor_unitario,:fonte,:url_fonte,:status,:provento_id,:detalhe)
+            ON CONFLICT (chave) DO UPDATE SET status=EXCLUDED.status, provento_id=EXCLUDED.provento_id,
+              detalhe=EXCLUDED.detalhe, atualizado_em=NOW()
+        """), {**oficial, "chave": chave, "status": status, "provento_id": provento_id, "detalhe": detalhe})
+        if status == "CONFIRMADO":
+            identificador = candidatos[0]["identificador"]
+            sessao.execute(text("""
+                UPDATE proventos_ativos SET data_pagamento=:pagamento, fonte='B3_LISTED_COMPANIES',
+                  qualidade_fonte='OFICIAL_B3', atualizado_em=NOW() WHERE id=:id
+            """), {"pagamento": oficial["data_pagamento"], "id": provento_id})
+            resultado["confirmados"] += 1
+            resultado["datas"][identificador] = oficial["data_pagamento"]
+        elif status == "CONFLITO":
+            resultado["conflitos"] += 1
+        else:
+            resultado["pendentes"] += 1
+    return resultado
 
 
 def extrair_eventos_yahoo(ticker, classe, papel, desde, ate, tentativas=2, espera_retentativa=3):
@@ -120,7 +260,7 @@ def _persistir(sessao, proventos, eventos):
 
 def coletar_proventos_eventos(limite_por_classe=20, janela_dias=75, pausa_segundos=1,
                               planilha=None, session_factory=None, ticker_factory=None,
-                              hoje=None):
+                              hoje=None, b3_fetcher=extrair_proventos_oficiais_b3):
     """Coleta e confirma Neon; depois espelha o lote no Sheets."""
     hoje = hoje or date.today()
     janela_dias = max(30, min(int(janela_dias), 120))
@@ -136,7 +276,8 @@ def coletar_proventos_eventos(limite_por_classe=20, janela_dias=75, pausa_segund
 
     resultado = {"processados": 0, "proventos": 0, "eventos": 0, "sem_eventos": 0,
                  "falhas": [], "janela_dias": janela_dias,
-                 "ordem_persistencia": "NEON_ANTES_PLANILHA"}
+                 "ordem_persistencia": "NEON_ANTES_PLANILHA",
+                 "pagamentos_oficiais": {"confirmados": 0, "pendentes": 0, "conflitos": 0}}
     proventos_espelho, eventos_espelho, tickers_espelho = [], [], []
     for classe, tickers in universo.items():
         for ticker in selecionar_lote(tickers, limite_por_classe, hoje=hoje):
@@ -144,13 +285,23 @@ def coletar_proventos_eventos(limite_por_classe=20, janela_dias=75, pausa_segund
                 proventos, eventos = extrair_eventos_yahoo(
                     ticker, classe, ticker_factory(f"{ticker}.SA"), desde, hoje
                 )
-                if not proventos and not eventos:
+                if not proventos and not eventos and classe != "ACAO":
                     resultado["sem_eventos"] += 1
                     resultado["processados"] += 1
                     continue
                 sessao = session_factory()
                 try:
                     _persistir(sessao, proventos, eventos)
+                    if classe == "ACAO":
+                        oficial = conciliar_pagamentos_b3(
+                            sessao, ticker,
+                            oficiais=None if b3_fetcher is extrair_proventos_oficiais_b3 else b3_fetcher(ticker),
+                        )
+                        for chave in ("confirmados", "pendentes", "conflitos"):
+                            resultado["pagamentos_oficiais"][chave] += oficial[chave]
+                        for item in proventos:
+                            if item["identificador"] in oficial["datas"]:
+                                item["data_pagamento"] = oficial["datas"][item["identificador"]]
                     sessao.commit()
                 except Exception:
                     sessao.rollback()
