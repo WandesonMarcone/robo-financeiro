@@ -333,6 +333,7 @@ MAPA_SETORES_B3 = {
     },
     "Bens Industriais": {
         "Máquinas e Equipamentos": ["WEGE3", "TUPY3", "POMO4", "ROMI3", "KEPL3", "AERI3", "SHUL4", "FRAS3"],
+        "Material de Transporte": ["EMBJ3", "EMBR3"],
         "Transporte e Logística": ["RAIL3", "CCRO3", "AZUL4", "GOLL4", "STBP3", "JSLG3", "HBSA3", "LOGN3", "TGMA3", "PORT3"]
     },
     "Tecnologia e Telecom": {
