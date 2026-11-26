@@ -43,8 +43,30 @@ jobs:
           with open('credenciais.json', 'w', encoding='utf-8') as arquivo:
               arquivo.write(os.environ['GOOGLE_CREDS'])
       - name: Coletar proventos e eventos de todas as classes
+        id: coletar
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
         run: |
           python -m scripts.coletar_proventos_eventos \
             --limite-por-classe "${{ inputs.limite_por_classe || '20' }}" \
             --janela-dias "${{ inputs.janela_dias || '75' }}" \
-            --pausa-segundos 3
+            --pausa-segundos 3 \
+            --arquivo-resultado "$GITHUB_OUTPUT"
+      - name: Avisar administrador sobre conclusão parcial
+        if: success() && steps.coletar.outputs.status == 'PARCIAL'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+          FALHA_PARCIAL: 'true'
+          ETAPA_FALHA: coleta de proventos e eventos parcial; consulte a Central de Controle
+        run: python -m scripts.notificar_falha_workflow
+      - name: Avisar administrador sobre falha
+        if: failure() && !cancelled()
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+          ETAPA_FALHA: coleta de proventos e eventos
+        run: python -m scripts.notificar_falha_workflow
