@@ -238,15 +238,21 @@ def extrair_eventos_yahoo(ticker, classe, papel, desde, ate, tentativas=2, esper
 
 def _persistir(sessao, proventos, eventos):
     for item in proventos:
-        sessao.execute(text("""
+        gravado = sessao.execute(text("""
             INSERT INTO proventos_ativos
               (identificador,ticker,classe,data_ex,data_pagamento,tipo,valor_unitario,moeda,fonte,qualidade_fonte)
             VALUES (:identificador,:ticker,:classe,:data_ex,:data_pagamento,:tipo,:valor_unitario,:moeda,:fonte,:qualidade_fonte)
             ON CONFLICT (identificador) DO UPDATE SET
               data_pagamento=COALESCE(EXCLUDED.data_pagamento,proventos_ativos.data_pagamento),
-              valor_unitario=EXCLUDED.valor_unitario, fonte=EXCLUDED.fonte,
-              qualidade_fonte=EXCLUDED.qualidade_fonte, atualizado_em=NOW()
-        """), item)
+              valor_unitario=EXCLUDED.valor_unitario,
+              fonte=CASE WHEN proventos_ativos.qualidade_fonte='OFICIAL_B3'
+                         THEN proventos_ativos.fonte ELSE EXCLUDED.fonte END,
+              qualidade_fonte=CASE WHEN proventos_ativos.qualidade_fonte='OFICIAL_B3'
+                                   THEN proventos_ativos.qualidade_fonte ELSE EXCLUDED.qualidade_fonte END,
+              atualizado_em=NOW()
+            RETURNING data_pagamento, fonte, qualidade_fonte
+        """), item).mappings().one()
+        item.update(gravado)
     for item in eventos:
         sessao.execute(text("""
             INSERT INTO eventos_corporativos_ativos
@@ -289,19 +295,29 @@ def coletar_proventos_eventos(limite_por_classe=20, janela_dias=75, pausa_segund
                     resultado["sem_eventos"] += 1
                     resultado["processados"] += 1
                     continue
+                pagamentos_b3 = []
+                if classe == "ACAO":
+                    try:
+                        pagamentos_b3 = b3_fetcher(ticker)
+                    except (requests.RequestException, RuntimeError) as exc:
+                        resultado["falhas"].append({
+                            "ticker": ticker, "classe": classe,
+                            "erro": "CONSULTA_B3_PENDENTE", "causa": type(exc).__name__,
+                        })
                 sessao = session_factory()
                 try:
                     _persistir(sessao, proventos, eventos)
-                    if classe == "ACAO":
-                        oficial = conciliar_pagamentos_b3(
-                            sessao, ticker,
-                            oficiais=None if b3_fetcher is extrair_proventos_oficiais_b3 else b3_fetcher(ticker),
-                        )
+                    if pagamentos_b3:
+                        oficial = conciliar_pagamentos_b3(sessao, ticker, oficiais=pagamentos_b3)
                         for chave in ("confirmados", "pendentes", "conflitos"):
                             resultado["pagamentos_oficiais"][chave] += oficial[chave]
                         for item in proventos:
                             if item["identificador"] in oficial["datas"]:
-                                item["data_pagamento"] = oficial["datas"][item["identificador"]]
+                                item.update(
+                                    data_pagamento=oficial["datas"][item["identificador"]],
+                                    fonte="B3_LISTED_COMPANIES",
+                                    qualidade_fonte="OFICIAL_B3",
+                                )
                     sessao.commit()
                 except Exception:
                     sessao.rollback()

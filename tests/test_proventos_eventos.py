@@ -1,8 +1,9 @@
 import unittest
 from datetime import date
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pandas as pd
+import requests
 
 from services.proventos_eventos import (
     coletar_proventos_eventos, extrair_eventos_yahoo, extrair_proventos_oficiais_b3,
@@ -73,6 +74,13 @@ class Sessao:
 
     def execute(self, _sql, parametros):
         self.eventos.append(("neon", parametros["identificador"]))
+        retorno = Mock()
+        retorno.mappings.return_value.one.return_value = {
+            chave: parametros[chave]
+            for chave in ("data_pagamento", "fonte", "qualidade_fonte")
+            if chave in parametros
+        }
+        return retorno
 
     def commit(self):
         self.eventos.append(("commit",))
@@ -146,6 +154,27 @@ class ProventosEventosTests(unittest.TestCase):
         self.assertEqual(1, resultado["eventos"])
         self.assertLess(tipos.index("neon"), tipos.index("planilha"))
         self.assertEqual("NEON_ANTES_PLANILHA", resultado["ordem_persistencia"])
+
+
+    def test_indisponibilidade_b3_preserva_lote_complementar(self):
+        operacoes = []
+
+        def b3_indisponivel(_ticker):
+            raise requests.ConnectionError("B3 indisponível")
+
+        resultado = coletar_proventos_eventos(
+            limite_por_classe=1, janela_dias=30, pausa_segundos=0,
+            planilha=Planilha(operacoes), session_factory=lambda: Sessao(operacoes),
+            ticker_factory=lambda _simbolo: Papel(), hoje=date(2026, 11, 24),
+            b3_fetcher=b3_indisponivel,
+        )
+
+        self.assertEqual(1, resultado["processados"])
+        self.assertEqual(1, resultado["proventos"])
+        self.assertEqual(1, resultado["eventos"])
+        self.assertEqual("CONSULTA_B3_PENDENTE", resultado["falhas"][0]["erro"])
+        self.assertIn(("commit",), operacoes)
+        self.assertNotIn(("rollback",), operacoes)
 
 
 if __name__ == "__main__":
