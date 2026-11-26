@@ -44,6 +44,8 @@ SEGMENTOS_FII_VERIFICADOS = {
     "ALZR11": "Misto",
     "BTRU11": "Renda Urbana",
     "KNCR11": "CRI",
+    "TRXF11": "Multicategoria",
+    "PMLL11": "Shoppings",
 }
 
 
