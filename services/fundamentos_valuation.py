@@ -5,8 +5,8 @@ Para ações, usa DFP anual (cinco anos por padrão) e ITR corrente da CVM. Para
 FIIs, usa informes mensais estruturados. Proventos e desdobramentos são
 complementados pelo Yahoo até que a fonte oficial estruturada esteja disponível.
 
-A ordem é invariável: fonte -> Google Sheets -> Neon. Uma falha no espelho da
-planilha impede qualquer commit SQL.
+A ordem é invariável: fonte -> Neon -> Google Sheets. O banco é a fonte
+central; o espelho é recuperável e nunca invalida uma persistência confirmada.
 """
 from __future__ import annotations
 
@@ -489,7 +489,8 @@ def _cadastro_ativo(sessao, ticker):
 
 
 def coletar_fundamentos_valuation(ticker, anos=5, planilha=None, session_factory=None,
-                                  http_get=None, ticker_factory=None, hoje=None, identidade_resolver=None):
+                                  http_get=None, ticker_factory=None, hoje=None, identidade_resolver=None,
+                                  espelhar_planilha=True):
     ticker = str(ticker or "").strip().upper()
     if not re.fullmatch(r"[A-Z0-9]{4,10}", ticker):
         raise ValueError("ticker_invalido")
@@ -626,20 +627,29 @@ def coletar_fundamentos_valuation(ticker, anos=5, planilha=None, session_factory
     finally:
         sessao.close()
 
-    planilha_resultado = {"estado": "PENDENTE", "fundamentos": 0, "indicadores": 0, "coberturas": 0}
-    try:
-        from services.planilha_fundamentos_valuation import gravar_fundamentos_planilha
-        from services.planilha_eventos_mercado import gravar_eventos_planilha
-        planilha_resultado = gravar_fundamentos_planilha(
-            fundamentos, indicadores, coberturas, planilha=planilha
-        )
-        gravar_eventos_planilha(proventos, eventos, planilha=planilha)
-        planilha_resultado["estado"] = "OK"
-    except Exception as exc:
-        detalhe = {"fonte": "GOOGLE_SHEETS_ESPELHO", "erro": type(exc).__name__}
-        falhas.append(detalhe)
-        planilha_resultado.update({"estado": "PENDENTE", "erro": type(exc).__name__})
-        print(f"Espelho do Sheets pendente para {ticker}; dados confirmados no Neon ({type(exc).__name__}).")
+    planilha_resultado = {"estado": "AGENDADO_NO_LOTE", "fundamentos": 0, "indicadores": 0, "coberturas": 0}
+    espelho_lote = None
+    if espelhar_planilha:
+        try:
+            from services.planilha_fundamentos_valuation import gravar_fundamentos_planilha
+            from services.planilha_eventos_mercado import gravar_eventos_planilha
+            planilha_resultado = gravar_fundamentos_planilha(
+                fundamentos, indicadores, coberturas, planilha=planilha
+            )
+            gravar_eventos_planilha(proventos, eventos, planilha=planilha)
+            planilha_resultado["estado"] = "OK"
+        except Exception as exc:
+            detalhe = {"fonte": "GOOGLE_SHEETS_ESPELHO", "erro": type(exc).__name__}
+            falhas.append(detalhe)
+            planilha_resultado.update({"estado": "PENDENTE", "erro": type(exc).__name__})
+            print(f"Espelho do Sheets pendente para {ticker}; dados confirmados no Neon ({type(exc).__name__}).")
+    else:
+        # A fila reúne os registros de até dez ações e faz uma única leitura e
+        # uma única gravação por aba. Isso evita o limite de leitura do Sheets.
+        espelho_lote = {
+            "fundamentos": fundamentos, "indicadores": indicadores,
+            "coberturas": coberturas, "proventos": proventos, "eventos": eventos,
+        }
 
     return {
         "status": "ok" if fundamentos else "falha",
@@ -652,4 +662,5 @@ def coletar_fundamentos_valuation(ticker, anos=5, planilha=None, session_factory
         "metodos_prontos": sum(1 for item in coberturas if item["status"] in {"PRONTO", "PREMISSAS_NECESSARIAS"}),
         "falhas": falhas, "planilha": planilha_resultado,
         "ordem_persistencia": "FONTE_NEON_ESPELHO_SHEETS",
+        **({"espelho_lote": espelho_lote} if espelho_lote is not None else {}),
     }
