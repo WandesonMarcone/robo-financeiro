@@ -55,13 +55,20 @@ def persistir_observacoes(sessao,fundamentos):
         def v(m):return g.get(m,{}).get("valor")
         dados=reconciliar(v("acoes_ordinarias"),v("acoes_preferenciais"),v("acoes_emitidas"),v("acoes_tesouraria"))
         if not dados:continue
+        # A composição é oficial quando a escala já foi normalizada a partir
+        # do próprio arquivo da CVM. Isso confirma o total do emissor, mas não
+        # inventa a divisão ticker a ticker para PN/Units.
+        fatos_capital=[g[m] for m in ("acoes_ordinarias","acoes_preferenciais","acoes_emitidas") if g.get(m)]
+        qualidade=("CVM_OFICIAL_TOTAL" if fatos_capital and all(f.get("unidade")=="ACOES" for f in fatos_capital)
+                   else "UNIDADE_PENDENTE")
         sessao.execute(text("""
             INSERT INTO capital_social_emissores(cnpj,referencia,fonte,url_origem,qualidade,ordinarias,preferenciais,emitidas,tesouraria)
-            VALUES (:cnpj,:ref,'CVM_DADOS_ABERTOS',:url,'UNIDADE_PENDENTE',:ordinarias,:preferenciais,:emitidas,:tesouraria)
+            VALUES (:cnpj,:ref,'CVM_DADOS_ABERTOS',:url,:qualidade,:ordinarias,:preferenciais,:emitidas,:tesouraria)
             ON CONFLICT(cnpj,referencia,fonte) DO UPDATE SET ordinarias=EXCLUDED.ordinarias,
                 preferenciais=EXCLUDED.preferenciais,emitidas=EXCLUDED.emitidas,tesouraria=EXCLUDED.tesouraria,
-                atualizado_em=now() WHERE capital_social_emissores.qualidade='UNIDADE_PENDENTE'
-        """),dict(dados,cnpj=cnpj,ref=ref,url=g["acoes_emitidas"]["url_origem"]))
+                qualidade=EXCLUDED.qualidade,atualizado_em=now()
+                WHERE capital_social_emissores.qualidade<>'CONCILIADO_OFICIAL'
+        """),dict(dados,cnpj=cnpj,ref=ref,url=g["acoes_emitidas"]["url_origem"],qualidade=qualidade))
 
 def obter_capital(ticker,session_factory=None):
     if session_factory is None:
@@ -74,13 +81,13 @@ def obter_capital(ticker,session_factory=None):
         tickers=list(s.execute(text("SELECT ticker FROM cadastro_cnpj_acoes WHERE cnpj=:c ORDER BY ticker"),{"c":cnpj}).scalars())
         resposta={"cnpj":cnpj,"name":ident["nome_emissor"],"tickers":tickers,"capital":None,"status":"PENDENTE_CONCILIACAO"}
         if not s.execute(text("SELECT to_regclass('public.capital_social_emissores')")).scalar():return resposta
-        r=s.execute(text("""SELECT * FROM capital_social_emissores WHERE cnpj=:c AND qualidade='CONCILIADO_OFICIAL'
+        r=s.execute(text("""SELECT * FROM capital_social_emissores WHERE cnpj=:c AND qualidade IN ('CONCILIADO_OFICIAL','CVM_OFICIAL_TOTAL')
             ORDER BY referencia DESC,atualizado_em DESC LIMIT 1"""),{"c":cnpj}).mappings().first()
         if not r:return resposta
         capital={k:r[k] for k in ("ordinarias","preferenciais","emitidas","tesouraria","fonte","url_origem","qualidade","classes")}
         capital["referencia"]=r["referencia"].isoformat()
         capital["fora_tesouraria"]=r["emitidas"]-r["tesouraria"] if r["tesouraria"] is not None else None
-        resposta.update(capital=capital,status="CONCILIADO_OFICIAL")
+        resposta.update(capital=capital,status=r["qualidade"])
         return resposta
 
 
@@ -99,8 +106,10 @@ def _resumo(ticker, cnpj, capital, observacoes):
     from services.capital_yahoo import resumir
     yahoo=resumir(ticker,cnpj,observacoes)
     if capital:
-        return {**yahoo, **quantidades(capital,ticker), "status":"CONCILIADO_OFICIAL",
-                "ticker_basis":"EMITIDAS_OFICIAIS","company_basis":"EMITIDAS_OFICIAIS"}
+        qualidade=capital.get("qualidade") or "CONCILIADO_OFICIAL"
+        return {**yahoo, **quantidades(capital,ticker), "status":qualidade,
+                "ticker_basis":"CLASSE_OFICIAL" if capital.get("classes",{}).get(ticker) else "NAO_ATRIBUIDO_POR_CLASSE",
+                "company_basis":"EMITIDAS_CVM_OFICIAL"}
     return yahoo
 
 def resumo_capital(ticker):
@@ -142,7 +151,7 @@ def espelhar_planilha(planilha=None, session_factory=None):
             FROM cadastro_cnpj_acoes c
             LEFT JOIN LATERAL (
                 SELECT emitidas,classes,referencia,fonte FROM capital_social_emissores
-                WHERE cnpj=c.cnpj AND qualidade='CONCILIADO_OFICIAL'
+                WHERE cnpj=c.cnpj AND qualidade IN ('CONCILIADO_OFICIAL','CVM_OFICIAL_TOTAL')
                 ORDER BY referencia DESC,atualizado_em DESC LIMIT 1
             ) p ON true
             WHERE c.ticker=ANY(:tickers)
@@ -154,7 +163,7 @@ def espelhar_planilha(planilha=None, session_factory=None):
         r=mapa.get(t) or {}
         q=_resumo(t,r.get("cnpj"),r if r.get("emitidas") is not None else None,observacoes)
         nota=(f"Fonte: {q.get('source')}. Ref./coleta: {q.get('reference_date')}. "
-              + ("Capital emitido oficial. " if q["status"]=="CONCILIADO_OFICIAL" else
+              + ("Capital emitido oficial. " if q["status"] in ('CONCILIADO_OFICIAL','CVM_OFICIAL_TOTAL') else
                  "Yahoo: quantidade informada, total implícito estimado; não equivale necessariamente ao capital emitido. ")
               + "Não somar totais entre classes do mesmo emissor.")
         valores=[]
