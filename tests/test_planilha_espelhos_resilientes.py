@@ -24,6 +24,10 @@ class AbaEventos:
         self.added += quantidade
         self.row_count += quantidade
 
+    def resize(self, rows):
+        self.row_count = rows
+        self.added += rows - 1000
+
     def batch_update(self, dados, **_kwargs):
         self.atualizacoes.extend(dados)
 
