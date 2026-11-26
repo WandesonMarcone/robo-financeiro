@@ -121,8 +121,13 @@ def sincronizar(session_factory=None, planilha=None, coletor=None, hoje=None,
     autorizados = set(universo)
     universo = {t for t in autorizados if not cnpj_valido(anteriores.get(t,{}).get("cnpj")) or not anteriores.get(t,{}).get("nome_emissor")}
     if not universo:
+        with session_factory() as s:
+            from services.catalogo_central import espelhar_acoes_oficiais
+            espelho = espelhar_acoes_oficiais(s)
+            s.commit()
         return {"universo":len(autorizados),"confirmados":len(autorizados),"novos":0,
-                "alterados":[],"nao_localizados":[],"ambiguos":[],"fontes_consultadas":[],"falhas_fontes":[]}
+                "alterados":[],"nao_localizados":[],"ambiguos":[],"fontes_consultadas":[],"falhas_fontes":[],
+                "catalogo":espelho}
     hoje = hoje or date.today()
     # A FCA do ano corrente pode ainda não trazer uma companhia recém-listada,
     # em reorganização societária ou com a publicação pendente. Nunca usamos o
@@ -176,6 +181,8 @@ def sincronizar(session_factory=None, planilha=None, coletor=None, hoje=None,
                 UPDATE fila_fundamentos_acoes SET proxima_tentativa=NOW()
                 WHERE ticker=:ticker AND estado<>'EM_COLETA'
             """), [{"ticker":t} for t in mudaram])
+        from services.catalogo_central import espelhar_acoes_oficiais
+        espelho = espelhar_acoes_oficiais(s)
         s.commit()
     return {"universo":len(autorizados), "confirmados":len(autorizados-universo)+len(selecionados),
             "novos":sum(t not in anteriores for t in selecionados),
@@ -183,4 +190,4 @@ def sincronizar(session_factory=None, planilha=None, coletor=None, hoje=None,
             "nao_localizados":sorted(universo-set(selecionados)),
             "ambiguos":sorted(universo & set(ambiguos)),
             "fontes_consultadas": [item[3] for item in mapas_por_ano],
-            "falhas_fontes": erros_fontes}
+            "falhas_fontes": erros_fontes, "catalogo":espelho}
