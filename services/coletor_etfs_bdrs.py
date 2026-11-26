@@ -45,25 +45,12 @@ def registrar_instrumento(ticker, tipo, simbolo_exterior=None, session_factory=N
                           simbolo_yahoo=None, nome=None, fonte_cadastro=None,
                           planilha=None, dados_planilha=None,
                           indice_referencia=None, gestora=None):
-    """Cadastra o instrumento mantendo a planilha como catálogo operacional."""
+    """Persiste primeiro no Neon e mantém a planilha como espelho recuperável."""
     ticker = str(ticker or "").strip().upper()
     tipo = str(tipo or "").strip().upper()
     if not ticker or tipo not in TIPOS_INSTRUMENTO_MERCADO:
         raise ValueError("ticker ou tipo inválido")
     yahoo = simbolo_yahoo or (f"{ticker}.SA" if tipo in TIPOS_COM_PLANILHA else simbolo_exterior or ticker)
-    from services.planilha_instrumentos import gravar_instrumento_planilha
-
-    gravar_instrumento_planilha(
-        tipo,
-        {
-            "ticker": ticker,
-            "nome": nome,
-            "indice_referencia": indice_referencia,
-            "fonte": fonte_cadastro or "CADASTRO_MANUAL",
-            **(dados_planilha or {}),
-        },
-        planilha=planilha,
-    )
     from atualizador_documentos import SessionDB
     sessao = session_factory() if session_factory else SessionDB()
     try:
@@ -87,12 +74,35 @@ def registrar_instrumento(ticker, tipo, simbolo_exterior=None, session_factory=N
             "fonte": fonte_cadastro or "PAINEL_TELEGRAM",
         }).mappings().one()
         sessao.commit()
-        return dict(row)
+        registro = dict(row)
     except Exception:
         sessao.rollback()
         raise
     finally:
         sessao.close()
+
+    # O espelho não pode desfazer o cadastro central por indisponibilidade ou
+    # quota do Sheets. A sincronização em lote posterior parte do Neon e
+    # recompõe a linha pendente.
+    try:
+        from services.planilha_instrumentos import gravar_instrumento_planilha
+        espelho = gravar_instrumento_planilha(
+            tipo,
+            {
+                "ticker": ticker,
+                "nome": nome,
+                "indice_referencia": indice_referencia,
+                "fonte": fonte_cadastro or "CADASTRO_MANUAL",
+                **(dados_planilha or {}),
+            },
+            planilha=planilha,
+        )
+        registro["espelho_planilha"] = "OK"
+        registro["planilha"] = espelho
+    except Exception as exc:
+        registro["espelho_planilha"] = "PENDENTE"
+        registro["erro_espelho"] = type(exc).__name__
+    return registro
 
 
 def cadastrar_base_inicial(session_factory=None):
@@ -114,7 +124,7 @@ def cadastrar_base_inicial(session_factory=None):
         cadastrados.append(item["ticker"])
     return {
         "cadastrados": cadastrados, "quantidade": len(cadastrados),
-        "ordem_persistencia": "PLANILHA_ANTES_NEON",
+        "ordem_persistencia": "NEON_ANTES_PLANILHA",
     }
 
 

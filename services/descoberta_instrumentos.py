@@ -1,8 +1,9 @@
 """Descoberta controlada de ETFs, BDRs e criptomoedas.
 
 As fontes servem para localizar candidatos. Antes do cadastro, o símbolo é
-validado por cotação e a linha é gravada na planilha; só então o registro é
-espelhado no Neon por ``registrar_instrumento``.
+validado por cotação e registrado no Neon; a planilha recebe um espelho
+recuperável, sem que uma indisponibilidade temporária do Sheets descarte o
+candidato qualificado.
 """
 from __future__ import annotations
 
@@ -142,6 +143,6 @@ def descobrir_e_cadastrar(tipo, limite=3, *, planilha=None, get=requests.get,
             falhas.append({"ticker": item["ticker"], "erro": type(exc).__name__})
     return {
         "tipo": tipo, "encontrados": len(candidatos), "adicionados": novos,
-        "falhas": falhas, "ordem_persistencia": "PLANILHA_ANTES_NEON",
+        "falhas": falhas, "ordem_persistencia": "NEON_ANTES_PLANILHA",
     }
 

@@ -58,6 +58,11 @@ class Planilha:
         return self.aba
 
 
+class PlanilhaIndisponivel:
+    def worksheet(self, _nome):
+        raise RuntimeError("Sheets indisponível")
+
+
 class ResultadoSQL:
     def mappings(self):
         return self
@@ -114,15 +119,25 @@ class DescobertaInstrumentosTests(unittest.TestCase):
         self.assertEqual([1, 2], esperas)
         self.assertEqual("planilha", eventos[-1][0])
 
-    def test_cadastro_grava_planilha_antes_do_neon(self):
+    def test_cadastro_grava_neon_antes_da_planilha(self):
         eventos = []
         planilha = Planilha(Aba(eventos))
         registrar_instrumento(
             "NOVO11", "ETF", nome="ETF Novo", planilha=planilha,
             session_factory=lambda: Sessao(eventos),
         )
-        self.assertEqual("planilha", eventos[0][0])
-        self.assertEqual("neon", eventos[1][0])
+        self.assertEqual("neon", eventos[0][0])
+        self.assertEqual("planilha", eventos[-1][0])
+
+    def test_cadastro_preserva_neon_quando_espelho_falha(self):
+        eventos = []
+        resultado = registrar_instrumento(
+            "NOVO11", "ETF", nome="ETF Novo", planilha=PlanilhaIndisponivel(),
+            session_factory=lambda: Sessao(eventos),
+        )
+        self.assertEqual("neon", eventos[0][0])
+        self.assertEqual("PENDENTE", resultado["espelho_planilha"])
+        self.assertEqual("RuntimeError", resultado["erro_espelho"])
 
     def test_descoberta_nao_recadastra_ticker_da_planilha(self):
         eventos = []
