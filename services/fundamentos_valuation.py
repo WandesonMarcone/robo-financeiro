@@ -173,6 +173,21 @@ def _escala(linha, metrica):
     return 1.0
 
 
+def _escala_quantidade(linha):
+    """Aplica somente a escala explicitamente declarada pela CVM.
+
+    A composição de capital pode vir em milhares ou em unidades. Não usamos
+    Yahoo para inferir ou corrigir a escala: ele é apenas uma fonte de
+    comparação complementar.
+    """
+    escala = _texto(linha.get("ESCALA_QTD") or linha.get("ESCALA_MOEDA"))
+    if "MILHAO" in escala or "MILHOES" in escala:
+        return 1_000_000.0
+    if "MIL" in escala:
+        return 1_000.0
+    return 1.0
+
+
 def _arquivos_demonstracoes(pacote, documento, ano):
     prefixo = documento.lower() + "_cia_aberta_"
     demonstracoes = ("BPA_con", "BPP_con", "DRE_con", "DFC_MI_con", "DFC_MD_con")
@@ -260,7 +275,12 @@ def extrair_demonstracoes_cvm(conteudo, ticker, cnpj, documento, ano):
                         "acoes_emitidas": "QT_ACAO_TOTAL_CAP_INTEGR",
                         "acoes_tesouraria": "QT_ACAO_TOTAL_TESOURO",
                     }
-                    valores = {k: _numero(linha.get(v)) for k, v in campos.items()}
+                    escala_quantidade = _escala_quantidade(linha)
+                    valores = {
+                        k: (_numero(linha.get(v)) * escala_quantidade
+                            if _numero(linha.get(v)) is not None else None)
+                        for k, v in campos.items()
+                    }
                     total, tesouraria = valores["acoes_emitidas"], valores["acoes_tesouraria"]
                     if total is not None and tesouraria is not None and total >= tesouraria:
                         valores["acoes_circulacao_ex_tesouraria"] = total - tesouraria
@@ -278,7 +298,7 @@ def extrair_demonstracoes_cvm(conteudo, ticker, cnpj, documento, ano):
                             "periodicidade": "ANUAL" if documento == "DFP" else "TRIMESTRAL",
                             "documento": documento, "escopo": "CONSOLIDADO",
                             "demonstracao": "COMPOSICAO_CAPITAL", "conta_codigo": campos.get(metrica),
-                            "metrica": metrica, "valor": valor, "unidade": "QUANTIDADE",
+                            "metrica": metrica, "valor": valor, "unidade": "ACOES",
                             "moeda": "BRL", "fonte": "CVM_DADOS_ABERTOS",
                             "qualidade_fonte": "DERIVADO" if metrica == "acoes_circulacao_ex_tesouraria" else "OFICIAL",
                             "url_origem": URL_CVM[documento].format(ano=ano), "_prioridade": versao,
