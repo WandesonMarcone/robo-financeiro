@@ -46,6 +46,29 @@ def _abrir(tipo: str, planilha=None):
     return aba, linhas
 
 
+def _garantir_linhas(aba, ultima_linha: int, descricao: str):
+    """Expande a grade antes da escrita, inclusive em planilhas antigas.
+
+    ``Worksheet.add_rows`` nem sempre atualiza a propriedade ``row_count``
+    da instância usada pelo gspread em seguida. ``resize`` confirma o limite
+    final da grade no Sheets; o fallback preserva os doubles de teste e
+    versões antigas do cliente.
+    """
+    atual = int(getattr(aba, "row_count", 0) or 0)
+    if ultima_linha <= atual:
+        return
+    destino = max(ultima_linha, atual + 1000)
+    from modules.resiliencia_planilha import executar_com_retentativa
+    if callable(getattr(aba, "resize", None)):
+        executar_com_retentativa(
+            lambda: aba.resize(rows=destino), descricao,
+        )
+        return
+    executar_com_retentativa(
+        lambda: aba.add_rows(destino - atual), descricao,
+    )
+
+
 def gravar_eventos_planilha(proventos, eventos, planilha=None):
     """Espelha eventos, ampliando a aba antes de ultrapassar seu limite."""
     from modules.resiliencia_planilha import executar_com_retentativa
@@ -86,11 +109,9 @@ def gravar_eventos_planilha(proventos, eventos, planilha=None):
                 fim = "J"
             atualizacoes.append({"range": f"A{numero}:{fim}{numero}", "values": [valores]})
         ultima_linha = max((int(atualizacao["range"].split(":", 1)[0][1:]) for atualizacao in atualizacoes), default=1)
-        if ultima_linha > aba.row_count:
-            executar_com_retentativa(
-                lambda: aba.add_rows(max(1000, ultima_linha - aba.row_count)),
-                f"Expansão da aba {ABAS_EVENTOS[tipo][0]}",
-            )
+        _garantir_linhas(
+            aba, ultima_linha, f"Expansão da aba {ABAS_EVENTOS[tipo][0]}",
+        )
         executar_com_retentativa(
             lambda: aba.batch_update(atualizacoes, value_input_option="USER_ENTERED"),
             f"Gravação em lote na aba {ABAS_EVENTOS[tipo][0]}",
