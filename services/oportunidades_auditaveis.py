@@ -23,6 +23,18 @@ def registrar(sessao, ticker, classe, referencia, elegivel, criterios, motivos,
            "criterios": json.dumps(criterios or {}, ensure_ascii=False), "fonte": fonte})
 
 
+def _limite_percentual(valor, limite):
+    """Converte limites configurados como fração para a escala observada."""
+    if limite is None:
+        return None
+    try:
+        if float(limite) < 1 and valor is not None and float(valor) >= 1:
+            return float(limite) * 100
+    except (TypeError, ValueError):
+        pass
+    return limite
+
+
 def motivos_acao(pl, pvp, dy, roe, liquidez, filtros):
     valores={"pl":pl,"pvp":pvp,"dy":dy,"roe":roe,"liquidez":liquidez}
     regras={"pl":[filtros.get("pl_min",3),filtros.get("pl_max",12)],
@@ -35,8 +47,14 @@ def motivos_acao(pl, pvp, dy, roe, liquidez, filtros):
         try: numero=float(valor)
         except (TypeError,ValueError):
             motivos.append({"criterio":chave,"resultado":"SEM_DADO"}); continue
+        if chave in {"dy", "roe"}:
+            minimo = _limite_percentual(numero, minimo)
+            maximo = _limite_percentual(numero, maximo)
         ok=(minimo is None or numero>=minimo) and (maximo is None or numero<=maximo)
-        motivos.append({"criterio":chave,"resultado":"APROVADO" if ok else "REPROVADO","valor":numero,"minimo":minimo,"maximo":maximo})
+        motivo={"criterio":chave,"resultado":"APROVADO" if ok else "REPROVADO","valor":numero,"minimo":minimo,"maximo":maximo}
+        if chave in {"dy", "roe"}:
+            motivo["unidade"]="percentual"
+        motivos.append(motivo)
     return valores,motivos
 
 
