@@ -28,9 +28,12 @@ if __name__ == "__main__":
                                        falhas=len(resultado.get("falhas") or []), pendentes=pendentes)
         resultado["status"] = estado
         registrar_resultado(evento, resultado)
+        oficiais = resultado.get("pagamentos_oficiais") or {}
         mensagem = (f"Proventos e eventos: {estado.lower()}; "
                     f"processados={resultado['processados']}, proventos={resultado['proventos']}, "
-                    f"eventos={resultado['eventos']}, falhas={len(resultado['falhas'])}.")
+                    f"eventos={resultado['eventos']}, pagamentos B3 confirmados={oficiais.get('confirmados', 0)}, "
+                    f"pendentes={oficiais.get('pendentes', 0)}, conflitos={oficiais.get('conflitos', 0)}, "
+                    f"falhas={len(resultado['falhas'])}.")
         concluir_evento(evento, sucesso=estado != FALHOU, mensagem=mensagem,
                         erro="COLETA_SEM_SUCESSO" if estado == FALHOU else None, status=estado)
         if args.arquivo_resultado:
