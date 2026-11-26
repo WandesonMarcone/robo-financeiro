@@ -141,6 +141,13 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, 
 
     opps_brutas, cat_novatas = [], []
     if not df.empty:
+        # Auditoria não interfere na descoberta: em caso de indisponibilidade
+        # do Neon, a fila de atualização continua normalmente.
+        try:
+            from services.oportunidades_auditaveis import registrar_acoes_dataframe
+            registrar_acoes_dataframe(df, filtro_acao, agora_dt.date())
+        except Exception:
+            pass
         opps_filtradas = [
             papel for papel, linha in df.iterrows()
             if eh_oportunidade_acao(
