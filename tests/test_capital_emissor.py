@@ -25,6 +25,14 @@ class TestCapital(unittest.TestCase):
         self.assertIsNone(quantidades(c,"TEST11")["ticker_shares"])
         self.assertIsNone(quantidades(None,"TEST3")["company_shares"])
 
+    def test_total_oficial_nao_inventa_quantidade_da_classe(self):
+        from services.capital_emissor import _resumo
+        capital={"emitidas":3000000,"qualidade":"CVM_OFICIAL_TOTAL","classes":{}}
+        resumo=_resumo("TEST4","123",capital,[])
+        self.assertEqual(3000000,resumo["company_shares"])
+        self.assertIsNone(resumo["ticker_shares"])
+        self.assertEqual("CVM_OFICIAL_TOTAL",resumo["status"])
+
     def test_yahoo_nao_soma_classes_nem_units(self):
         from datetime import datetime, timezone
         from services.capital_yahoo import observar, resumir
