@@ -62,7 +62,7 @@ def _ler_neon(classe, session_factory=None):
             nome_oficial = "co.nome_emissor," if oficial else ""
             setor_oficial = "co.setor," if oficial else ""
             selecao_universo = (
-                "SELECT ticker FROM universo_acoes_autorizadas"
+                "SELECT ticker FROM universo_acoes_autorizadas WHERE ativo=TRUE"
                 if universo_oficial else
                 "SELECT ticker FROM ativos WHERE tipo::text=:tipo "
                 "UNION SELECT ticker FROM ativos_catalogo WHERE tipo::text=:tipo"
