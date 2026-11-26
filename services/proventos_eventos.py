@@ -93,7 +93,15 @@ def _b3_json(metodo, parametros, http_get=requests.get):
         resposta.raise_for_status()
     elif int(getattr(resposta, "status_code", 200)) >= 400:
         raise RuntimeError(f"B3_HTTP_{resposta.status_code}")
-    return resposta.json()
+    dados = resposta.json()
+    if isinstance(dados, str):
+        try:
+            dados = json.loads(dados)
+        except ValueError as exc:
+            raise RuntimeError("B3_RESPOSTA_INVALIDA") from exc
+    if not isinstance(dados, (dict, list)):
+        raise RuntimeError("B3_RESPOSTA_INVALIDA")
+    return dados
 
 
 def extrair_proventos_oficiais_b3(ticker, http_get=requests.get):
@@ -103,6 +111,8 @@ def extrair_proventos_oficiais_b3(ticker, http_get=requests.get):
     catalogo = _b3_json("GetInitialCompanies", {
         "language": "pt-br", "pageNumber": 1, "pageSize": 20, "company": emissor,
     }, http_get=http_get)
+    if not isinstance(catalogo, dict):
+        raise RuntimeError("B3_CATALOGO_FORMATO_INESPERADO")
     empresa = next((item for item in catalogo.get("results", [])
                     if str(item.get("issuingCompany") or "").upper() == emissor), None)
     if not empresa or not empresa.get("codeCVM"):
@@ -111,6 +121,8 @@ def extrair_proventos_oficiais_b3(ticker, http_get=requests.get):
     detalhe = _b3_json("GetDetail", {
         "codeCVM": str(empresa["codeCVM"]), "language": "pt-br",
     }, http_get=http_get)
+    if not isinstance(detalhe, dict):
+        raise RuntimeError("B3_DETALHE_FORMATO_INESPERADO")
     isins = {
         str(item["isin"]).strip().upper()
         for item in detalhe.get("otherCodes", [])

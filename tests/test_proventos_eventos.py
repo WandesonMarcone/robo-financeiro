@@ -1,3 +1,4 @@
+import json
 import unittest
 from datetime import date
 from unittest.mock import Mock, patch
@@ -109,10 +110,10 @@ class ProventosEventosTests(unittest.TestCase):
             if "GetInitialCompanies" in url:
                 return Resposta({"results": [{"issuingCompany": "PETR", "codeCVM": "9512"}]})
             if "GetDetail" in url:
-                return Resposta({"otherCodes": [
+                return Resposta(json.dumps({"otherCodes": [
                     {"code": "PETR3", "isin": "BRPETRACNOR9"},
                     {"code": "PETR4", "isin": "BRPETRACNPR6"},
-                ]})
+                ]}))
             self.assertIn("GetListedSupplementCompany", url)
             return Resposta([{"code": "PETR", "cashDividends": [
                 {"assetIssued": "BRPETRACNPR6", "isinCode": "BRPETRACNPR6", "paymentDate": "21/12/2026", "lastDatePrior": "21/08/2026", "rate": "0,47156696", "label": "DIVIDENDO"},
