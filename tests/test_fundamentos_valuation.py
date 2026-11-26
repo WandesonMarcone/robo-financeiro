@@ -73,6 +73,17 @@ class FundamentosValuationTest(unittest.TestCase):
         self.assertEqual(mapa["lucro_liquido"]["valor"], 26_480_000)
         self.assertEqual(mapa["lucro_liquido"]["conta_codigo"], "3.11.01")
 
+    def test_nao_le_lpa_de_fluxo_de_caixa_por_descricao(self):
+        campos = "CNPJ_CIA;DT_REFER;DT_INI_EXERC;DT_FIM_EXERC;ORDEM_EXERC;CD_CONTA;DS_CONTA;VL_CONTA;ESCALA_MOEDA\n"
+        dfc = campos + "00.000.000/0001-91;2025-12-31;2025-01-01;2025-12-31;ÚLTIMO;6.01.01.05;Lucro por Ação Diluído;99877;UNIDADE\n"
+        conteudo = io.BytesIO()
+        with zipfile.ZipFile(conteudo, "w") as pacote:
+            pacote.writestr("dfp_cia_aberta_DFC_MI_con_2025.csv", dfc.encode("latin1"))
+        fatos = extrair_demonstracoes_cvm(
+            conteudo.getvalue(), "TEST3", "00.000.000/0001-91", "DFP", 2025,
+        )
+        self.assertNotIn("lpa_diluido", {f["metrica"] for f in fatos})
+
     def test_deriva_lpa_vpa_payout_crescimento_e_divida(self):
         fundamentos = []
         proventos = []

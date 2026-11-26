@@ -142,13 +142,15 @@ def _data(valor):
         return None
 
 
-def _metrica(conta: str, descricao: str):
+def _metrica(conta: str, descricao: str, demonstracao: str | None = None):
     texto_desc = _texto(descricao).lower()
     # O plano de contas de instituições financeiras não usa sempre os mesmos
     # códigos das companhias industriais. No BPP de bancos, por exemplo, 2.03
     # é "Provisões" e o patrimônio aparece em 2.07. A descrição oficial deve
     # prevalecer nesses conceitos para impedir um VPA/ROE materialmente errado.
     for termos, metrica in DESCRICOES:
+        if metrica in {"lpa_basico", "lpa_diluido"} and demonstracao not in {None, "DRE"}:
+            continue
         if all(termo in texto_desc for termo in termos):
             return metrica
     if conta == "2.03" and "patrimonio liquido" not in texto_desc:
@@ -170,6 +172,21 @@ def _escala(linha, metrica):
         return 1_000_000.0
     if "MIL" in escala:
         return 1000.0
+    return 1.0
+
+
+def _escala_quantidade(linha):
+    """Aplica somente a escala explicitamente declarada pela CVM.
+
+    A composição de capital pode vir em milhares ou em unidades. Não usamos
+    Yahoo para inferir ou corrigir a escala: ele é apenas uma fonte de
+    comparação complementar.
+    """
+    escala = _texto(linha.get("ESCALA_QTD") or linha.get("ESCALA_MOEDA"))
+    if "MILHAO" in escala or "MILHOES" in escala:
+        return 1_000_000.0
+    if "MIL" in escala:
+        return 1_000.0
     return 1.0
 
 
@@ -204,7 +221,7 @@ def extrair_demonstracoes_cvm(conteudo, ticker, cnpj, documento, ano):
                         continue
                     conta = str(linha.get("CD_CONTA") or "").strip()
                     descricao = linha.get("DS_CONTA") or ""
-                    metrica = _metrica(conta, descricao)
+                    metrica = _metrica(conta, descricao, demonstracao)
                     valor = _numero(linha.get("VL_CONTA"))
                     if not metrica or valor is None:
                         continue
@@ -260,7 +277,12 @@ def extrair_demonstracoes_cvm(conteudo, ticker, cnpj, documento, ano):
                         "acoes_emitidas": "QT_ACAO_TOTAL_CAP_INTEGR",
                         "acoes_tesouraria": "QT_ACAO_TOTAL_TESOURO",
                     }
-                    valores = {k: _numero(linha.get(v)) for k, v in campos.items()}
+                    escala_quantidade = _escala_quantidade(linha)
+                    valores = {
+                        k: (_numero(linha.get(v)) * escala_quantidade
+                            if _numero(linha.get(v)) is not None else None)
+                        for k, v in campos.items()
+                    }
                     total, tesouraria = valores["acoes_emitidas"], valores["acoes_tesouraria"]
                     if total is not None and tesouraria is not None and total >= tesouraria:
                         valores["acoes_circulacao_ex_tesouraria"] = total - tesouraria
@@ -278,7 +300,7 @@ def extrair_demonstracoes_cvm(conteudo, ticker, cnpj, documento, ano):
                             "periodicidade": "ANUAL" if documento == "DFP" else "TRIMESTRAL",
                             "documento": documento, "escopo": "CONSOLIDADO",
                             "demonstracao": "COMPOSICAO_CAPITAL", "conta_codigo": campos.get(metrica),
-                            "metrica": metrica, "valor": valor, "unidade": "QUANTIDADE",
+                            "metrica": metrica, "valor": valor, "unidade": "ACOES",
                             "moeda": "BRL", "fonte": "CVM_DADOS_ABERTOS",
                             "qualidade_fonte": "DERIVADO" if metrica == "acoes_circulacao_ex_tesouraria" else "OFICIAL",
                             "url_origem": URL_CVM[documento].format(ano=ano), "_prioridade": versao,
@@ -441,6 +463,24 @@ def avaliar_cobertura(ticker, classe, fundamentos, indicadores, setor=None):
 
 
 def _persistir(sessao, fundamentos, indicadores, coberturas):
+    # Corrige fatos antigos que foram classificados como LPA por uma descrição
+    # semelhante dentro da DFC. LPA é uma linha da DRE; preserva todo o resto
+    # do grupo consolidado e só remove o falso positivo antes do novo upsert.
+    tickers = sorted({f["ticker"] for f in fundamentos if f.get("classe") == "ACAO"})
+    if tickers:
+        sessao.execute(text("""
+            UPDATE fundamentos_periodos p
+               SET itens = COALESCE((
+                    SELECT jsonb_object_agg(chave, valor)
+                    FROM jsonb_each(p.itens) AS fato(chave,valor)
+                    WHERE NOT (
+                        valor->>'metrica' IN ('lpa_basico','lpa_diluido')
+                        AND COALESCE(valor->>'demonstracao','') <> 'DRE'
+                    )
+               ), '{}'::jsonb), atualizado_em=NOW()
+             WHERE p.camada='fundamentos' AND p.classe='ACAO'
+               AND p.ticker=ANY(:tickers)
+        """), {"tickers": tickers})
     from services.fundamentos_consolidados import persistir_grupos
     persistir_grupos(sessao, fundamentos, indicadores)
     from services.capital_emissor import persistir_observacoes

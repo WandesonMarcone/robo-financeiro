@@ -55,6 +55,17 @@ class TestFilaFundamentos(unittest.TestCase):
         fatos = extrair_demonstracoes_cvm(b.getvalue(), "TEST3", "00.000.000/0001-91", "DFP", 2025)
         self.assertEqual({f["metrica"]: f["valor"] for f in fatos}["acoes_circulacao_ex_tesouraria"], 95)
 
+    def test_composicao_capital_respeita_escala_de_quantidade_da_cvm(self):
+        b = io.BytesIO()
+        with zipfile.ZipFile(b, "w") as z:
+            z.writestr("dfp_cia_aberta_DRE_con_2025.csv", "CNPJ_CIA;DT_FIM_EXERC;ORDEM_EXERC;CD_CONTA;DS_CONTA;VL_CONTA;ESCALA_MOEDA\n00.000.000/0001-91;2025-12-31;ULTIMO;3.01;Receita;100;MIL\n")
+            z.writestr("dfp_cia_aberta_composicao_capital_2025.csv", "CNPJ_CIA;DT_REFER;VERSAO;ESCALA_MOEDA;QT_ACAO_ORDIN_CAP_INTEGR;QT_ACAO_PREF_CAP_INTEGR;QT_ACAO_TOTAL_CAP_INTEGR;QT_ACAO_TOTAL_TESOURO\n00.000.000/0001-91;2025-12-31;1;MIL;80;20;100;5\n")
+        fatos = extrair_demonstracoes_cvm(b.getvalue(), "TEST3", "00.000.000/0001-91", "DFP", 2025)
+        mapa = {f["metrica"]: f for f in fatos}
+        self.assertEqual(100_000, mapa["acoes_emitidas"]["valor"])
+        self.assertEqual(95_000, mapa["acoes_circulacao_ex_tesouraria"]["valor"])
+        self.assertEqual("ACOES", mapa["acoes_emitidas"]["unidade"])
+
     def test_escala_milhoes(self):
         self.assertEqual(_escala({"ESCALA_MOEDA": "MILHÃO"}, "receita_liquida"), 1000000)
 
