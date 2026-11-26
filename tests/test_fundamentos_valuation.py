@@ -124,6 +124,20 @@ class FundamentosValuationTest(unittest.TestCase):
         self.assertEqual(lpas[2023], 5.0)
         self.assertEqual(lpas[2024], 6.0)
 
+    def test_nao_deriva_vpa_sem_confirmacao_da_classe(self):
+        fundamentos = [{
+            "periodo_fim": date(2025, 12, 31), "periodicidade": "ANUAL",
+            "metrica": metrica, "valor": valor,
+        } for metrica, valor in {
+            "lucro_liquido": 100_000, "lpa_diluido": 2.0,
+            "patrimonio_liquido": 500_000,
+            "acoes_circulacao_ex_tesouraria": 50_000,
+        }.items()]
+        indicadores = derivar_indicadores(
+            "UNIT11", "ACAO", fundamentos, permitir_vpa=False,
+        )
+        self.assertNotIn("vpa", {item["indicador"] for item in indicadores})
+
     def test_banco_bloqueia_fcff_e_preserva_fcfe(self):
         periodo = date(2025, 12, 31)
         indicadores = [

@@ -323,7 +323,8 @@ def _fato(ticker, classe, periodo, metrica, valor, unidade, entradas, periodicid
     }
 
 
-def derivar_indicadores(ticker, classe, fundamentos, proventos=None, eventos=None):
+def derivar_indicadores(ticker, classe, fundamentos, proventos=None, eventos=None,
+                        permitir_vpa=True):
     por_periodo = defaultdict(dict)
     for item in fundamentos:
         if item["periodicidade"] == "ANUAL":
@@ -361,14 +362,15 @@ def derivar_indicadores(ticker, classe, fundamentos, proventos=None, eventos=Non
         patrimonio = m.get("patrimonio_liquido")
         quantidade = m.get("acoes_circulacao_ex_tesouraria")
         from services.capital_emissor import escala_suspeita
-        if patrimonio is not None and quantidade and quantidade > 0 and not escala_suspeita(quantidade,lucro,lpa):
+        if (permitir_vpa and patrimonio is not None and quantidade and quantidade > 0
+                and not escala_suspeita(quantidade,lucro,lpa)):
             fator_posterior = 1.0
             for data_evento, fator in desdobramentos:
                 if data_evento > periodo:
                     fator_posterior *= fator
             quantidade *= fator_posterior
             indicadores.append(_fato(ticker, classe, periodo, "vpa", patrimonio / quantidade, "BRL_ACAO", {"patrimonio_liquido": patrimonio, "acoes": quantidade, "origem": "COMPOSICAO_CAPITAL"}))
-        elif patrimonio is not None and acoes and not quantidade:
+        elif permitir_vpa and patrimonio is not None and acoes and not quantidade:
             indicadores.append(_fato(ticker, classe, periodo, "vpa", patrimonio / acoes, "BRL_ACAO", {"patrimonio_liquido": patrimonio, "acoes": acoes, "origem": "ESTIMATIVA_ACOES_MEDIA_DILUIDA"}))
         if patrimonio not in {None, 0} and lucro is not None:
             indicadores.append(_fato(ticker, classe, periodo, "roe", lucro / patrimonio, "FRACAO", {"lucro_liquido": lucro, "patrimonio_liquido": patrimonio}))
@@ -462,7 +464,7 @@ def avaliar_cobertura(ticker, classe, fundamentos, indicadores, setor=None):
     return coberturas
 
 
-def _persistir(sessao, fundamentos, indicadores, coberturas):
+def _persistir(sessao, fundamentos, indicadores, coberturas, limpar_vpa_tickers=()):
     # Corrige fatos antigos que foram classificados como LPA por uma descrição
     # semelhante dentro da DFC. LPA é uma linha da DRE; preserva todo o resto
     # do grupo consolidado e só remove o falso positivo antes do novo upsert.
@@ -481,6 +483,21 @@ def _persistir(sessao, fundamentos, indicadores, coberturas):
              WHERE p.camada='fundamentos' AND p.classe='ACAO'
                AND p.ticker=ANY(:tickers)
         """), {"tickers": tickers})
+    # A composição publicada pela CVM confirma o total do emissor. Quando ele
+    # tem mais de uma classe/Unit e não há composição por ticker, VPA por ação
+    # não é determinável sem supor uma divisão. Remove apenas o derivado que
+    # deixou de ser elegível; fatos brutos, LPA e todo o histórico permanecem.
+    if limpar_vpa_tickers:
+        sessao.execute(text("""
+            UPDATE fundamentos_periodos p
+               SET itens = COALESCE((
+                    SELECT jsonb_object_agg(chave, valor)
+                    FROM jsonb_each(p.itens) AS fato(chave,valor)
+                    WHERE COALESCE(valor->>'indicador','') <> 'vpa'
+               ), '{}'::jsonb), atualizado_em=NOW()
+             WHERE p.camada='indicadores' AND p.classe='ACAO'
+               AND p.ticker=ANY(:tickers)
+        """), {"tickers": sorted(set(limpar_vpa_tickers))})
     from services.fundamentos_consolidados import persistir_grupos
     persistir_grupos(sessao, fundamentos, indicadores)
     from services.capital_emissor import persistir_observacoes
@@ -526,6 +543,29 @@ def _cadastro_ativo(sessao, ticker):
     if not linha:
         raise ValueError("ativo_sem_cnpj_cadastrado")
     return dict(linha)
+
+
+def _vpa_por_ticker_confirmavel(session_factory, cadastro):
+    """Só permite VPA quando o CNPJ possui uma única ação listada conhecida.
+
+    A composição CVM disponível nesta rotina é por emissor. Para ON/PN/Units,
+    o total não pode ser repartido entre tickers por conveniência.
+    """
+    if cadastro.get("classe") != "ACAO":
+        return True
+    sessao = session_factory()
+    try:
+        quantidade = sessao.execute(text("""
+            SELECT count(DISTINCT ticker)
+            FROM cadastro_cnpj_acoes
+            WHERE cnpj=:cnpj
+        """), {"cnpj": cadastro["cnpj"]}).scalar()
+        return quantidade == 1
+    except Exception:
+        # Sem confirmação de classe, a regra é não fabricar um VPA por ação.
+        return False
+    finally:
+        sessao.close()
 
 
 def coletar_fundamentos_valuation(ticker, anos=5, planilha=None, session_factory=None,
@@ -637,9 +677,10 @@ def coletar_fundamentos_valuation(ticker, anos=5, planilha=None, session_factory
     except Exception as exc:
         falhas.append({"fonte": "YAHOO_EVENTOS", "ano": None, "erro": type(exc).__name__})
 
+    vpa_confirmavel = _vpa_por_ticker_confirmavel(session_factory, cadastro)
     indicadores = derivar_indicadores(
         ticker, cadastro["classe"], fundamentos,
-        proventos=proventos, eventos=eventos,
+        proventos=proventos, eventos=eventos, permitir_vpa=vpa_confirmavel,
     )
     setor = cadastro.get("setor")
     if cadastro["classe"] == "ACAO" and not setor:
@@ -655,7 +696,8 @@ def coletar_fundamentos_valuation(ticker, anos=5, planilha=None, session_factory
     # descartar fundamentos já coletados da CVM.
     sessao = session_factory()
     try:
-        _persistir(sessao, fundamentos, indicadores, coberturas)
+        _persistir(sessao, fundamentos, indicadores, coberturas,
+                   limpar_vpa_tickers=() if vpa_confirmavel else (ticker,))
         from services.fundamentos_consolidados import podar_trimestres
         podar_trimestres(sessao, fundamentos, hoje.year)
         from services.proventos_eventos import _persistir as persistir_eventos
