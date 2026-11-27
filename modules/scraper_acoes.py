@@ -64,6 +64,18 @@ def classificar_setor_por_mapa(ticker, yf_info=None):
         return macro, sub
     return SETOR_PADRAO
 
+
+
+def _selecionar_novas_acoes(candidatos, existentes, limite, agora_dt):
+    """Faz rodízio das ações qualificadas ainda ausentes da lista oficial."""
+    existentes = set(existentes)
+    novas = [str(t).strip().upper() for t in candidatos if str(t).strip().upper() not in existentes]
+    if not novas or limite <= 0:
+        return []
+    bloco = max(1, agora_dt.hour * 2 + agora_dt.minute // 30)
+    inicio = (bloco * limite) % len(novas)
+    return [novas[(inicio + i) % len(novas)] for i in range(min(limite, len(novas)))]
+
 def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, pausa_entre_ativos=0, prazo_monotonic=None, clock=time.monotonic, sleep=time.sleep):
     print("📈 [1/5] Iniciando auditoria completa de Ações...")
     aba_base = planilha.worksheet("BD_Acoes")
@@ -173,7 +185,10 @@ def rodar_garimpo_acoes(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, 
         ][:limite_opp]
         # Descoberta continua ativa. A inclusão exige vínculo oficial atual.
         identidades_novas = {}
-        candidatos = [c for c in opps_brutas if c not in todas][:8] if tickers_lote is None else []
+        candidatos = (
+            _selecionar_novas_acoes(opps_brutas, todas_originais, limite=8, agora_dt=agora_dt)
+            if tickers_lote is None else []
+        )
         if candidatos:
             from services.identidade_fundamentos_acoes import IdentidadeFCA
             resolver = IdentidadeFCA()
