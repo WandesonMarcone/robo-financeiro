@@ -132,12 +132,15 @@ def executar_auditoria_carteira():
     _enviar_favoritos(digest_fiis, "fii")
     _enviar_favoritos(digest_acoes, "acao")
     _enviar_favoritos(digest_instrumentos, "instrumento")
-    try:
-        texto_indices = mensagem_indices_b3()
-        disparar_alertas(texto_indices)
-        print(texto_indices.replace("\n", " | "))
-    except Exception as e:
-        print(f"Falha ao obter IFIX/Ibovespa: {type(e).__name__}")
+    # O fechamento dos índices é enviado uma vez, após o pregão, para evitar
+    # cinco mensagens repetidas durante as rodadas intradiárias.
+    if agora_dt.hour >= 19:
+        try:
+            texto_indices = mensagem_indices_b3()
+            disparar_alertas(texto_indices)
+            print(texto_indices.replace("\n", " | "))
+        except Exception as e:
+            print(f"Falha ao obter IFIX/Ibovespa: {type(e).__name__}")
     if not enviou_fii and not enviou_acao and not enviou_instrumentos and not enviou_macro_tesouro:
         print("Execucao concluida com sucesso. (Mercado esta estavel, sem alertas de distorcoes).")
 
