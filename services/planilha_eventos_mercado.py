@@ -93,6 +93,9 @@ def gravar_eventos_planilha(proventos, eventos, planilha=None):
             if numero is None:
                 numero = proxima
                 proxima += 1
+                # A mesma coleta pode repetir um identificador. Registre a
+                # linha reservada imediatamente para manter o lote idempotente.
+                existentes[identificador] = numero
             if tipo == "provento":
                 valores = [
                     identificador, item["ticker"], item["classe"], str(item["data_ex"]),
