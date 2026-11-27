@@ -25,3 +25,18 @@ class GithubFundamentosDispatchTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GithubOpportunitiesDispatchTest(unittest.TestCase):
+    @patch("services.github_actions.requests.post")
+    def test_dispara_varredura_unificada_sem_classe(self, post):
+        from services.github_actions import disparar_oportunidades_unificadas
+
+        post.return_value = Mock(status_code=204, text="")
+        with patch.dict(os.environ, {"GITHUB_ACTIONS_TOKEN": "segredo", "GITHUB_REPOSITORY": "dono/repo"}, clear=False):
+            ok, mensagem = disparar_oportunidades_unificadas()
+        self.assertTrue(ok)
+        self.assertIn("Varredura completa", mensagem)
+        kwargs = post.call_args.kwargs
+        self.assertEqual(kwargs["json"]["inputs"], {"modo": "oportunidades"})
+        self.assertTrue(post.call_args.args[0].endswith("/mercado-oportunidades.yml/dispatches"))
