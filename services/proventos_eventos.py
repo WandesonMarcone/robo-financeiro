@@ -104,7 +104,7 @@ def _b3_json(metodo, parametros, http_get=requests.get):
     return dados
 
 
-def extrair_proventos_oficiais_b3(ticker, http_get=requests.get):
+def extrair_proventos_oficiais_b3(ticker, http_get=requests.get, classe="ACAO"):
     """Resolve na B3 o ISIN do ticker e consulta as datas de pagamento."""
     ticker = str(ticker or "").upper().strip()
     emissor = re.sub(r"\d+$", "", ticker)
@@ -156,7 +156,7 @@ def extrair_proventos_oficiais_b3(ticker, http_get=requests.get):
             if not pagamento or not math.isfinite(valor) or valor <= 0:
                 continue
             oficiais.append({
-                "ticker": ticker, "classe": "ACAO", "isin": isin,
+                "ticker": ticker, "classe": str(classe or "ACAO").upper(), "isin": isin,
                 "data_com": _data_oficial(item.get("lastDatePrior")),
                 "data_pagamento": pagamento, "valor_unitario": valor,
                 "tipo_original": str(item.get("label") or "PROVENTO"),
@@ -170,10 +170,11 @@ def _chave_oficial(item):
                f"{float(item['valor_unitario']):.10f}", item["fonte"])
 
 
-def conciliar_pagamentos_b3(sessao, ticker, http_get=requests.get, oficiais=None):
+def conciliar_pagamentos_b3(sessao, ticker, http_get=requests.get, oficiais=None, classe="ACAO"):
     """Associa pagamento oficial a um único evento complementar compatível."""
     resultado = {"consultados": 0, "confirmados": 0, "pendentes": 0, "conflitos": 0, "datas": {}}
-    oficiais = extrair_proventos_oficiais_b3(ticker, http_get=http_get) if oficiais is None else oficiais
+    classe = str(classe or "ACAO").upper()
+    oficiais = extrair_proventos_oficiais_b3(ticker, http_get=http_get, classe=classe) if oficiais is None else oficiais
     for oficial in oficiais:
         resultado["consultados"] += 1
         chave = _chave_oficial(oficial)
@@ -181,12 +182,12 @@ def conciliar_pagamentos_b3(sessao, ticker, http_get=requests.get, oficiais=None
         if oficial.get("data_com"):
             candidatos = sessao.execute(text("""
                 SELECT id, identificador, data_pagamento FROM proventos_ativos
-                WHERE ticker=:ticker AND classe='ACAO'
+                WHERE ticker=:ticker AND classe=:classe
                   AND data_ex >= :data_com AND data_ex <= :limite
                   AND ABS(valor_unitario - :valor) <= :tolerancia
                 ORDER BY id FOR UPDATE
             """), {
-                "ticker": oficial["ticker"], "data_com": oficial["data_com"],
+                "ticker": oficial["ticker"], "classe": classe, "data_com": oficial["data_com"],
                 "limite": oficial["data_com"] + timedelta(days=7), "valor": oficial["valor_unitario"],
                 "tolerancia": max(0.00000001, abs(oficial["valor_unitario"]) * 0.00001),
             }).mappings().all()
@@ -315,24 +316,27 @@ def coletar_proventos_eventos(limite_por_classe=20, janela_dias=75, pausa_segund
                 proventos, eventos = extrair_eventos_yahoo(
                     ticker, classe, ticker_factory(f"{ticker}.SA"), desde, hoje
                 )
-                if not proventos and not eventos and classe != "ACAO":
-                    resultado["sem_eventos"] += 1
-                    resultado["processados"] += 1
-                    continue
                 pagamentos_b3 = []
-                if classe == "ACAO":
+                if classe in {"ACAO", "BDR", "FII"}:
                     try:
-                        pagamentos_b3 = b3_fetcher(ticker)
+                        if b3_fetcher is extrair_proventos_oficiais_b3:
+                            pagamentos_b3 = b3_fetcher(ticker, classe=classe)
+                        else:
+                            pagamentos_b3 = b3_fetcher(ticker)
                     except (requests.RequestException, RuntimeError) as exc:
                         resultado["falhas"].append({
                             "ticker": ticker, "classe": classe,
                             "erro": "CONSULTA_B3_PENDENTE", "causa": type(exc).__name__,
                         })
+                if not proventos and not eventos and not pagamentos_b3:
+                    resultado["sem_eventos"] += 1
+                    resultado["processados"] += 1
+                    continue
                 sessao = session_factory()
                 try:
                     _persistir(sessao, proventos, eventos)
                     if pagamentos_b3:
-                        oficial = conciliar_pagamentos_b3(sessao, ticker, oficiais=pagamentos_b3)
+                        oficial = conciliar_pagamentos_b3(sessao, ticker, oficiais=pagamentos_b3, classe=classe)
                         for chave in ("confirmados", "pendentes", "conflitos"):
                             resultado["pagamentos_oficiais"][chave] += oficial[chave]
                         for item in proventos:
