@@ -108,6 +108,8 @@ class PortfolioApiTest(unittest.TestCase):
         self.assertEqual(200, response.status_code)
         self.assertEqual(0.5, response.json["data"][0]["amount_per_unit"])
         self.assertEqual("COMPLEMENTAR", response.json["data"][0]["source_quality"])
+        self.assertEqual(1, response.json["coverage"]["pending_payment_dates"])
+        self.assertEqual(1, response.json["coverage"]["complementary_events"])
 
     @patch("services.portfolio_api._supabase_user", return_value={"id": "user-1"})
     @patch("atualizador_documentos.SessionDB")
