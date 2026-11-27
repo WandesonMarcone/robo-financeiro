@@ -9,7 +9,7 @@ class TaxonomiaFiisAutomaticaTests(unittest.TestCase):
             "GGRC11", "BTLG11", "CLIN11", "RBRY11", "VGIR11", "CVBI11",
             "KNUQ11", "KNHF11", "MCCI11", "KNSC11", "HSRE11", "KNIP11",
             "KNHY11", "HGRU11", "HGLG11", "KNRI11", "SNEL11", "CPTS11",
-            "ALZR11", "BTRU11", "KNCR11",
+            "ALZR11", "BTRU11", "KNCR11", "TRXF11", "PMLL11",
         }
         self.assertEqual(esperados, set(SEGMENTOS_FII_VERIFICADOS))
         for ticker, segmento in SEGMENTOS_FII_VERIFICADOS.items():
