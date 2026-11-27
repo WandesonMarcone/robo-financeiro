@@ -1,0 +1,114 @@
+name: Mercado — atualização noturna
+
+on:
+  schedule:
+    - cron: '15 22 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      limite_total:
+        description: Teto por lote de ações e FIIs
+        required: false
+        default: '30'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mercado-operacoes
+  cancel-in-progress: false
+
+jobs:
+  atualizacao:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDENTIALS }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      LOGO_DEV_TOKEN: ${{ secrets.LOGO_DEV_TOKEN }}
+      SEC_EDGAR_USER_AGENT: ${{ secrets.SEC_EDGAR_USER_AGENT }}
+      EOD_SNAPSHOTS: 'true'
+      ALERTA_CRIPTO_VARIACAO_PCT: ${{ vars.ALERTA_CRIPTO_VARIACAO_PCT || '4.0' }}
+      ALERTA_MOEDA_VARIACAO_PCT: ${{ vars.ALERTA_MOEDA_VARIACAO_PCT || '0.75' }}
+      COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+      - name: Criar credencial temporária do Google
+        shell: python
+        run: |
+          import os
+          with open('credenciais.json', 'w', encoding='utf-8') as arquivo:
+              arquivo.write(os.environ['GOOGLE_CREDS'])
+      - name: Sincronizar CNPJs oficiais das ações
+        timeout-minutes: 4
+        continue-on-error: true
+        run: python -m scripts.sincronizar_cnpj_acoes
+      - name: Planejar cobertura integral
+        id: planejar
+        run: python -m scripts.planejar_ciclo_noturno --limite-total "${{ inputs.limite_total || '30' }}" --github-output "$GITHUB_OUTPUT"
+      - name: Atualizar ações, FIIs e instrumentos
+        id: atualizacao
+        shell: bash
+        run: |
+          ciclos="${{ steps.planejar.outputs.ciclos }}"
+          for ciclo in $(seq 1 "${ciclos}"); do
+            python atualizador_ciclico.py --limite-total "${{ inputs.limite_total || '30' }}" --orcamento-segundos 180 --pausa-segundos 2
+          done
+          for classe in ETF BDR CRIPTO; do
+            python -m scripts.descobrir_instrumentos --tipo "${classe}" --limite 3 \
+              || echo "::warning::Descoberta ${classe} temporariamente indisponível"
+          done
+          classes_atualizadas=0
+          fontes_parciais=""
+          arquivo_falhas_parciais="${RUNNER_TEMP}/classes-parciais.txt"
+          : > "${arquivo_falhas_parciais}"
+          for classe in ETF BDR CRIPTO MOEDA; do
+            if python -m scripts.coletar_etfs_bdrs --tipo "${classe}" --limite 60 --sem-notificacoes --arquivo-falhas-parciais "${arquivo_falhas_parciais}"; then
+              classes_atualizadas=$((classes_atualizadas + 1))
+            else
+              fontes_parciais="${fontes_parciais:+${fontes_parciais},}${classe}"
+            fi
+          done
+          if [ "${classes_atualizadas}" -eq 0 ]; then
+            echo "::error::Nenhuma classe de mercado pôde ser atualizada"
+            exit 1
+          fi
+          if [ -s "${arquivo_falhas_parciais}" ]; then
+            classes_parciais=$(sort -u "${arquivo_falhas_parciais}" | paste -sd, -)
+            fontes_parciais="${fontes_parciais:+${fontes_parciais},}${classes_parciais}"
+          fi
+          python -m scripts.coletar_series_macro || fontes_parciais="${fontes_parciais:+${fontes_parciais},}macroeconomia"
+          python -m scripts.coletar_tesouro_direto || fontes_parciais="${fontes_parciais:+${fontes_parciais},}Tesouro Direto"
+          python -m scripts.persistir_fechamento_eod
+          python -m scripts.coletar_proventos_eventos --limite-por-classe 20 --janela-dias 75
+          python -m scripts.auditar_cobertura_noturna --max-atraso-dias 1
+          python -m scripts.auditar_mercado_multiclasse || fontes_parciais="${fontes_parciais:+${fontes_parciais},}cobertura de mercado"
+          python -m scripts.corrigir_taxonomia_fiis --usar-contingencia
+          if [ -n "${fontes_parciais}" ]; then
+            echo "status=parcial" >> "$GITHUB_OUTPUT"
+            echo "falhas=${fontes_parciais}" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=ok" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Notificar conclusão parcial
+        if: success() && steps.atualizacao.outputs.status == 'parcial'
+        continue-on-error: true
+        env:
+          FALHA_PARCIAL: 'true'
+          ETAPA_FALHA: ${{ steps.atualizacao.outputs.falhas }}
+        run: python -m scripts.notificar_falha_workflow
+      - name: Espelhar quantidades de ações
+        if: always() && !cancelled()
+        continue-on-error: true
+        run: python -m scripts.espelhar_capital_emissor
+      - name: Notificar falha integral
+        if: failure() && !cancelled()
+        continue-on-error: true
+        run: python -m scripts.notificar_falha_workflow
