@@ -189,7 +189,8 @@ on:
       - 'scripts/processar_documentos_pendentes.py'
       - 'pipeline_dados/tipos_documento.py'
       - 'tests/test_tipos_documento.py'
-      - '.github/workflows/main.yml'
+      - '.github/workflows/mercado-oportunidades.yml'
+      - '.github/workflows/atualizacao-noturna.yml'
       - '.github/workflows/test-fluxos-isolados.yml'
       - '.github/workflows/atualizacao-ciclica.yml'
 
