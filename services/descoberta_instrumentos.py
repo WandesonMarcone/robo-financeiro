@@ -116,6 +116,20 @@ def candidatos_cripto(get=requests.get):
     return candidatos
 
 
+
+
+def _selecionar_rodizio(candidatos, existentes, limite):
+    """Retorna candidatos novos em janela rotativa por meia hora UTC."""
+    existentes = set(existentes)
+    novos = [item for item in candidatos if item.get("ticker") not in existentes]
+    if not novos or limite <= 0:
+        return []
+    agora = datetime.now(timezone.utc)
+    bloco = max(1, agora.hour * 2 + agora.minute // 30)
+    inicio = (bloco * limite) % len(novos)
+    janela = min(len(novos), max(limite * 4, limite))
+    return [novos[(inicio + i) % len(novos)] for i in range(janela)]
+
 def descobrir_e_cadastrar(tipo, limite=3, *, planilha=None, get=requests.get,
                            registrar=registrar_instrumento):
     tipo = str(tipo or "").strip().upper()
@@ -132,6 +146,7 @@ def descobrir_e_cadastrar(tipo, limite=3, *, planilha=None, get=requests.get,
     candidatos = candidatos_cripto(get=get) if tipo == "CRIPTO" else candidatos_b3(tipo, get=get)
     novos = []
     falhas = []
+    candidatos = _selecionar_rodizio(candidatos, existentes, limite)
     for item in candidatos:
         if item["ticker"] in existentes or len(novos) >= limite:
             continue
