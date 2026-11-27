@@ -21,6 +21,21 @@ from modules.relatorio_mercado import (
 )
 from modules.taxonomia_fiis import classificar_fii
 
+
+
+def _selecionar_novos_fiis(candidatos, existentes, limite, agora_dt):
+    """Faz rodízio dos FIIs qualificados ainda ausentes da lista oficial.
+
+    O horário desloca a janela para que as rodadas do pregão não repitam sempre
+    os mesmos tickers. Quando não houver candidato qualificado, retorna vazio.
+    """
+    novos = [str(t).strip().upper() for t in candidatos if str(t).strip().upper() not in set(existentes)]
+    if not novos or limite <= 0:
+        return []
+    bloco = max(1, agora_dt.hour * 2 + agora_dt.minute // 30)
+    inicio = (bloco * limite) % len(novos)
+    return [novos[(inicio + i) % len(novos)] for i in range(min(limite, len(novos)))]
+
 def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, pausa_entre_ativos=0, prazo_monotonic=None, clock=time.monotonic, sleep=time.sleep):
     print("🏢 [1/5] Iniciando varredura com Yahoo Finance e Fundamentus...")
     aba_fiis = planilha.worksheet("BD_FIIs")
@@ -102,10 +117,12 @@ def rodar_garimpo_fiis(planilha, agora_dt, agora_sp, sp_tz, tickers_lote=None, p
             if o in tickers_planilha and o not in cat_populares
             and precisa_atualizar(o, mapa_atualizacao, agora_dt, sp_tz)
         ][:limite_opp]
-        novatos_garimpados = [
-            fii for fii in oportunidades_gerais
-            if fii not in tickers_planilha and fii not in cat_populares
-        ][:3]
+        novatos_garimpados = _selecionar_novos_fiis(
+            oportunidades_gerais,
+            tickers_planilha,
+            limite=3,
+            agora_dt=agora_dt,
+        )
     else:
         cat_opps = []
 
