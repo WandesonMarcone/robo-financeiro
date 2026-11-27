@@ -25,6 +25,7 @@ _SEGMENTOS = (
     ("CRI", "Papel", ("TITULOS", "PAPEL", "RECEBIVEL", "VALORES MOBILIARIOS", "CRI", "LCI", "CRA", "CERTIFICADOS")),
     ("Cotas de FIIs", "FOF", ("FUNDO DE FUNDOS", "FOF", "COTAS DE FUNDOS", "COTAS DE FIIS")),
     ("Misto", "Híbrido", ("HIBRIDO", "MISTO", "MULTIESTRATEGIA", "MULTI ESTRATEGIA", "MULTI-ESTRATEGIA")),
+    ("Multicategoria", "Tijolo", ("MULTICATEGORIA", "MULTI CATEGORIA")),
     ("Logística", "Tijolo", ("LOGISTIC", "GALPAO", "INDUSTRIAL")),
     ("Shoppings", "Tijolo", ("SHOPPING", "MALL")),
     ("Lajes Corporativas", "Tijolo", ("LAJE", "CORPORATIV", "ESCRITORIO", "OFFICE")),
