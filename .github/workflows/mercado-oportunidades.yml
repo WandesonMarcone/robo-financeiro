@@ -6,6 +6,12 @@ on:
     - cron: '0 13,17,22 * * 0,6'
   workflow_dispatch:
     inputs:
+      modo:
+        description: Operação manual
+        required: true
+        type: choice
+        default: oportunidades
+        options: [oportunidades, corrigir_taxonomia_fiis]
       novo_ticker:
         description: Novo ETF, BDR, cripto ou moeda para cadastrar
         required: false
@@ -62,7 +68,7 @@ jobs:
         continue-on-error: true
         run: python -m scripts.sincronizar_cnpj_acoes
       - name: Buscar oportunidades de ações, FIIs e instrumentos
-        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 13,15,17,19,21 * * 1-5'
+        if: github.event.schedule == '0 13,15,17,19,21 * * 1-5' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'oportunidades')
         shell: bash
         run: |
           if [ -n "${{ inputs.novo_ticker || '' }}" ]; then
@@ -90,6 +96,9 @@ jobs:
           python -m scripts.coletar_series_macro || echo "::warning::Contexto macro indisponível"
           python -m scripts.coletar_tesouro_direto || echo "::warning::Tesouro indisponível"
           python -m scripts.buscar_oportunidades_unificadas
+      - name: Corrigir setores e segmentos de FIIs
+        if: github.event_name == 'workflow_dispatch' && inputs.modo == 'corrigir_taxonomia_fiis'
+        run: python -m scripts.corrigir_taxonomia_fiis --usar-contingencia
       - name: Atualizar criptomoedas no fim de semana
         if: github.event.schedule == '0 13,17,22 * * 0,6'
         run: |
