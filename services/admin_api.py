@@ -1134,14 +1134,14 @@ def oportunidades_acoes():
 @exige_admin
 def oportunidades_instrumentos_internacionais():
     """Triagem explicável; candidatos não são recomendação de investimento."""
-    tipo = str(request.args.get("type") or "").upper().strip()
-    if tipo not in {"ETF", "BDR", "CRIPTO", "MOEDA"}:
-        return jsonify({"message": "Escolha ETF, BDR, CRIPTO ou MOEDA."}), 400
+    tipo = str(request.args.get("type") or "").upper().strip() or None
+    if tipo is not None and tipo not in {"ETF", "BDR", "CRIPTO", "MOEDA"}:
+        return jsonify({"message": "Classe inválida. Use ETF, BDR, CRIPTO ou MOEDA."}), 400
     try:
         from services.coletor_etfs_bdrs import listar_oportunidades_instrumentos
         itens = listar_oportunidades_instrumentos(tipo=tipo)
         return jsonify({
-            "type": tipo,
+            "type": tipo or "TODOS",
             "opportunities": itens,
             "criteria": "Dados recentes, liquidez mínima, distância da máxima e limite de volatilidade. Triagem, não recomendação.",
         })
@@ -1169,6 +1169,24 @@ def executar_comando():
     if ticker and not _TICKER.fullmatch(ticker):
         return jsonify({"message": "Ticker inválido."}), 400
 
+    if action == "buscar_oportunidades":
+        from services.github_actions import disparar_oportunidades_unificadas
+        from services.historico_operacional import iniciar_evento, registrar_progresso, concluir_evento
+        evento_id = iniciar_evento(
+            action, origem="PAINEL_ADMIN",
+            mensagem="Varredura completa de oportunidades",
+            detalhes={"workflow": "mercado-oportunidades.yml", "modo": "oportunidades"},
+        )
+        registrar_progresso(evento_id, "Solicitando varredura unificada ao GitHub Actions.")
+        ok, mensagem = disparar_oportunidades_unificadas()
+        if not ok:
+            concluir_evento(evento_id, sucesso=False, mensagem=mensagem, erro="GITHUB_ACTIONS_DISPATCH_FAILED")
+            return jsonify({"message": mensagem}), 502
+        registrar_progresso(evento_id, "Workflow aceito pelo GitHub. Ações, FIIs e demais classes serão processados no mesmo ciclo.")
+        return jsonify({
+            "message": "Varredura completa enviada ao GitHub Actions. O histórico mostrará o andamento.",
+            "task_id": evento_id,
+        }), 202
     if action == "status":
         return jsonify({"message": "Status atualizado."})
     if action == "registrar_instrumento":
