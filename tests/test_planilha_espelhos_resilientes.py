@@ -59,6 +59,19 @@ class PlanilhaEspelhosResilientesTests(unittest.TestCase):
         self.assertEqual(len(chamadas), 2)
         self.assertEqual(pausas, [2])
 
+    def test_lote_repetido_nao_cria_duas_linhas(self):
+        _, cabecalho = ABAS_EVENTOS["provento"]
+        aba = AbaEventos("provento", [list(cabecalho)])
+        item = {
+            "identificador": "repetido", "ticker": "BBAS3", "classe": "ACAO",
+            "data_ex": "2026-11-25", "data_pagamento": None,
+            "tipo": "DISTRIBUICAO", "valor_unitario": 0.25,
+            "fonte": "CVM", "qualidade_fonte": "OFICIAL",
+        }
+        resultado = gravar_eventos_planilha([item, dict(item)], [], planilha=PlanilhaFake(aba))
+        self.assertEqual(resultado["proventos"], 2)
+        self.assertEqual([linha["range"] for linha in aba.atualizacoes], ["A2:K2", "A2:K2"])
+
     def test_aba_de_proventos_expande_antes_da_linha_1001(self):
         _, cabecalho = ABAS_EVENTOS["provento"]
         linhas = [list(cabecalho)] + [[f"antigo-{i}"] for i in range(999)]
