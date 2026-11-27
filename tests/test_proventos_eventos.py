@@ -122,9 +122,33 @@ class ProventosEventosTests(unittest.TestCase):
 
         itens = extrair_proventos_oficiais_b3("PETR4", http_get=get)
         self.assertEqual(1, len(itens))
+        self.assertEqual("BRPETRACNPR6", itens[0]["isin"])
         self.assertEqual(date(2026, 12, 21), itens[0]["data_pagamento"])
         self.assertEqual(date(2026, 8, 21), itens[0]["data_com"])
-        self.assertEqual("BRPETRACNPR6", itens[0]["isin"])
+
+    def test_b3_preserva_classe_bdr(self):
+        class Resposta:
+            def __init__(self, dados):
+                self.dados = dados
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self.dados
+
+        def get(url, **_kwargs):
+            if "GetInitialCompanies" in url:
+                return Resposta({"results": [{"issuingCompany": "AAPL", "codeCVM": "123"}]})
+            if "GetDetail" in url:
+                return Resposta({"otherCodes": [{"code": "AAPL34", "isin": "BRAAPLBDR001"}]})
+            return Resposta([{"code": "AAPL", "cashDividends": [{
+                "isinCode": "BRAAPLBDR001", "paymentDate": "21/12/2026",
+                "lastDatePrior": "20/12/2026", "rate": "0,10",
+            }]}])
+
+        itens = extrair_proventos_oficiais_b3("AAPL34", http_get=get, classe="BDR")
+        self.assertEqual("BDR", itens[0]["classe"])
 
     def test_data_oficial_divergente_fica_em_conflito(self):
         sessao = Mock()
