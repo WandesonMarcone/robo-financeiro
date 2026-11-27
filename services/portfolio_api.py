@@ -411,7 +411,15 @@ def asset_income(ticker: str):
         "currency": row["moeda"], "source": row["fonte"],
         "source_quality": row["qualidade_fonte"],
     } for row in rows]
-    return jsonify({"data": data, "coverage": {"requested_days": days, "events": len(data)}})
+    oficiais = sum(1 for row in rows if row["qualidade_fonte"] == "OFICIAL_B3")
+    pendentes = sum(1 for row in rows if row["data_pagamento"] is None)
+    return jsonify({"data": data, "coverage": {
+        "requested_days": days,
+        "events": len(data),
+        "official_events": oficiais,
+        "pending_payment_dates": pendentes,
+        "complementary_events": len(data) - oficiais,
+    }})
 
 
 @portfolio_api.get("/api/v1/assets/<ticker>/corporate-events")
