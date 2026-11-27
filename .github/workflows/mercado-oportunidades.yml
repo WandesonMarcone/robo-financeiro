@@ -1,0 +1,101 @@
+name: Mercado — oportunidades
+
+on:
+  schedule:
+    - cron: '0 13,15,17,19,21 * * 1-5'
+    - cron: '0 13,17,22 * * 0,6'
+  workflow_dispatch:
+    inputs:
+      novo_ticker:
+        description: Novo ETF, BDR, cripto ou moeda para cadastrar
+        required: false
+        default: ''
+      nova_classe:
+        description: Classe do novo instrumento
+        required: false
+        type: choice
+        default: ETF
+        options: [ETF, BDR, CRIPTO, MOEDA]
+      simbolo_yahoo:
+        description: Símbolo Yahoo, se diferente do ticker
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mercado-operacoes
+  cancel-in-progress: false
+
+jobs:
+  oportunidades:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      GOOGLE_CREDS: ${{ secrets.GOOGLE_CREDENTIALS }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      LOGO_DEV_TOKEN: ${{ secrets.LOGO_DEV_TOKEN }}
+      SEC_EDGAR_USER_AGENT: ${{ secrets.SEC_EDGAR_USER_AGENT }}
+      EOD_SNAPSHOTS: 'true'
+      ALERTA_CRIPTO_VARIACAO_PCT: ${{ vars.ALERTA_CRIPTO_VARIACAO_PCT || '4.0' }}
+      ALERTA_MOEDA_VARIACAO_PCT: ${{ vars.ALERTA_MOEDA_VARIACAO_PCT || '0.75' }}
+      COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+      - name: Criar credencial temporária do Google
+        shell: python
+        run: |
+          import os
+          with open('credenciais.json', 'w', encoding='utf-8') as arquivo:
+              arquivo.write(os.environ['GOOGLE_CREDS'])
+      - name: Sincronizar CNPJs oficiais das ações
+        timeout-minutes: 4
+        continue-on-error: true
+        run: python -m scripts.sincronizar_cnpj_acoes
+      - name: Buscar oportunidades de ações, FIIs e instrumentos
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 13,15,17,19,21 * * 1-5'
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.novo_ticker || '' }}" ]; then
+            python -m scripts.adicionar_instrumento_mercado \
+              --ticker "${{ inputs.novo_ticker }}" \
+              --tipo "${{ inputs.nova_classe }}" \
+              --simbolo-yahoo "${{ inputs.simbolo_yahoo }}"
+          fi
+          for classe in ETF BDR CRIPTO; do
+            python -m scripts.descobrir_instrumentos --tipo "${classe}" --limite 3 \
+              || echo "::warning::Descoberta ${classe} temporariamente indisponível"
+          done
+          classes_atualizadas=0
+          for classe in ETF BDR CRIPTO MOEDA; do
+            if python -m scripts.coletar_etfs_bdrs --tipo "${classe}" --limite 60 --sem-notificacoes; then
+              classes_atualizadas=$((classes_atualizadas + 1))
+            else
+              echo "::warning::Atualização ${classe} temporariamente indisponível"
+            fi
+          done
+          if [ "${classes_atualizadas}" -eq 0 ]; then
+            echo "::error::Nenhuma classe de mercado pôde ser atualizada"
+            exit 1
+          fi
+          python -m scripts.coletar_series_macro || echo "::warning::Contexto macro indisponível"
+          python -m scripts.coletar_tesouro_direto || echo "::warning::Tesouro indisponível"
+          python -m scripts.buscar_oportunidades_unificadas
+      - name: Atualizar criptomoedas no fim de semana
+        if: github.event.schedule == '0 13,17,22 * * 0,6'
+        run: |
+          python -m scripts.coletar_etfs_bdrs --tipo CRIPTO --limite 30 --sem-notificacoes
+          python -m scripts.buscar_sinais_multiclasse
+      - name: Notificar falha
+        if: failure() && !cancelled()
+        continue-on-error: true
+        run: python -m scripts.notificar_falha_workflow
