@@ -58,31 +58,56 @@ def resumo_mercado(limite_historico=45):
         sessao.close()
 
 
+def _formatar_macro(item):
+    codigo = item.get("codigo")
+    try:
+        valor = float(item.get("valor"))
+    except (TypeError, ValueError):
+        return None
+    if codigo == "USD_BRL_PTAX":
+        return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    if codigo in {"CDI", "SELIC_EFETIVA"} and abs(valor) < 1:
+        valor *= 100
+    return f"{valor:.2f}%".replace(".", ",")
+
+
 def mensagem_mercado():
+    """Resumo curto, com unidades corretas e sem preços brutos do Tesouro."""
     dados = resumo_mercado()
-    linhas = ["📊 *Mercado e macroeconomia*"]
-    rotulos = {"SELIC_META": "Meta Selic", "SELIC_EFETIVA": "Selic efetiva", "CDI": "CDI", "IPCA": "IPCA", "USD_BRL_PTAX": "Dólar PTAX"}
+    linhas = ["📊 *Mercado — resumo da última coleta*"]
+    rotulos = {
+        "SELIC_META": "Meta Selic",
+        "SELIC_EFETIVA": "Selic efetiva",
+        "CDI": "CDI",
+        "IPCA": "IPCA mensal",
+        "USD_BRL_PTAX": "Dólar PTAX",
+    }
     for item in dados["series"]:
-        valor = item.get("valor")
+        valor = _formatar_macro(item)
         if valor is None:
             continue
-        codigo = item.get("codigo")
-        casas = 4 if codigo == "USD_BRL_PTAX" else 4
-        referencia = item.get("referencia_em") or "sem referência"
-        linhas.append(f"• *{rotulos.get(codigo, item['nome'])}:* {float(valor):.{casas}f} — {referencia[:10]}")
-    for item in dados.get("indices") or []:
-        fechamento = item.get("fechamento")
-        if fechamento is None:
-            continue
-        variacao = item.get("variacao_percentual")
-        sufixo = f" · {float(variacao):+.2f}%" if variacao is not None else ""
-        linhas.append(f"• *{item['indice']}:* {float(fechamento):,.2f}{sufixo} — {(item.get('data_pregao') or '')[:10]}")
-    if dados["treasury"]:
-        linhas.append("\n🏛️ *Tesouro Direto* — última tabela oficial disponível")
-        for item in dados["treasury"][:6]:
+        referencia = (item.get("referencia_em") or "")[:10]
+        linhas.append(f"• *{rotulos.get(item.get('codigo'), item.get('nome'))}:* {valor} ({referencia})")
+    if dados.get("indices"):
+        linhas.append("\n📈 *Índices no fechamento*")
+        for item in dados["indices"]:
+            fechamento = item.get("fechamento")
+            if fechamento is None:
+                continue
+            variacao = item.get("variacao_percentual")
+            sufixo = f" · {float(variacao):+.2f}%".replace(".", ",") if variacao is not None else ""
+            linhas.append(f"• {item['indice']}: {float(fechamento):,.2f}{sufixo}".replace(",", "X").replace(".", ",").replace("X", "."))
+    tesouro = dados.get("treasury") or []
+    if tesouro:
+        linhas.append(f"\n🏛️ *Tesouro Direto* — {len(tesouro)} títulos atualizados")
+        for item in tesouro[:3]:
             taxa = item.get("taxa_compra")
-            venc = item.get("vencimento") or "—"
-            linhas.append(f"• {item['nome_titulo']} {venc}: {float(taxa):.3f}% a.a." if taxa is not None else f"• {item['nome_titulo']} {venc}")
+            if taxa is None:
+                continue
+            venc = item.get("vencimento") or "sem vencimento"
+            linhas.append(f"• {item['nome_titulo']} ({venc}): {float(taxa):.2f}% a.a.".replace(".", ","))
+        if len(tesouro) > 3:
+            linhas.append("Use /mercado para consultar a lista completa.")
     if len(linhas) == 1:
-        linhas.append("Ainda não há dados coletados. Use /atualizar_macro ou aguarde o próximo ciclo.")
+        linhas.append("Ainda não há dados coletados.")
     return "\n".join(linhas)
