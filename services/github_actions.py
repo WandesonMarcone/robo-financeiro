@@ -43,6 +43,19 @@ def disparar_atualizacao_isolada(ticker, timeout=20):
     return ok, "Busca isolada enfileirada no GitHub Actions." if ok else mensagem
 
 
+def disparar_oportunidades_unificadas(timeout=20):
+    """Enfileira a varredura completa de oportunidades em uma única operação.
+
+    O workflow atualiza ações, FIIs, ETFs, BDRs, cripto, moedas, macro e
+    Tesouro conforme as fontes disponíveis. A seleção de uma classe fica
+    restrita ao cadastro de instrumentos e não ao disparo da varredura.
+    """
+    ok, mensagem = _disparar_workflow(
+        "mercado-oportunidades.yml", {"modo": "oportunidades"}, timeout=timeout,
+    )
+    return ok, "Varredura completa de oportunidades enfileirada no GitHub Actions." if ok else mensagem
+
+
 def disparar_fundamentos_valuation(ticker, anos=5, timeout=20):
     """Enfileira a coleta pesada, sem ocupar a instância web do Render."""
     ticker = str(ticker or "").strip().upper()
